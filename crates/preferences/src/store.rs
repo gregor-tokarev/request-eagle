@@ -1,4 +1,4 @@
-use crate::AppearancePreferences;
+use crate::{AppearancePreferences, RequestPreferences};
 
 use anyhow::{Context as _, Result, bail};
 use gpui_kit::{App, Global};
@@ -13,6 +13,7 @@ use std::{
 #[serde(default)]
 pub struct Preferences {
     pub appearance: AppearancePreferences,
+    pub request: RequestPreferences,
 }
 
 impl Global for Preferences {}
