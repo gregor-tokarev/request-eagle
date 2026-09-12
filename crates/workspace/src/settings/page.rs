@@ -59,7 +59,7 @@ impl Settings {
     ) -> Self {
         Self {
             page: SettingsPage::General,
-            general: cx.new(|cx| GeneralSettings::new(updater, cx)),
+            general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
             appearance: cx.new(|cx| appearance::AppearanceSettings::new(window, cx)),
             keybindings: cx.new(|cx| KeybindingsPage::new(window, cx)),
             focus_handle: cx.focus_handle(),

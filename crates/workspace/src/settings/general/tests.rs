@@ -52,7 +52,8 @@ fn checking_survives_closing_settings_and_does_not_open_a_window(cx: &mut TestAp
 
     let updater = cx.update(|cx| updater::init("1.2.3", cx));
 
-    let (page, view) = cx.add_window_view(|_, cx| GeneralSettings::new(updater.clone(), cx));
+    let (page, view) =
+        cx.add_window_view(|window, cx| GeneralSettings::new(updater.clone(), window, cx));
 
     let check = view.debug_bounds("check-for-updates").unwrap();
     view.simulate_click(check.center(), Modifiers::default());
@@ -85,7 +86,8 @@ fn checking_survives_closing_settings_and_does_not_open_a_window(cx: &mut TestAp
         ));
     });
 
-    let (_, view) = cx.add_window_view(|_, cx| GeneralSettings::new(updater.clone(), cx));
+    let (_, view) =
+        cx.add_window_view(|window, cx| GeneralSettings::new(updater.clone(), window, cx));
     assert!(
         view.debug_bounds("install-update").is_some(),
         "Reopened General must offer the completed update"
@@ -124,7 +126,8 @@ fn failed_check_can_be_retried_from_general(cx: &mut TestAppContext) {
 
     let updater = cx.update(|cx| updater::init("1.2.3", cx));
 
-    let (_, view) = cx.add_window_view(|_, cx| GeneralSettings::new(updater.clone(), cx));
+    let (_, view) =
+        cx.add_window_view(|window, cx| GeneralSettings::new(updater.clone(), window, cx));
 
     let check = view.debug_bounds("check-for-updates").unwrap();
     view.simulate_click(check.center(), Modifiers::default());

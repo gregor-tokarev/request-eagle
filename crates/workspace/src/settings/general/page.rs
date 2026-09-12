@@ -3,17 +3,25 @@ use gpui_kit::{prelude::*, *};
 
 use updater::{UpdateStatus, Updater};
 
+use super::request::RequestSettings;
+
 pub(in crate::settings) struct GeneralSettings {
     updater: Entity<Updater>,
+    request: Entity<RequestSettings>,
     _subscription: Subscription,
 }
 
 impl GeneralSettings {
-    pub(in crate::settings) fn new(updater: Entity<Updater>, cx: &mut Context<Self>) -> Self {
+    pub(in crate::settings) fn new(
+        updater: Entity<Updater>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscription = cx.observe(&updater, |_, _, cx| cx.notify());
 
         Self {
             updater,
+            request: cx.new(|cx| RequestSettings::new(window, cx)),
             _subscription: subscription,
         }
     }
@@ -115,5 +123,6 @@ impl Render for GeneralSettings {
                         this.child("Request Eagle will relaunch when the update is installed.")
                     }),
             )
+            .child(self.request.clone())
     }
 }
