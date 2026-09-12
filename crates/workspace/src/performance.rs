@@ -128,7 +128,7 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
     }
 }
 
-fn collections(request_count: usize) -> CollectionRegistry {
+pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
     if request_count == 0 {
         return CollectionRegistry::new();
     }

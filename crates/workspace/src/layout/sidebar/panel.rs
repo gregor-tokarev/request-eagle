@@ -12,7 +12,8 @@ use super::tree::{CollectionTree, ItemKind};
 
 pub(crate) struct Sidebar {
     pub(super) tree: Arc<CollectionTree>,
-    pub(super) visible: Vec<usize>,
+    pub(super) visible: Arc<Vec<usize>>,
+    unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
     selected_row: Option<usize>,
@@ -31,7 +32,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let tree = Arc::new(CollectionTree::new(&collections));
-        let visible = (0..tree.items.len()).collect();
+        let visible: Arc<Vec<usize>> = Arc::new((0..tree.items.len()).collect());
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter collections"));
         let search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
@@ -42,6 +43,7 @@ impl Sidebar {
 
         Self {
             tree,
+            unfiltered_rows: Some(visible.clone()),
             visible,
             collapsed: HashSet::new(),
             selected: None,
@@ -56,31 +58,48 @@ impl Sidebar {
     }
 
     fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {
+        self.rows_task = None;
+
+        if self.query.is_empty()
+            && let Some(rows) = self.unfiltered_rows.clone()
+        {
+            self.apply_rows(rows, reset_scroll, cx);
+            return;
+        }
+
         let tree = self.tree.clone();
         let collapsed = self.collapsed.clone();
         let query = self.query.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { tree.visible_rows(&collapsed, &query) });
+            .spawn(async move { Arc::new(tree.visible_rows(&collapsed, &query)) });
 
         // Dropping the previous task prevents an older search replacing newer results.
         self.rows_task = Some(cx.spawn(async move |this, cx| {
             let rows = task.await;
 
             let _ = this.update(cx, |this, cx| {
-                this.visible = rows;
-                this.selected_row = this
-                    .selected
-                    .and_then(|selected| this.visible.iter().position(|&id| id == selected));
-
-                if reset_scroll {
-                    this.scroll_handle
-                        .scroll_to_item_strict(0, ScrollStrategy::Top);
+                if this.query.is_empty() {
+                    this.unfiltered_rows = Some(rows.clone());
                 }
 
-                cx.notify();
+                this.apply_rows(rows, reset_scroll, cx);
             });
         }));
+
+        cx.notify();
+    }
+
+    fn apply_rows(&mut self, rows: Arc<Vec<usize>>, reset_scroll: bool, cx: &mut Context<Self>) {
+        self.visible = rows;
+        self.selected_row = self
+            .selected
+            .and_then(|selected| self.visible.binary_search(&selected).ok());
+
+        if reset_scroll {
+            self.scroll_handle
+                .scroll_to_item_strict(0, ScrollStrategy::Top);
+        }
 
         cx.notify();
     }
@@ -94,6 +113,7 @@ impl Sidebar {
             self.collapsed.insert(index);
         }
 
+        self.unfiltered_rows = None;
         self.refresh_rows(false, cx);
     }
 

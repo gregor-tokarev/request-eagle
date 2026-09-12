@@ -13,7 +13,7 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
-fn collections() -> CollectionRegistry {
+pub(super) fn collections() -> CollectionRegistry {
     let directory = std::env::temp_dir().join(format!(
         "request-eagle-sidebar-test-{}-{}",
         std::process::id(),
@@ -166,6 +166,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
         assert!(!sidebar.visible.contains(&1));
     });
 
+    let browsing_rows = cx.read(|cx| sidebar.read(cx).visible.clone());
     let search = cx.read(|cx| sidebar.read(cx).search.clone());
     cx.update(|window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
     cx.simulate_input("/posts/7");
@@ -183,6 +184,10 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     cx.simulate_keystrokes("cmd-a backspace");
     cx.run_until_parked();
     cx.read(|cx| {
+        assert!(
+            Arc::ptr_eq(&sidebar.read(cx).visible, &browsing_rows),
+            "clearing search must reuse the browsing rows"
+        );
         assert!(
             !sidebar.read(cx).visible.contains(&1),
             "clearing search preserves collapsed folders"
