@@ -1,0 +1,13 @@
+# Expected HTTP status: 404
+id = "httpbingo-Responses-03-not-found"
+name = "Not found"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/status/404"
+headers = [["Accept", "application/json"]]
+
+[test]
+status = 404

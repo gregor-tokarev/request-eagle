@@ -1,0 +1,18 @@
+# Expected HTTP status: 200
+# Body (UTF-8): Hello from Request Eagle.
+id = "httpbingo-Echo-04-text"
+name = "Echo plain text"
+schema_version = 1
+
+[request]
+type = "http"
+method = "PUT"
+path = "/put"
+headers = [["Accept", "application/json"], ["Content-Type", "text/plain; charset=UTF-8"]]
+body = [
+    72, 101, 108, 108, 111, 32, 102, 114, 111, 109, 32, 82, 101, 113, 117, 101, 115, 116, 32, 69,
+    97, 103, 108, 101, 46,
+]
+
+[test]
+status = 200

@@ -1,0 +1,18 @@
+# Expected HTTP status: 200
+id = "httpbingo-Echo-01-query"
+name = "Echo query and headers"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/get"
+headers = [["Accept", "application/json"], ["X-Demo-Client", "Request Eagle"]]
+query = [
+    ["search", "Request Eagle"],
+    ["tag", "rust"],
+    ["tag", "gpui"],
+]
+
+[test]
+status = 200

@@ -57,7 +57,7 @@ impl Layout {
 
         Self {
             top_panel: cx.new(|_| TopPanel),
-            sidebar: cx.new(|_| Sidebar::new(collections)),
+            sidebar: cx.new(|cx| Sidebar::new(collections, window, cx)),
             main_view: cx.new(|_| MainView),
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -171,8 +171,8 @@ impl Render for Layout {
             .sizes()
             .first()
             .copied()
-            .unwrap_or(px(200.))
-            .clamp(px(200.), px(400.));
+            .unwrap_or(px(300.))
+            .clamp(px(220.), px(480.));
 
         let workspace = v_flex()
             .size_full()
@@ -187,7 +187,8 @@ impl Render for Layout {
                                 .visible(sidebar_progress > 0.0)
                                 .flex_none()
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
-                                .size_range(px(200.)..px(400.))
+                                .size(px(300.))
+                                .size_range(px(220.)..px(480.))
                                 .child(self.sidebar.clone()),
                         )
                         .child(self.main_view.clone().into_any_element()),

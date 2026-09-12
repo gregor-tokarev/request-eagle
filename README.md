@@ -17,6 +17,11 @@ because the kit does not re-export it.
 Run `cargo test --workspace --locked` to test the workspace, or `make run` to
 build and launch the macOS app bundle.
 
+Run `make demo` to open the [public API fixtures](test/README.md) in a separately
+named app. The sidebar loads the real collection folders and supports filtering,
+collapsing, request selection, and keyboard navigation. Its virtual list draws
+only the visible rows. Use `python3 test/run.py` to execute all 23 saved requests.
+
 `make dev` watches project files and rebuilds and restarts an optimized release
 build named **Request Eagle (Dev)**. GPUI's detailed frame monitor appears in
 the upper-right corner. It shows current CPU draw time, `1%` for p99, `10%` for

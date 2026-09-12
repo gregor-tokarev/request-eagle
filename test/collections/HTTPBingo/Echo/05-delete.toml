@@ -1,0 +1,13 @@
+# Expected HTTP status: 200
+id = "httpbingo-Echo-05-delete"
+name = "Echo DELETE request"
+schema_version = 1
+
+[request]
+type = "http"
+method = "DELETE"
+path = "/delete"
+headers = [["Accept", "application/json"]]
+
+[test]
+status = 200

@@ -35,6 +35,8 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
         ("Workspace empty", 0, None),
         ("Workspace 100 requests", 100, None),
         ("Workspace 1000 requests", 1000, None),
+        ("Workspace 10000 requests", 10000, None),
+        ("Workspace 100000 requests", 100000, None),
         ("General", 0, Some(SettingsPage::General)),
         ("Appearance", 0, Some(SettingsPage::Appearance)),
         ("Keybindings", 0, Some(SettingsPage::Keybindings)),

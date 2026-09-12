@@ -1,0 +1,17 @@
+# Expected HTTP status: 200
+id = "jsonplaceholder-Users-Todos-01-list"
+name = "List unfinished todos"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/todos"
+headers = [["Accept", "application/json"]]
+query = [
+    ["userId", "1"],
+    ["completed", "false"],
+]
+
+[test]
+status = 200

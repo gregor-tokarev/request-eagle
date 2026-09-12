@@ -1,0 +1,13 @@
+# Expected HTTP status: 200
+id = "jsonplaceholder-Posts-05-delete"
+name = "Delete post"
+schema_version = 1
+
+[request]
+type = "http"
+method = "DELETE"
+path = "/posts/1"
+headers = [["Accept", "application/json"]]
+
+[test]
+status = 200

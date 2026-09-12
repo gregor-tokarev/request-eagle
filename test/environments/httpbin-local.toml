@@ -1,0 +1,2 @@
+# Optional local httpbin server, see README.md.
+base_url = "http://127.0.0.1:8080"

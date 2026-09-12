@@ -1,0 +1,16 @@
+# Expected HTTP status: 200
+id = "jsonplaceholder-Posts-01-list"
+name = "List posts by user"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/posts"
+headers = [["Accept", "application/json"]]
+query = [
+    ["userId", "1"],
+]
+
+[test]
+status = 200

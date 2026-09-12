@@ -1,0 +1,13 @@
+# Expected HTTP status: 200
+id = "httpbingo-Responses-06-delay"
+name = "One second delay"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/delay/1"
+headers = [["Accept", "application/json"]]
+
+[test]
+status = 200

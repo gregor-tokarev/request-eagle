@@ -1,0 +1,20 @@
+# Expected HTTP status: 200
+# Body (UTF-8): {"message":"Hello, eagle!","enabled":true,"tags":["rust","gpui"]}
+id = "httpbingo-Echo-02-json"
+name = "Echo JSON body"
+schema_version = 1
+
+[request]
+type = "http"
+method = "POST"
+path = "/post"
+headers = [["Accept", "application/json"], ["Content-Type", "application/json"]]
+body = [
+    123, 34, 109, 101, 115, 115, 97, 103, 101, 34, 58, 34, 72, 101, 108, 108, 111, 44, 32, 101,
+    97, 103, 108, 101, 33, 34, 44, 34, 101, 110, 97, 98, 108, 101, 100, 34, 58, 116, 114, 117,
+    101, 44, 34, 116, 97, 103, 115, 34, 58, 91, 34, 114, 117, 115, 116, 34, 44, 34, 103, 112,
+    117, 105, 34, 93, 125,
+]
+
+[test]
+status = 200

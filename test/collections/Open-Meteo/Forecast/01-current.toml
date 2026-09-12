@@ -1,0 +1,20 @@
+# Expected HTTP status: 200
+id = "open-meteo-Forecast-01-current"
+name = "Current weather in Berlin"
+schema_version = 1
+
+[request]
+type = "http"
+method = "GET"
+path = "/v1/forecast"
+headers = [["Accept", "application/json"]]
+query = [
+    ["latitude", "52.52"],
+    ["longitude", "13.41"],
+    ["current", "temperature_2m,relative_humidity_2m,wind_speed_10m"],
+    ["timezone", "Europe/Berlin"],
+    ["forecast_days", "1"],
+]
+
+[test]
+status = 200
