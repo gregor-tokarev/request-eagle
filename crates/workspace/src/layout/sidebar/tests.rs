@@ -6,7 +6,8 @@ use std::{
 };
 
 use collection::CollectionRegistry;
-use gpui_kit::{Modifiers, TestAppContext, px, size};
+use gpui_kit::component::Root;
+use gpui_kit::{AppContext, Focusable, Modifiers, TestAppContext, px, size};
 
 use super::{
     Sidebar,
@@ -207,4 +208,165 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     cx.run_until_parked();
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(last)));
     assert!(cx.debug_bounds(last_selector).is_some());
+}
+
+#[gpui_kit::test]
+fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let mut sidebar = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        sidebar = Some(view.clone());
+
+        Root::new(view, window, cx)
+    });
+    let sidebar = sidebar.unwrap();
+
+    cx.update(|window, _| window.activate_window());
+    cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
+    cx.update(|window, cx| {
+        assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
+    });
+
+    cx.simulate_keystrokes("tab");
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        assert!(sidebar.focus_handle(cx).is_focused(window));
+    });
+    cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(0)));
+    cx.simulate_keystrokes("down");
+    cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(1)));
+
+    cx.simulate_keystrokes("shift-tab");
+    cx.update(|window, cx| {
+        assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
+    });
+}
+
+#[gpui_kit::test]
+fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let mut sidebar = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        sidebar = Some(view.clone());
+
+        Root::new(view, window, cx)
+    });
+    let sidebar = sidebar.unwrap();
+
+    cx.update(|window, _| window.activate_window());
+    cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
+    cx.simulate_input("/posts/7");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("down down down");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        let selected = sidebar.selected.expect("arrow keys should select a result");
+
+        assert_eq!(sidebar.tree.items[selected].label, "Get post 7");
+    });
+
+    cx.simulate_keystrokes("shift-tab up");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(sidebar.selected, sidebar.visible.last().copied());
+    });
+
+    cx.simulate_keystrokes("shift-tab enter");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(sidebar.selected, sidebar.visible.first().copied());
+    });
+
+    cx.simulate_keystrokes("shift-tab left space right shift-up");
+    cx.update(|window, cx| {
+        let search = &sidebar.read(cx).search;
+        assert!(search.focus_handle(cx).is_focused(window));
+        assert_eq!(search.read(cx).value(), "/posts/ 7");
+    });
+
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("no-such-request");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("down up enter");
+    cx.update(|window, cx| {
+        assert!(sidebar.read(cx).visible.is_empty());
+        assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
+    });
+    cx.simulate_keystrokes("tab down up home end left right enter space shift-tab");
+    cx.update(|window, cx| {
+        assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
+    });
+}
+
+#[gpui_kit::test]
+fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let mut layout = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            crate::workspace::Layout::new(
+                Arc::new(collections()),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        layout = Some(view.clone());
+
+        Root::new(view, window, cx)
+    });
+    let sidebar = cx.read(|cx| layout.unwrap().read(cx).sidebar.clone());
+
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        assert!(sidebar.focus_handle(cx).is_focused(window));
+        assert_eq!(sidebar.read(cx).selected, Some(0));
+    });
+
+    cx.simulate_keystrokes("down right right");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(
+            sidebar.tree.items[sidebar.selected.unwrap()].label,
+            "Create comment"
+        );
+    });
+    cx.simulate_keystrokes("left left");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&2)));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(!sidebar.read(cx).collapsed.contains(&2)));
+    cx.simulate_keystrokes("space");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&2)));
+
+    cx.simulate_keystrokes("home");
+    cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(0)));
+    cx.simulate_keystrokes("end");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(sidebar.selected, sidebar.visible.last().copied());
+    });
+
+    cx.simulate_keystrokes("shift-up cmd-home");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(sidebar.selected, sidebar.visible.last().copied());
+    });
 }

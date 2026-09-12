@@ -22,6 +22,12 @@ The sidebar loads collections from `~/.request-eagle/collections`. Set
 request selection, and keyboard navigation use a virtual list that draws only
 the visible rows.
 
+The collection tree receives keyboard focus when the workspace opens. Up/Down
+select rows, Left/Right collapse or expand folders and move to parents or children,
+and Home/End select the first or last row. Enter/Space toggle the selected folder.
+Shift-Tab returns to the filter; Tab moves from the filter into the tree. From
+the filter, Down/Enter select the first result row and Up selects the last.
+
 Search builds a [suffix-array index](https://docs.rs/suffix/1.3.0/suffix/struct.SuffixTable.html)
 when collections load. It looks up case-insensitive substrings in collection and
 folder names, request names, methods, and paths without scanning every request.

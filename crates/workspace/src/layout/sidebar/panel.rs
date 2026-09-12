@@ -23,6 +23,7 @@ pub(crate) struct Sidebar {
     focus: FocusHandle,
     rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
+    _focus_subscription: Subscription,
 }
 
 impl Sidebar {
@@ -41,6 +42,11 @@ impl Sidebar {
             }
         });
 
+        let focus = cx.focus_handle().tab_stop(true);
+        let focus_subscription = cx.on_focus(&focus, window, |this, _, cx| {
+            this.select_row(this.selected_row.unwrap_or(0), cx);
+        });
+
         Self {
             tree,
             unfiltered_rows: Some(visible.clone()),
@@ -51,9 +57,10 @@ impl Sidebar {
             search,
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
-            focus: cx.focus_handle(),
+            focus,
             rows_task: None,
             _search_subscription: search_subscription,
+            _focus_subscription: focus_subscription,
         }
     }
 
@@ -128,7 +135,7 @@ impl Sidebar {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.visible.is_empty() {
+        if self.visible.is_empty() || event.keystroke.modifiers != Modifiers::default() {
             return;
         }
 
@@ -162,7 +169,7 @@ impl Sidebar {
                 {
                     self.toggle(index, cx);
                 } else if let Some(parent) = self.tree.items[index].parent
-                    && let Some(row) = self.visible[..row].iter().rposition(|&id| id == parent)
+                    && let Ok(row) = self.visible[..row].binary_search(&parent)
                 {
                     self.select_row(row, cx);
                 }
@@ -170,6 +177,27 @@ impl Sidebar {
             _ => return,
         }
 
+        cx.stop_propagation();
+    }
+
+    fn on_search_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.visible.is_empty() || event.keystroke.modifiers != Modifiers::default() {
+            return;
+        }
+
+        let row = match event.keystroke.key.as_str() {
+            "down" | "enter" => 0,
+            "up" => self.visible.len() - 1,
+            _ => return,
+        };
+
+        self.select_row(row, cx);
+        window.focus(&self.focus, cx);
         cx.stop_propagation();
     }
 
@@ -262,6 +290,12 @@ impl Sidebar {
     }
 }
 
+impl Focusable for Sidebar {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
 impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
@@ -272,12 +306,17 @@ impl Render for Sidebar {
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .child(
-                div().flex_none().p_2().child(
-                    Input::new(&self.search)
-                        .small()
-                        .prefix(IconName::Search)
-                        .cleanable(true),
-                ),
+                div()
+                    .flex_none()
+                    .p_2()
+                    // Input actions consume arrow keys, so transfer focus in capture phase.
+                    .capture_key_down(cx.listener(Self::on_search_key_down))
+                    .child(
+                        Input::new(&self.search)
+                            .small()
+                            .prefix(IconName::Search)
+                            .cleanable(true),
+                    ),
             )
             .child(
                 h_flex()

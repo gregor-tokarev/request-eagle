@@ -17,7 +17,7 @@ use updater::Updater;
 
 pub(super) struct Layout {
     top_panel: Entity<TopPanel>,
-    sidebar: Entity<Sidebar>,
+    pub(super) sidebar: Entity<Sidebar>,
     main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -55,9 +55,12 @@ impl Layout {
             |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
         );
 
+        let sidebar = cx.new(|cx| Sidebar::new(collections, window, cx));
+        window.focus(&sidebar.focus_handle(cx), cx);
+
         Self {
             top_panel: cx.new(|_| TopPanel),
-            sidebar: cx.new(|cx| Sidebar::new(collections, window, cx)),
+            sidebar,
             main_view: cx.new(|_| MainView),
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
