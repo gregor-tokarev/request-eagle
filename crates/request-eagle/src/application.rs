@@ -48,8 +48,11 @@ pub fn run() {
         let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
         actions::init(updater.clone(), cx);
 
-        let collections = collection::CollectionRegistry::load()
-            .expect("Failed to load collections from ~/.request-eagle/collections");
+        let collections = match std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR") {
+            Some(path) => collection::CollectionRegistry::from_path(path),
+            None => collection::CollectionRegistry::load(),
+        }
+        .expect("Failed to load collections");
 
         workspace::init(collections, updater, cx);
 

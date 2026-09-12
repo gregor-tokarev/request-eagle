@@ -2,7 +2,7 @@ use crate::actions::{CloseSettings, ToggleLeftSidebar};
 use crate::layout::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
 use crate::workspace::{Layout, on_toggle_sidebar};
 use collection::CollectionRegistry;
-use gpui_kit::{Modifiers, TestAppContext, px};
+use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
 use std::sync::Arc;
 
 #[gpui_kit::test]
@@ -25,7 +25,8 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     let settings = cx.read(|cx| layout.read(cx).settings.clone());
     assert!(cx.debug_bounds("settings").is_none());
     assert!(cx.debug_bounds("main-view").is_some());
-    cx.update(|window, cx| assert!(window.focused(cx).is_none()));
+    let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
+    cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
 
     for _ in 0..2 {
         cx.update(|window, cx| {
@@ -53,7 +54,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
         });
         assert!(cx.debug_bounds("settings").is_none());
         assert!(cx.debug_bounds("main-view").is_some());
-        cx.update(|window, cx| assert!(window.focused(cx).is_none()));
+        cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
     }
 }
 

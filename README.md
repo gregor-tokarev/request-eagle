@@ -17,6 +17,23 @@ because the kit does not re-export it.
 Run `cargo test --workspace --locked` to test the workspace, or `make run` to
 build and launch the macOS app bundle.
 
+The sidebar loads collections from `~/.request-eagle/collections`. Set
+`REQUEST_EAGLE_COLLECTIONS_DIR` to use another directory. Filtering, collapsing,
+request selection, and keyboard navigation use a virtual list that draws only
+the visible rows.
+
+The collection tree receives keyboard focus when the workspace opens. Up/Down
+select rows, Left/Right collapse or expand folders and move to parents or children,
+and Home/End select the first or last row. Enter/Space toggle the selected folder.
+Shift-Tab returns to the filter; Tab moves from the filter into the tree. From
+the filter, Down/Enter select the first result row and Up selects the last.
+
+Search builds a [suffix-array index](https://docs.rs/suffix/1.3.0/suffix/struct.SuffixTable.html)
+when collections load. It looks up case-insensitive substrings in collection and
+folder names, request names, methods, and paths without scanning every request.
+Result assembly visits matching rows, their ancestors, and matched folders'
+descendants. Clearing the search restores cached browsing rows and collapse state.
+
 `make dev` watches project files and rebuilds and restarts an optimized release
 build named **Request Eagle (Dev)**. GPUI's detailed frame monitor appears in
 the upper-right corner. It shows current CPU draw time, `1%` for p99, `10%` for
@@ -24,6 +41,41 @@ p90, maximum draw time, and frame count. Percentiles use the latest 1,000 draws;
 the 120 fps frame budget is 8.33 ms. These are CPU draw times, not displayed FPS
 or GPU timings. Stop the app and watcher with Ctrl-C. Normal release builds do
 not enable the monitor.
+
+To benchmark CPU drawing and scrolling with 100,000 generated requests, run:
+
+```sh
+REQUEST_EAGLE_BENCH_PAGE='Workspace 100000 requests' \
+  cargo test -p workspace --release --locked pages_render_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+The benchmark creates temporary collections and removes them after loading.
+It excludes collection loading, GPU presentation, and the native Root wrapper.
+
+To measure search latency separately, including result assembly, run:
+
+```sh
+cargo test -p workspace --release --locked collection_search_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+This compares the index with the previous full scan on 1,000, 10,000, and 100,000
+requests. It includes short common queries, selective paths, misses, and folder
+matches, and reports index build time and storage. Broad queries still take time
+proportional to their matches and the rows they return.
+
+On an Apple M5 Pro release build with 100,000 generated requests, median CPU
+search times, including result assembly, were:
+
+| Query | Previous scan | Indexed search |
+| --- | ---: | ---: |
+| `get` | 0.864 ms | 0.561 ms |
+| `/resources/99` | 0.472 ms | 0.0083 ms |
+| `/resources/99999` | 0.492 ms | 0.0004 ms |
+
+Building the tree and index took 97 ms once; the retained index payload was
+35.5 MiB. These timings exclude UI scheduling and GPU presentation.
 
 ## Settings
 
