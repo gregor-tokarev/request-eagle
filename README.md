@@ -17,10 +17,10 @@ because the kit does not re-export it.
 Run `cargo test --workspace --locked` to test the workspace, or `make run` to
 build and launch the macOS app bundle.
 
-Run `make demo` to open the [public API fixtures](test/README.md) in a separately
-named app. The sidebar loads the real collection folders and supports filtering,
-collapsing, request selection, and keyboard navigation. Its virtual list draws
-only the visible rows. Use `python3 test/run.py` to execute all 23 saved requests.
+The sidebar loads collections from `~/.request-eagle/collections`. Set
+`REQUEST_EAGLE_COLLECTIONS_DIR` to use another directory. Filtering, collapsing,
+request selection, and keyboard navigation use a virtual list that draws only
+the visible rows.
 
 `make dev` watches project files and rebuilds and restarts an optimized release
 build named **Request Eagle (Dev)**. GPUI's detailed frame monitor appears in
@@ -29,6 +29,17 @@ p90, maximum draw time, and frame count. Percentiles use the latest 1,000 draws;
 the 120 fps frame budget is 8.33 ms. These are CPU draw times, not displayed FPS
 or GPU timings. Stop the app and watcher with Ctrl-C. Normal release builds do
 not enable the monitor.
+
+To benchmark CPU drawing and scrolling with 100,000 generated requests, run:
+
+```sh
+REQUEST_EAGLE_BENCH_PAGE='Workspace 100000 requests' \
+  cargo test -p workspace --release --locked pages_render_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+The benchmark creates temporary collections and removes them after loading.
+It excludes collection loading, GPU presentation, and the native Root wrapper.
 
 ## Settings
 

@@ -1,4 +1,9 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::HashSet,
+    fs,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use collection::CollectionRegistry;
 use gpui_kit::{Modifiers, TestAppContext, px, size};
@@ -8,37 +13,89 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
-fn fixtures() -> CollectionRegistry {
-    CollectionRegistry::from_path(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/collections"),
-    )
-    .unwrap()
+fn collections() -> CollectionRegistry {
+    let directory = std::env::temp_dir().join(format!(
+        "request-eagle-sidebar-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    for name in ["Example API", "Status API"] {
+        let collection = directory.join(name);
+        fs::create_dir_all(&collection).unwrap();
+        fs::write(
+            collection.join("environment.toml"),
+            "base_url = \"https://example.com\"\n",
+        )
+        .unwrap();
+    }
+
+    let mut requests: Vec<_> = (0..24)
+        .map(|index| {
+            (
+                format!("Example API/Posts/request-{index:02}.toml"),
+                format!("Get post {index}"),
+                "GET",
+                format!("/posts/{index}"),
+            )
+        })
+        .collect();
+    requests.extend([
+        (
+            "Example API/Posts/Comments/create.toml".into(),
+            "Create comment".into(),
+            "POST",
+            "/comments".into(),
+        ),
+        (
+            "Status API/Responses/not-found.toml".into(),
+            "Not found".into(),
+            "GET",
+            "/status/404".into(),
+        ),
+    ]);
+
+    for (index, (file, name, method, path)) in requests.into_iter().enumerate() {
+        let file = directory.join(file);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, format!(
+            "id = \"request-{index}\"\nname = \"{name}\"\nschema_version = 1\n\n[request]\ntype = \"http\"\nmethod = \"{method}\"\npath = \"{path}\"\n"
+        )).unwrap();
+    }
+
+    let result = CollectionRegistry::from_path(&directory);
+    fs::remove_dir_all(directory).unwrap();
+
+    result.unwrap()
 }
 
 #[test]
-fn real_fixtures_load_with_nested_requests_and_local_environments() {
-    let collections = fixtures();
+fn tree_preserves_hierarchy_and_filters_collapsed_collections() {
+    let collections = collections();
     let tree = CollectionTree::new(&collections);
 
-    assert_eq!(tree.roots.len(), 3);
+    assert_eq!(tree.roots.len(), 2);
     assert_eq!(
         tree.roots
             .iter()
             .map(|&index| tree.items[index].request_count)
             .sum::<usize>(),
-        23
+        26
     );
     assert_eq!(
         tree.items
             .iter()
             .filter(|item| item.kind == ItemKind::Request("POST"))
             .count(),
-        3
+        1
     );
     assert!(
         tree.items
             .iter()
-            .any(|item| item.depth == 3 && item.kind == ItemKind::Request("GET"))
+            .any(|item| item.depth == 3 && item.kind == ItemKind::Request("POST"))
     );
     assert!(
         !tree
@@ -67,7 +124,7 @@ fn real_fixtures_load_with_nested_requests_and_local_environments() {
         .collect();
     assert_eq!(
         labels,
-        ["JSONPlaceholder", "Posts", "Comments", "List post comments"]
+        ["Example API", "Posts", "Comments", "Create comment"]
     );
 
     let rows = tree.visible_rows(&collapsed, "/status/404");
@@ -86,7 +143,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     });
 
     let (sidebar, cx) =
-        cx.add_window_view(|window, cx| Sidebar::new(Arc::new(fixtures()), window, cx));
+        cx.add_window_view(|window, cx| Sidebar::new(Arc::new(collections()), window, cx));
     cx.simulate_resize(size(px(300.), px(500.)));
     cx.run_until_parked();
 
@@ -111,7 +168,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
 
     let search = cx.read(|cx| sidebar.read(cx).search.clone());
     cx.update(|window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
-    cx.simulate_input("/delay/1");
+    cx.simulate_input("/posts/7");
     cx.run_until_parked();
 
     cx.read(|cx| {
@@ -119,7 +176,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
         assert_eq!(sidebar.visible.len(), 3);
         assert_eq!(
             sidebar.tree.items[*sidebar.visible.last().unwrap()].label,
-            "One second delay"
+            "Get post 7"
         );
     });
 

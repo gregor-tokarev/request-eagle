@@ -5,7 +5,7 @@ BUNDLE_ID ?= com.egortokarev.requesteagle
 BUILD_DIR := target/$(if $(filter dev,$(PROFILE)),debug,$(PROFILE))
 APP := $(BUILD_DIR)/$(APP_NAME).app
 
-.PHONY: bundle run dev demo release clean-bundle
+.PHONY: bundle run dev release clean-bundle
 
 # Assemble an .app bundle so local runs get the real bundle identity
 # (icon, name, Info.plist) instead of the bare-executable treatment.
@@ -32,10 +32,6 @@ run: bundle
 # Rebuild an optimized app with GPUI's frame monitor whenever files change.
 dev:
 	+@./scripts/dev.sh
-
-# Load the public API fixtures in a separately named development app.
-demo:
-	REQUEST_EAGLE_COLLECTIONS_DIR="$(CURDIR)/test/collections" $(MAKE) run PROFILE=release APP_NAME="Request Eagle (Collections demo)" BUNDLE_ID=com.egortokarev.requesteagle.collections-demo
 
 release:
 	./scripts/build-macos.sh
