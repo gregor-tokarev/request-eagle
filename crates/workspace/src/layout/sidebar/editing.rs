@@ -30,6 +30,7 @@ impl Sidebar {
         let path = item.path.clone();
         let name = item.label.clone();
         self.rename = None;
+        self.pending_delete = None;
         self.error = None;
         self.selected = Some(index);
         self.selected_row = self.visible.binary_search(&index).ok();
@@ -92,7 +93,7 @@ impl Sidebar {
         cx.notify();
     }
 
-    pub(super) fn delete_item(
+    pub(super) fn request_delete(
         &mut self,
         index: usize,
         window: &mut Window,
@@ -102,10 +103,56 @@ impl Sidebar {
             return;
         };
         let path = item.path.clone();
+        self.rename = None;
+        self.error = None;
+        if let Ok(row) = self.visible.binary_search(&index) {
+            self.select_row(row, cx);
+        }
+        self.pending_delete = Some(path);
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    pub(super) fn cancel_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pending_delete = None;
+        self.error = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    pub(super) fn on_delete_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending_delete.is_none() {
+            return;
+        }
+
+        if event.keystroke.key == "escape" {
+            self.cancel_delete(window, cx);
+            cx.stop_propagation();
+        } else if self.focus.is_focused(window)
+            && matches!(
+                event.keystroke.key.as_str(),
+                "backspace" | "enter" | "space" | "left" | "right"
+            )
+        {
+            // Repeating the delete key must never confirm or collapse the prompt.
+            cx.stop_propagation();
+        }
+    }
+
+    pub(super) fn confirm_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.pending_delete.clone() else {
+            return;
+        };
         let row = self.selected_row.unwrap_or(0);
 
         match self.collections.delete(&path) {
             Ok(()) => {
+                self.pending_delete = None;
                 self.rename = None;
                 self.error = None;
                 self.rebuild_tree(None, None, cx);

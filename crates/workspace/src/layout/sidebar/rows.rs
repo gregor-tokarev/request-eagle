@@ -1,4 +1,5 @@
 use gpui_kit::component::{
+    button::{Button, ButtonVariants},
     input::Input,
     menu::{ContextMenuExt, PopupMenuItem},
     *,
@@ -8,7 +9,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{panel::Sidebar, tree::ItemKind};
 
 impl Sidebar {
-    pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let index = self.visible[row];
         let item = &self.tree.items[index];
         let branch = item.is_branch();
@@ -26,6 +27,52 @@ impl Sidebar {
             ItemKind::Folder => "Delete folder",
             ItemKind::Request(_) => "Delete request",
         };
+
+        if self.pending_delete.as_ref() == Some(&item.path) {
+            return div()
+                .id(("collection-row", index))
+                .debug_selector(move || format!("collection-row-{index}").into())
+                .h(px(30.))
+                .w_full()
+                .px_2()
+                .child(
+                    h_flex()
+                        .debug_selector(|| "sidebar-delete-prompt".into())
+                        .size_full()
+                        .rounded_md()
+                        .px_2()
+                        .gap_1()
+                        .bg(theme.sidebar_accent)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(px(12.))
+                                .child(format!("{delete_label}?")),
+                        )
+                        .child(
+                            Button::new("confirm-sidebar-delete")
+                                .debug_selector(|| "confirm-sidebar-delete".into())
+                                .label("Yes")
+                                .xsmall()
+                                .danger()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.confirm_delete(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("cancel-sidebar-delete")
+                                .debug_selector(|| "cancel-sidebar-delete".into())
+                                .label("No")
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.cancel_delete(window, cx)
+                                })),
+                        ),
+                )
+                .into_any_element();
+        }
 
         div()
             .id(("collection-row", index))
@@ -149,10 +196,12 @@ impl Sidebar {
                     PopupMenuItem::new(delete_label).on_click(move |_, window, cx| {
                         let view = delete_view.clone();
                         window.defer(cx, move |window, cx| {
-                            let _ = view.update(cx, |this, cx| this.delete_item(index, window, cx));
+                            let _ =
+                                view.update(cx, |this, cx| this.request_delete(index, window, cx));
                         });
                     }),
                 )
             })
+            .into_any_element()
     }
 }

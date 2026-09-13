@@ -120,6 +120,12 @@ fn double_click_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut T
 
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
+    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
+    cx.simulate_keystrokes("backspace backspace enter space");
+    assert!(fixture.0.join("API/Users/list.toml").exists());
+    click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
+    cx.run_until_parked();
     assert!(!fixture.0.join("API/Users/list.toml").exists());
     cx.read(|cx| {
         assert_eq!(sidebar.read(cx).tree.items[0].request_count, 0);
@@ -144,6 +150,15 @@ fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut T
     assert!(!fixture.0.join("Other").exists());
     click_row(cx, "collection-row-3", MouseButton::Right, 1);
     cx.simulate_keystrokes("down down down down enter");
+    cx.run_until_parked();
+    assert!(fixture.0.join("Renamed").exists());
+    click_row(cx, "cancel-sidebar-delete", MouseButton::Left, 1);
+    cx.run_until_parked();
+    assert!(fixture.0.join("Renamed").exists());
+    assert!(cx.debug_bounds("sidebar-delete-prompt").is_none());
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
     cx.run_until_parked();
     assert!(!fixture.0.join("Renamed").exists());
     assert!(fixture.0.join("API/Users/list.toml").exists());
@@ -176,9 +191,38 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
     assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
     cx.simulate_keystrokes("down down down backspace");
     cx.run_until_parked();
+    assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-delete-prompt").is_none());
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
+    cx.run_until_parked();
     assert!(!fixture.0.join("Renamed API/Users/list.toml").exists());
     cx.read(|cx| {
         assert!(sidebar.read(cx).visible.is_empty());
         assert!(sidebar.read(cx).selected.is_none());
     });
+}
+
+#[gpui_kit::test]
+fn moving_selection_or_filtering_cancels_pending_deletion(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (sidebar, cx) = sidebar(&fixture, cx);
+    click_row(cx, "collection-row-2", MouseButton::Left, 1);
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(sidebar.read(cx).pending_delete.is_none()));
+    assert!(fixture.0.join("API/Users/list.toml").exists());
+    cx.simulate_keystrokes("backspace");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
+    cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
+    cx.run_until_parked();
+    cx.read(|cx| assert!(sidebar.read(cx).pending_delete.is_none()));
+    assert!(fixture.0.join("Other").exists());
 }

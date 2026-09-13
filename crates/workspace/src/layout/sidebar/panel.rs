@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use collection::CollectionRegistry;
 use gpui_kit::component::{
@@ -13,6 +13,7 @@ use super::{editing::RenameEditor, tree::CollectionTree};
 pub(crate) struct Sidebar {
     pub(super) collections: CollectionRegistry,
     pub(super) rename: Option<RenameEditor>,
+    pub(super) pending_delete: Option<PathBuf>,
     pub(super) error: Option<String>,
     pub(super) tree: Arc<CollectionTree>,
     pub(super) visible: Arc<Vec<usize>>,
@@ -39,6 +40,11 @@ impl Sidebar {
         let visible: Arc<Vec<usize>> = Arc::new((0..tree.items.len()).collect());
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter collections"));
         let search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Focus | InputEvent::Change) {
+                this.pending_delete = None;
+                cx.notify();
+            }
+
             if matches!(event, InputEvent::Change) {
                 this.query = this.search.read(cx).value().trim().to_lowercase();
                 this.refresh_rows(true, cx);
@@ -53,6 +59,7 @@ impl Sidebar {
         Self {
             collections,
             rename: None,
+            pending_delete: None,
             error: None,
             tree,
             unfiltered_rows: Some(visible.clone()),
@@ -137,6 +144,10 @@ impl Sidebar {
 
     pub(super) fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if let Some(&index) = self.visible.get(row) {
+            if self.selected != Some(index) {
+                self.pending_delete = None;
+            }
+
             self.selected = Some(index);
             self.selected_row = Some(row);
             self.scroll_handle
@@ -167,7 +178,7 @@ impl Sidebar {
             "end" => self.select_row(self.visible.len() - 1, cx),
             "backspace" => {
                 if self.selected_row.is_some() {
-                    self.delete_item(index, window, cx);
+                    self.request_delete(index, window, cx);
                 }
             }
             "enter" | "space" => self.toggle(index, cx),
@@ -286,6 +297,7 @@ impl Render for Sidebar {
                     .min_h_0()
                     .overflow_hidden()
                     .track_focus(&self.focus)
+                    .capture_key_down(cx.listener(Self::on_delete_key_down))
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(if self.visible.is_empty() {
                         v_flex()
