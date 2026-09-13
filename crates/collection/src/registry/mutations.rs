@@ -106,7 +106,7 @@ fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditEr
         Err(error) => return Err(error.into()),
     }
 
-    fs::rename(path, &destination)?;
+    crate::order::rename_directory(path, &destination)?;
     Ok(destination)
 }
 
@@ -148,7 +148,7 @@ fn delete_entry(entries: &mut Vec<Entry>, path: &Path) -> Result<bool, io::Error
     Ok(false)
 }
 
-fn rebase_entries(entries: &mut [Entry], old: &Path, new: &Path) {
+pub(super) fn rebase_entries(entries: &mut [Entry], old: &Path, new: &Path) {
     for entry in entries {
         match entry {
             Entry::File(file) => rebase_path(&mut file.path, old, new),
@@ -162,7 +162,11 @@ fn rebase_entries(entries: &mut [Entry], old: &Path, new: &Path) {
 
 fn rebase_path(path: &mut PathBuf, old: &Path, new: &Path) {
     if let Ok(relative) = path.strip_prefix(old) {
-        *path = new.join(relative);
+        *path = if relative.as_os_str().is_empty() {
+            new.to_path_buf()
+        } else {
+            new.join(relative)
+        };
     }
 }
 
@@ -174,6 +178,8 @@ pub enum CollectionEditError {
     AlreadyExists,
     #[error("This item is no longer in the collection.")]
     NotFound,
+    #[error("A folder cannot be moved into itself or its descendants.")]
+    InvalidMove,
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]

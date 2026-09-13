@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::Request;
 use serde::{Deserialize, Serialize};
@@ -28,4 +28,13 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub name: String,
     pub entries: Vec<Entry>,
+}
+
+impl Entry {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::File(file) => &file.path,
+            Self::Directory(folder) => &folder.path,
+        }
+    }
 }

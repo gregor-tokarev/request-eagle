@@ -15,10 +15,10 @@ use super::Sidebar;
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
-struct Fixture(PathBuf);
+pub(super) struct Fixture(pub(super) PathBuf);
 
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
             "request-eagle-sidebar-edits-{}-{}-{}",
             NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
@@ -41,7 +41,7 @@ impl Drop for Fixture {
     }
 }
 
-fn sidebar<'a>(
+pub(super) fn sidebar<'a>(
     fixture: &Fixture,
     cx: &'a mut TestAppContext,
 ) -> (Entity<Sidebar>, &'a mut VisualTestContext) {

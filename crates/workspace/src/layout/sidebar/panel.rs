@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
-use collection::CollectionRegistry;
+use collection::{CollectionRegistry, MovePlacement};
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
@@ -15,6 +15,7 @@ pub(crate) struct Sidebar {
     pub(super) collections: CollectionRegistry,
     pub(super) rename: Option<RenameEditor>,
     pub(super) pending_delete: Option<PathBuf>,
+    pub(super) drop_target: Option<(usize, MovePlacement)>,
     pub(super) error: Option<String>,
     pub(super) tree: Arc<CollectionTree>,
     pub(super) visible: Arc<Vec<usize>>,
@@ -62,6 +63,7 @@ impl Sidebar {
             collections,
             rename: None,
             pending_delete: None,
+            drop_target: None,
             error: None,
             tree,
             unfiltered_rows: Some(visible.clone()),

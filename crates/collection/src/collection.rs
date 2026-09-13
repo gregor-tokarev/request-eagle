@@ -108,6 +108,11 @@ fn load_directory(
         }
     }
 
+    crate::order::apply(path, &mut entries).map_err(|source| CollectionLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
     Ok(DirEntry {
         path: path.to_path_buf(),
         name: file_name(path),

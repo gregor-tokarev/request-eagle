@@ -1,4 +1,5 @@
 mod creation;
+mod dragging;
 mod editing;
 mod panel;
 mod rows;
@@ -13,3 +14,6 @@ mod search_tests;
 mod tests;
 
 pub(crate) use panel::Sidebar;
+
+#[cfg(test)]
+mod dragging_tests;

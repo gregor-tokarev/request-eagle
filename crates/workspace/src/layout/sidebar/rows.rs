@@ -1,3 +1,5 @@
+use std::{cell::Cell, rc::Rc};
+
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::Input,
@@ -6,7 +8,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{panel::Sidebar, tree::ItemKind};
+use super::{dragging::DraggedItem, panel::Sidebar, tree::ItemKind};
+use collection::MovePlacement;
 
 impl Sidebar {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -17,6 +20,18 @@ impl Sidebar {
         let selected = self.selected == Some(index);
         let theme = cx.theme();
         let view = cx.entity().downgrade();
+        let drag_view = view.clone();
+        let bounds = Rc::new(Cell::new(Bounds::default()));
+        let row_bounds = bounds.clone();
+        let drop_position = self
+            .drop_target
+            .filter(|(target, _)| *target == index && cx.has_active_drag())
+            .map(|(_, placement)| placement);
+        let drag = DraggedItem {
+            path: item.path.clone(),
+            label: item.label.clone(),
+            owner: cx.entity_id(),
+        };
         let path = item.path.clone();
         let rename = self
             .rename
@@ -78,6 +93,7 @@ impl Sidebar {
         }
 
         div()
+            .relative()
             .id(("collection-row", index))
             .debug_selector(move || format!("collection-row-{index}").into())
             .h(px(30.))
@@ -94,6 +110,9 @@ impl Sidebar {
                     .when(selected, |this| this.bg(theme.sidebar_accent))
                     .when(!selected, |this| {
                         this.hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
+                    })
+                    .when(drop_position == Some(MovePlacement::Inside), |this| {
+                        this.bg(theme.info.opacity(0.25))
                     })
                     .child(if branch {
                         h_flex()
@@ -161,6 +180,65 @@ impl Sidebar {
                         )
                     }),
             )
+            .when(
+                matches!(
+                    drop_position,
+                    Some(MovePlacement::Before | MovePlacement::After)
+                ),
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_2()
+                            .right_2()
+                            .h(px(2.))
+                            .bg(theme.info)
+                            .when(drop_position == Some(MovePlacement::Before), |this| {
+                                this.top_0()
+                            })
+                            .when(drop_position == Some(MovePlacement::After), |this| {
+                                this.bottom_0()
+                            }),
+                    )
+                },
+            )
+            .when(
+                rename.is_none() && item.kind != ItemKind::Collection,
+                |this| {
+                    this.on_drag(drag, move |drag, _, window, cx| {
+                        let _ = drag_view.update(cx, |this, cx| {
+                            this.pending_delete = None;
+                            this.drop_target = None;
+                            this.select_row(row, cx);
+                            window.focus(&this.focus, cx);
+                        });
+                        cx.new(|_| drag.clone())
+                    })
+                },
+            )
+            .on_drag_move(
+                cx.listener(move |this, event: &DragMoveEvent<DraggedItem>, _, cx| {
+                    this.drag_over_row(index, event, cx);
+                }),
+            )
+            .child(
+                canvas(move |bounds, _, _| row_bounds.set(bounds), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
+            .on_drop(cx.listener(move |this, drag: &DraggedItem, window, cx| {
+                if drag.owner != cx.entity_id() {
+                    return;
+                }
+                // A quick drag may arrive without a separate hover event.
+                if let Some(placement) =
+                    this.drop_placement(index, drag, bounds.get(), window.mouse_position())
+                {
+                    this.move_item(&drag.path, index, placement, window, cx);
+                }
+            }))
             .on_click(cx.listener(move |this, _, window, cx| {
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);

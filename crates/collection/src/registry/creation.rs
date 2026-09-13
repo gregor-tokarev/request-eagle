@@ -40,6 +40,7 @@ impl CollectionRegistry {
             .entries_mut(parent)
             .ok_or(CollectionEditError::NotFound)?;
         let path = create_directory(parent, "New Folder")?;
+        persist_created_order(parent, entries, &path, true)?;
         entries.push(Entry::Directory(DirEntry {
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             path: path.clone(),
@@ -94,6 +95,8 @@ impl CollectionRegistry {
                 return Err(error.into());
             }
 
+            drop(file);
+            persist_created_order(parent, entries, &path, false)?;
             entry.raw_content = content;
             entries.push(Entry::File(entry));
             return Ok(path);
@@ -102,7 +105,7 @@ impl CollectionRegistry {
         unreachable!()
     }
 
-    fn entries_mut(&mut self, parent: &Path) -> Option<&mut Vec<Entry>> {
+    pub(super) fn entries_mut(&mut self, parent: &Path) -> Option<&mut Vec<Entry>> {
         for collection in &mut self.collections {
             if collection.path == parent {
                 return Some(&mut collection.entries);
@@ -133,4 +136,26 @@ fn create_directory(parent: &Path, base: &str) -> io::Result<PathBuf> {
     }
 
     unreachable!()
+}
+
+fn persist_created_order(
+    parent: &Path,
+    entries: &[Entry],
+    path: &Path,
+    directory: bool,
+) -> io::Result<()> {
+    let paths: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.path().to_path_buf())
+        .chain(std::iter::once(path.to_path_buf()))
+        .collect();
+    if let Err(error) = crate::order::save(parent, &paths) {
+        if directory {
+            let _ = fs::remove_dir(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
