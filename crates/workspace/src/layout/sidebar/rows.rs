@@ -122,7 +122,6 @@ impl Sidebar {
                         };
 
                         div()
-                            .w(px(42.))
                             .flex_none()
                             .text_size(px(9.))
                             .font_weight(FontWeight::SEMIBOLD)
