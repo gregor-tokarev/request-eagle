@@ -11,7 +11,7 @@ use gpui_kit::{
     MouseDownEvent, MouseUpEvent, TestAppContext, VisualTestContext, component::Root, px, size,
 };
 
-use super::Sidebar;
+use super::CollectionPanel;
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -44,7 +44,7 @@ impl Drop for Fixture {
 pub(super) fn sidebar<'a>(
     fixture: &Fixture,
     cx: &'a mut TestAppContext,
-) -> (Entity<Sidebar>, &'a mut VisualTestContext) {
+) -> (Entity<CollectionPanel>, &'a mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -52,7 +52,7 @@ pub(super) fn sidebar<'a>(
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            Sidebar::new(
+            CollectionPanel::new(
                 CollectionRegistry::from_path(&fixture.0).unwrap(),
                 window,
                 cx,

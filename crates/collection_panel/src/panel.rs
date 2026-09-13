@@ -11,7 +11,8 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::{editing::RenameEditor, tree::CollectionTree};
 
-pub(crate) struct Sidebar {
+/// The collections tree and its search, editing, and drag interactions.
+pub struct CollectionPanel {
     pub(super) collections: CollectionRegistry,
     pub(super) rename: Option<RenameEditor>,
     pub(super) pending_delete: Option<PathBuf>,
@@ -33,8 +34,8 @@ pub(crate) struct Sidebar {
     _focus_subscription: Subscription,
 }
 
-impl Sidebar {
-    pub(crate) fn new(
+impl CollectionPanel {
+    pub fn new(
         collections: CollectionRegistry,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -245,13 +246,13 @@ impl Sidebar {
     }
 }
 
-impl Focusable for Sidebar {
+impl Focusable for CollectionPanel {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
 
-impl Render for Sidebar {
+impl Render for CollectionPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .debug_selector(|| "collections-sidebar".into())

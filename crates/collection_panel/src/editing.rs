@@ -9,7 +9,7 @@ use gpui_kit::{
     *,
 };
 
-use super::{panel::Sidebar, tree::CollectionTree};
+use super::{panel::CollectionPanel, tree::CollectionTree};
 
 pub(super) struct RenameEditor {
     pub path: PathBuf,
@@ -17,7 +17,7 @@ pub(super) struct RenameEditor {
     _subscription: Subscription,
 }
 
-impl Sidebar {
+impl CollectionPanel {
     pub(super) fn begin_rename(
         &mut self,
         index: usize,

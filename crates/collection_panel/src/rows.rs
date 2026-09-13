@@ -8,10 +8,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{dragging::DraggedItem, panel::Sidebar, tree::ItemKind};
+use super::{dragging::DraggedItem, panel::CollectionPanel, tree::ItemKind};
 use collection::MovePlacement;
 
-impl Sidebar {
+impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let index = self.visible[row];
         let item = &self.tree.items[index];

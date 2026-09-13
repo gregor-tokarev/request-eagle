@@ -5,14 +5,14 @@ use updater::{UpdateStatus, Updater};
 
 use super::request::RequestSettings;
 
-pub(in crate::settings) struct GeneralSettings {
+pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
     request: Entity<RequestSettings>,
     _subscription: Subscription,
 }
 
 impl GeneralSettings {
-    pub(in crate::settings) fn new(
+    pub(crate) fn new(
         updater: Entity<Updater>,
         window: &mut Window,
         cx: &mut Context<Self>,

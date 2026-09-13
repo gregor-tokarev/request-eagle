@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod creation;
 mod dragging;
 mod editing;
@@ -13,7 +15,7 @@ mod search_tests;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use panel::Sidebar;
+pub use panel::CollectionPanel;
 
 #[cfg(test)]
 mod dragging_tests;

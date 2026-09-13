@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use collection::CollectionEditError;
 use gpui_kit::{Context, ScrollStrategy, Window};
 
-use super::Sidebar;
+use super::CollectionPanel;
 
-impl Sidebar {
+impl CollectionPanel {
     pub(super) fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let result = self.collections.create_collection();
         self.finish_creation(result, window, cx);

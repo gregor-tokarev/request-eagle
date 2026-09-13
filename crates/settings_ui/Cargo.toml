@@ -1,16 +1,16 @@
 [package]
-name = "workspace"
+name = "settings_ui"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-collection = { path = "../collection" }
-collection_panel = { path = "../collection_panel" }
-settings_ui = { path = "../settings_ui" }
 gpui-kit = { workspace = true, features = ["component"] }
 keybindings_service = { path = "../keybindings_service" }
-updater = { path = "../updater" }
+preferences = { path = "../preferences" }
 request_eagle_theme = { package = "theme", path = "../theme" }
+updater = { path = "../updater" }
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
+serde_json = "1"
+smol = "2"

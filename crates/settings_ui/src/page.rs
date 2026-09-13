@@ -12,12 +12,12 @@ use super::keybindings::KeybindingsPage;
 use crate::actions::CloseSettings;
 use updater::Updater;
 
-pub(crate) enum SettingsEvent {
+pub enum SettingsEvent {
     Close,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SettingsPage {
+pub enum SettingsPage {
     General,
     Appearance,
     Keybindings,
@@ -41,7 +41,7 @@ impl SettingsPage {
     }
 }
 
-pub(crate) struct Settings {
+pub struct Settings {
     page: SettingsPage,
     general: Entity<GeneralSettings>,
     appearance: Entity<appearance::AppearanceSettings>,
@@ -52,11 +52,7 @@ pub(crate) struct Settings {
 impl EventEmitter<SettingsEvent> for Settings {}
 
 impl Settings {
-    pub(crate) fn new(
-        updater: Entity<Updater>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(updater: Entity<Updater>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             page: SettingsPage::General,
             general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
@@ -66,7 +62,7 @@ impl Settings {
         }
     }
 
-    pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
             SettingsPage::General | SettingsPage::Appearance => {
                 window.focus(&self.focus_handle, cx)
@@ -77,12 +73,7 @@ impl Settings {
         }
     }
 
-    pub(crate) fn select_page(
-        &mut self,
-        page: SettingsPage,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn select_page(&mut self, page: SettingsPage, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
         self.focus(window, cx);
 

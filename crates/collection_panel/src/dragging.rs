@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use collection::MovePlacement;
 use gpui_kit::{component::*, *};
 
-use super::{Sidebar, tree::ItemKind};
+use super::{CollectionPanel, tree::ItemKind};
 
 #[derive(Clone)]
 pub(super) struct DraggedItem {
@@ -25,7 +25,7 @@ impl Render for DraggedItem {
     }
 }
 
-impl Sidebar {
+impl CollectionPanel {
     pub(super) fn drag_over_row(
         &mut self,
         index: usize,

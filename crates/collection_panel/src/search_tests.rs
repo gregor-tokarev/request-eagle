@@ -1,4 +1,6 @@
-use std::{collections::HashSet, hint::black_box, time::Instant};
+use std::{collections::HashSet, fs, hint::black_box, time::Instant};
+
+use collection::CollectionRegistry;
 
 use super::{search::SearchIndex, tree::CollectionTree};
 
@@ -130,7 +132,7 @@ fn measure(mut search: impl FnMut() -> Vec<usize>) -> (f64, f64) {
 #[ignore = "manual indexed search benchmark; run in release mode with one test thread"]
 fn collection_search_benchmark() {
     for count in [1000, 10000, 100000] {
-        let collections = crate::performance::collections(count);
+        let collections = benchmark_collections(count);
         let started = Instant::now();
         let tree = CollectionTree::new(&collections);
         eprintln!(
@@ -163,4 +165,32 @@ fn collection_search_benchmark() {
             );
         }
     }
+}
+
+fn benchmark_collections(request_count: usize) -> CollectionRegistry {
+    if request_count == 0 {
+        return CollectionRegistry::new();
+    }
+
+    // Load synthetic requests through the real parser, outside the timed region.
+    // Never load or modify the user's collections or preferences.
+    let directory = std::env::temp_dir().join(format!(
+        "request-eagle-search-benchmark-{}-{request_count}",
+        std::process::id()
+    ));
+    for index in 0..request_count {
+        let folder = directory.join(format!(
+            "collection-{:02}/folder-{:02}",
+            index / 100,
+            index % 100 / 20
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(format!("request-{index:04}.toml")), format!(
+            "id = \"request-{index}\"\nname = \"Get resource {index}\"\nschema_version = 1\n[request]\ntype = \"http\"\nmethod = \"GET\"\npath = \"/resources/{index}\"\nheaders = []\n"
+        )).unwrap();
+    }
+
+    let collections = CollectionRegistry::from_path(&directory).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    collections
 }

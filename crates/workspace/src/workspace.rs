@@ -1,11 +1,9 @@
 use std::time::Duration;
 
 use crate::actions::{OpenGeneralSettings, OpenSettings, ToggleLeftSidebar};
-use crate::layout::{
-    bottom_panel::BottomPanel, main_view::MainView, sidebar::Sidebar, top_panel::TopPanel,
-};
-use crate::settings::{Settings, SettingsEvent, SettingsPage};
+use crate::layout::{bottom_panel::BottomPanel, main_view::MainView, top_panel::TopPanel};
 use collection::CollectionRegistry;
+use collection_panel::CollectionPanel;
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
@@ -13,11 +11,12 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use updater::Updater;
 
 pub(super) struct Layout {
     top_panel: Entity<TopPanel>,
-    pub(super) sidebar: Entity<Sidebar>,
+    pub(super) sidebar: Entity<CollectionPanel>,
     main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -55,7 +54,7 @@ impl Layout {
             |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
         );
 
-        let sidebar = cx.new(|cx| Sidebar::new(collections, window, cx));
+        let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         window.focus(&sidebar.focus_handle(cx), cx);
 
         Self {

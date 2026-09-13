@@ -2,7 +2,6 @@
 
 mod actions;
 mod layout;
-mod settings;
 mod window_options;
 mod workspace;
 

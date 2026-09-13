@@ -1,10 +1,10 @@
-use crate::settings::SettingsPage;
 use crate::workspace::Layout;
 use collection::CollectionRegistry;
 use gpui_kit::{
     InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point,
     px, size,
 };
+use settings_ui::SettingsPage;
 use std::{fs, time::Instant};
 
 // Run serially, without other benchmarks competing for CPU:

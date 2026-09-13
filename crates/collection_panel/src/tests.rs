@@ -13,7 +13,7 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Focusable, Modifiers, TestAppContext, px, size};
 
 use super::{
-    Sidebar,
+    CollectionPanel,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -149,7 +149,8 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
         request_eagle_theme::init(cx);
     });
 
-    let (sidebar, cx) = cx.add_window_view(|window, cx| Sidebar::new(collections(), window, cx));
+    let (sidebar, cx) =
+        cx.add_window_view(|window, cx| CollectionPanel::new(collections(), window, cx));
     cx.simulate_resize(size(px(300.), px(500.)));
     cx.run_until_parked();
 
@@ -224,7 +225,7 @@ fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(collections(), window, cx));
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -261,7 +262,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(collections(), window, cx));
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -314,22 +315,21 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
-fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) {
+fn keyboard_browses_collections_from_initial_focus(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
     });
 
-    let mut layout = None;
+    let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            crate::workspace::Layout::new(collections(), updater::init("1.2.3", cx), window, cx)
-        });
-        layout = Some(view.clone());
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
     });
-    let sidebar = cx.read(|cx| layout.unwrap().read(cx).sidebar.clone());
+    let sidebar = sidebar.unwrap();
 
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
