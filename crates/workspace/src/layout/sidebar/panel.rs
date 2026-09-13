@@ -25,6 +25,7 @@ pub(crate) struct Sidebar {
     pub(super) query: String,
     pub(super) scroll_handle: UniformListScrollHandle,
     pub(super) focus: FocusHandle,
+    pub(super) delete_focus: FocusHandle,
     pub(super) rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
@@ -71,6 +72,7 @@ impl Sidebar {
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
             focus,
+            delete_focus: cx.focus_handle(),
             rows_task: None,
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
@@ -157,7 +159,7 @@ impl Sidebar {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.focus.is_focused(window)
+        if !(self.focus.is_focused(window) || self.delete_focus.is_focused(window))
             || self.visible.is_empty()
             || event.keystroke.modifiers != Modifiers::default()
         {
@@ -166,6 +168,13 @@ impl Sidebar {
 
         let row = self.selected_row.unwrap_or(0);
         let index = self.visible[row];
+
+        if self.delete_focus.is_focused(window)
+            && matches!(event.keystroke.key.as_str(), "up" | "down" | "home" | "end")
+        {
+            self.pending_delete = None;
+            window.focus(&self.focus, cx);
+        }
 
         match event.keystroke.key.as_str() {
             "down" => self.select_row(

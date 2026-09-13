@@ -32,6 +32,7 @@ impl Sidebar {
             return div()
                 .id(("collection-row", index))
                 .debug_selector(move || format!("collection-row-{index}").into())
+                .track_focus(&self.delete_focus)
                 .h(px(30.))
                 .w_full()
                 .px_2()
@@ -54,6 +55,7 @@ impl Sidebar {
                             Button::new("confirm-sidebar-delete")
                                 .debug_selector(|| "confirm-sidebar-delete".into())
                                 .label("Yes")
+                                .tooltip("Confirm deletion (Enter)")
                                 .xsmall()
                                 .danger()
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -64,6 +66,7 @@ impl Sidebar {
                             Button::new("cancel-sidebar-delete")
                                 .debug_selector(|| "cancel-sidebar-delete".into())
                                 .label("No")
+                                .tooltip("Cancel deletion (Escape)")
                                 .xsmall()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {

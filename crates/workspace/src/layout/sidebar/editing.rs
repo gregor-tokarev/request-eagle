@@ -109,7 +109,7 @@ impl Sidebar {
             self.select_row(row, cx);
         }
         self.pending_delete = Some(path);
-        window.focus(&self.focus, cx);
+        window.focus(&self.delete_focus, cx);
         cx.notify();
     }
 
@@ -126,17 +126,22 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pending_delete.is_none() {
+        if self.pending_delete.is_none() || !self.delete_focus.contains_focused(window, cx) {
             return;
         }
 
         if event.keystroke.key == "escape" {
             self.cancel_delete(window, cx);
             cx.stop_propagation();
-        } else if self.focus.is_focused(window)
+        } else if event.keystroke.key == "enter"
+            && event.keystroke.modifiers == Modifiers::default()
+        {
+            self.confirm_delete(window, cx);
+            cx.stop_propagation();
+        } else if self.delete_focus.is_focused(window)
             && matches!(
                 event.keystroke.key.as_str(),
-                "backspace" | "enter" | "space" | "left" | "right"
+                "backspace" | "space" | "left" | "right"
             )
         {
             // Repeating the delete key must never confirm or collapse the prompt.

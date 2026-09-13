@@ -122,9 +122,10 @@ fn double_click_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut T
     cx.run_until_parked();
     assert!(fixture.0.join("API/Users/list.toml").exists());
     assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
-    cx.simulate_keystrokes("backspace backspace enter space");
+    cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
+    cx.simulate_keystrokes("backspace backspace space");
     assert!(fixture.0.join("API/Users/list.toml").exists());
-    click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
+    cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     assert!(!fixture.0.join("API/Users/list.toml").exists());
     cx.read(|cx| {
@@ -152,6 +153,7 @@ fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut T
     cx.simulate_keystrokes("down down down down enter");
     cx.run_until_parked();
     assert!(fixture.0.join("Renamed").exists());
+    cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
     click_row(cx, "cancel-sidebar-delete", MouseButton::Left, 1);
     cx.run_until_parked();
     assert!(fixture.0.join("Renamed").exists());
@@ -192,8 +194,10 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
     cx.simulate_keystrokes("down down down backspace");
     cx.run_until_parked();
     assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
+    cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
+    cx.update(|window, cx| assert!(sidebar.focus_handle(cx).is_focused(window)));
     assert!(cx.debug_bounds("sidebar-delete-prompt").is_none());
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
