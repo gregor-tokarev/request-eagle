@@ -176,6 +176,38 @@ impl Sidebar {
                 let path = path.clone();
                 let copied_path = path.to_string_lossy().into_owned();
 
+                let menu = if branch {
+                    let request_view = view.clone();
+                    let request_parent = path.clone();
+                    let folder_view = view.clone();
+                    let folder_parent = path.clone();
+
+                    menu.item(
+                        PopupMenuItem::new("New Request").on_click(move |_, window, cx| {
+                            let view = request_view.clone();
+                            let parent = request_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_request(&parent, window, cx)
+                                });
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("New Folder").on_click(move |_, window, cx| {
+                            let view = folder_view.clone();
+                            let parent = folder_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view
+                                    .update(cx, |this, cx| this.create_folder(&parent, window, cx));
+                            });
+                        }),
+                    )
+                    .separator()
+                } else {
+                    menu
+                };
+
                 menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
                     let view = rename_view.clone();
                     window.defer(cx, move |window, cx| {

@@ -110,7 +110,7 @@ fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditEr
     Ok(destination)
 }
 
-fn find_entry<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {
+pub(super) fn find_entry<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {
     for entry in entries {
         match entry {
             Entry::File(file) if file.path == path => return Some(entry),

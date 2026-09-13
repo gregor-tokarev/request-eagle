@@ -2,6 +2,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use collection::CollectionRegistry;
 use gpui_kit::component::{
+    button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     scroll::Scrollbar,
     *,
@@ -287,6 +288,18 @@ impl Render for Sidebar {
                             .text_size(px(10.))
                             .text_color(cx.theme().muted_foreground)
                             .child(self.tree.roots.len().to_string()),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("new-collection")
+                            .debug_selector(|| "new-collection".into())
+                            .icon(IconName::Plus)
+                            .tooltip("New Collection")
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.create_collection(window, cx)
+                            })),
                     ),
             )
             .when_some(self.error.clone(), |this, error| {

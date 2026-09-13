@@ -171,7 +171,7 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn rebuild_tree(
+    pub(super) fn rebuild_tree(
         &mut self,
         selected: Option<&Path>,
         renamed: Option<(&Path, &Path)>,
