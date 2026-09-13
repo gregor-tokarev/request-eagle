@@ -143,7 +143,7 @@ fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut T
     assert!(fixture.0.join("Renamed").is_dir());
     assert!(!fixture.0.join("Other").exists());
     click_row(cx, "collection-row-3", MouseButton::Right, 1);
-    cx.simulate_keystrokes("down down down enter");
+    cx.simulate_keystrokes("down down down down enter");
     cx.run_until_parked();
     assert!(!fixture.0.join("Renamed").exists());
     assert!(fixture.0.join("API/Users/list.toml").exists());

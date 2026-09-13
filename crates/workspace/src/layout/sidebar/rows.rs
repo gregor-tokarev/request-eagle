@@ -129,6 +129,7 @@ impl Sidebar {
                 let rename_view = view.clone();
                 let delete_view = view.clone();
                 let path = path.clone();
+                let copied_path = path.to_string_lossy().into_owned();
 
                 menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
                     let view = rename_view.clone();
@@ -140,6 +141,9 @@ impl Sidebar {
                     PopupMenuItem::new("Open in Finder")
                         .on_click(move |_, _, cx| cx.reveal_path(&path)),
                 )
+                .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copied_path.clone()));
+                }))
                 .separator()
                 .item(
                     PopupMenuItem::new(delete_label).on_click(move |_, window, cx| {

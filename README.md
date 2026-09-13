@@ -28,8 +28,8 @@ and Home/End select the first or last row. Enter/Space toggle the selected folde
 Shift-Tab returns to the filter; Tab moves from the filter into the tree. From
 the filter, Down/Enter select the first result row and Up selects the last.
 
-Right-click any collection, folder, or request for Rename, Open in Finder, and
-Delete. Double-click a row to edit its name; Enter saves, while Escape or moving
+Right-click any collection, folder, or request for Rename, Open in Finder, Copy Path,
+and Delete. Copy Path copies the backing file or directory path. Double-click a row to edit its name; Enter saves, while Escape or moving
 focus away cancels. Backspace deletes the selected item when the tree has focus.
 Deletion removes the backing file or directory, including a directory's contents.
 Request renames update the TOML name while preserving comments and custom fields.
