@@ -1,5 +1,5 @@
 use super::{KeybindingsPage, matches_search};
-use crate::actions::{CloseSettings, OpenSettings, ToggleLeftSidebar};
+use crate::CloseSettings;
 use gpui_kit::{
     Action, AppContext as _, Context, Entity, Global, InteractiveElement as _, IntoElement,
     Keystroke, Modifiers, ParentElement as _, Render, Styled as _, TestAppContext,
@@ -7,7 +7,7 @@ use gpui_kit::{
 };
 use keybindings_service as keybindings;
 
-actions!(settings_tests, [Quit]);
+actions!(settings_tests, [Quit, OpenSettings, ToggleLeftSidebar]);
 
 #[derive(Default)]
 struct QuitCount(usize);
@@ -68,7 +68,7 @@ fn setup_width(
 ) {
     cx.update(|cx| {
         gpui_kit::init(cx);
-        crate::actions::init(cx);
+        init_commands(cx);
 
         keybindings::register(
             Quit,
@@ -304,7 +304,7 @@ fn special_keys_are_recorded_and_never_dispatch_while_capturing(cx: &mut TestApp
 #[test]
 fn search_accepts_names_symbols_and_modifier_aliases() {
     let mut app = gpui_kit::TestApp::new();
-    app.update(crate::actions::init);
+    app.update(init_commands);
 
     app.read(|cx| {
         let commands = keybindings::commands(cx);
@@ -383,13 +383,13 @@ fn recording_keeps_command_rows_and_shortcut_column_in_place(cx: &mut TestAppCon
         let (page, _, cx) = setup_width(cx, width);
 
         let selectors = [
-            "keybinding-row-workspace::OpenSettings",
-            "keybinding-row-workspace::ToggleLeftSidebar",
-            "shortcut-slot-workspace::ToggleLeftSidebar",
+            "keybinding-row-settings_tests::OpenSettings",
+            "keybinding-row-settings_tests::ToggleLeftSidebar",
+            "shortcut-slot-settings_tests::ToggleLeftSidebar",
         ];
         let before = selectors.map(|selector| cx.debug_bounds(selector).unwrap());
         let record = cx
-            .debug_bounds("record-workspace::ToggleLeftSidebar")
+            .debug_bounds("record-settings_tests::ToggleLeftSidebar")
             .unwrap();
         cx.simulate_click(record.center(), Modifiers::default());
 
@@ -456,7 +456,7 @@ fn shortcut_search_captures_filters_clears_and_releases_focus(cx: &mut TestAppCo
             .is_some()
     );
     assert!(
-        cx.debug_bounds("keybinding-row-workspace::ToggleLeftSidebar")
+        cx.debug_bounds("keybinding-row-settings_tests::ToggleLeftSidebar")
             .is_none()
     );
 
@@ -496,7 +496,7 @@ fn shortcut_search_captures_filters_clears_and_releases_focus(cx: &mut TestAppCo
             .is_some()
     );
     assert!(
-        cx.debug_bounds("keybinding-row-workspace::ToggleLeftSidebar")
+        cx.debug_bounds("keybinding-row-settings_tests::ToggleLeftSidebar")
             .is_some()
     );
 
@@ -507,7 +507,7 @@ fn shortcut_search_captures_filters_clears_and_releases_focus(cx: &mut TestAppCo
             .is_none()
     );
     assert!(
-        cx.debug_bounds("keybinding-row-workspace::ToggleLeftSidebar")
+        cx.debug_bounds("keybinding-row-settings_tests::ToggleLeftSidebar")
             .is_some()
     );
 
@@ -580,7 +580,7 @@ fn search_mode_switch_keeps_the_search_bar_and_rows_in_place(cx: &mut TestAppCon
         let selectors = [
             "keybindings-search",
             "toggle-shortcut-search",
-            "keybinding-row-workspace::ToggleLeftSidebar",
+            "keybinding-row-settings_tests::ToggleLeftSidebar",
         ];
         let before = selectors.map(|selector| cx.debug_bounds(selector).unwrap());
 
@@ -624,4 +624,28 @@ fn search_mode_switch_keeps_the_search_bar_and_rows_in_place(cx: &mut TestAppCon
         cx.simulate_input("settings");
         cx.read(|cx| assert_eq!(page.read(cx).search.read(cx).value(), "settings"));
     }
+}
+
+fn init_commands(cx: &mut gpui_kit::App) {
+    crate::init(cx);
+    keybindings::register(
+        ToggleLeftSidebar,
+        "Toggle sidebar",
+        "Show or hide the collections sidebar.",
+        "Workspace",
+        Some("cmd-b"),
+        None,
+        cx,
+    )
+    .unwrap();
+    keybindings::register(
+        OpenSettings,
+        "Open settings",
+        "Open application settings.",
+        "Settings",
+        Some("cmd-,"),
+        None,
+        cx,
+    )
+    .unwrap();
 }

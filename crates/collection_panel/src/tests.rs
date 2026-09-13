@@ -1,7 +1,10 @@
 use std::{
     collections::HashSet,
     fs,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -10,13 +13,16 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Focusable, Modifiers, TestAppContext, px, size};
 
 use super::{
-    Sidebar,
+    CollectionPanel,
     tree::{CollectionTree, ItemKind},
 };
 
+static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+
 pub(super) fn collections() -> CollectionRegistry {
     let directory = std::env::temp_dir().join(format!(
-        "request-eagle-sidebar-test-{}-{}",
+        "request-eagle-sidebar-test-{}-{}-{}",
+        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -144,7 +150,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     });
 
     let (sidebar, cx) =
-        cx.add_window_view(|window, cx| Sidebar::new(Arc::new(collections()), window, cx));
+        cx.add_window_view(|window, cx| CollectionPanel::new(collections(), window, cx));
     cx.simulate_resize(size(px(300.), px(500.)));
     cx.run_until_parked();
 
@@ -211,7 +217,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
 }
 
 #[gpui_kit::test]
-fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
+fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -219,7 +225,7 @@ fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -232,7 +238,7 @@ fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
 
-    cx.simulate_keystrokes("tab");
+    cx.simulate_keystrokes("tab tab");
     cx.run_until_parked();
     cx.update(|window, cx| {
         assert!(sidebar.focus_handle(cx).is_focused(window));
@@ -241,7 +247,7 @@ fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("down");
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(1)));
 
-    cx.simulate_keystrokes("shift-tab");
+    cx.simulate_keystrokes("shift-tab shift-tab");
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
@@ -256,7 +262,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -275,19 +281,19 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert_eq!(sidebar.tree.items[selected].label, "Get post 7");
     });
 
-    cx.simulate_keystrokes("shift-tab up");
+    cx.simulate_keystrokes("shift-tab shift-tab up");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.last().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab enter");
+    cx.simulate_keystrokes("shift-tab shift-tab enter");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.first().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab left space right shift-up");
+    cx.simulate_keystrokes("shift-tab shift-tab left space right shift-up");
     cx.update(|window, cx| {
         let search = &sidebar.read(cx).search;
         assert!(search.focus_handle(cx).is_focused(window));
@@ -302,34 +308,28 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert!(sidebar.read(cx).visible.is_empty());
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
-    cx.simulate_keystrokes("tab down up home end left right enter space shift-tab");
+    cx.simulate_keystrokes("tab tab down up home end left right enter space shift-tab shift-tab");
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
 }
 
 #[gpui_kit::test]
-fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) {
+fn keyboard_browses_collections_from_initial_focus(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
     });
 
-    let mut layout = None;
+    let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            crate::workspace::Layout::new(
-                Arc::new(collections()),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
+        let view = cx.new(|cx| CollectionPanel::new(collections(), window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
     });
-    let sidebar = cx.read(|cx| layout.unwrap().read(cx).sidebar.clone());
+    let sidebar = sidebar.unwrap();
 
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
@@ -350,6 +350,17 @@ fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) 
     cx.run_until_parked();
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&2)));
     cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        let editor = sidebar
+            .rename
+            .as_ref()
+            .expect("Enter should rename the selected folder");
+        assert_eq!(editor.input.read(cx).value(), "Comments");
+        assert!(sidebar.collapsed.contains(&2));
+    });
+    cx.simulate_keystrokes("escape right");
     cx.run_until_parked();
     cx.read(|cx| assert!(!sidebar.read(cx).collapsed.contains(&2)));
     cx.simulate_keystrokes("space");

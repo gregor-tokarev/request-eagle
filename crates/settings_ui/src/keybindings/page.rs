@@ -10,7 +10,7 @@ use keybindings_service::{self as keybindings, Command};
 
 use super::recorder::Recording;
 
-pub(in crate::settings) struct KeybindingsPage {
+pub(crate) struct KeybindingsPage {
     pub(super) search: Entity<InputState>,
     pub(super) search_focus: FocusHandle,
     pub(super) search_by_shortcut: bool,
@@ -25,7 +25,7 @@ pub(in crate::settings) struct KeybindingsPage {
 }
 
 impl KeybindingsPage {
-    pub(in crate::settings) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search commands or shortcuts…"));
         let search_subscription = cx.subscribe(&search, |_, _, _: &InputEvent, cx| cx.notify());
@@ -47,7 +47,7 @@ impl KeybindingsPage {
         }
     }
 
-    pub(in crate::settings) fn focus_search(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn focus_search(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.search_by_shortcut {
             window.focus(&self.search_focus, cx);
         } else {

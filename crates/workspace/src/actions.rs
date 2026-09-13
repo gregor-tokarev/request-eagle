@@ -2,12 +2,7 @@ use gpui_kit::{App, actions};
 
 actions!(
     workspace,
-    [
-        ToggleLeftSidebar,
-        OpenSettings,
-        OpenGeneralSettings,
-        CloseSettings
-    ]
+    [ToggleLeftSidebar, OpenSettings, OpenGeneralSettings]
 );
 
 pub(crate) fn init(cx: &mut App) {
@@ -33,14 +28,5 @@ pub(crate) fn init(cx: &mut App) {
     )
     .expect("default settings keybinding should be valid");
 
-    keybindings_service::register(
-        CloseSettings,
-        "Close settings",
-        "Return to your workspace.",
-        "Settings",
-        Some("escape"),
-        Some("Settings"),
-        cx,
-    )
-    .expect("default close settings keybinding should be valid");
+    settings_ui::init(cx);
 }

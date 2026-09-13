@@ -12,7 +12,7 @@ use crate::{DirEntry, Entry, FileEntry};
 pub struct Collection {
     pub path: PathBuf,
     pub entries: Vec<Entry>,
-    local_env: Environment,
+    pub(crate) local_env: Environment,
 }
 
 impl Collection {
@@ -108,6 +108,11 @@ fn load_directory(
         }
     }
 
+    crate::order::apply(path, &mut entries).map_err(|source| CollectionLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
     Ok(DirEntry {
         path: path.to_path_buf(),
         name: file_name(path),
@@ -115,7 +120,7 @@ fn load_directory(
     })
 }
 
-fn load_file(path: &Path) -> Result<FileEntry, CollectionLoadError> {
+pub(crate) fn load_file(path: &Path) -> Result<FileEntry, CollectionLoadError> {
     let raw_content = fs::read_to_string(path).map_err(|source| CollectionLoadError::Read {
         path: path.to_path_buf(),
         source,
@@ -151,7 +156,7 @@ fn save_entry(entry: &mut Entry) -> Result<(), CollectionSaveError> {
     }
 }
 
-fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError> {
+pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError> {
     if let Some(parent) = entry.path.parent() {
         fs::create_dir_all(parent).map_err(|source| CollectionSaveError::Write {
             path: parent.to_path_buf(),

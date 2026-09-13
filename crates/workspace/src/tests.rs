@@ -1,9 +1,9 @@
-use crate::actions::{CloseSettings, ToggleLeftSidebar};
+use crate::actions::ToggleLeftSidebar;
 use crate::layout::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
 use crate::workspace::{Layout, on_toggle_sidebar};
 use collection::CollectionRegistry;
 use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
-use std::sync::Arc;
+use settings_ui::CloseSettings;
 
 #[gpui_kit::test]
 fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
@@ -11,11 +11,13 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
+        // Overrides saved before CloseSettings moved crates must still resolve.
+        keybindings_service::set_override("workspace::CloseSettings", Some("ctrl-w"), cx).unwrap();
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
-            Arc::new(CollectionRegistry::new()),
+            CollectionRegistry::new(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -28,7 +30,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
     cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
 
-    for _ in 0..2 {
+    for attempt in 0..2 {
         cx.update(|window, cx| {
             layout.update(cx, |layout, cx| layout.open_settings(window, cx));
         });
@@ -44,8 +46,13 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
         // Reopening an already visible screen must not replace the saved focus.
         cx.update(|window, cx| {
             layout.update(cx, |layout, cx| layout.open_settings(window, cx));
-            window.dispatch_action(Box::new(CloseSettings), cx);
+            if attempt == 0 {
+                window.dispatch_action(Box::new(CloseSettings), cx);
+            }
         });
+        if attempt == 1 {
+            cx.simulate_keystrokes("ctrl-w");
+        }
         cx.run_until_parked();
 
         cx.read(|cx| {
@@ -69,7 +76,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
-            Arc::new(CollectionRegistry::new()),
+            CollectionRegistry::new(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -129,4 +136,44 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
         .expect("toggle-sidebar button should be rendered");
     cx.simulate_click(button_bounds.center(), Modifiers::default());
     assert!(!sidebar_visible(cx));
+}
+
+#[gpui_kit::test]
+fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        Layout::new(
+            crate::performance::collections(2),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        )
+    });
+    cx.update(|window, cx| {
+        window.activate_window();
+        assert!(layout.read(cx).sidebar.focus_handle(cx).is_focused(window));
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("collection-row-1").is_some());
+
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("collection-row-1").is_none());
+    cx.simulate_keystrokes("right");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("collection-row-1").is_some());
+
+    cx.simulate_keystrokes("down right enter");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+    cx.update(|window, cx| {
+        assert!(layout.read(cx).sidebar.focus_handle(cx).is_focused(window));
+    });
 }

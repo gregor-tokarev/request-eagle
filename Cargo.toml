@@ -1,12 +1,14 @@
 [workspace]
 members = [
     "crates/collection",
+    "crates/collection_panel",
     "crates/environment",
     "crates/keybindings_service",
     "crates/preferences",
     "crates/theme",
     "crates/updater",
     "crates/workspace",
+    "crates/settings_ui",
     "crates/request-eagle",
 ]
 resolver = "3"

@@ -17,7 +17,7 @@ pub(super) enum PageRow {
     Themes(Vec<usize>),
 }
 
-pub(in crate::settings) struct AppearanceSettings {
+pub(crate) struct AppearanceSettings {
     font: Entity<SelectState<FontList>>,
     pub(super) previews: Vec<ThemePreview>,
     pub(super) theme_focus: Vec<FocusHandle>,
@@ -30,7 +30,7 @@ pub(in crate::settings) struct AppearanceSettings {
 }
 
 impl AppearanceSettings {
-    pub(in crate::settings) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let preferences = cx
             .try_global::<preferences::Preferences>()
             .cloned()

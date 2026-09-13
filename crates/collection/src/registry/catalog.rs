@@ -13,7 +13,8 @@ const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
 #[derive(Default)]
 pub struct CollectionRegistry {
-    collections: Vec<Collection>,
+    pub(super) collections: Vec<Collection>,
+    pub(super) directory: Option<PathBuf>,
 }
 
 impl CollectionRegistry {
@@ -34,9 +35,13 @@ impl CollectionRegistry {
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CollectionRegistryLoadError> {
         let path = path.as_ref();
+        let mut registry = Self {
+            directory: Some(path.to_path_buf()),
+            ..Self::new()
+        };
         let directory = match fs::read_dir(path) {
             Ok(directory) => directory,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Self::new()),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(registry),
             Err(source) => {
                 return Err(CollectionRegistryLoadError::Read {
                     path: path.to_path_buf(),
@@ -57,7 +62,6 @@ impl CollectionRegistry {
             .collect::<Result<Vec<_>, _>>()?;
         collection_paths.sort();
 
-        let mut registry = Self::new();
         for collection_path in collection_paths {
             let metadata = fs::metadata(&collection_path).map_err(|source| {
                 CollectionRegistryLoadError::Read {
@@ -140,6 +144,7 @@ impl FromIterator<Collection> for CollectionRegistry {
     fn from_iter<T: IntoIterator<Item = Collection>>(collections: T) -> Self {
         Self {
             collections: collections.into_iter().collect(),
+            ..Self::new()
         }
     }
 }

@@ -1,11 +1,11 @@
-use crate::settings::SettingsPage;
 use crate::workspace::Layout;
 use collection::CollectionRegistry;
 use gpui_kit::{
     InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point,
     px, size,
 };
-use std::{fs, sync::Arc, time::Instant};
+use settings_ui::SettingsPage;
+use std::{fs, time::Instant};
 
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
@@ -45,7 +45,7 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
             continue;
         }
 
-        let collections = Arc::new(collections(request_count));
+        let collections = collections(request_count);
         let (layout, cx) = cx.add_window_view(|window, cx| {
             Layout::new(collections, updater::init("1.2.3", cx), window, cx)
         });
