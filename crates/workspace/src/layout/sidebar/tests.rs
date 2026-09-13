@@ -1,7 +1,10 @@
 use std::{
     collections::HashSet,
     fs,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,9 +17,12 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
+static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+
 pub(super) fn collections() -> CollectionRegistry {
     let directory = std::env::temp_dir().join(format!(
-        "request-eagle-sidebar-test-{}-{}",
+        "request-eagle-sidebar-test-{}-{}-{}",
+        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -143,8 +149,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
         request_eagle_theme::init(cx);
     });
 
-    let (sidebar, cx) =
-        cx.add_window_view(|window, cx| Sidebar::new(Arc::new(collections()), window, cx));
+    let (sidebar, cx) = cx.add_window_view(|window, cx| Sidebar::new(collections(), window, cx));
     cx.simulate_resize(size(px(300.), px(500.)));
     cx.run_until_parked();
 
@@ -219,7 +224,7 @@ fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        let view = cx.new(|cx| Sidebar::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -256,7 +261,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
 
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Sidebar::new(Arc::new(collections()), window, cx));
+        let view = cx.new(|cx| Sidebar::new(collections(), window, cx));
         sidebar = Some(view.clone());
 
         Root::new(view, window, cx)
@@ -318,12 +323,7 @@ fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) 
     let mut layout = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            crate::workspace::Layout::new(
-                Arc::new(collections()),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
+            crate::workspace::Layout::new(collections(), updater::init("1.2.3", cx), window, cx)
         });
         layout = Some(view.clone());
 

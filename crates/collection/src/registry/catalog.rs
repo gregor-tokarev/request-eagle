@@ -13,7 +13,7 @@ const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
 #[derive(Default)]
 pub struct CollectionRegistry {
-    collections: Vec<Collection>,
+    pub(super) collections: Vec<Collection>,
 }
 
 impl CollectionRegistry {

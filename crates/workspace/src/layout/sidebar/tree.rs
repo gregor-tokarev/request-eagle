@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use collection::{CollectionRegistry, Entry, Method, Request};
 use gpui_kit::SharedString;
@@ -14,6 +17,7 @@ pub(super) enum ItemKind {
 
 pub(super) struct TreeItem {
     pub label: SharedString,
+    pub path: PathBuf,
     pub kind: ItemKind,
     pub depth: usize,
     pub parent: Option<usize>,
@@ -50,6 +54,7 @@ impl CollectionTree {
             search_texts.push(name.clone());
             tree.items.push(TreeItem {
                 label: name.into(),
+                path: collection.path.clone(),
                 kind: ItemKind::Collection,
                 depth: 0,
                 parent: None,
@@ -74,6 +79,7 @@ impl CollectionTree {
                     search_texts.push(folder.name.clone());
                     self.items.push(TreeItem {
                         label: folder.name.clone().into(),
+                        path: folder.path.clone(),
                         kind: ItemKind::Folder,
                         depth,
                         parent: Some(parent),
@@ -96,6 +102,7 @@ impl CollectionTree {
 
                     self.items.push(TreeItem {
                         label: file.name.clone().into(),
+                        path: file.path.clone(),
                         kind: ItemKind::Request(method),
                         depth,
                         parent: Some(parent),

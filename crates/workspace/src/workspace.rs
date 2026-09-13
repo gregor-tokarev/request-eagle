@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use crate::actions::{OpenGeneralSettings, OpenSettings, ToggleLeftSidebar};
 use crate::layout::{
@@ -35,7 +35,7 @@ pub(super) struct Layout {
 
 impl Layout {
     pub(super) fn new(
-        collections: Arc<CollectionRegistry>,
+        collections: CollectionRegistry,
         updater: Entity<Updater>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -213,7 +213,7 @@ pub fn init(collections: CollectionRegistry, updater: Entity<Updater>, cx: &mut 
 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
-        let layout = cx.new(|cx| Layout::new(Arc::new(collections), updater, window, cx));
+        let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
         on_toggle_sidebar(&layout, cx);
         on_open_settings(&layout, window.window_handle(), cx);
 

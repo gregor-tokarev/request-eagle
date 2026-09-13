@@ -8,27 +8,30 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::tree::{CollectionTree, ItemKind};
+use super::{editing::RenameEditor, tree::CollectionTree};
 
 pub(crate) struct Sidebar {
+    pub(super) collections: CollectionRegistry,
+    pub(super) rename: Option<RenameEditor>,
+    pub(super) error: Option<String>,
     pub(super) tree: Arc<CollectionTree>,
     pub(super) visible: Arc<Vec<usize>>,
-    unfiltered_rows: Option<Arc<Vec<usize>>>,
+    pub(super) unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
-    selected_row: Option<usize>,
+    pub(super) selected_row: Option<usize>,
     pub(super) search: Entity<InputState>,
-    query: String,
-    scroll_handle: UniformListScrollHandle,
-    focus: FocusHandle,
-    rows_task: Option<Task<()>>,
+    pub(super) query: String,
+    pub(super) scroll_handle: UniformListScrollHandle,
+    pub(super) focus: FocusHandle,
+    pub(super) rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
 }
 
 impl Sidebar {
     pub(crate) fn new(
-        collections: Arc<CollectionRegistry>,
+        collections: CollectionRegistry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -48,6 +51,9 @@ impl Sidebar {
         });
 
         Self {
+            collections,
+            rename: None,
+            error: None,
             tree,
             unfiltered_rows: Some(visible.clone()),
             visible,
@@ -64,7 +70,7 @@ impl Sidebar {
         }
     }
 
-    fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {
+    pub(super) fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {
         self.rows_task = None;
 
         if self.query.is_empty()
@@ -97,7 +103,12 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn apply_rows(&mut self, rows: Arc<Vec<usize>>, reset_scroll: bool, cx: &mut Context<Self>) {
+    pub(super) fn apply_rows(
+        &mut self,
+        rows: Arc<Vec<usize>>,
+        reset_scroll: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.visible = rows;
         self.selected_row = self
             .selected
@@ -111,7 +122,7 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn toggle(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn toggle(&mut self, index: usize, cx: &mut Context<Self>) {
         if !self.query.is_empty() || !self.tree.items[index].is_branch() {
             return;
         }
@@ -124,7 +135,7 @@ impl Sidebar {
         self.refresh_rows(false, cx);
     }
 
-    fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
+    pub(super) fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if let Some(&index) = self.visible.get(row) {
             self.selected = Some(index);
             self.selected_row = Some(row);
@@ -134,8 +145,11 @@ impl Sidebar {
         }
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.visible.is_empty() || event.keystroke.modifiers != Modifiers::default() {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus.is_focused(window)
+            || self.visible.is_empty()
+            || event.keystroke.modifiers != Modifiers::default()
+        {
             return;
         }
 
@@ -151,6 +165,11 @@ impl Sidebar {
             "up" => self.select_row(row.saturating_sub(1), cx),
             "home" => self.select_row(0, cx),
             "end" => self.select_row(self.visible.len() - 1, cx),
+            "backspace" => {
+                if self.selected_row.is_some() {
+                    self.delete_item(index, window, cx);
+                }
+            }
             "enter" | "space" => self.toggle(index, cx),
             "right" => {
                 if self.collapsed.contains(&index) {
@@ -199,94 +218,6 @@ impl Sidebar {
         self.select_row(row, cx);
         window.focus(&self.focus, cx);
         cx.stop_propagation();
-    }
-
-    fn row(&self, row: usize, cx: &mut Context<Self>) -> impl IntoElement {
-        let index = self.visible[row];
-        let item = &self.tree.items[index];
-        let branch = item.is_branch();
-        let expanded = !self.query.is_empty() || !self.collapsed.contains(&index);
-        let selected = self.selected == Some(index);
-        let theme = cx.theme();
-
-        div()
-            .id(("collection-row", index))
-            .debug_selector(move || format!("collection-row-{index}").into())
-            .h(px(30.))
-            .w_full()
-            .px_2()
-            .child(
-                h_flex()
-                    .size_full()
-                    .rounded_md()
-                    .pl(px(6. + item.depth as f32 * 14.))
-                    .pr_2()
-                    .gap_1p5()
-                    .text_size(px(13.))
-                    .when(selected, |this| this.bg(theme.sidebar_accent))
-                    .when(!selected, |this| {
-                        this.hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
-                    })
-                    .child(if branch {
-                        h_flex()
-                            .gap_1p5()
-                            .flex_none()
-                            .text_color(theme.muted_foreground)
-                            .child(
-                                Icon::new(if expanded {
-                                    IconName::ChevronDown
-                                } else {
-                                    IconName::ChevronRight
-                                })
-                                .size(px(12.)),
-                            )
-                            .child(Icon::new(IconName::Folder).size(px(14.)))
-                            .into_any_element()
-                    } else {
-                        let ItemKind::Request(method) = item.kind else {
-                            unreachable!()
-                        };
-                        let color = match method {
-                            "GET" => theme.success,
-                            "POST" => theme.warning,
-                            "PUT" => theme.info,
-                            _ => theme.danger,
-                        };
-
-                        div()
-                            .w(px(42.))
-                            .flex_none()
-                            .text_size(px(9.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color)
-                            .child(method)
-                            .into_any_element()
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .when(item.kind == ItemKind::Collection, |this| {
-                                this.font_weight(FontWeight::MEDIUM)
-                            })
-                            .child(item.label.clone()),
-                    )
-                    .when(branch, |this| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .text_size(px(10.))
-                                .text_color(theme.muted_foreground)
-                                .child(item.request_count.to_string()),
-                        )
-                    }),
-            )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                window.focus(&this.focus, cx);
-                this.select_row(row, cx);
-                this.toggle(index, cx);
-            }))
     }
 }
 
@@ -337,6 +268,16 @@ impl Render for Sidebar {
                             .child(self.tree.roots.len().to_string()),
                     ),
             )
+            .when_some(self.error.clone(), |this, error| {
+                this.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            })
             .child(
                 div()
                     .id("sidebar-tree")

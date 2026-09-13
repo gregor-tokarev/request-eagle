@@ -3,7 +3,6 @@ use crate::layout::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
 use crate::workspace::{Layout, on_toggle_sidebar};
 use collection::CollectionRegistry;
 use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
-use std::sync::Arc;
 
 #[gpui_kit::test]
 fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
@@ -15,7 +14,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
-            Arc::new(CollectionRegistry::new()),
+            CollectionRegistry::new(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -69,7 +68,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
-            Arc::new(CollectionRegistry::new()),
+            CollectionRegistry::new(),
             updater::init("1.2.3", cx),
             window,
             cx,
