@@ -91,10 +91,13 @@ fn click_row(
 }
 
 #[gpui_kit::test]
-fn double_click_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppContext) {
+fn enter_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-2", MouseButton::Left, 2);
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
     assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
     cx.simulate_keystrokes("backspace");
     assert!(fixture.0.join("API/Users/list.toml").exists());
@@ -112,6 +115,9 @@ fn double_click_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut T
     );
 
     click_row(cx, "collection-row-2", MouseButton::Left, 2);
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
     cx.simulate_input("Discard this");
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
@@ -172,6 +178,9 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
     let fixture = Fixture::new();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-0", MouseButton::Left, 2);
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
     cx.simulate_input("Other");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();

@@ -351,6 +351,17 @@ fn keyboard_browses_collections_from_workspace_startup(cx: &mut TestAppContext) 
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&2)));
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        let editor = sidebar
+            .rename
+            .as_ref()
+            .expect("Enter should rename the selected folder");
+        assert_eq!(editor.input.read(cx).value(), "Comments");
+        assert!(sidebar.collapsed.contains(&2));
+    });
+    cx.simulate_keystrokes("escape right");
+    cx.run_until_parked();
     cx.read(|cx| assert!(!sidebar.read(cx).collapsed.contains(&2)));
     cx.simulate_keystrokes("space");
     cx.run_until_parked();

@@ -190,7 +190,8 @@ impl Sidebar {
                     self.request_delete(index, window, cx);
                 }
             }
-            "enter" | "space" => self.toggle(index, cx),
+            "enter" => self.begin_rename(index, window, cx),
+            "space" => self.toggle(index, cx),
             "right" => {
                 if self.collapsed.contains(&index) {
                     self.toggle(index, cx);

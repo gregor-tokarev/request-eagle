@@ -162,14 +162,10 @@ impl Sidebar {
                         )
                     }),
             )
-            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                if event.click_count() == 2 {
-                    this.begin_rename(index, window, cx);
-                } else {
-                    window.focus(&this.focus, cx);
-                    this.select_row(row, cx);
-                    this.toggle(index, cx);
-                }
+            .on_click(cx.listener(move |this, _, window, cx| {
+                window.focus(&this.focus, cx);
+                this.select_row(row, cx);
+                this.toggle(index, cx);
             }))
             .context_menu(move |menu, window, cx| {
                 let _ = view.update(cx, |this, cx| {

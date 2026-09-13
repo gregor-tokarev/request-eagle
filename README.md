@@ -24,15 +24,17 @@ the visible rows.
 
 The collection tree receives keyboard focus when the workspace opens. Up/Down
 select rows, Left/Right collapse or expand folders and move to parents or children,
-and Home/End select the first or last row. Enter/Space toggle the selected folder.
+and Home/End select the first or last row. Space toggles the selected folder.
+Enter edits the selected row's name.
 Shift-Tab returns to the filter; Tab moves from the filter into the tree. From
 the filter, Down/Enter select the first result row and Up selects the last.
 
 Right-click any collection, folder, or request for Rename, Open in Finder, Copy Path,
-and Delete. Copy Path copies the backing file or directory path. Double-click a row to edit its name; Enter saves, while Escape or moving
-focus away cancels. Delete and Backspace show an inline Yes/No confirmation in
-the selected row and focus the prompt. Yes or Enter deletes; No or Escape cancels. Moving selection or focusing
-the filter also cancels. Backspace only acts when the tree has focus.
+and Delete. Copy Path copies the backing file or directory path. Select a row and
+press Enter to edit its name; Enter saves, while Escape or moving focus away
+cancels. Delete and Backspace show an inline Yes/No confirmation in
+the selected row and focus the prompt. Yes or Enter deletes; No or Escape cancels.
+Moving selection or focusing the filter also cancels. Backspace only acts when the tree has focus.
 Deletion removes the backing file or directory, including a directory's contents.
 Request renames update the TOML name while preserving comments and custom fields.
 Collection and folder renames move their directories and update descendant paths.
