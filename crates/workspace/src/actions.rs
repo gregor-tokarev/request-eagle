@@ -1,11 +1,122 @@
-use gpui_kit::{App, actions};
+use gpui_kit::{Action, App, actions};
 
 actions!(
     workspace,
-    [ToggleLeftSidebar, OpenSettings, OpenGeneralSettings]
+    [
+        ToggleLeftSidebar,
+        OpenSettings,
+        OpenGeneralSettings,
+        NewTab,
+        CloseTab,
+        PreviousTab,
+        NextTab,
+        SelectTab1,
+        SelectTab2,
+        SelectTab3,
+        SelectTab4,
+        SelectTab5,
+        SelectTab6,
+        SelectTab7,
+        SelectTab8,
+        SelectLastTab,
+    ]
 );
 
+fn register_tab_action<A: Action>(
+    action: A,
+    label: &'static str,
+    description: &'static str,
+    shortcut: &str,
+    cx: &mut App,
+) {
+    keybindings_service::register(
+        action,
+        label,
+        description,
+        "Tabs",
+        Some(shortcut),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default tab keybinding should be valid");
+}
+
 pub(crate) fn init(cx: &mut App) {
+    register_tab_action(NewTab, "New tab", "Open an empty tab.", "cmd-t", cx);
+    register_tab_action(CloseTab, "Close tab", "Close the active tab.", "cmd-w", cx);
+    // GPUI reports shifted punctuation as the resulting character on macOS.
+    register_tab_action(
+        PreviousTab,
+        "Previous tab",
+        "Switch to the previous tab.",
+        "cmd-{",
+        cx,
+    );
+    register_tab_action(NextTab, "Next tab", "Switch to the next tab.", "cmd-}", cx);
+    register_tab_action(
+        SelectTab1,
+        "Select tab 1",
+        "Switch to the first tab.",
+        "cmd-1",
+        cx,
+    );
+    register_tab_action(
+        SelectTab2,
+        "Select tab 2",
+        "Switch to the second tab.",
+        "cmd-2",
+        cx,
+    );
+    register_tab_action(
+        SelectTab3,
+        "Select tab 3",
+        "Switch to the third tab.",
+        "cmd-3",
+        cx,
+    );
+    register_tab_action(
+        SelectTab4,
+        "Select tab 4",
+        "Switch to the fourth tab.",
+        "cmd-4",
+        cx,
+    );
+    register_tab_action(
+        SelectTab5,
+        "Select tab 5",
+        "Switch to the fifth tab.",
+        "cmd-5",
+        cx,
+    );
+    register_tab_action(
+        SelectTab6,
+        "Select tab 6",
+        "Switch to the sixth tab.",
+        "cmd-6",
+        cx,
+    );
+    register_tab_action(
+        SelectTab7,
+        "Select tab 7",
+        "Switch to the seventh tab.",
+        "cmd-7",
+        cx,
+    );
+    register_tab_action(
+        SelectTab8,
+        "Select tab 8",
+        "Switch to the eighth tab.",
+        "cmd-8",
+        cx,
+    );
+    register_tab_action(
+        SelectLastTab,
+        "Select last tab",
+        "Switch to the last tab.",
+        "cmd-9",
+        cx,
+    );
+
     keybindings_service::register(
         ToggleLeftSidebar,
         "Toggle sidebar",

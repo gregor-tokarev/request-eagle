@@ -8,7 +8,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{dragging::DraggedItem, panel::CollectionPanel, tree::ItemKind};
+use super::{
+    dragging::DraggedItem,
+    panel::{CollectionPanel, CollectionPanelEvent},
+    tree::ItemKind,
+};
 use collection::MovePlacement;
 
 impl CollectionPanel {
@@ -46,7 +50,7 @@ impl CollectionPanel {
         if self.pending_delete.as_ref() == Some(&item.path) {
             return div()
                 .id(("collection-row", index))
-                .debug_selector(move || format!("collection-row-{index}").into())
+                .debug_selector(move || format!("collection-row-{index}"))
                 .track_focus(&self.delete_focus)
                 .h(px(30.))
                 .w_full()
@@ -95,7 +99,7 @@ impl CollectionPanel {
         div()
             .relative()
             .id(("collection-row", index))
-            .debug_selector(move || format!("collection-row-{index}").into())
+            .debug_selector(move || format!("collection-row-{index}"))
             .h(px(30.))
             .w_full()
             .px_2()
@@ -242,7 +246,18 @@ impl CollectionPanel {
             .on_click(cx.listener(move |this, _, window, cx| {
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
-                this.toggle(index, cx);
+
+                if branch {
+                    this.toggle(index, cx);
+                } else if let ItemKind::Request(method) = this.tree.items[index].kind {
+                    let item = &this.tree.items[index];
+
+                    cx.emit(CollectionPanelEvent::OpenRequest {
+                        path: item.path.clone(),
+                        name: item.label.clone(),
+                        method,
+                    });
+                }
             }))
             .context_menu(move |menu, window, cx| {
                 let _ = view.update(cx, |this, cx| {
