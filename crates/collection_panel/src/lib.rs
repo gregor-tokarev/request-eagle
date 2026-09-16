@@ -15,7 +15,7 @@ mod search_tests;
 #[cfg(test)]
 mod tests;
 
-pub use panel::CollectionPanel;
+pub use panel::{CollectionPanel, CollectionPanelEvent};
 
 #[cfg(test)]
 mod dragging_tests;

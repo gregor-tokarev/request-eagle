@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use crate::actions::{OpenGeneralSettings, OpenSettings, ToggleLeftSidebar};
+use crate::actions::*;
 use crate::layout::{bottom_panel::BottomPanel, main_view::MainView, top_panel::TopPanel};
 use collection::CollectionRegistry;
-use collection_panel::CollectionPanel;
+use collection_panel::{CollectionPanel, CollectionPanelEvent};
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
@@ -17,7 +17,7 @@ use updater::Updater;
 pub(super) struct Layout {
     top_panel: Entity<TopPanel>,
     pub(super) sidebar: Entity<CollectionPanel>,
-    main_view: Entity<MainView>,
+    pub(super) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
     pub(super) main_split: Entity<ResizableState>,
@@ -28,6 +28,7 @@ pub(super) struct Layout {
     previous_focus: Option<FocusHandle>,
 
     _sidebar_visibility_subscription: Subscription,
+    _sidebar_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -55,12 +56,19 @@ impl Layout {
         );
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
+        let sidebar_subscription = cx.subscribe(&sidebar, |this, _, event, cx| match event {
+            CollectionPanelEvent::OpenRequest { path, name, method } => {
+                this.main_view.update(cx, |view, cx| {
+                    view.open_request(path, name.clone(), method, cx);
+                });
+            }
+        });
         window.focus(&sidebar.focus_handle(cx), cx);
 
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
-            main_view: cx.new(|_| MainView),
+            main_view: cx.new(MainView::new),
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
@@ -68,6 +76,7 @@ impl Layout {
             settings_visible: false,
             previous_focus: None,
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
+            _sidebar_subscription: sidebar_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -106,6 +115,18 @@ impl Layout {
             *visible = !*visible;
 
             cx.notify();
+        });
+    }
+
+    fn update_tabs(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut MainView, &mut Context<MainView>),
+    ) {
+        self.main_view.update(cx, |view, cx| {
+            update(view, cx);
+            view.focus(window, cx);
         });
     }
 }
@@ -178,6 +199,46 @@ impl Render for Layout {
 
         let workspace = v_flex()
             .size_full()
+            .key_context("Workspace")
+            .on_action(cx.listener(|this, _: &NewTab, window, cx| {
+                this.update_tabs(window, cx, MainView::new_tab);
+            }))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                this.update_tabs(window, cx, MainView::close_active_tab);
+            }))
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.cycle_tab(true, cx));
+            }))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.cycle_tab(false, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab1, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(0, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab2, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(1, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab3, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(2, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab4, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(3, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab5, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(4, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab6, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(5, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab7, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(6, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectTab8, window, cx| {
+                this.update_tabs(window, cx, |view, cx| view.select_tab(7, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectLastTab, window, cx| {
+                this.update_tabs(window, cx, MainView::select_last_tab);
+            }))
             .when(self.settings_visible, |this| this.hidden())
             .child(self.top_panel.clone())
             .child(

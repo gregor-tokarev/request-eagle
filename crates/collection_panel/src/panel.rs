@@ -11,6 +11,14 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::{editing::RenameEditor, tree::CollectionTree};
 
+pub enum CollectionPanelEvent {
+    OpenRequest {
+        path: PathBuf,
+        name: SharedString,
+        method: &'static str,
+    },
+}
+
 /// The collections tree and its search, editing, and drag interactions.
 pub struct CollectionPanel {
     pub(super) collections: CollectionRegistry,
@@ -33,6 +41,8 @@ pub struct CollectionPanel {
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
 }
+
+impl EventEmitter<CollectionPanelEvent> for CollectionPanel {}
 
 impl CollectionPanel {
     pub fn new(
