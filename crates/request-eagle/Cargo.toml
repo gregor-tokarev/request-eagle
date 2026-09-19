@@ -4,15 +4,12 @@ version = "0.1.9"
 edition = "2024"
 
 [features]
-dev-profiler = ["dep:gpui-profiler"]
+dev-profiler = ["gpui-kit/profiler"]
 
 [dependencies]
 collection = { path = "../collection" }
 preferences = { path = "../preferences" }
 gpui-kit = { workspace = true, features = ["component", "assets"] }
-# The kit does not forward GPUI's profiler feature. Enable it on the same
-# pinned GPUI package; its overlay API is still imported through gpui_kit.
-gpui-profiler = { package = "gpui-pre", version = "=0.3.1", default-features = false, features = ["profiler"], optional = true }
 keybindings_service = { path = "../keybindings_service" }
 reqwest_client.workspace = true
 updater = { path = "../updater" }
