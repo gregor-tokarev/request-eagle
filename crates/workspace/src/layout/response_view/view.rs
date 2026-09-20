@@ -13,6 +13,7 @@ enum Section {
 }
 
 pub(in crate::layout) struct ResponseView {
+    focus: FocusHandle,
     pub(super) content: Option<ResponseContent>,
     pub(super) editor: Option<Entity<EditorState>>,
     pub(super) message: SharedString,
@@ -24,8 +25,9 @@ pub(in crate::layout) struct ResponseView {
 }
 
 impl ResponseView {
-    pub(in crate::layout) fn new() -> Self {
+    pub(in crate::layout) fn new(cx: &mut App) -> Self {
         Self {
+            focus: cx.focus_handle(),
             content: None,
             editor: None,
             message: "Send a request to see the response".into(),
@@ -211,6 +213,12 @@ impl Render for ResponseView {
 
         v_flex()
             .debug_selector(|| "response-panel".into())
+            .track_focus(&self.focus)
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                if event.button == MouseButton::Left {
+                    window.focus(&this.focus, cx);
+                }
+            }))
             .size_full()
             .min_h_0()
             .min_w_0()

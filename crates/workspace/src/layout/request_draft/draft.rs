@@ -73,7 +73,7 @@ impl RequestDraft {
         }
 
         self.response
-            .get_or_insert_with(|| cx.new(|_| super::super::response_view::ResponseView::new()));
+            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
         self.split
             .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
     }
@@ -165,7 +165,7 @@ impl Render for RequestDraft {
         // The first tab can render before it is focused. These panel states do
         // not install window listeners or notify during construction.
         self.response
-            .get_or_insert_with(|| cx.new(|_| super::super::response_view::ResponseView::new()));
+            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
         self.split
             .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
 

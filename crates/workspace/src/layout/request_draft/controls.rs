@@ -9,6 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::draft::{RequestDraft, RequestSection};
+use crate::actions::SendRequest;
 
 fn method_color(method: Method, cx: &App) -> Hsla {
     match method {
@@ -151,6 +152,13 @@ impl RequestDraft {
                                 "Send request"
                             })
                             .text_color(rgb(0xffffff))
+                            .when(!sending, |button| {
+                                button.tooltip_with_action(
+                                    "Send request",
+                                    &SendRequest,
+                                    Some("Workspace"),
+                                )
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.task.is_some() {
                                     this.cancel(cx);

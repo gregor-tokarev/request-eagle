@@ -210,6 +210,10 @@ impl Render for Layout {
         let workspace = v_flex()
             .size_full()
             .key_context("Workspace")
+            .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
+                this.main_view
+                    .update(cx, |view, cx| view.send_request(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);
             }))

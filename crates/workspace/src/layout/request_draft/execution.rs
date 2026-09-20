@@ -31,7 +31,7 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
 }
 
 impl RequestDraft {
-    pub(super) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::layout) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.task.is_some() {
             return;
         }

@@ -184,6 +184,14 @@ impl MainView {
         window.focus(&self.focus, cx);
     }
 
+    pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.selected
+            && let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
+        {
+            draft.update(cx, |draft, cx| draft.send(window, cx));
+        }
+    }
+
     fn tab_strip(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let gap = window.rem_size() * 0.25;
         let stride = TAB_WIDTH + gap;

@@ -1,3 +1,4 @@
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
@@ -44,11 +45,17 @@ impl ResponseView {
                             .w(px(240.))
                             .flex_shrink_0()
                             .px_2()
-                            .child(if cookies_only { "Cookie" } else { "Header" }),
+                            .cursor_text()
+                            .child(SelectableText::new(
+                                "response-column-name",
+                                if cookies_only { "Cookie" } else { "Header" },
+                            )),
                     )
-                    .child(div().flex_1().px_2().child("Value")),
+                    .child(div().flex_1().px_2().cursor_text().child(
+                        SelectableText::new("response-column-value", "Value").document_order(1),
+                    )),
             )
-            .children(rows.into_iter().map(|(name, value)| {
+            .children(rows.into_iter().enumerate().map(|(index, (name, value))| {
                 let value = String::from_utf8_lossy(value.as_bytes()).into_owned();
                 let (name, value) = if cookies_only {
                     value
@@ -68,13 +75,29 @@ impl ResponseView {
                     .border_color(cx.theme().border)
                     .child(
                         div()
+                            .debug_selector(move || format!("response-header-name-{index}"))
                             .w(px(240.))
                             .flex_shrink_0()
                             .px_2()
                             .font_family(cx.theme().mono_font_family.clone())
-                            .child(name),
+                            .cursor_text()
+                            .child(
+                                SelectableText::new(("response-header-name", index), name)
+                                    .document_order((index * 2 + 2) as u64),
+                            ),
                     )
-                    .child(div().flex_1().min_w_0().px_2().child(value))
+                    .child(
+                        div()
+                            .debug_selector(move || format!("response-header-value-{index}"))
+                            .flex_1()
+                            .min_w_0()
+                            .px_2()
+                            .cursor_text()
+                            .child(
+                                SelectableText::new(("response-header-value", index), value)
+                                    .document_order((index * 2 + 3) as u64),
+                            ),
+                    )
             }))
             .into_any_element()
     }
