@@ -67,3 +67,12 @@ cargo test -p workspace --features dev-profiler --release pages_render_benchmark
 This reports CPU draw percentiles at three window sizes. It excludes native window
 integration and GPU presentation; also check the frame monitor in `make dev` when
 assessing the 8.33 ms budget for 120 fps.
+
+To measure Ctrl+} tab switches with 100, 1,000, and 10,000 open tabs:
+
+```sh
+cargo test -p workspace --release tabs_switch_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+This includes shortcut dispatch and CPU drawing at the same three window sizes.
