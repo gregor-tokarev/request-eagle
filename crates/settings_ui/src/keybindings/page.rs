@@ -267,6 +267,8 @@ impl KeybindingsPage {
             });
         }
 
+        // GPUI invalidates cached views when their bounds/text style change or
+        // the window refreshes. Theme application already refreshes all windows.
         row.clone()
             .cached(StyleRefinement::default().w_full().h(px(56.)).flex_none())
             .into_any_element()
