@@ -45,6 +45,7 @@ impl Render for BottomPanel {
         };
 
         div()
+            .w_full()
             .border_t_1()
             .border_color(cx.theme().border)
             .flex()

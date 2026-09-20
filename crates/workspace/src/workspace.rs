@@ -249,7 +249,11 @@ impl Render for Layout {
             .on_action(cx.listener(|this, _: &SelectLastTab, window, cx| {
                 this.update_tabs(window, cx, MainView::select_last_tab);
             }))
-            .child(self.top_panel.clone())
+            .child(
+                self.top_panel
+                    .clone()
+                    .cached(StyleRefinement::default().w_full().h(px(34.)).flex_none()),
+            )
             .child(
                 div().flex_1().min_h_0().overflow_hidden().child(
                     h_resizable("main_split")
@@ -261,12 +265,20 @@ impl Render for Layout {
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
                                 .size(px(300.))
                                 .size_range(px(220.)..px(480.))
-                                .child(self.sidebar.clone()),
+                                .child(
+                                    self.sidebar
+                                        .clone()
+                                        .cached(StyleRefinement::default().size_full()),
+                                ),
                         )
                         .child(self.main_view.clone().into_any_element()),
                 ),
             )
-            .child(self.bottom_panel.clone());
+            .child(
+                self.bottom_panel
+                    .clone()
+                    .cached(StyleRefinement::default().w_full().h_8().flex_none()),
+            );
 
         div()
             .size_full()

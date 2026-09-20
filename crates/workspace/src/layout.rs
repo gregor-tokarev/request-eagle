@@ -1,5 +1,7 @@
 pub(crate) mod bottom_panel;
 pub(crate) mod main_view;
+pub(crate) mod request_draft;
+mod request_fields;
 pub(crate) mod top_panel;
 
 #[cfg(test)]
