@@ -3,7 +3,7 @@ use gpui_kit::{App, Entity, actions};
 actions!(request_eagle, [CheckForUpdates, Quit]);
 
 pub fn init(updater: Entity<updater::Updater>, cx: &mut App) {
-    keybindings_service::set_binding("cmd-q", Quit, None, cx)
+    keybindings_service::set_binding("secondary-q", Quit, None, cx)
         .expect("default quit keybinding should be valid");
 
     cx.on_action(move |_: &CheckForUpdates, cx| {

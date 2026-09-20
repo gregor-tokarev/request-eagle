@@ -191,6 +191,15 @@ impl Render for Settings {
                     .min_h_0()
                     .child(self.appearance.clone())
                     .into_any_element()
+            } else if self.page == SettingsPage::Keybindings {
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .justify_center()
+                    .px(if narrow { px(20.) } else { px(48.) })
+                    .py(if narrow { px(24.) } else { px(48.) })
+                    .child(self.keybindings.clone())
+                    .into_any_element()
             } else {
                 div()
                     .id("settings-scroll")
@@ -202,15 +211,7 @@ impl Render for Settings {
                             .items_center()
                             .px(if narrow { px(20.) } else { px(48.) })
                             .py(if narrow { px(24.) } else { px(48.) })
-                            .child(match self.page {
-                                SettingsPage::General => self.general.clone().into_any_element(),
-                                SettingsPage::Appearance => {
-                                    self.appearance.clone().into_any_element()
-                                }
-                                SettingsPage::Keybindings => {
-                                    self.keybindings.clone().into_any_element()
-                                }
-                            }),
+                            .child(self.general.clone()),
                     )
                     .into_any_element()
             });

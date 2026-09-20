@@ -4,13 +4,13 @@ APP_NAME ?= Request Eagle
 BUNDLE_ID ?= com.egortokarev.requesteagle
 BUILD_DIR := target/$(if $(filter dev,$(PROFILE)),debug,$(PROFILE))
 APP := $(BUILD_DIR)/$(APP_NAME).app
+OS := $(shell uname -s)
 
-.PHONY: bundle run dev release clean-bundle
+.PHONY: build bundle run dev release clean-bundle
 
 # Assemble an .app bundle so local runs get the real bundle identity
 # (icon, name, Info.plist) instead of the bare-executable treatment.
-bundle:
-	cargo build -p request-eagle --profile "$(PROFILE)" $(if $(FEATURES),--features "$(FEATURES)")
+bundle: build
 	rm -rf "$(APP)"
 	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
 	cp "$(BUILD_DIR)/request-eagle" "$(APP)/Contents/MacOS/request-eagle"
@@ -25,9 +25,17 @@ bundle:
 	plutil -lint "$(APP)/Contents/Info.plist"
 	codesign --force --entitlements packaging/macos/entitlements.plist --sign - "$(APP)"
 
-# Bundle and run in the foreground with logs in the terminal.
+build:
+	cargo build -p request-eagle --profile "$(PROFILE)" $(if $(FEATURES),--features "$(FEATURES)")
+
+# Run in the foreground with logs in the terminal, bundling on macOS.
+ifeq ($(OS),Darwin)
 run: bundle
 	"$(APP)/Contents/MacOS/request-eagle"
+else
+run: build
+	./scripts/run.sh "$(BUILD_DIR)/request-eagle"
+endif
 
 # Rebuild an optimized app with GPUI's frame monitor whenever files change.
 dev:

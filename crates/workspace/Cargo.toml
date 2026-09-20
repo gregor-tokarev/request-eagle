@@ -3,6 +3,9 @@ name = "workspace"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+dev-profiler = ["gpui-kit/profiler"]
+
 [dependencies]
 collection = { path = "../collection" }
 collection_panel = { path = "../collection_panel" }

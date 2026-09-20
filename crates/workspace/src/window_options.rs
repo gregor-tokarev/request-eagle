@@ -8,12 +8,12 @@ pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
 
     WindowOptions {
         titlebar: Some(TitlebarOptions {
-            title: None,
+            title: Some("Request Eagle".into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(9.0), px(9.0))),
         }),
         window_bounds,
-        focus: false,
+        app_id: Some("com.egortokarev.requesteagle".into()),
         is_movable: true,
         kind: WindowKind::Normal,
         display_id,
