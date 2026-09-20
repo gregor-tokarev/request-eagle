@@ -89,7 +89,7 @@ fn checking_survives_closing_settings_and_does_not_open_a_window(cx: &mut TestAp
     let (_, view) =
         cx.add_window_view(|window, cx| GeneralSettings::new(updater.clone(), window, cx));
     assert!(
-        view.debug_bounds("install-update").is_some(),
+        view.debug_bounds("download-update").is_some(),
         "Reopened General must offer the completed update"
     );
     assert_eq!(requests.load(Ordering::SeqCst), 1);
@@ -149,13 +149,15 @@ fn failed_check_can_be_retried_from_general(cx: &mut TestAppContext) {
         ));
     });
 
-    let install = view
-        .debug_bounds("install-update")
+    let download = view
+        .debug_bounds("download-update")
         .expect("General must update its button when the check completes");
 
-    // Cargo test binaries have no app bundle. Exercise the real install button
+    assert!(view.debug_bounds("relaunch-update").is_none());
+
+    // Cargo test binaries have no app bundle. Exercise the real download button
     // and failure state without downloading or replacing an app.
-    view.simulate_click(install.center(), Modifiers::default());
+    view.simulate_click(download.center(), Modifiers::default());
 
     view.read(|cx| {
         assert!(matches!(
