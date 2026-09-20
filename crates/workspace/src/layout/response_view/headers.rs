@@ -6,11 +6,12 @@ use super::view::ResponseView;
 
 impl ResponseView {
     pub(super) fn headers(&self, cookies_only: bool, cx: &App) -> AnyElement {
-        let headers = &self.content.as_ref().unwrap().http().headers;
-        let rows: Vec<_> = headers
-            .iter()
-            .filter(|(name, _)| !cookies_only || name.as_str() == "set-cookie")
-            .collect();
+        let content = self.content.as_ref().unwrap();
+        let (rows, state) = if cookies_only {
+            (content.cookies.clone(), self.cookies_list.clone())
+        } else {
+            (content.headers.clone(), self.headers_list.clone())
+        };
 
         if rows.is_empty() {
             return div()
@@ -32,7 +33,6 @@ impl ResponseView {
             .debug_selector(|| "response-header-table".into())
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
             .child(
                 h_flex()
                     .h(px(32.))
@@ -55,50 +55,61 @@ impl ResponseView {
                         SelectableText::new("response-column-value", "Value").document_order(1),
                     )),
             )
-            .children(rows.into_iter().enumerate().map(|(index, (name, value))| {
-                let value = String::from_utf8_lossy(value.as_bytes()).into_owned();
-                let (name, value) = if cookies_only {
-                    value
-                        .split_once('=')
-                        .map(|(name, value)| (name.to_owned(), value.to_owned()))
-                        .unwrap_or(("set-cookie".into(), value))
-                } else {
-                    (name.to_string(), value)
-                };
+            // Variable-height virtualization keeps long values wrapped without
+            // registering and laying out every selectable cell on each frame.
+            .child(
+                list(state, move |index, _, cx| {
+                    let (name, value) = &rows[index];
 
-                h_flex()
-                    .items_start()
-                    .flex_none()
-                    .min_h(px(32.))
-                    .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .debug_selector(move || format!("response-header-name-{index}"))
-                            .w(px(240.))
-                            .flex_shrink_0()
-                            .px_2()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .cursor_text()
-                            .child(
-                                SelectableText::new(("response-header-name", index), name)
+                    h_flex()
+                        .id(("response-header-row", index))
+                        .w_full()
+                        .items_start()
+                        .flex_none()
+                        .min_h(px(32.))
+                        .py_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(
+                            div()
+                                .debug_selector(move || format!("response-header-name-{index}"))
+                                .flex()
+                                .flex_col()
+                                .w(px(240.))
+                                .flex_shrink_0()
+                                .px_2()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .cursor_text()
+                                .child(
+                                    SelectableText::new(
+                                        ("response-header-name", index),
+                                        name.clone(),
+                                    )
                                     .document_order((index * 2 + 2) as u64),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(move || format!("response-header-value-{index}"))
-                            .flex_1()
-                            .min_w_0()
-                            .px_2()
-                            .cursor_text()
-                            .child(
-                                SelectableText::new(("response-header-value", index), value)
+                                ),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(move || format!("response-header-value-{index}"))
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .px_2()
+                                .cursor_text()
+                                .child(
+                                    SelectableText::new(
+                                        ("response-header-value", index),
+                                        value.clone(),
+                                    )
                                     .document_order((index * 2 + 3) as u64),
-                            ),
-                    )
-            }))
+                                ),
+                        )
+                        .into_any_element()
+                })
+                .flex_1()
+                .min_h_0(),
+            )
             .into_any_element()
     }
 }

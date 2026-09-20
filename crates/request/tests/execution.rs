@@ -131,6 +131,47 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
         assert_eq!(response.body, vec![0, 255, 1]);
         assert_eq!(response.headers.get_all("set-cookie").iter().count(), 2);
         assert_eq!(response.headers["x-raw"].as_bytes(), b"\xff");
+        assert_eq!(response.metrics.request_body_bytes, 3);
+        assert_eq!(response.metrics.request_header_bytes, 24);
+    });
+}
+
+#[test]
+fn measures_waiting_and_download_separately() {
+    smol::block_on(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            smol::Timer::after(Duration::from_millis(30)).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            smol::Timer::after(Duration::from_millis(60)).await;
+            stream.write_all(b"abc").await.unwrap();
+        });
+        let execution = executor()
+            .execute(HttpRequest {
+                path: url,
+                ..HttpRequest::default()
+            })
+            .await
+            .unwrap();
+        server.await;
+        let Response::Http(response) = &execution.response;
+        let metrics = response.metrics;
+        assert!(metrics.waiting >= Duration::from_millis(30));
+        assert!(metrics.download >= Duration::from_millis(50));
+        assert!(metrics.prepare + metrics.waiting + metrics.download <= execution.elapsed);
+        assert_eq!(metrics.request_header_bytes, 0);
+        assert_eq!(metrics.request_body_bytes, 0);
+        assert_eq!(
+            metrics.response_header_bytes,
+            b"content-length: 3\r\nconnection: close\r\n".len()
+        );
+        assert_eq!(response.body, b"abc");
     });
 }
 

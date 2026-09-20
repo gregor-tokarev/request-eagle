@@ -170,6 +170,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         });
     });
 
+    cx.update(|window, _| window.refresh());
     let body = cx.debug_bounds("request-section-Body").unwrap();
     cx.simulate_click(body.center(), Modifiers::default());
     let body = cx.debug_bounds("request-body").unwrap();

@@ -23,4 +23,21 @@ pub struct HttpResponse {
     pub headers: HeaderMap,
     /// Raw bytes; no text decoding or automatic decompression is performed.
     pub body: Vec<u8>,
+    pub metrics: HttpMetrics,
+}
+
+/// Measurements available at the HTTP client boundary.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HttpMetrics {
+    pub prepare: Duration,
+    /// Includes connection setup, uploading the request, and waiting for headers.
+    /// DNS, TCP, TLS and time to the first byte are not exposed separately.
+    pub waiting: Duration,
+    /// Time spent reading the response body after receiving its headers.
+    pub download: Duration,
+    /// HTTP/1-style field size estimates (`name: value\r\n`), excluding framing
+    /// and compression. Request fields added by the transport are not included.
+    pub request_header_bytes: usize,
+    pub response_header_bytes: usize,
+    pub request_body_bytes: usize,
 }

@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use http_client::{AsyncBody, HttpClient, HttpRequestExt, RedirectPolicy, Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    ExecutionError, HttpError, HttpRequest, HttpResponse, HttpVersion, RequestPreferences,
+    ExecutionError, HttpError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
+    RequestPreferences,
 };
 
 #[derive(Clone)]
@@ -50,6 +51,8 @@ impl HttpExecutor {
         &self,
         request: HttpRequest,
     ) -> Result<HttpResponse, ExecutionError> {
+        let started = Instant::now();
+        let request_body_bytes = request.body.as_ref().map_or(0, Vec::len);
         let mut url = Url::parse(&request.path).map_err(HttpError::InvalidUrl)?;
 
         if !matches!(url.scheme(), "http" | "https") {
@@ -79,11 +82,18 @@ impl HttpExecutor {
         let request = builder
             .body(request.body.map(AsyncBody::from).unwrap_or_default())
             .map_err(HttpError::InvalidRequest)?;
+        let request_header_bytes = request
+            .headers()
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
+            .sum();
+        let prepared = Instant::now();
         let response = self
             .client
             .send(request)
             .await
             .map_err(HttpError::Transport)?;
+        let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         let mut body = Vec::new();
 
@@ -109,11 +119,26 @@ impl HttpExecutor {
             }
         }
 
+        let download = received.elapsed();
+        let response_header_bytes = parts
+            .headers
+            .iter()
+            .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
+            .sum();
+
         Ok(HttpResponse {
             status: parts.status,
             version: parts.version,
             headers: parts.headers,
             body,
+            metrics: HttpMetrics {
+                prepare: prepared.duration_since(started),
+                waiting: received.duration_since(prepared),
+                download,
+                request_header_bytes,
+                request_body_bytes,
+                response_header_bytes,
+            },
         })
     }
 }

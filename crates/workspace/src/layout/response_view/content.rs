@@ -1,4 +1,9 @@
+use gpui_kit::SharedString;
 use request::{Execution, HttpResponse, Response};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const DISPLAY_LIMIT: usize = 1024 * 1024;
 
@@ -8,11 +13,15 @@ pub(in crate::layout) struct ResponseContent {
     pub(super) pretty: Option<String>,
     pub(super) language: &'static str,
     pub(super) truncated: bool,
+    pub(super) processing: Duration,
+    pub(super) headers: Arc<[(SharedString, SharedString)]>,
+    pub(super) cookies: Arc<[(SharedString, SharedString)]>,
 }
 
 impl ResponseContent {
     /// Prepare display text off the UI thread; keep the original response intact.
     pub(in crate::layout) fn new(execution: Execution) -> Self {
+        let started = Instant::now();
         let Response::Http(response) = &execution.response;
         let mut end = response.body.len().min(DISPLAY_LIMIT);
 
@@ -44,12 +53,38 @@ impl ResponseContent {
             "text"
         };
 
+        let headers = response
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string().into(),
+                    String::from_utf8_lossy(value.as_bytes())
+                        .into_owned()
+                        .into(),
+                )
+            })
+            .collect::<Arc<[(SharedString, SharedString)]>>();
+        let cookies = headers
+            .iter()
+            .filter(|(name, _)| name == "set-cookie")
+            .map(|(_, value)| {
+                value
+                    .split_once('=')
+                    .map(|(name, value)| (name.to_owned().into(), value.to_owned().into()))
+                    .unwrap_or_else(|| ("set-cookie".into(), value.clone()))
+            })
+            .collect();
+
         Self {
             execution,
             raw,
             pretty,
             language,
             truncated,
+            processing: started.elapsed(),
+            headers,
+            cookies,
         }
     }
 

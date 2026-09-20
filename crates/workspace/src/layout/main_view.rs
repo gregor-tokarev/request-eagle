@@ -402,15 +402,17 @@ impl Render for MainView {
                         },
                     ))
                     .when_some(self.selected, |this, index| {
-                        this.aria_label(self.tabs[index].title.clone())
-                            // Scrolling/hovering tabs must not lay out an unchanged
-                            // editor. Child notifications and resize invalidate it.
-                            .child(
-                                self.tabs[index]
-                                    .page
-                                    .clone()
-                                    .cached(StyleRefinement::default().size_full()),
-                            )
+                        this.aria_label(self.tabs[index].title.clone()).child(
+                            match self.tabs[index].page.clone().downcast::<RequestDraft>() {
+                                // Request editors cache their expensive children separately.
+                                // A cached parent forces all nested caches to redraw whenever
+                                // a response selection changes in GPUI.
+                                Ok(page) => page.into_any_element(),
+                                Err(page) => page
+                                    .cached(StyleRefinement::default().size_full())
+                                    .into_any_element(),
+                            },
+                        )
                     }),
             )
     }

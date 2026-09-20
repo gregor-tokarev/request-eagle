@@ -28,12 +28,21 @@ pub(in crate::layout) struct RequestDraft {
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
+    address_view: Option<Entity<RequestAddress>>,
+    configuration_view: Option<Entity<RequestConfiguration>>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<MethodChanged> for RequestDraft {}
 
 impl RequestDraft {
+    #[cfg(test)]
+    pub(in crate::layout) fn response_for_test(
+        &self,
+    ) -> Entity<super::super::response_view::ResponseView> {
+        self.response.as_ref().expect("prepared response").clone()
+    }
+
     pub(in crate::layout) fn new() -> Self {
         Self {
             request: HttpRequest::default(),
@@ -46,6 +55,8 @@ impl RequestDraft {
             split: None,
             task: None,
             executor: None,
+            address_view: None,
+            configuration_view: None,
             _subscriptions: Vec::new(),
         }
     }
@@ -161,7 +172,7 @@ impl RequestDraft {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The first tab can render before it is focused. These panel states do
         // not install window listeners or notify during construction.
         self.response
@@ -169,25 +180,15 @@ impl Render for RequestDraft {
         self.split
             .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
 
-        let content = match self.section {
-            RequestSection::Headers | RequestSection::Params => self.fields(window, cx),
-            RequestSection::Body => self.body(window, cx),
-        };
-        let request_panel = v_flex()
-            .size_full()
-            .min_h_0()
-            .min_w_0()
-            .gap_2()
-            .pb_3()
-            .child(self.section_tabs(cx))
-            .child(
-                div()
-                    .id("request-section-content")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(content),
-            );
+        let owner = cx.entity().downgrade();
+        let address = self
+            .address_view
+            .get_or_insert_with(|| cx.new(|_| RequestAddress(owner.clone())))
+            .clone();
+        let configuration = self
+            .configuration_view
+            .get_or_insert_with(|| cx.new(|_| RequestConfiguration(owner)))
+            .clone();
 
         v_flex()
             .debug_selector(|| "request-draft".into())
@@ -197,8 +198,7 @@ impl Render for RequestDraft {
             .pb_2()
             .gap_2()
             .text_size(px(13.))
-            .child(self.header(cx))
-            .child(self.url_bar(window, cx))
+            .child(address.cached(StyleRefinement::default().w_full().h(px(88.)).flex_none()))
             .child(
                 div().flex_1().min_h_0().overflow_hidden().child(
                     v_resizable("request-response-split")
@@ -207,7 +207,9 @@ impl Render for RequestDraft {
                             resizable_panel()
                                 .size(px(230.))
                                 .size_range(px(110.)..px(1200.))
-                                .child(request_panel),
+                                .child(
+                                    configuration.cached(StyleRefinement::default().size_full()),
+                                ),
                         )
                         .child(
                             self.response
@@ -218,5 +220,55 @@ impl Render for RequestDraft {
                         ),
                 ),
             )
+    }
+}
+
+// Cache the editable controls independently of the response. Notifications
+// from their draft or input states invalidate these views, while selecting a
+// response does not redraw the address bar and request fields.
+struct RequestAddress(WeakEntity<RequestDraft>);
+
+impl Render for RequestAddress {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.0
+            .update(cx, |draft, cx| {
+                v_flex()
+                    .size_full()
+                    .gap_2()
+                    .child(draft.header(cx))
+                    .child(draft.url_bar(window, cx))
+            })
+            .unwrap_or_else(|_| div())
+    }
+}
+
+struct RequestConfiguration(WeakEntity<RequestDraft>);
+
+impl Render for RequestConfiguration {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.0
+            .update(cx, |draft, cx| {
+                let content = match draft.section {
+                    RequestSection::Headers | RequestSection::Params => draft.fields(window, cx),
+                    RequestSection::Body => draft.body(window, cx),
+                };
+
+                v_flex()
+                    .size_full()
+                    .min_h_0()
+                    .min_w_0()
+                    .gap_2()
+                    .pb_3()
+                    .child(draft.section_tabs(cx))
+                    .child(
+                        div()
+                            .id("request-section-content")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(content),
+                    )
+            })
+            .unwrap_or_else(|_| div())
     }
 }

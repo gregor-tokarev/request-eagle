@@ -6,6 +6,16 @@ use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, draft::RequestSection, execution::outgoing_request};
 
+// Debug selectors are collected only during layout, not replayed from cached
+// controls. Refresh before querying geometry; interactions still use real input.
+fn element_bounds(
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+    cx.update(|window, _| window.refresh());
+    cx.debug_bounds(selector)
+}
+
 fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -51,9 +61,9 @@ fn prepares_json_requests_without_mutating_the_draft() {
 #[gpui_kit::test]
 fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
-    let body_tab = cx.debug_bounds("request-section-Body").unwrap();
+    let body_tab = element_bounds(cx, "request-section-Body").unwrap();
     cx.simulate_click(body_tab.center(), Modifiers::default());
-    assert!(cx.debug_bounds("request-body").is_none());
+    assert!(element_bounds(cx, "request-body").is_none());
 
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
@@ -61,7 +71,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
             draft.prepare(window, cx);
         })
     });
-    let body_tab = cx.debug_bounds("request-section-Body").unwrap();
+    let body_tab = element_bounds(cx, "request-section-Body").unwrap();
     cx.simulate_click(body_tab.center(), Modifiers::default());
     let editor = cx.read(|cx| draft.read(cx).body.as_ref().unwrap().clone());
     cx.update(|window, cx| {
@@ -77,7 +87,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
         );
     });
 
-    let format = cx.debug_bounds("format-request-json").unwrap();
+    let format = element_bounds(cx, "format-request-json").unwrap();
     cx.simulate_click(format.center(), Modifiers::default());
     cx.read(|cx| {
         assert_eq!(
@@ -93,7 +103,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
                 draft.prepare(window, cx);
             })
         });
-        assert!(cx.debug_bounds("request-body").is_none());
+        assert!(element_bounds(cx, "request-body").is_none());
         cx.read(|cx| assert!(draft.read(cx).request.body.is_some()));
     }
 
@@ -104,7 +114,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
             draft.prepare(window, cx);
         })
     });
-    assert!(cx.debug_bounds("request-body").is_some());
+    assert!(element_bounds(cx, "request-body").is_some());
     cx.read(|cx| assert_eq!(editor.read(cx).value(), "{\n  \"hello\": true\n}"));
 }
 
@@ -139,7 +149,7 @@ async fn send_button_performs_a_request_and_displays_the_response(cx: &mut TestA
             draft.set_method(Method::Post, cx);
         })
     });
-    let send = cx.debug_bounds("send-request").unwrap();
+    let send = element_bounds(cx, "send-request").unwrap();
     cx.simulate_click(send.center(), Modifiers::default());
     let started = std::time::Instant::now();
     while cx.read(|cx| draft.read(cx).task.is_some()) {
@@ -151,21 +161,21 @@ async fn send_button_performs_a_request_and_displays_the_response(cx: &mut TestA
         cx.run_until_parked();
     }
     server.await;
-    assert!(cx.debug_bounds("response-status").is_some());
-    assert!(cx.debug_bounds("response-body").is_some());
+    assert!(element_bounds(cx, "response-status").is_some());
+    assert!(element_bounds(cx, "response-body").is_some());
 
-    let copy = cx.debug_bounds("response-copy").unwrap();
+    let copy = element_bounds(cx, "response-copy").unwrap();
     cx.simulate_click(copy.center(), Modifiers::default());
     assert_eq!(
         cx.read_from_clipboard().unwrap().text().unwrap(),
         "{\"found\":false}"
     );
-    let headers = cx.debug_bounds("response-section-Headers").unwrap();
+    let headers = element_bounds(cx, "response-section-Headers").unwrap();
     cx.simulate_click(headers.center(), Modifiers::default());
-    assert!(cx.debug_bounds("response-header-table").is_some());
-    let cookies = cx.debug_bounds("response-section-Cookies").unwrap();
+    assert!(element_bounds(cx, "response-header-table").is_some());
+    let cookies = element_bounds(cx, "response-section-Cookies").unwrap();
     cx.simulate_click(cookies.center(), Modifiers::default());
-    assert!(cx.debug_bounds("response-header-table").is_some());
+    assert!(element_bounds(cx, "response-header-table").is_some());
 }
 
 #[gpui_kit::test]
@@ -177,10 +187,10 @@ fn cancel_button_releases_the_task_and_allows_sending_again(cx: &mut TestAppCont
             cx.notify();
         })
     });
-    let cancel = cx.debug_bounds("send-request").unwrap();
+    let cancel = element_bounds(cx, "send-request").unwrap();
     cx.simulate_click(cancel.center(), Modifiers::default());
     cx.read(|cx| assert!(draft.read(cx).task.is_none()));
-    assert!(cx.debug_bounds("response-empty").is_some());
+    assert!(element_bounds(cx, "response-empty").is_some());
 }
 
 #[gpui_kit::test]
@@ -243,18 +253,18 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             .unwrap()
     });
     cx.update(|window, _| window.refresh());
-    let url_bounds = cx.debug_bounds("request-url").unwrap();
+    let url_bounds = element_bounds(cx, "request-url").unwrap();
     cx.simulate_click(url_bounds.center(), Modifiers::default());
     cx.simulate_input(&url);
     cx.update(|_, cx| active.update(cx, |draft, cx| draft.set_method(Method::Post, cx)));
-    let body_tab = cx.debug_bounds("request-section-Body").unwrap();
+    let body_tab = element_bounds(cx, "request-section-Body").unwrap();
     cx.simulate_click(body_tab.center(), Modifiers::default());
-    let body = cx.debug_bounds("request-body").unwrap();
+    let body = element_bounds(cx, "request-body").unwrap();
     cx.simulate_click(body.center(), Modifiers::default());
     cx.simulate_input("{\"hello\":true}");
 
     for selector in ["request-url", "request-body", "response-body"] {
-        let bounds = cx.debug_bounds(selector).unwrap();
+        let bounds = element_bounds(cx, selector).unwrap();
         cx.simulate_click(bounds.center(), Modifiers::default());
         cx.simulate_keystrokes("secondary-enter");
         let started = std::time::Instant::now();
@@ -267,7 +277,7 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             cx.run_until_parked();
         }
         assert!(
-            cx.debug_bounds("response-status").is_some(),
+            element_bounds(cx, "response-status").is_some(),
             "shortcut from {selector}"
         );
         received

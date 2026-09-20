@@ -17,7 +17,7 @@ mod response;
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;
-pub use http_client::http::{HeaderMap, StatusCode, Version};
+pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request};
 pub use preferences::{HttpVersion, RequestPreferences};
-pub use response::{Execution, HttpResponse, Response};
+pub use response::{Execution, HttpMetrics, HttpResponse, Response};

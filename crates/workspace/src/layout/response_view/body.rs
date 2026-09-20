@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     button::*,
-    input::Editor,
+    input::{Editor, EditorState},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -8,10 +8,26 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::view::ResponseView;
 
+/// Cache the editor independently so selecting response details does not lay
+/// out and paint an unchanged (potentially large) response body again.
+pub(super) struct ResponseBodyEditor(pub(super) Entity<EditorState>);
+
+impl Render for ResponseBodyEditor {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Editor::new(&self.0)
+            .h_full()
+            .readonly(true)
+            .appearance(false)
+            .bordered(false)
+            .text_size(px(13.))
+            .aria_label("Response body")
+    }
+}
+
 impl ResponseView {
     pub(super) fn body(&self, cx: &mut Context<Self>) -> AnyElement {
         let content = self.content.as_ref().unwrap();
-        let editor = self.editor.as_ref().unwrap();
+        let editor_view = self.editor_view.as_ref().unwrap();
         let view = cx.entity().downgrade();
 
         v_flex()
@@ -128,13 +144,9 @@ impl ResponseView {
                     .min_h_0()
                     .overflow_hidden()
                     .child(
-                        Editor::new(editor)
-                            .h_full()
-                            .readonly(true)
-                            .appearance(false)
-                            .bordered(false)
-                            .text_size(px(13.))
-                            .aria_label("Response body"),
+                        editor_view
+                            .clone()
+                            .cached(StyleRefinement::default().size_full()),
                     ),
             )
             .into_any_element()

@@ -3,7 +3,8 @@ use gpui_kit::component::{input::EditorState, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ExecutionError;
 
-use super::content::{ResponseContent, size_label};
+use super::body::ResponseBodyEditor;
+use super::content::ResponseContent;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -13,15 +14,18 @@ enum Section {
 }
 
 pub(in crate::layout) struct ResponseView {
-    focus: FocusHandle,
+    pub(super) focus: FocusHandle,
     pub(super) content: Option<ResponseContent>,
     pub(super) editor: Option<Entity<EditorState>>,
+    pub(super) editor_view: Option<Entity<ResponseBodyEditor>>,
     pub(super) message: SharedString,
     pub(super) loading: bool,
     error: bool,
     section: Section,
     pub(super) pretty: bool,
     pub(super) wrap: bool,
+    pub(super) headers_list: ListState,
+    pub(super) cookies_list: ListState,
 }
 
 impl ResponseView {
@@ -30,18 +34,22 @@ impl ResponseView {
             focus: cx.focus_handle(),
             content: None,
             editor: None,
+            editor_view: None,
             message: "Send a request to see the response".into(),
             loading: false,
             error: false,
             section: Section::Body,
             pretty: false,
             wrap: true,
+            headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
+            cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
         }
     }
 
     pub(in crate::layout) fn start(&mut self, cx: &mut Context<Self>) {
         self.content = None;
         self.editor = None;
+        self.editor_view = None;
         self.loading = true;
         self.error = false;
         self.message = "Sending request…".into();
@@ -64,22 +72,27 @@ impl ResponseView {
 
         match result {
             Ok(content) => {
+                self.headers_list.reset(content.headers.len());
+                self.cookies_list.reset(content.cookies.len());
                 self.pretty = content.pretty.is_some();
                 let text = content.pretty.as_ref().unwrap_or(&content.raw).clone();
-                self.editor = Some(cx.new(|cx| {
+                let editor = cx.new(|cx| {
                     EditorState::new(window, cx)
                         .language(content.language)
                         .line_number(true)
                         .soft_wrap(self.wrap)
                         .replaceable(false)
                         .default_value(text)
-                }));
+                });
+                self.editor_view = Some(cx.new(|_| ResponseBodyEditor(editor.clone())));
+                self.editor = Some(editor);
                 self.content = Some(content);
                 self.error = false;
             }
             Err(error) => {
                 self.content = None;
                 self.editor = None;
+                self.editor_view = None;
                 self.error = true;
                 self.message = error.to_string().into();
             }
@@ -140,41 +153,7 @@ impl ResponseView {
                     ),
             )
             .child(div().flex_1())
-            .when_some(self.content.as_ref(), |row, content| {
-                let response = content.http();
-                let color = if response.status.is_success() {
-                    cx.theme().success
-                } else if response.status.is_redirection() {
-                    cx.theme().warning
-                } else {
-                    cx.theme().danger
-                };
-
-                row.child(
-                    h_flex()
-                        .debug_selector(|| "response-metadata".into())
-                        .gap_2()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            div()
-                                .debug_selector(|| "response-status".into())
-                                .px_2()
-                                .py_1()
-                                .rounded(px(5.))
-                                .bg(color.opacity(0.15))
-                                .text_color(color)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(response.status.to_string()),
-                        )
-                        .child("•")
-                        .child(format!("{} ms", content.execution.elapsed.as_millis()))
-                        .child("•")
-                        .child(size_label(response.body.len()))
-                        .child("•")
-                        .child(format!("{:?}", response.version)),
-                )
-            })
+            .when(self.content.is_some(), |row| row.child(self.metadata(cx)))
     }
 }
 
@@ -217,6 +196,14 @@ impl Render for ResponseView {
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
                 if event.button == MouseButton::Left {
                     window.focus(&this.focus, cx);
+                    cx.notify();
+                }
+            }))
+            // Plain SelectableText updates its selection without invalidating
+            // the owning view. Paint the changing highlight while dragging.
+            .on_mouse_move(cx.listener(|_, event: &MouseMoveEvent, _, cx| {
+                if event.pressed_button == Some(MouseButton::Left) {
+                    cx.notify();
                 }
             }))
             .size_full()

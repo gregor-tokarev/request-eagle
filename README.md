@@ -55,6 +55,17 @@ On Linux, Ctrl+Shift+[ and Ctrl+Shift+] cycle tabs. Super remains available for
 desktop shortcuts such as Hyprland's floating, workspace, and close-window
 commands.
 
+Command+Enter (Ctrl+Enter on Linux/Windows) sends the active request from its URL,
+fields, JSON editor, or response. The shortcut can be changed in Settings →
+Keybindings. Repeating it while a request is running does not cancel that request.
+
+Response header and cookie names and values support text selection and copying.
+Hover over status, response time, or size for selectable details. Timings include
+preparation, waiting for headers, downloading the body, and formatting. Connection
+phases are included in waiting; the client does not expose separate DNS/TCP/TLS
+timings. Header byte counts are text-size estimates, and request counts exclude
+headers added automatically by the transport.
+
 To measure Settings → Keybindings page switches with the frame monitor enabled:
 
 ```sh
@@ -84,3 +95,15 @@ if p99 exceeds that budget. Run serially on an otherwise idle machine. The first
 number measured (default 120). Native input, font rendering, GPU work, and display
 refresh still need verification in `make dev`; this CPU test does not prove a
 120 Hz presentation rate.
+
+To check the response UI inside the full workspace with 1,000 collection
+requests, a large JSON body, 161 headers (including 32 cookies), scrolling,
+and selection inside the timing and size overlays:
+
+```sh
+cargo test -p workspace --release response_interaction_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+This uses the same 8.33 ms p99 CPU budget and window sizes. Run it serially without
+competing builds or benchmarks; native GPU presentation must be checked separately.

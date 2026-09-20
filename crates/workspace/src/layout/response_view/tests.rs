@@ -16,6 +16,7 @@ fn response(body: &[u8], content_type: &str) -> ResponseContent {
             version: Version::HTTP_11,
             headers,
             body: body.to_vec(),
+            metrics: request::HttpMetrics::default(),
         }),
     })
 }
@@ -101,6 +102,7 @@ fn response_headers_and_cookies_support_selection_and_copy(cx: &mut TestAppConte
         ("session".to_owned(), "abc==; Path=/; HttpOnly".to_owned()),
         ("locale".to_owned(), "en; SameSite=Lax".to_owned()),
     ];
+    let content = ResponseContent::new(content.execution);
     let (_, cx) = cx.add_window_view(|window, cx| {
         let response = cx.new(|cx| {
             let mut view = ResponseView::new(cx);
@@ -141,7 +143,7 @@ fn response_headers_and_cookies_support_selection_and_copy(cx: &mut TestAppConte
             .debug_bounds(format!("response-header-value-{}", rows.len() - 1).leak())
             .unwrap();
         let start = point(first.left() + px(8.), first.center().y);
-        let end = point(last.right() - px(8.), last.bottom() - px(1.));
+        let end = point(last.left() + px(200.), last.center().y);
         cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
         cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
         cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
@@ -154,6 +156,134 @@ fn response_headers_and_cookies_support_selection_and_copy(cx: &mut TestAppConte
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
             Some(expected.as_str())
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        cx.set_reduce_motion(true);
+    });
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let response = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            let mut content = response(b"abc", "text/plain");
+            let Response::Http(http) = &mut content.execution.response;
+            http.metrics = request::HttpMetrics {
+                prepare: Duration::from_millis(1),
+                waiting: Duration::from_millis(150),
+                download: Duration::from_millis(80),
+                response_header_bytes: 42,
+                request_header_bytes: 10,
+                request_body_bytes: 6,
+            };
+            view.finish(Ok(content), window, cx);
+            view
+        });
+        gpui_kit::component::Root::new(response, window, cx)
+    });
+
+    for (trigger, panel, first, last, expected) in [
+        (
+            "response-time",
+            "response-time-overlay",
+            "detail-time-title",
+            "timing-phase-2",
+            "Prepare\n1.00 ms\nWait for headers\n150.00 ms\nDownload\n80.00 ms",
+        ),
+        (
+            "response-size",
+            "response-size-overlay",
+            "detail-response-total",
+            "detail-request-body",
+            "Response size\n45 B\nHeaders (estimated)\n42 B\nDownloaded body\n3 B\nUncompressed\n3 B\nRequest size (known)\n16 B\nConfigured headers\n10 B\nBody\n6 B",
+        ),
+    ] {
+        cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        let trigger = cx.debug_bounds(trigger).unwrap();
+        cx.simulate_mouse_move(trigger.center(), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds(panel).is_some());
+
+        let first = cx.debug_bounds(first).unwrap();
+        let last = cx.debug_bounds(last).unwrap();
+        let start = point(first.left() + px(1.), first.center().y);
+        let end = point(last.right() - px(1.), last.center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.simulate_keystrokes("secondary-c");
+        let copied = cx.read_from_clipboard().unwrap().text().unwrap();
+        assert!(copied.contains(expected), "{panel}: {copied}");
+    }
+}
+
+#[gpui_kit::test]
+fn virtual_headers_keep_scrolled_and_wrapped_values_selectable(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let mut content = response(b"ok", "text/plain");
+    let Response::Http(http) = &mut content.execution.response;
+    for index in 0..128 {
+        http.headers.insert(
+            format!("x-header-{index}")
+                .parse::<request::HeaderName>()
+                .unwrap(),
+            format!("value {index} {}end", "wrapped header text ".repeat(20))
+                .parse()
+                .unwrap(),
+        );
+    }
+    let content = ResponseContent::new(content.execution);
+    let last = content.headers.len() - 1;
+    let expected = content.headers[last].1.clone();
+    let mut response_view = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            view.finish(Ok(content), window, cx);
+            view
+        });
+        response_view = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let view = response_view.unwrap();
+    let tab = cx.debug_bounds("response-section-Headers").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+    let selector = format!("response-header-value-{last}").leak();
+    assert!(
+        cx.debug_bounds(selector).is_none(),
+        "offscreen rows should not render"
+    );
+
+    for width in [1024., 640.] {
+        cx.simulate_resize(gpui_kit::size(px(width), px(768.)));
+        cx.update(|window, cx| {
+            view.read(cx).headers_list.scroll_to(gpui_kit::ListOffset {
+                item_ix: last,
+                offset_in_item: px(0.),
+            });
+            window.refresh();
+        });
+        let cell = cx.debug_bounds(selector).unwrap();
+        assert!(cell.size.height > px(30.), "long values must wrap");
+        let start = point(cell.left() + px(8.), cell.top() + px(8.));
+        let end = point(cell.right() - px(8.), cell.bottom() - px(8.));
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.simulate_keystrokes("secondary-c");
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().unwrap(),
+            expected.as_ref()
         );
     }
 }
