@@ -188,7 +188,7 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
         assert!(sidebar.read(cx).error.is_some());
         assert!(sidebar.read(cx).rename.is_some());
     });
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();

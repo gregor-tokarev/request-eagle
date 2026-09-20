@@ -188,7 +188,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
         );
     });
 
-    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_keystrokes("secondary-a backspace");
     cx.run_until_parked();
     cx.read(|cx| {
         assert!(
@@ -300,7 +300,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert_eq!(search.read(cx).value(), "/posts/ 7");
     });
 
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("no-such-request");
     cx.run_until_parked();
     cx.simulate_keystrokes("down up enter");

@@ -28,7 +28,7 @@ fn replaces_a_binding_at_runtime() {
         assert_eq!(
             binding_for::<FirstAction>(cx),
             Some(&Binding {
-                keystrokes: "cmd-w".into(),
+                keystrokes: Keystroke::parse("cmd-w").unwrap().unparse(),
                 context: None,
             })
         );
