@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 dirs = "6"
 environment = { path = "../environment" }
+request = { path = "../request" }
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 toml = "1.1.3"

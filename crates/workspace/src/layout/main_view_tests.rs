@@ -108,6 +108,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
 
     let new_tab = cx.debug_bounds("new-tab").unwrap();
     cx.simulate_click(new_tab.center(), Modifiers::default());
+    cx.run_until_parked();
     cx.read(|cx| {
         let view = view.read(cx);
         let tab = &view.tabs[2];
@@ -124,6 +125,9 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
         assert_eq!(view.tabs[1].request_path.as_deref(), Some(saved_path));
         assert_eq!(view.tabs[1].method, Some("POST"));
     });
+    // A resizer's settling frame can replay the cached page. Refresh before
+    // inspecting debug selectors, which are collected during a fresh layout.
+    cx.update(|window, _| window.refresh());
     assert!(cx.debug_bounds("request-draft").is_some());
 }
 
@@ -159,6 +163,12 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         cx.simulate_click(field.center(), Modifiers::default());
         cx.simulate_input(value);
     }
+
+    cx.update(|_, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(collection::Method::Post, cx)
+        });
+    });
 
     let body = cx.debug_bounds("request-section-Body").unwrap();
     cx.simulate_click(body.center(), Modifiers::default());

@@ -1,14 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Protocol-specific request data shared by collection files and editable drafts.
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     Http(HttpRequest),
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct HttpRequest {
     pub method: Method,
+    /// An absolute HTTP or HTTPS URL when executing the request.
     pub path: String,
 
     #[serde(default)]
@@ -17,6 +19,24 @@ pub struct HttpRequest {
     pub body: Option<Vec<u8>>,
     #[serde(default)]
     pub query: Option<Vec<(String, String)>>,
+}
+
+impl From<HttpRequest> for Request {
+    fn from(request: HttpRequest) -> Self {
+        Self::Http(request)
+    }
+}
+
+impl From<&HttpRequest> for Request {
+    fn from(request: &HttpRequest) -> Self {
+        Self::Http(request.clone())
+    }
+}
+
+impl From<&Request> for Request {
+    fn from(request: &Request) -> Self {
+        request.clone()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
