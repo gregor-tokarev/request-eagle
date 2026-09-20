@@ -30,30 +30,37 @@ fn checks_against_the_application_version(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn installation_cannot_be_interrupted_or_restarted(cx: &mut TestAppContext) {
+fn pending_updates_cannot_be_interrupted_or_restarted(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_http_client(FakeHttpClient::create(|_| async {
-            panic!("An active installation must not start another HTTP request")
+            panic!("A pending update must not start another HTTP request")
         }));
     });
 
-    let updater = cx.new(|_| Updater {
-        current_version: "1.2.3",
-        status: UpdateStatus::Installing("99.0.0".into()),
-    });
+    for status in [
+        UpdateStatus::Downloading {
+            version: "99.0.0".into(),
+            downloaded_bytes: 100,
+            total_bytes: Some(200),
+        },
+        UpdateStatus::Verifying("99.0.0".into()),
+        UpdateStatus::Ready("99.0.0".into()),
+    ] {
+        let before = format!("{status:?}");
+        let updater = cx.new(|_| Updater {
+            current_version: "1.2.3",
+            status,
+            prepared_update: None,
+        });
 
-    updater.update(cx, |updater, cx| {
-        updater.check(cx);
-        updater.install(cx);
-    });
-    cx.run_until_parked();
+        updater.update(cx, |updater, cx| {
+            updater.check(cx);
+            updater.download(cx);
+        });
+        cx.run_until_parked();
 
-    cx.read(|cx| {
-        assert!(matches!(
-            updater.read(cx).status(),
-            UpdateStatus::Installing(version) if version == "99.0.0"
-        ));
-    });
+        cx.read(|cx| assert_eq!(format!("{:?}", updater.read(cx).status()), before));
+    }
 }
 
 fn manifest(version: &str) -> String {

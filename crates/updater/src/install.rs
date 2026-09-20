@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use gpui_kit::http_client::{AsyncBody, HttpClient};
@@ -12,14 +13,35 @@ use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
-use super::UpdateManifest;
+use super::{UpdateManifest, UpdateStatus};
+
+#[cfg(test)]
+mod tests;
 
 const EXPECTED_TEAM_ID: &str = "P2M3JQ4DR5";
+
+pub(super) struct PreparedUpdate {
+    current_app: PathBuf,
+    new_app: PathBuf,
+    work_dir: tempfile::TempDir,
+}
+
+impl PreparedUpdate {
+    pub(super) fn launch_installer(self) -> Result<(), String> {
+        launch_installer(&self.current_app, &self.new_app, self.work_dir.path())?;
+
+        // The installer now owns these files and removes them after relaunch.
+        let _ = self.work_dir.keep();
+
+        Ok(())
+    }
+}
 
 pub(super) async fn download_and_prepare_update(
     manifest: &UpdateManifest,
     http_client: Arc<dyn HttpClient>,
-) -> Result<(), String> {
+    progress: smol::channel::Sender<UpdateStatus>,
+) -> Result<PreparedUpdate, String> {
     let current_app = current_app_bundle()?;
     let install_dir = current_app
         .parent()
@@ -32,20 +54,34 @@ pub(super) async fn download_and_prepare_update(
         ));
     }
 
-    let work_dir = env::temp_dir().join(format!("request-eagle-update-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&work_dir);
-    fs::create_dir_all(&work_dir)
+    let work_dir = tempfile::Builder::new()
+        .prefix("request-eagle-update-")
+        .tempdir()
         .map_err(|error| format!("Could not create the update directory: {error}"))?;
 
-    let archive = work_dir.join("Request Eagle.zip");
-    download_update(&manifest.url, &archive, http_client).await?;
+    let archive = work_dir.path().join("Request Eagle.zip");
+    download_update(
+        &manifest.url,
+        &archive,
+        http_client,
+        |downloaded_bytes, total_bytes| {
+            let _ = progress.try_send(UpdateStatus::Downloading {
+                version: manifest.version.clone(),
+                downloaded_bytes,
+                total_bytes,
+            });
+        },
+    )
+    .await?;
+
+    let _ = progress.try_send(UpdateStatus::Verifying(manifest.version.clone()));
 
     verify_sha256(&archive, &manifest.sha256)?;
 
     let status = Command::new("/usr/bin/ditto")
         .args(["-x", "-k"])
         .arg(&archive)
-        .arg(&work_dir)
+        .arg(work_dir.path())
         .status()
         .map_err(|error| format!("Could not extract the update: {error}"))?;
 
@@ -53,16 +89,21 @@ pub(super) async fn download_and_prepare_update(
         return Err("The update archive could not be extracted.".into());
     }
 
-    let new_app = work_dir.join("Request Eagle.app");
+    let new_app = work_dir.path().join("Request Eagle.app");
     verify_apple_signature(&new_app)?;
 
-    launch_installer(&current_app, &new_app, &work_dir)
+    Ok(PreparedUpdate {
+        current_app,
+        new_app,
+        work_dir,
+    })
 }
 
 async fn download_update(
     url: &str,
     destination: &Path,
     http_client: Arc<dyn HttpClient>,
+    mut on_progress: impl FnMut(u64, Option<u64>),
 ) -> Result<(), String> {
     let mut response = http_client
         .get(url, AsyncBody::empty(), true)
@@ -86,6 +127,17 @@ async fn download_update(
         });
     }
 
+    let total_bytes = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|total| *total > 0);
+    let mut downloaded_bytes = 0;
+    let mut last_progress = Instant::now();
+
+    on_progress(downloaded_bytes, total_bytes);
+
     let mut destination = File::create(destination)
         .await
         .map_err(|error| format!("Could not create the update archive: {error}"))?;
@@ -106,12 +158,28 @@ async fn download_update(
             .write_all(&buffer[..bytes_read])
             .await
             .map_err(|error| format!("Could not write the update archive: {error}"))?;
+
+        downloaded_bytes += bytes_read as u64;
+
+        // Keep large downloads responsive without redrawing for every chunk.
+        if last_progress.elapsed() >= Duration::from_millis(100) {
+            on_progress(downloaded_bytes, total_bytes);
+            last_progress = Instant::now();
+        }
     }
 
     destination
         .flush()
         .await
         .map_err(|error| format!("Could not finish writing the update archive: {error}"))?;
+
+    on_progress(downloaded_bytes, total_bytes);
+
+    if let Some(total) = total_bytes
+        && downloaded_bytes != total
+    {
+        return Err("The update download was incomplete. Please try again.".into());
+    }
 
     Ok(())
 }

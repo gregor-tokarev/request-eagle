@@ -25,13 +25,20 @@ pub enum UpdateStatus {
     Checking,
     UpToDate,
     Available(UpdateManifest),
-    Installing(String),
+    Downloading {
+        version: String,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
+    },
+    Verifying(String),
+    Ready(String),
     Error(String),
 }
 
 pub struct Updater {
     pub(super) current_version: &'static str,
     pub(super) status: UpdateStatus,
+    pub(super) prepared_update: Option<install::PreparedUpdate>,
 }
 
 impl Updater {
@@ -52,7 +59,10 @@ impl Updater {
     pub fn check(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.status,
-            UpdateStatus::Checking | UpdateStatus::Installing(_)
+            UpdateStatus::Checking
+                | UpdateStatus::Downloading { .. }
+                | UpdateStatus::Verifying(_)
+                | UpdateStatus::Ready(_)
         ) {
             return;
         }
@@ -74,27 +84,64 @@ impl Updater {
         .detach();
     }
 
-    pub fn install(&mut self, cx: &mut Context<Self>) {
+    pub fn download(&mut self, cx: &mut Context<Self>) {
         let UpdateStatus::Available(manifest) = self.status.clone() else {
             return;
         };
 
-        self.set_status(UpdateStatus::Installing(manifest.version.clone()), cx);
+        let version = manifest.version.clone();
+
+        self.set_status(
+            UpdateStatus::Downloading {
+                version: version.clone(),
+                downloaded_bytes: 0,
+                total_bytes: None,
+            },
+            cx,
+        );
 
         let http_client = cx.http_client();
+        let (progress, updates) = smol::channel::unbounded();
         let task = cx.background_executor().spawn(async move {
-            install::download_and_prepare_update(&manifest, http_client).await
+            install::download_and_prepare_update(&manifest, http_client, progress).await
         });
 
-        cx.spawn(async move |this, cx| match task.await {
-            Ok(()) => cx.update(|cx| cx.quit()),
-            Err(error) => {
-                let _ = this.update(cx, |this, cx| {
-                    this.set_status(UpdateStatus::Error(error), cx)
-                });
+        cx.spawn(async move |this, cx| {
+            while let Ok(status) = updates.recv().await {
+                if this
+                    .update(cx, |this, cx| this.set_status(status, cx))
+                    .is_err()
+                {
+                    return;
+                }
             }
+
+            let result = task.await;
+
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(update) => {
+                    this.prepared_update = Some(update);
+                    this.set_status(UpdateStatus::Ready(version), cx);
+                }
+                Err(error) => this.set_status(UpdateStatus::Error(error), cx),
+            });
         })
         .detach();
+    }
+
+    pub fn relaunch(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.status, UpdateStatus::Ready(_)) {
+            return;
+        }
+
+        let Some(update) = self.prepared_update.take() else {
+            return;
+        };
+
+        match update.launch_installer() {
+            Ok(()) => cx.quit(),
+            Err(error) => self.set_status(UpdateStatus::Error(error), cx),
+        }
     }
 }
 
@@ -102,6 +149,7 @@ pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
     let updater = cx.new(|_| Updater {
         current_version,
         status: UpdateStatus::Idle,
+        prepared_update: None,
     });
 
     // Bare cargo binaries cannot be replaced by the app-bundle installer.
