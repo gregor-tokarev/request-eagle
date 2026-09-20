@@ -42,7 +42,13 @@ fn register_tab_action<A: Action>(
 }
 
 pub(crate) fn init(cx: &mut App) {
-    register_tab_action(NewTab, "New tab", "Open an empty tab.", "secondary-t", cx);
+    register_tab_action(
+        NewTab,
+        "New tab",
+        "Open an empty GET request.",
+        "secondary-t",
+        cx,
+    );
     register_tab_action(
         CloseTab,
         "Close tab",

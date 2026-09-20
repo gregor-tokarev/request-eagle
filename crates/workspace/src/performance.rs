@@ -1,8 +1,8 @@
 use crate::workspace::Layout;
 use collection::CollectionRegistry;
 use gpui_kit::{
-    InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, point,
-    px, size,
+    AppContext, InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    TouchPhase, component::Root, point, px, size,
 };
 use settings_ui::SettingsPage;
 use std::{fs, time::Instant};
@@ -187,15 +187,18 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
     collections
 }
 
-// Includes shortcut dispatch and forced full-layout CPU draws (not GPU presentation).
-// cargo test -p workspace --release tabs_switch_benchmark -- --ignored --nocapture --test-threads=1
+// Includes event dispatch, effects, Root, drawing and element cleanup. GPU
+// presentation still requires checking the native app. Run without CPU contention.
 #[gpui_kit::test]
-#[ignore = "manual full-layout tab switching benchmark"]
-fn tabs_switch_benchmark(cx: &mut TestAppContext) {
+#[ignore = "manual 120 fps tab interaction budget"]
+fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
     let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
         .map(|value| value.parse::<usize>().expect("positive sample count"))
         .unwrap_or(120);
     assert!(sample_count > 0);
+    assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+
+    let mut failures = Vec::new();
 
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -205,14 +208,27 @@ fn tabs_switch_benchmark(cx: &mut TestAppContext) {
     });
 
     for tab_count in [100, 1_000, 10_000] {
-        let (layout, cx) = cx.add_window_view(|window, cx| {
-            Layout::new(
-                CollectionRegistry::new(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
+        let mut layout = None;
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| {
+                Layout::new(
+                    CollectionRegistry::new(),
+                    updater::init("1.2.3", cx),
+                    window,
+                    cx,
+                )
+            });
+            layout = Some(view.clone());
+
+            Root::new(view, window, cx)
         });
+        let layout = layout.unwrap();
+
+        #[cfg(feature = "dev-profiler")]
+        cx.update(|window, _| {
+            window.set_debug_frame_overlay_mode(gpui_kit::DebugFrameOverlayMode::Full);
+        });
+
         cx.update(|_, cx| {
             layout.read(cx).main_view.clone().update(cx, |view, cx| {
                 for _ in 1..tab_count {
@@ -225,34 +241,80 @@ fn tabs_switch_benchmark(cx: &mut TestAppContext) {
             cx.simulate_resize(size(px(width), px(height)));
             cx.run_until_parked();
 
-            // Start near the end so cycling measures scrolling and wraparound.
-            cx.simulate_keystrokes("secondary-9");
-            let next = gpui_kit::Keystroke::parse("secondary-}").unwrap();
-            let mut samples = Vec::with_capacity(sample_count);
+            for interaction in ["switch", "scroll", "create"] {
+                // Exercise unseen pages, scrolling, and keyboard wraparound.
+                cx.simulate_keystrokes("secondary-9");
+                let bar = cx.debug_bounds("main-tab-bar").unwrap();
+                let shortcut = gpui_kit::Keystroke::parse(if interaction == "create" {
+                    "secondary-t"
+                } else {
+                    "secondary-}"
+                })
+                .unwrap();
+                let mut samples = Vec::with_capacity(sample_count);
 
-            for index in 0..sample_count + 20 {
-                let duration = cx.update(|window, cx| {
+                for index in 0..sample_count + 20 {
                     let started = Instant::now();
-                    assert!(window.dispatch_keystroke(next.clone(), cx));
-                    window.refresh();
-                    window.draw(cx).clear(cx);
-                    started.elapsed()
-                });
+                    cx.update(|window, cx| {
+                        if interaction == "scroll" {
+                            window.dispatch_event(
+                                ScrollWheelEvent {
+                                    position: bar.center(),
+                                    delta: ScrollDelta::Pixels(point(
+                                        px(if index % 40 < 20 { 80. } else { -80. }),
+                                        px(0.),
+                                    )),
+                                    modifiers: Modifiers::default(),
+                                    touch_phase: TouchPhase::Moved,
+                                }
+                                .to_platform_input(),
+                                cx,
+                            );
+                        } else {
+                            assert!(window.dispatch_keystroke(shortcut.clone(), cx));
+                        }
+                    });
+                    // TestAppContext::update flushes effects and draws dirty
+                    // windows, including element cleanup. Do not force another
+                    // draw here or time the same interaction twice.
 
-                if index >= 20 {
-                    samples.push(duration.as_secs_f64() * 1000.);
+                    if index >= 20 {
+                        samples.push(started.elapsed().as_secs_f64() * 1000.);
+                    }
+                }
+
+                samples.sort_by(f64::total_cmp);
+                let mean = samples.iter().sum::<f64>() / sample_count as f64;
+                let p99 = samples[(sample_count * 99).div_ceil(100) - 1];
+                let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
+                let label = format!("{tab_count} tabs {width}x{height} {interaction}");
+                eprintln!(
+                    "{label}: mean {mean:.2} ms, p95 {:.2}, p99 {p99:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
+                    samples[(sample_count * 95).div_ceil(100) - 1],
+                    samples[sample_count - 1],
+                );
+                if p99 > 1000. / 120. {
+                    failures.push(format!("{label}: p99 {p99:.2} ms"));
+                }
+
+                if interaction == "create" {
+                    cx.update(|_, cx| {
+                        layout.read(cx).main_view.clone().update(cx, |view, cx| {
+                            for _ in 0..sample_count + 20 {
+                                view.close_active_tab(cx);
+                            }
+                        });
+                    });
                 }
             }
-
-            samples.sort_by(f64::total_cmp);
-            let mean = samples.iter().sum::<f64>() / sample_count as f64;
-            let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
-            eprintln!(
-                "{tab_count} tabs {width}x{height}: mean {mean:.2} ms, p95 {:.2}, p99 {:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
-                samples[(sample_count * 95).div_ceil(100) - 1],
-                samples[(sample_count * 99).div_ceil(100) - 1],
-                samples[sample_count - 1],
-            );
         }
+
+        cx.update(|window, _| window.remove_window());
     }
+
+    assert!(
+        failures.is_empty(),
+        "120 fps CPU budget exceeded:\n{}",
+        failures.join("\n")
+    );
 }

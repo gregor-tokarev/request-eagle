@@ -2,11 +2,12 @@ use std::path::Path;
 
 use gpui_kit::{
     AppContext, Context, Entity, InputEvent as _, InteractiveElement, IntoElement, Modifiers,
-    Render, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, Window,
-    div, point, px, size,
+    ParentElement, Render, ScrollDelta, ScrollWheelEvent, Styled, TestAppContext, TouchPhase,
+    VisualTestContext, Window, div, point, px, size,
 };
 
 use super::main_view::MainView;
+use super::request_draft::RequestDraft;
 use crate::workspace::Layout;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext) {
@@ -24,6 +25,193 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext
             cx,
         )
     })
+}
+
+#[gpui_kit::test]
+fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    let first = cx.read(|cx| {
+        let view = view.read(cx);
+        let tab = &view.tabs[0];
+
+        assert_eq!(tab.method, Some("GET"));
+        assert!(tab.request_path.is_none());
+
+        tab.page.clone().downcast::<RequestDraft>().ok().unwrap()
+    });
+
+    assert!(cx.debug_bounds("request-draft").is_some());
+    assert!(cx.debug_bounds("request-collection").is_some());
+    assert!(cx.debug_bounds("tab-method-1").is_some());
+    cx.read(|cx| {
+        let draft = first.read(cx);
+
+        assert!(matches!(draft.request.method, collection::Method::Get));
+        assert!(draft.request.path.is_empty());
+        assert!(draft.request.headers.is_empty());
+        assert!(draft.request.body.is_none());
+        assert!(draft.request.query.is_none());
+        assert!(draft.url.as_ref().unwrap().read(cx).value().is_empty());
+    });
+
+    let url = cx.debug_bounds("request-url").unwrap();
+    cx.simulate_click(url.center(), Modifiers::default());
+    cx.simulate_input("https://example.com/first");
+    cx.read(|cx| assert_eq!(first.read(cx).request.path, "https://example.com/first"));
+
+    // Creating a tab while editing a URL must not inherit that draft's data.
+    cx.simulate_keystrokes("secondary-t");
+    cx.read(|cx| {
+        let view = view.read(cx);
+        let tab = &view.tabs[1];
+        let draft = tab.page.clone().downcast::<RequestDraft>().ok().unwrap();
+
+        assert_eq!(view.selected, Some(1));
+        assert_eq!(tab.method, Some("GET"));
+        assert!(tab.request_path.is_none());
+        assert_ne!(draft, first);
+        assert!(draft.read(cx).request.path.is_empty());
+        assert!(
+            draft
+                .read(cx)
+                .url
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .value()
+                .is_empty()
+        );
+    });
+
+    cx.simulate_keystrokes("secondary-1");
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).tabs[0].page.entity_id(), first.entity_id());
+        assert_eq!(
+            first.read(cx).url.as_ref().unwrap().read(cx).value(),
+            "https://example.com/first"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    let saved_path = Path::new("/collection/saved.toml");
+
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.open_request(saved_path, "Saved request".into(), "POST", cx);
+        });
+    });
+
+    let new_tab = cx.debug_bounds("new-tab").unwrap();
+    cx.simulate_click(new_tab.center(), Modifiers::default());
+    cx.read(|cx| {
+        let view = view.read(cx);
+        let tab = &view.tabs[2];
+        let draft = tab.page.clone().downcast::<RequestDraft>().ok().unwrap();
+
+        assert_eq!(view.selected, Some(2));
+        assert_eq!(tab.method, Some("GET"));
+        assert!(tab.request_path.is_none());
+        assert!(matches!(
+            draft.read(cx).request.method,
+            collection::Method::Get
+        ));
+        assert!(draft.read(cx).request.path.is_empty());
+        assert_eq!(view.tabs[1].request_path.as_deref(), Some(saved_path));
+        assert_eq!(view.tabs[1].method, Some("POST"));
+    });
+    assert!(cx.debug_bounds("request-draft").is_some());
+}
+
+#[gpui_kit::test]
+fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
+    cx: &mut TestAppContext,
+) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    let draft = cx.read(|cx| {
+        view.read(cx).tabs[0]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+
+    for (selector, value) in [
+        ("headers-key-0", "Accept"),
+        ("headers-value-0", "application/json"),
+    ] {
+        let field = cx.debug_bounds(selector).unwrap();
+        cx.simulate_click(field.center(), Modifiers::default());
+        cx.simulate_input(value);
+    }
+    assert!(cx.debug_bounds("headers-key-1").is_some());
+
+    let params = cx.debug_bounds("request-section-Params").unwrap();
+    cx.simulate_click(params.center(), Modifiers::default());
+    for (selector, value) in [("params-key-0", "page"), ("params-value-0", "2")] {
+        let field = cx.debug_bounds(selector).unwrap();
+        cx.simulate_click(field.center(), Modifiers::default());
+        cx.simulate_input(value);
+    }
+
+    let body = cx.debug_bounds("request-section-Body").unwrap();
+    cx.simulate_click(body.center(), Modifiers::default());
+    let body = cx.debug_bounds("request-body").unwrap();
+    cx.simulate_click(body.center(), Modifiers::default());
+    cx.simulate_input("hello");
+    let params = cx.debug_bounds("request-section-Params").unwrap();
+    cx.simulate_click(params.center(), Modifiers::default());
+
+    cx.update(|_, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(collection::Method::Post, cx)
+        })
+    });
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).tabs[0].method, Some("POST"));
+        assert!(view.read(cx).tabs[0].request_path.is_none());
+        assert_eq!(
+            draft.read(cx).request.headers,
+            [("Accept".into(), "application/json".into())]
+        );
+        assert_eq!(
+            draft.read(cx).request.query,
+            Some(vec![("page".into(), "2".into())])
+        );
+        assert_eq!(
+            draft.read(cx).request.body.as_deref(),
+            Some(b"hello".as_slice())
+        );
+    });
+
+    cx.simulate_keystrokes("secondary-t");
+    cx.read(|cx| {
+        let view = view.read(cx);
+        let new_draft = view.tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap();
+
+        assert_eq!(view.tabs[1].method, Some("GET"));
+        assert!(new_draft.read(cx).request.headers.is_empty());
+        assert!(new_draft.read(cx).request.query.is_none());
+        assert!(new_draft.read(cx).request.body.is_none());
+    });
+
+    cx.simulate_keystrokes("secondary-1");
+    assert!(cx.debug_bounds("params-key-1").is_some());
+    cx.read(|cx| {
+        assert_eq!(draft.read(cx).request.method, collection::Method::Post);
+        assert_eq!(draft.read(cx).request.headers[0].1, "application/json");
+    });
 }
 
 #[gpui_kit::test]
@@ -67,6 +255,8 @@ fn tab_shortcuts_work_from_sidebar_and_wrap(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs.len(), 1);
         assert_eq!(view.read(cx).tabs[0].id, 4);
         assert_eq!(view.read(cx).selected, Some(0));
+        assert_eq!(view.read(cx).tabs[0].method, Some("GET"));
+        assert!(view.read(cx).tabs[0].request_path.is_none());
     });
 }
 
@@ -164,6 +354,18 @@ fn thousands_of_tabs_keep_selection_visible_and_offscreen_tabs_unrendered(cx: &m
                 view.new_tab(cx);
             }
         });
+    });
+
+    // Opening tabs in the background must not register thousands of input
+    // listeners before those editors have ever been displayed.
+    cx.read(|cx| {
+        let unseen = view.read(cx).tabs[500]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap();
+        assert!(unseen.read(cx).url.is_none());
     });
 
     for (width, height) in [(1024., 768.), (3440., 1410.), (1440., 900.)] {
@@ -398,4 +600,68 @@ fn switching_keeps_page_entities_and_renders_only_the_active_page(cx: &mut TestA
     });
     assert!(cx.debug_bounds("page-value-42").is_some());
     cx.read(|cx| assert_eq!(view.read(cx).tabs[1].page.entity_id(), page.entity_id()));
+}
+
+struct RenderCountPage {
+    renders: usize,
+    child: Entity<StatefulPage>,
+}
+
+impl Render for RenderCountPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders += 1;
+
+        div().size_full().child(self.child.clone())
+    }
+}
+
+#[gpui_kit::test]
+fn scrolling_tabs_reuses_the_page_but_child_changes_and_resize_redraw_it(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    let child = cx.new(|_| StatefulPage(7));
+    let page = cx.new(|_| RenderCountPage {
+        renders: 0,
+        child: child.clone(),
+    });
+
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            for _ in 0..30 {
+                view.new_tab(cx);
+            }
+            view.open_tab("Counted page", page.clone(), cx);
+        });
+    });
+
+    let renders = cx.read(|cx| page.read(cx).renders);
+    let bar = cx.debug_bounds("main-tab-bar").unwrap();
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            ScrollWheelEvent {
+                position: bar.center(),
+                delta: ScrollDelta::Pixels(point(px(1800.), px(0.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("page-tab-32").is_none());
+    cx.read(|cx| assert_eq!(page.read(cx).renders, renders));
+
+    cx.update(|_, cx| {
+        child.update(cx, |child, cx| {
+            child.0 = 42;
+            cx.notify();
+        })
+    });
+    assert!(cx.debug_bounds("page-value-42").is_some());
+    let renders = cx.read(|cx| page.read(cx).renders);
+
+    cx.simulate_resize(size(px(1440.), px(900.)));
+    cx.read(|cx| assert!(page.read(cx).renders > renders));
+    assert!(cx.debug_bounds("page-value-42").is_some());
 }

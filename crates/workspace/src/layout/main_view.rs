@@ -4,6 +4,7 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
+use super::request_draft::{MethodChanged, RequestDraft};
 use crate::actions::{CloseTab, NewTab};
 
 const TAB_WIDTH: Pixels = px(176.);
@@ -12,9 +13,10 @@ const TAB_HEIGHT: Pixels = px(28.);
 pub(super) struct PageTab {
     pub(super) id: u64,
     pub(super) title: SharedString,
-    request_path: Option<PathBuf>,
+    pub(super) request_path: Option<PathBuf>,
     pub(super) method: Option<&'static str>,
     pub(super) page: AnyView,
+    _request_subscription: Option<Subscription>,
 }
 
 pub(crate) struct MainView {
@@ -63,6 +65,7 @@ impl MainView {
             request_path: None,
             method: None,
             page: page.into(),
+            _request_subscription: None,
         });
         self.next_id += 1;
 
@@ -99,9 +102,18 @@ impl MainView {
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
-        let page = cx.new(|_| EmptyPage);
+        let page = cx.new(|_| RequestDraft::new());
+        let id = self.next_id;
+        let subscription = cx.subscribe(&page, move |this, _, event: &MethodChanged, cx| {
+            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) {
+                tab.method = Some(event.0.as_str());
+                cx.notify();
+            }
+        });
 
-        self.open_tab(title, page, cx);
+        let index = self.open_tab(title, page, cx);
+        self.tabs[index].method = Some("GET");
+        self.tabs[index]._request_subscription = Some(subscription);
     }
 
     /// Select by zero-based position. Missing positions leave selection unchanged.
@@ -163,6 +175,12 @@ impl MainView {
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.selected
+            && let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
+        {
+            draft.update(cx, |draft, cx| draft.prepare(window, cx));
+        }
+
         window.focus(&self.focus, cx);
     }
 
@@ -366,15 +384,25 @@ impl Render for MainView {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            this.focus(window, cx);
-                        }),
-                    )
+                    // Focus the page before its controls handle the click, so
+                    // clicking an input can keep focus instead of losing it here.
+                    .capture_any_mouse_down(cx.listener(
+                        |this, event: &MouseDownEvent, window, cx| {
+                            if event.button == MouseButton::Left {
+                                this.focus(window, cx);
+                            }
+                        },
+                    ))
                     .when_some(self.selected, |this, index| {
                         this.aria_label(self.tabs[index].title.clone())
-                            .child(self.tabs[index].page.clone())
+                            // Scrolling/hovering tabs must not lay out an unchanged
+                            // editor. Child notifications and resize invalidate it.
+                            .child(
+                                self.tabs[index]
+                                    .page
+                                    .clone()
+                                    .cached(StyleRefinement::default().size_full()),
+                            )
                     }),
             )
     }

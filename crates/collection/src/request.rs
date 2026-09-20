@@ -6,7 +6,7 @@ pub enum Request {
     Http(HttpRequest),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct HttpRequest {
     pub method: Method,
     pub path: String,
@@ -19,11 +19,23 @@ pub struct HttpRequest {
     pub query: Option<Vec<(String, String)>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Method {
+    #[default]
     Get,
     Post,
     Put,
     Delete,
+}
+
+impl Method {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+        }
+    }
 }

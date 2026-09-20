@@ -68,11 +68,19 @@ This reports CPU draw percentiles at three window sizes. It excludes native wind
 integration and GPU presentation; also check the frame monitor in `make dev` when
 assessing the 8.33 ms budget for 120 fps.
 
-To measure Ctrl+} tab switches with 100, 1,000, and 10,000 open tabs:
+To check tab creation, Ctrl+} switching, and horizontal scrolling with 100,
+1,000, and 10,000 open tabs against the 120 fps CPU budget:
 
 ```sh
-cargo test -p workspace --release tabs_switch_benchmark \
+cargo test -p workspace --features dev-profiler --release tabs_interaction_benchmark \
   -- --ignored --nocapture --test-threads=1
 ```
 
-This includes shortcut dispatch and CPU drawing at the same three window sizes.
+This includes event dispatch, notifications, the app's Root wrapper, the frame
+monitor, CPU drawing, and element cleanup at the same three window sizes. It
+reports mean, p95, p99, maximum, and the number of frames over 8.33 ms, and fails
+if p99 exceeds that budget. Run serially on an otherwise idle machine. The first
+20 interactions warm up each case; `REQUEST_EAGLE_BENCH_SAMPLES` controls the
+number measured (default 120). Native input, font rendering, GPU work, and display
+refresh still need verification in `make dev`; this CPU test does not prove a
+120 Hz presentation rate.

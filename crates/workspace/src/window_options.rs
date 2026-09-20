@@ -8,7 +8,11 @@ pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
 
     WindowOptions {
         titlebar: Some(TitlebarOptions {
-            title: Some("Request Eagle".into()),
+            title: Some(
+                std::env::var("REQUEST_EAGLE_WINDOW_TITLE")
+                    .unwrap_or_else(|_| "Request Eagle".into())
+                    .into(),
+            ),
             appears_transparent: true,
             traffic_light_position: Some(point(px(9.0), px(9.0))),
         }),
