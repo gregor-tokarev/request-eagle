@@ -52,29 +52,6 @@ impl RequestDraft {
                     .text_color(cx.theme().muted_foreground)
                     .child("No collection"),
             )
-            .child(div().flex_1())
-            .child(
-                Button::new("save-request")
-                    .ghost()
-                    .small()
-                    .label("Save")
-                    .icon(IconName::File)
-                    .disabled(true),
-            )
-            .child(
-                Button::new("save-request-options")
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::ChevronDown)
-                    .disabled(true),
-            )
-            .child(
-                Button::new("share-request")
-                    .small()
-                    .label("Share")
-                    .icon(IconName::ExternalLink)
-                    .disabled(true),
-            )
     }
 
     pub(super) fn url_bar(
@@ -181,16 +158,6 @@ impl RequestDraft {
                                     this.send(window, cx);
                                 }
                             })),
-                    )
-                    .child(div().h_full().w(px(1.)).bg(rgb(0x2554a8)))
-                    .child(
-                        Button::new("send-request-options")
-                            .ghost()
-                            .h_full()
-                            .w(px(30.))
-                            .icon(Icon::new(IconName::ChevronDown).size(px(13.)))
-                            .text_color(rgb(0xffffff))
-                            .disabled(true),
                     ),
             )
     }
@@ -202,63 +169,52 @@ impl RequestDraft {
             ("Body", self.supports_body().then_some(RequestSection::Body)),
         ];
 
-        h_flex()
-            .flex_none()
-            .gap_2()
-            .min_w_0()
-            .child(
-                Tabs::new("request-sections")
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .overflow_x_scroll()
-                    .gap_1()
-                    .children(sections.into_iter().map(|(label, section)| {
-                        let selected = section == Some(self.section);
-                        let count = match section {
-                            Some(RequestSection::Params) => {
-                                self.request.query.as_ref().map_or(0, Vec::len)
-                            }
-                            Some(RequestSection::Headers) => self.request.headers.len(),
-                            _ => 0,
-                        };
+        h_flex().flex_none().gap_2().min_w_0().child(
+            Tabs::new("request-sections")
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .overflow_x_scroll()
+                .gap_1()
+                .children(sections.into_iter().map(|(label, section)| {
+                    let selected = section == Some(self.section);
+                    let count = match section {
+                        Some(RequestSection::Params) => {
+                            self.request.query.as_ref().map_or(0, Vec::len)
+                        }
+                        Some(RequestSection::Headers) => self.request.headers.len(),
+                        _ => 0,
+                    };
 
-                        Tab::new(label)
-                            .debug_selector(move || format!("request-section-{label}"))
-                            .selected(selected)
-                            .disabled(section.is_none())
-                            .accessibility_label(label)
-                            .flex_none()
-                            .h(px(30.))
-                            .px_2()
-                            .gap_1()
-                            .rounded(px(4.))
-                            .text_color(cx.theme().muted_foreground)
-                            .when(selected, |this| {
-                                this.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                            })
-                            .when(section.is_some(), |this| {
-                                this.hover(|this| this.bg(cx.theme().muted))
-                            })
-                            .child(label)
-                            .when(count > 0, |this| {
-                                this.child(div().text_size(px(11.)).child(count.to_string()))
-                            })
-                            .when_some(section, |this, section| {
-                                this.on_click(cx.listener(move |this, _, window, cx| {
-                                    this.section = section;
-                                    this.prepare(window, cx);
-                                    cx.notify();
-                                }))
-                            })
-                    })),
-            )
-            .child(
-                Button::new("request-cookies")
-                    .ghost()
-                    .small()
-                    .label("Cookies")
-                    .disabled(true),
-            )
+                    Tab::new(label)
+                        .debug_selector(move || format!("request-section-{label}"))
+                        .selected(selected)
+                        .disabled(section.is_none())
+                        .accessibility_label(label)
+                        .flex_none()
+                        .h(px(30.))
+                        .px_2()
+                        .gap_1()
+                        .rounded(px(4.))
+                        .text_color(cx.theme().muted_foreground)
+                        .when(selected, |this| {
+                            this.bg(cx.theme().muted).text_color(cx.theme().foreground)
+                        })
+                        .when(section.is_some(), |this| {
+                            this.hover(|this| this.bg(cx.theme().muted))
+                        })
+                        .child(label)
+                        .when(count > 0, |this| {
+                            this.child(div().text_size(px(11.)).child(count.to_string()))
+                        })
+                        .when_some(section, |this, section| {
+                            this.on_click(cx.listener(move |this, _, window, cx| {
+                                this.section = section;
+                                this.prepare(window, cx);
+                                cx.notify();
+                            }))
+                        })
+                })),
+        )
     }
 }

@@ -97,7 +97,7 @@ impl Render for RequestFields {
                     .h(px(30.))
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(36.)).flex_none())
-                    .children(["Key", "Value"].map(|label| {
+                    .children(["Key", "Value", "Description"].map(|label| {
                         div()
                             .flex_1()
                             .min_w_0()
@@ -109,45 +109,7 @@ impl Render for RequestFields {
                             .items_center()
                             .child(label)
                     }))
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .px_2()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_ellipsis()
-                                    .child("Description"),
-                            )
-                            .child(
-                                Button::new("bulk-edit")
-                                    .ghost()
-                                    .xsmall()
-                                    .label("Bulk Edit")
-                                    .disabled(true),
-                            )
-                            .when(id == "headers", |this| {
-                                this.child(
-                                    Button::new("header-presets")
-                                        .ghost()
-                                        .xsmall()
-                                        .label("Presets")
-                                        .child(Icon::new(IconName::ChevronDown).size(px(11.)))
-                                        .disabled(true),
-                                )
-                            }),
-                    )
-                    .child(
-                        Button::new("field-options")
-                            .ghost()
-                            .xsmall()
-                            .w(px(30.))
-                            .icon(IconName::Ellipsis)
-                            .disabled(true),
-                    ),
+                    .child(div().w(px(30.)).flex_none()),
             )
             .children(self.rows.iter().enumerate().map(|(index, row)| {
                 let populated =
