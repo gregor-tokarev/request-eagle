@@ -197,13 +197,9 @@ impl RequestDraft {
 
     pub(super) fn section_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let sections = [
-            ("Docs", None),
             ("Params", Some(RequestSection::Params)),
-            ("Authorization", None),
             ("Headers", Some(RequestSection::Headers)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
-            ("Scripts", None),
-            ("Settings", None),
         ];
 
         h_flex()
@@ -243,9 +239,6 @@ impl RequestDraft {
                             })
                             .when(section.is_some(), |this| {
                                 this.hover(|this| this.bg(cx.theme().muted))
-                            })
-                            .when(label == "Docs", |this| {
-                                this.child(Icon::new(IconName::Menu).size(px(13.)))
                             })
                             .child(label)
                             .when(count > 0, |this| {
