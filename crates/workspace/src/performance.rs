@@ -186,3 +186,73 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
     fs::remove_dir_all(directory).unwrap();
     collections
 }
+
+// Includes shortcut dispatch and forced full-layout CPU draws (not GPU presentation).
+// cargo test -p workspace --release tabs_switch_benchmark -- --ignored --nocapture --test-threads=1
+#[gpui_kit::test]
+#[ignore = "manual full-layout tab switching benchmark"]
+fn tabs_switch_benchmark(cx: &mut TestAppContext) {
+    let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
+        .map(|value| value.parse::<usize>().expect("positive sample count"))
+        .unwrap_or(120);
+    assert!(sample_count > 0);
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+        cx.set_reduce_motion(true);
+    });
+
+    for tab_count in [100, 1_000, 10_000] {
+        let (layout, cx) = cx.add_window_view(|window, cx| {
+            Layout::new(
+                CollectionRegistry::new(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        cx.update(|_, cx| {
+            layout.read(cx).main_view.clone().update(cx, |view, cx| {
+                for _ in 1..tab_count {
+                    view.new_tab(cx);
+                }
+            });
+        });
+
+        for (width, height) in [(1024., 768.), (1440., 900.), (3440., 1410.)] {
+            cx.simulate_resize(size(px(width), px(height)));
+            cx.run_until_parked();
+
+            // Start near the end so cycling measures scrolling and wraparound.
+            cx.simulate_keystrokes("secondary-9");
+            let next = gpui_kit::Keystroke::parse("secondary-}").unwrap();
+            let mut samples = Vec::with_capacity(sample_count);
+
+            for index in 0..sample_count + 20 {
+                let duration = cx.update(|window, cx| {
+                    let started = Instant::now();
+                    assert!(window.dispatch_keystroke(next.clone(), cx));
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                    started.elapsed()
+                });
+
+                if index >= 20 {
+                    samples.push(duration.as_secs_f64() * 1000.);
+                }
+            }
+
+            samples.sort_by(f64::total_cmp);
+            let mean = samples.iter().sum::<f64>() / sample_count as f64;
+            let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
+            eprintln!(
+                "{tab_count} tabs {width}x{height}: mean {mean:.2} ms, p95 {:.2}, p99 {:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
+                samples[(sample_count * 95).div_ceil(100) - 1],
+                samples[(sample_count * 99).div_ceil(100) - 1],
+                samples[sample_count - 1],
+            );
+        }
+    }
+}

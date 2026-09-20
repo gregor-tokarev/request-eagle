@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use gpui_kit::{
-    AppContext, Context, Entity, InteractiveElement, IntoElement, Modifiers, Render,
-    TestAppContext, VisualTestContext, Window, div,
+    AppContext, Context, Entity, InputEvent as _, InteractiveElement, IntoElement, Modifiers,
+    Render, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, Window,
+    div, point, px, size,
 };
 
 use super::main_view::MainView;
@@ -150,6 +151,94 @@ fn overflowing_tabs_scroll_to_selected_position(cx: &mut TestAppContext) {
         assert!(selected_tab.left() >= tab_bar.left());
         assert!(selected_tab.right() <= new_tab.left());
     }
+}
+
+#[gpui_kit::test]
+fn thousands_of_tabs_keep_selection_visible_and_offscreen_tabs_unrendered(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            for _ in 1..10_000 {
+                view.new_tab(cx);
+            }
+        });
+    });
+
+    for (width, height) in [(1024., 768.), (3440., 1410.), (1440., 900.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+
+        for (shortcut, selected, visible, hidden) in [
+            ("secondary-9", 9_999, "page-tab-10000", "page-tab-1"),
+            ("secondary-}", 0, "page-tab-1", "page-tab-10000"),
+            ("secondary-{", 9_999, "page-tab-10000", "page-tab-1"),
+            ("secondary-{", 9_998, "page-tab-9999", "page-tab-1"),
+            ("secondary-1", 0, "page-tab-1", "page-tab-9999"),
+        ] {
+            cx.simulate_keystrokes(shortcut);
+            cx.read(|cx| assert_eq!(view.read(cx).selected, Some(selected)));
+
+            let tab = cx.debug_bounds(visible).unwrap();
+            let bar = cx.debug_bounds("main-tab-bar").unwrap();
+            let new_tab = cx.debug_bounds("new-tab").unwrap();
+            assert!(tab.left() >= bar.left(), "{visible} at {width}");
+            assert!(tab.right() <= new_tab.left(), "{visible} at {width}");
+            assert!(cx.debug_bounds(hidden).is_none());
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn virtual_tabs_support_mouse_scrolling_selection_and_close(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            for _ in 1..1_000 {
+                view.new_tab(cx);
+            }
+        });
+    });
+    cx.simulate_keystrokes("secondary-9");
+
+    let last_tab = cx.debug_bounds("page-tab-1000").unwrap();
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            ScrollWheelEvent {
+                position: last_tab.center(),
+                delta: ScrollDelta::Pixels(point(px(1800.), px(0.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(view.read(cx).selected, Some(999)));
+    assert!(cx.debug_bounds("page-tab-1000").is_none());
+
+    let tab = cx.debug_bounds("page-tab-990").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+    cx.read(|cx| assert_eq!(view.read(cx).selected, Some(989)));
+
+    cx.simulate_mouse_move(tab.center(), None, Modifiers::default());
+    let close = cx.debug_bounds("close-tab-990").unwrap();
+    cx.simulate_mouse_move(close.center(), None, Modifiers::default());
+    cx.simulate_click(close.center(), Modifiers::default());
+    cx.read(|cx| {
+        let view = view.read(cx);
+        assert_eq!(view.tabs.len(), 999);
+        assert_eq!(view.tabs[view.selected.unwrap()].id, 991);
+    });
+    assert!(cx.debug_bounds("page-tab-990").is_none());
+    assert!(cx.debug_bounds("page-tab-991").is_some());
+
+    cx.simulate_keystrokes("secondary-9 secondary-w");
+    assert!(cx.debug_bounds("page-tab-999").is_some());
+    assert!(cx.debug_bounds("page-tab-1000").is_none());
 }
 
 #[gpui_kit::test]

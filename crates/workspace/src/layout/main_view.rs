@@ -6,6 +6,9 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewTab};
 
+const TAB_WIDTH: Pixels = px(176.);
+const TAB_HEIGHT: Pixels = px(28.);
+
 pub(super) struct PageTab {
     pub(super) id: u64,
     pub(super) title: SharedString,
@@ -19,6 +22,7 @@ pub(crate) struct MainView {
     pub(super) selected: Option<usize>,
     next_id: u64,
     scroll: ScrollHandle,
+    scroll_to_tab: Option<usize>,
     focus: FocusHandle,
 }
 
@@ -37,6 +41,7 @@ impl MainView {
             selected: None,
             next_id: 1,
             scroll: ScrollHandle::new(),
+            scroll_to_tab: None,
             focus: cx.focus_handle(),
         };
 
@@ -106,7 +111,7 @@ impl MainView {
         }
 
         self.selected = Some(index);
-        self.scroll.scroll_to_item(index);
+        self.scroll_to_tab = Some(index);
 
         cx.notify();
     }
@@ -152,15 +157,88 @@ impl MainView {
             }
         });
 
-        if let Some(selected) = self.selected {
-            self.scroll.scroll_to_item(selected);
-        }
+        self.scroll_to_tab = self.selected;
 
         cx.notify();
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+    }
+
+    fn tab_strip(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let gap = window.rem_size() * 0.25;
+        let stride = TAB_WIDTH + gap;
+        let content_width = TAB_WIDTH * self.tabs.len() + gap * self.tabs.len().saturating_sub(1);
+
+        Tabs::new("page-tabs")
+            .min_w_0()
+            .flex_shrink(1.)
+            .flex()
+            .overflow_x_scroll()
+            .track_scroll(&self.scroll)
+            .child(
+                // Reserve the full scroll extent, but build and lay out only the
+                // visible tabs. GPUI's uniform_list only supports vertical lists.
+                canvas(
+                    cx.processor(move |this, bounds: Bounds<Pixels>, window, cx| {
+                        // The parent has its current viewport and clamped scroll
+                        // offset now, including on the first frame and after resize.
+                        let viewport = this.scroll.bounds();
+                        let mut left = -this.scroll.offset().x;
+
+                        if let Some(index) = this.scroll_to_tab.take() {
+                            let tab_left = stride * index;
+                            let tab_right = tab_left + TAB_WIDTH;
+
+                            if tab_left < left || TAB_WIDTH > viewport.size.width {
+                                left = tab_left;
+                            } else if tab_right > left + viewport.size.width {
+                                left = tab_right - viewport.size.width;
+                            }
+                        }
+
+                        left =
+                            left.clamp(px(0.), (content_width - viewport.size.width).max(px(0.)));
+                        this.scroll.set_offset(point(-left, px(0.)));
+
+                        let first = (left / stride).floor() as usize;
+                        let end = (((left + viewport.size.width) / stride).ceil() as usize)
+                            .min(this.tabs.len());
+                        let mut tabs = Vec::with_capacity(end.saturating_sub(first));
+
+                        for index in first..end {
+                            let mut tab = this.tab(index, &this.tabs[index], cx).into_any_element();
+                            tab.layout_as_root(
+                                size(
+                                    AvailableSpace::Definite(TAB_WIDTH),
+                                    AvailableSpace::Definite(TAB_HEIGHT),
+                                ),
+                                window,
+                                cx,
+                            );
+                            // Use the new offset immediately, so keyboard jumps
+                            // reveal the selected tab in this frame.
+                            tab.prepaint_at(
+                                point(viewport.left() - left + stride * index, bounds.top()),
+                                window,
+                                cx,
+                            );
+                            tabs.push(tab);
+                        }
+
+                        tabs
+                    }),
+                    |_, tabs, window, cx| {
+                        for mut tab in tabs {
+                            tab.paint(window, cx);
+                        }
+                    },
+                )
+                .flex_none()
+                .w(content_width)
+                .h(TAB_HEIGHT),
+            )
     }
 
     fn tab(&self, index: usize, tab: &PageTab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -174,8 +252,8 @@ impl MainView {
             .accessibility_label(tab.title.clone())
             .set_position(index + 1, self.tabs.len())
             .flex_none()
-            .w(px(176.))
-            .h(px(28.))
+            .w(TAB_WIDTH)
+            .h(TAB_HEIGHT)
             .px_2()
             .gap_2()
             .rounded(px(5.))
@@ -246,7 +324,7 @@ impl MainView {
 }
 
 impl Render for MainView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .debug_selector(|| "main-view".into())
             .size_full()
@@ -264,21 +342,7 @@ impl Render for MainView {
                     .bg(cx.theme().tab_bar)
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        Tabs::new("page-tabs")
-                            .min_w_0()
-                            .flex_shrink(1.)
-                            .flex()
-                            .gap_1()
-                            .overflow_x_scroll()
-                            .track_scroll(&self.scroll)
-                            .children(
-                                self.tabs
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(index, tab)| self.tab(index, tab, cx)),
-                            ),
-                    )
+                    .child(self.tab_strip(window, cx))
                     .child(
                         Button::new("new-tab")
                             .debug_selector(|| "new-tab".into())
