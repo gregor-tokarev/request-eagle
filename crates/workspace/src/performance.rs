@@ -9,12 +9,15 @@ use std::{fs, time::Instant};
 
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
+// Set REQUEST_EAGLE_BENCH_TRANSITIONS=1 to switch away and back before each draw.
+// Enable workspace/dev-profiler and REQUEST_EAGLE_BENCH_OVERLAY=1 to include the monitor.
 // Like appearance_render_benchmark, this measures forced CPU draws, including
 // element cleanup, but excludes GPU presentation and the native Root wrapper.
 #[gpui_kit::test]
 #[ignore = "manual full-layout page render benchmark"]
 fn pages_render_benchmark(cx: &mut TestAppContext) {
     let page_filter = std::env::var("REQUEST_EAGLE_BENCH_PAGE").ok();
+    let switch_pages = std::env::var_os("REQUEST_EAGLE_BENCH_TRANSITIONS").is_some();
     let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
         .map(|value| value.parse::<usize>().expect("positive sample count"))
         .unwrap_or(120);
@@ -50,6 +53,13 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
             Layout::new(collections, updater::init("1.2.3", cx), window, cx)
         });
 
+        #[cfg(feature = "dev-profiler")]
+        if std::env::var_os("REQUEST_EAGLE_BENCH_OVERLAY").is_some() {
+            cx.update(|window, _| {
+                window.set_debug_frame_overlay_mode(gpui_kit::DebugFrameOverlayMode::Full);
+            });
+        }
+
         if let Some(page) = page {
             cx.update(|window, cx| {
                 layout.update(cx, |layout, cx| {
@@ -83,6 +93,21 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
 
                 for index in 0..sample_count + 20 {
                     let duration = cx.update(|window, cx| {
+                        if switch_pages && let Some(page) = page {
+                            layout.update(cx, |layout, cx| {
+                                layout.settings.update(cx, |settings, cx| {
+                                    settings.select_page(SettingsPage::General, window, cx);
+                                });
+                            });
+                            window.refresh();
+                            window.draw(cx).clear(cx);
+                            layout.update(cx, |layout, cx| {
+                                layout.settings.update(cx, |settings, cx| {
+                                    settings.select_page(page, window, cx);
+                                });
+                            });
+                        }
+
                         if scrolling {
                             window.dispatch_event(
                                 ScrollWheelEvent {
@@ -118,7 +143,13 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
                 let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
                 eprintln!(
                     "{label} {width}x{height} {}: mean {mean:.2} ms, p95 {:.2}, p99 {:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
-                    if scrolling { "scroll" } else { "draw" },
+                    if scrolling {
+                        "scroll"
+                    } else if switch_pages && page.is_some() {
+                        "page switch"
+                    } else {
+                        "draw"
+                    },
                     samples[(sample_count * 95).div_ceil(100) - 1],
                     samples[(sample_count * 99).div_ceil(100) - 1],
                     samples[sample_count - 1],

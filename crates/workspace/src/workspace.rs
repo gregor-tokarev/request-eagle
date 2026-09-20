@@ -10,7 +10,7 @@ use gpui_kit::component::{
     resizable::{ResizableState, h_resizable, resizable_panel},
     *,
 };
-use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::*;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use updater::Updater;
 
@@ -176,6 +176,16 @@ pub(super) fn on_toggle_sidebar(layout: &Entity<Layout>, cx: &mut App) {
 
 impl Render for Layout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Keep the screen entities alive, but only lay out the visible screen.
+        // GPUI still requests child layouts beneath display: none containers.
+        if self.settings_visible {
+            return div()
+                .size_full()
+                .text_base()
+                .child(self.settings.clone())
+                .into_any_element();
+        }
+
         let sidebar_progress = motion::transition(
             "sidebar-visibility",
             if *self.sidebar_visible.read(cx) {
@@ -239,7 +249,6 @@ impl Render for Layout {
             .on_action(cx.listener(|this, _: &SelectLastTab, window, cx| {
                 this.update_tabs(window, cx, MainView::select_last_tab);
             }))
-            .when(self.settings_visible, |this| this.hidden())
             .child(self.top_panel.clone())
             .child(
                 div().flex_1().min_h_0().overflow_hidden().child(
@@ -259,12 +268,11 @@ impl Render for Layout {
             )
             .child(self.bottom_panel.clone());
 
-        div().size_full().text_base().child(workspace).child(
-            div()
-                .size_full()
-                .when(!self.settings_visible, |this| this.hidden())
-                .child(self.settings.clone()),
-        )
+        div()
+            .size_full()
+            .text_base()
+            .child(workspace)
+            .into_any_element()
     }
 }
 

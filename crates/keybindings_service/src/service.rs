@@ -33,7 +33,7 @@ struct RegisteredCommand {
 }
 
 /// A command shown in Settings, including commands without a shortcut.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Command {
     pub id: &'static str,
     pub label: &'static str,

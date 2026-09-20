@@ -148,7 +148,7 @@ fn recording_intercepts_commands_and_saves_a_replacement(cx: &mut TestAppContext
                 .as_ref()
                 .unwrap()
                 .unparse(),
-            "cmd-q"
+            Keystroke::parse("cmd-q").unwrap().unparse()
         );
     });
     cx.simulate_keystrokes("cmd-shift-q");
@@ -200,13 +200,13 @@ fn conflict_and_cancel_preserve_existing_shortcuts(cx: &mut TestAppContext) {
             keybindings::binding_for::<ToggleLeftSidebar>(cx)
                 .unwrap()
                 .keystrokes,
-            "cmd-b"
+            Keystroke::parse("cmd-b").unwrap().unparse()
         );
         assert_eq!(
             keybindings::binding_for::<OpenSettings>(cx)
                 .unwrap()
                 .keystrokes,
-            "cmd-,"
+            Keystroke::parse("cmd-,").unwrap().unparse()
         );
     });
 }
@@ -227,7 +227,7 @@ fn inline_recorder_releases_capture_when_focus_leaves(cx: &mut TestAppContext) {
             keybindings::binding_for::<ToggleLeftSidebar>(cx)
                 .unwrap()
                 .keystrokes,
-            "cmd-b"
+            Keystroke::parse("cmd-b").unwrap().unparse()
         );
     });
     cx.simulate_keystrokes("cmd-q");
@@ -344,7 +344,7 @@ fn recorder_buttons_save_cancel_and_remove(cx: &mut TestAppContext) {
         assert!(page.read(cx).recording.is_none());
         assert_eq!(
             keybindings::binding_for::<Quit>(cx).unwrap().keystrokes,
-            "cmd-shift-q"
+            Keystroke::parse("cmd-shift-q").unwrap().unparse()
         );
     });
     cx.simulate_keystrokes("cmd-q");
@@ -444,11 +444,11 @@ fn shortcut_search_captures_filters_clears_and_releases_focus(cx: &mut TestAppCo
         assert_eq!(cx.global::<QuitCount>().0, 0);
         assert_eq!(
             page.read(cx).search_keystroke.as_ref().unwrap().unparse(),
-            "cmd-q"
+            Keystroke::parse("cmd-q").unwrap().unparse()
         );
         assert_eq!(
             keybindings::binding_for::<Quit>(cx).unwrap().keystrokes,
-            "cmd-q"
+            Keystroke::parse("cmd-q").unwrap().unparse()
         );
     });
     assert!(
@@ -518,7 +518,7 @@ fn shortcut_search_captures_filters_clears_and_releases_focus(cx: &mut TestAppCo
         assert_eq!(cx.global::<QuitCount>().0, 1);
         assert_eq!(
             page.read(cx).search_keystroke.as_ref().unwrap().unparse(),
-            "cmd-b"
+            Keystroke::parse("cmd-b").unwrap().unparse()
         );
     });
 
@@ -648,4 +648,102 @@ fn init_commands(cx: &mut gpui_kit::App) {
         cx,
     )
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn cached_commands_scroll_filter_and_update_shortcuts(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        init_commands(cx);
+    });
+    let (page, cx) = cx.add_window_view(KeybindingsPage::new);
+    cx.simulate_resize(gpui_kit::size(px(880.), px(240.)));
+    cx.run_until_parked();
+
+    let last_row = "keybinding-row-settings_tests::ToggleLeftSidebar";
+    assert!(cx.debug_bounds(last_row).unwrap().top() >= px(240.));
+    cx.update(|_, cx| {
+        page.update(cx, |page, cx| {
+            page.scroll_handle.scroll_to_item(2);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds(last_row).is_some());
+
+    click_recorder_button("record-settings_tests::ToggleLeftSidebar", cx);
+    cx.simulate_keystrokes("cmd-shift-b");
+    click_recorder_button("save-recording", cx);
+    cx.read(|cx| {
+        assert_eq!(
+            keybindings::binding_for::<ToggleLeftSidebar>(cx)
+                .unwrap()
+                .keystrokes,
+            Keystroke::parse("cmd-shift-b").unwrap().unparse()
+        );
+    });
+    click_recorder_button("reset-settings_tests::ToggleLeftSidebar", cx);
+    cx.read(|cx| {
+        assert_eq!(
+            keybindings::binding_for::<ToggleLeftSidebar>(cx)
+                .unwrap()
+                .keystrokes,
+            Keystroke::parse("cmd-b").unwrap().unparse()
+        );
+    });
+
+    cx.update(|window, cx| {
+        page.update(cx, |page, cx| {
+            page.search.update(cx, |search, cx| {
+                search.set_value("open settings", window, cx)
+            });
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds(last_row).is_none());
+    assert!(
+        cx.debug_bounds("keybinding-row-settings_tests::OpenSettings")
+            .is_some()
+    );
+    cx.read(|cx| assert_eq!(page.read(cx).scroll_handle.top_item(), 0));
+}
+
+#[gpui_kit::test]
+fn cached_command_buttons_remain_keyboard_accessible(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        init_commands(cx);
+    });
+    let mut page = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| KeybindingsPage::new(window, cx));
+        page = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let page = page.unwrap();
+    cx.simulate_resize(gpui_kit::size(px(880.), px(600.)));
+    cx.update(|window, cx| {
+        window.activate_window();
+        page.update(cx, |page, cx| page.focus_search(window, cx));
+    });
+    cx.run_until_parked();
+
+    // Repaint unchanged rows, then navigate from search through its mode toggle
+    // to the first command's record button and activate it with the keyboard.
+    cx.update(|_, cx| page.update(cx, |_, cx| cx.notify()));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("tab tab");
+    let keystroke = Keystroke::parse("enter").unwrap();
+    cx.simulate_event(gpui_kit::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui_kit::KeyUpEvent { keystroke });
+    cx.read(|cx| {
+        assert_eq!(
+            page.read(cx).recording.as_ref().unwrap().command.id,
+            CloseSettings::name_for_type()
+        );
+    });
 }

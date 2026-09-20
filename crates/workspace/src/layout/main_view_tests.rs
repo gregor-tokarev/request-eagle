@@ -31,34 +31,37 @@ fn tab_shortcuts_work_from_sidebar_and_wrap(cx: &mut TestAppContext) {
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
 
     // Initial focus is in the collections sidebar, outside the main view.
-    cx.simulate_keystrokes("cmd-t cmd-t");
+    cx.simulate_keystrokes("secondary-t secondary-t");
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(2));
     });
 
     for (keys, selected) in [
-        ("cmd-}", 0),
-        ("cmd-{", 2),
-        ("cmd-{", 1),
-        ("cmd-1", 0),
-        ("cmd-3", 2),
-        ("cmd-2", 1),
-        ("cmd-8", 1),
-        ("cmd-9", 2),
+        ("secondary-}", 0),
+        ("secondary-{", 2),
+        ("secondary-{", 1),
+        ("secondary-1", 0),
+        ("secondary-3", 2),
+        ("secondary-2", 1),
+        ("secondary-8", 1),
+        ("secondary-9", 2),
     ] {
         cx.simulate_keystrokes(keys);
         cx.read(|cx| assert_eq!(view.read(cx).selected, Some(selected), "{keys}"));
     }
 
-    cx.simulate_keystrokes("cmd-w cmd-w cmd-w cmd-w cmd-{ cmd-} cmd-9");
+    cx.simulate_keystrokes("secondary-w secondary-w secondary-w secondary-w");
+    cx.simulate_keystrokes("secondary-{");
+    cx.simulate_keystrokes("secondary-}");
+    cx.simulate_keystrokes("secondary-9");
     cx.read(|cx| {
         assert!(view.read(cx).tabs.is_empty());
         assert_eq!(view.read(cx).selected, None);
     });
     assert!(cx.debug_bounds("main-view").is_some());
 
-    cx.simulate_keystrokes("cmd-t");
+    cx.simulate_keystrokes("secondary-t");
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 1);
         assert_eq!(view.read(cx).tabs[0].id, 4);
@@ -91,7 +94,7 @@ fn tab_buttons_preserve_selection_when_closing_other_tabs(cx: &mut TestAppContex
         assert_eq!(view.read(cx).tabs[0].id, 1);
     });
 
-    cx.simulate_keystrokes("cmd-2");
+    cx.simulate_keystrokes("secondary-2");
     cx.simulate_mouse_move(first_tab.center(), None, Modifiers::default());
     let close_first = cx.debug_bounds("close-tab-1").unwrap();
     cx.simulate_mouse_move(close_first.center(), None, Modifiers::default());
@@ -119,7 +122,7 @@ fn overflowing_tabs_scroll_to_selected_position(cx: &mut TestAppContext) {
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
 
     for _ in 0..12 {
-        cx.simulate_keystrokes("cmd-t");
+        cx.simulate_keystrokes("secondary-t");
     }
 
     let tab_bar = cx.debug_bounds("main-tab-bar").unwrap();
@@ -130,15 +133,15 @@ fn overflowing_tabs_scroll_to_selected_position(cx: &mut TestAppContext) {
     assert!(new_tab.right() <= tab_bar.right());
 
     for (shortcut, index, selector) in [
-        ("cmd-1", 0, "page-tab-1"),
-        ("cmd-2", 1, "page-tab-2"),
-        ("cmd-3", 2, "page-tab-3"),
-        ("cmd-4", 3, "page-tab-4"),
-        ("cmd-5", 4, "page-tab-5"),
-        ("cmd-6", 5, "page-tab-6"),
-        ("cmd-7", 6, "page-tab-7"),
-        ("cmd-8", 7, "page-tab-8"),
-        ("cmd-9", 12, "page-tab-13"),
+        ("secondary-1", 0, "page-tab-1"),
+        ("secondary-2", 1, "page-tab-2"),
+        ("secondary-3", 2, "page-tab-3"),
+        ("secondary-4", 3, "page-tab-4"),
+        ("secondary-5", 4, "page-tab-5"),
+        ("secondary-6", 5, "page-tab-6"),
+        ("secondary-7", 6, "page-tab-7"),
+        ("secondary-8", 7, "page-tab-8"),
+        ("secondary-9", 12, "page-tab-13"),
     ] {
         cx.simulate_keystrokes(shortcut);
         cx.read(|cx| assert_eq!(view.read(cx).selected, Some(index)));
@@ -154,17 +157,18 @@ fn settings_do_not_change_hidden_tabs(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
 
-    cx.simulate_keystrokes("cmd-t");
+    cx.simulate_keystrokes("secondary-t");
     cx.update(|window, cx| {
         layout.update(cx, |layout, cx| layout.open_settings(window, cx));
     });
-    cx.simulate_keystrokes("cmd-t cmd-w cmd-1 cmd-{");
+    cx.simulate_keystrokes("secondary-t secondary-w secondary-1");
+    cx.simulate_keystrokes("secondary-{");
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 2);
         assert_eq!(view.read(cx).selected, Some(1));
     });
 
-    cx.simulate_keystrokes("escape cmd-w");
+    cx.simulate_keystrokes("escape secondary-w");
     cx.read(|cx| assert_eq!(view.read(cx).tabs.len(), 1));
 }
 
@@ -223,7 +227,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs[1].page.entity_id(), first_page);
     });
 
-    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_keystrokes("secondary-w");
     cx.simulate_click(first_request.center(), Modifiers::default());
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 3);

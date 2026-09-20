@@ -1,14 +1,18 @@
 use gpui_kit::component::{
     button::*,
     input::{InputEvent, InputState},
-    kbd::Kbd,
     tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use keybindings_service::{self as keybindings, Command};
+use std::collections::HashMap;
 
-use super::recorder::Recording;
+use super::{
+    recorder::Recording,
+    row::{CommandRow, row_button},
+    shortcut,
+};
 
 pub(crate) struct KeybindingsPage {
     pub(super) search: Entity<InputState>,
@@ -20,6 +24,10 @@ pub(crate) struct KeybindingsPage {
     pub(super) recorder_scope: FocusHandle,
     pub(super) recording: Option<Recording>,
     pub(super) error: Option<String>,
+
+    pub(super) scroll_handle: ScrollHandle,
+    rows: HashMap<&'static str, Entity<CommandRow>>,
+    visible_commands: Vec<&'static str>,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -43,6 +51,9 @@ impl KeybindingsPage {
             recorder_scope,
             recording: None,
             error: None,
+            scroll_handle: ScrollHandle::new(),
+            rows: HashMap::new(),
+            visible_commands: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -94,17 +105,24 @@ impl KeybindingsPage {
             None => command.binding_error.as_ref(),
         };
 
-        h_flex()
+        let shortcut_width = if compact { px(176.) } else { px(216.) };
+
+        div()
             .debug_selector(move || format!("keybinding-row-{id}"))
+            .relative()
             .w_full()
             .h(px(56.))
             .flex_none()
-            .gap_3()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
                 v_flex()
-                    .flex_1()
+                    .absolute()
+                    .left_0()
+                    .right(shortcut_width + px(104.))
+                    .top_0()
+                    .bottom_0()
+                    .justify_center()
                     .min_w_0()
                     .gap_1()
                     .child(
@@ -133,32 +151,44 @@ impl KeybindingsPage {
             .child(
                 div()
                     .debug_selector(move || format!("shortcut-slot-{id}"))
-                    .w(if compact { px(176.) } else { px(216.) })
-                    .h_9()
+                    .absolute()
+                    .right(px(92.))
+                    .top_0()
+                    .bottom_0()
+                    .w(shortcut_width)
+                    .flex()
+                    .items_center()
                     .flex_none()
                     .child(match recording {
                         Some(recording) => self.render_recorder(recording, cx).into_any_element(),
-                        None => Button::new(SharedString::from(format!("record-{id}")))
-                            .debug_selector(move || format!("record-{id}"))
-                            .ghost()
-                            .w_full()
-                            .h_9()
-                            .px_3()
-                            .justify_end()
-                            .overflow_hidden()
-                            .tooltip("Click to record a shortcut")
-                            .child(shortcut(
-                                command.binding.as_ref().map(|b| b.keystrokes.as_str()),
-                                cx,
-                            ))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.start_recording(record_command.clone(), window, cx)
-                            }))
-                            .into_any_element(),
+                        None => row_button(
+                            SharedString::from(format!("record-{id}")),
+                            "Click to record a shortcut",
+                            false,
+                            cx,
+                        )
+                        .debug_selector(move || format!("record-{id}"))
+                        .w_full()
+                        .h_9()
+                        .px_3()
+                        .justify_end()
+                        .overflow_hidden()
+                        .child(shortcut(
+                            command.binding.as_ref().map(|b| b.keystrokes.as_str()),
+                            cx,
+                        ))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.start_recording(record_command.clone(), window, cx)
+                        }))
+                        .into_any_element(),
                     }),
             )
             .child(
                 h_flex()
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
                     .w(px(80.))
                     .flex_none()
                     .justify_end()
@@ -167,39 +197,79 @@ impl KeybindingsPage {
                         None => h_flex()
                             .gap_1()
                             .child(
-                                Button::new(SharedString::from(format!("remove-{id}")))
-                                    .debug_selector(move || format!("remove-{id}"))
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::Delete)
-                                    .when(command.binding.is_some(), |this| {
-                                        this.text_color(cx.theme().muted_foreground)
-                                    })
-                                    .disabled(command.binding.is_none())
-                                    .tooltip("Remove shortcut")
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                row_button(
+                                    SharedString::from(format!("remove-{id}")),
+                                    "Remove shortcut",
+                                    command.binding.is_none(),
+                                    cx,
+                                )
+                                .debug_selector(move || format!("remove-{id}"))
+                                .child(Icon::new(IconName::Delete).size_3p5())
+                                .when(command.binding.is_some(), |this| {
+                                    this.text_color(cx.theme().muted_foreground)
+                                })
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
                                         this.error = keybindings::set_override(id, None, cx)
                                             .err()
                                             .map(|error| error.to_string());
 
                                         cx.notify();
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
-                                Button::new(SharedString::from(format!("reset-{id}")))
-                                    .debug_selector(move || format!("reset-{id}"))
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::Undo2)
-                                    .disabled(!command.is_modified())
-                                    .tooltip("Reset to default")
-                                    .on_click(
-                                        cx.listener(move |this, _, _, cx| this.reset(Some(id), cx)),
-                                    ),
+                                row_button(
+                                    SharedString::from(format!("reset-{id}")),
+                                    "Reset to default",
+                                    !command.is_modified(),
+                                    cx,
+                                )
+                                .debug_selector(move || format!("reset-{id}"))
+                                .child(Icon::new(IconName::Undo2).size_3p5())
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.reset(Some(id), cx)),
+                                ),
                             )
                             .into_any_element(),
                     }),
             )
+    }
+
+    fn command_row(
+        &mut self,
+        command: &Command,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // The recorder changes on each keystroke; ordinary rows only change
+        // when their command changes. Keep cursor blinks out of their layout.
+        if self
+            .recording
+            .as_ref()
+            .is_some_and(|recording| recording.command.id == command.id)
+        {
+            return self.render_command(command, compact, cx).into_any_element();
+        }
+
+        let page = cx.entity().downgrade();
+        let row = self.rows.entry(command.id).or_insert_with(|| {
+            cx.new(|_| CommandRow {
+                command: command.clone(),
+                page: page.clone(),
+            })
+        });
+        if row.read(cx).command != *command {
+            // Replace the cached content and handlers with the new binding.
+            *row = cx.new(|_| CommandRow {
+                command: command.clone(),
+                page,
+            });
+        }
+
+        row.clone()
+            .cached(StyleRefinement::default().w_full().h(px(56.)).flex_none())
+            .into_any_element()
     }
 }
 
@@ -213,16 +283,25 @@ impl Render for KeybindingsPage {
 
         let query = self.search.read(cx).value();
         let visible = commands
-            .iter()
+            .into_iter()
             .filter(|command| self.matches_search(command, &query))
             .collect::<Vec<_>>();
+        let empty = visible.is_empty();
+        let visible_commands = visible.iter().map(|command| command.id).collect::<Vec<_>>();
+        if self.visible_commands != visible_commands {
+            self.visible_commands = visible_commands;
+            self.scroll_handle.scroll_to_item(0);
+        }
 
         v_flex()
             .w_full()
+            .h_full()
+            .min_h_0()
             .max_w(px(880.))
             .gap_6()
             .child(
                 h_flex()
+                    .flex_none()
                     .justify_between()
                     .flex_wrap()
                     .gap_4()
@@ -269,14 +348,30 @@ impl Render for KeybindingsPage {
                         .child(error.clone()),
                 )
             })
-            .child(
-                v_flex().w_full().children(
-                    visible
-                        .iter()
-                        .map(|command| self.render_command(command, compact, cx)),
-                ),
-            )
-            .when(visible.is_empty(), |this| {
+            .when(!empty, |this| {
+                this.child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .child(
+                            v_flex()
+                                .id("keybinding-commands")
+                                .size_full()
+                                .pr_4()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll_handle)
+                                .children(
+                                    visible
+                                        .iter()
+                                        .map(|command| self.command_row(command, compact, cx)),
+                                ),
+                        )
+                        .child(scroll::Scrollbar::vertical(&self.scroll_handle)),
+                )
+            })
+            .when(empty, |this| {
                 this.child(
                     v_flex()
                         .w_full()
@@ -307,66 +402,6 @@ impl Render for KeybindingsPage {
                 )
             })
     }
-}
-
-fn shortcut(keys: Option<&str>, cx: &App) -> AnyElement {
-    match keys {
-        Some(keys) => h_flex()
-            .w_full()
-            .justify_end()
-            .gap_1()
-            .children(
-                keys.split_whitespace()
-                    .filter_map(|key| Keystroke::parse(key).ok())
-                    .map(|stroke| shortcut_keycaps(&stroke, cx)),
-            )
-            .into_any_element(),
-        None => div()
-            .w_full()
-            .text_right()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child("Not set")
-            .into_any_element(),
-    }
-}
-
-pub(super) fn shortcut_keycaps(stroke: &Keystroke, cx: &App) -> AnyElement {
-    let mac = cfg!(target_os = "macos");
-    let modifiers = [
-        (stroke.modifiers.platform, if mac { "⌘" } else { "Win" }),
-        (stroke.modifiers.control, if mac { "⌃" } else { "Ctrl" }),
-        (stroke.modifiers.alt, if mac { "⌥" } else { "Alt" }),
-        (stroke.modifiers.shift, if mac { "⇧" } else { "Shift" }),
-        (stroke.modifiers.function, "Fn"),
-    ];
-
-    let mut key = stroke.clone();
-    key.modifiers = Modifiers::default();
-
-    let labels = modifiers
-        .into_iter()
-        .filter(|(pressed, _)| *pressed)
-        .map(|(_, label)| label.to_owned())
-        .chain(std::iter::once(Kbd::format(&key)));
-
-    h_flex()
-        .gap_1()
-        .children(labels.map(|label| {
-            div()
-                .h_6()
-                .min_w_6()
-                .px_1()
-                .flex_none()
-                .rounded_md()
-                .bg(cx.theme().foreground.opacity(0.06))
-                .text_color(cx.theme().muted_foreground)
-                .text_sm()
-                .text_center()
-                .line_height(px(24.))
-                .child(label)
-        }))
-        .into_any_element()
 }
 
 fn search_text(value: &str) -> String {

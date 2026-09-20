@@ -107,10 +107,13 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
         let binding = window
             .highest_precedence_binding_for_action(&ToggleLeftSidebar)
             .expect("ToggleLeftSidebar should be bound");
-        assert_eq!(binding.keystrokes()[0].inner().to_string(), "⌘B");
+        assert_eq!(
+            binding.keystrokes()[0].inner(),
+            &gpui_kit::Keystroke::parse("secondary-b").unwrap()
+        );
     });
 
-    cx.simulate_keystrokes("cmd-b");
+    cx.simulate_keystrokes("secondary-b");
     assert!(!sidebar_visible(cx));
 
     let expanded_bounds = cx
@@ -121,7 +124,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
         main_bounds.size.width + px(300.)
     );
 
-    cx.simulate_keystrokes("cmd-b");
+    cx.simulate_keystrokes("secondary-b");
     assert!(sidebar_visible(cx));
 
     assert_eq!(cx.debug_bounds("main-view"), Some(main_bounds));

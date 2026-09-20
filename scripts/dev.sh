@@ -3,13 +3,27 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/target/release/Request Eagle (Dev).app/Contents/MacOS/request-eagle"
 POLL_INTERVAL="${REQUEST_EAGLE_DEV_POLL_INTERVAL:-0.5}"
 APP_PID=""
 
+case "$(uname -s)" in
+	Darwin)
+		BUILD_TARGET=bundle
+		APP="$ROOT/target/release/Request Eagle (Dev).app/Contents/MacOS/request-eagle"
+		;;
+	Linux)
+		BUILD_TARGET=build
+		APP="$ROOT/target/release/request-eagle"
+		;;
+	*)
+		echo "Unsupported development platform: $(uname -s)" >&2
+		exit 1
+		;;
+esac
+
 snapshot() {
 	{
-		for file in Cargo.toml Cargo.lock Makefile scripts/dev.sh; do
+		for file in Cargo.toml Cargo.lock Makefile scripts/dev.sh scripts/run.sh; do
 			test ! -f "$ROOT/$file" || printf '%s\n' "$file"
 		done
 		find "$ROOT/crates" "$ROOT/packaging/macos" -type f -print |
@@ -18,10 +32,9 @@ snapshot() {
 		LC_ALL=C sort |
 		while IFS= read -r file; do
 			printf '%s  ' "$file"
-			shasum "$ROOT/$file"
+			cksum "$ROOT/$file"
 		done |
-		shasum |
-		awk '{print $1}'
+		cksum
 }
 
 stop_app() {
@@ -60,7 +73,7 @@ while true; do
 	echo
 	echo "Change detected; rebuilding Request Eagle..."
 
-	if "${MAKE:-make}" --no-print-directory -C "$ROOT" bundle \
+	if "${MAKE:-make}" --no-print-directory -C "$ROOT" "$BUILD_TARGET" \
 		PROFILE=release FEATURES=dev-profiler \
 		APP_NAME="Request Eagle (Dev)" BUNDLE_ID=com.egortokarev.requesteagle.dev; then
 		# If another edit landed during the build, rebuild once more before launch.
@@ -70,7 +83,7 @@ while true; do
 		fi
 
 		echo "Launching Request Eagle..."
-		"$APP" &
+		"$ROOT/scripts/run.sh" "$APP" &
 		APP_PID=$!
 	else
 		echo "Build failed; waiting for another change."
