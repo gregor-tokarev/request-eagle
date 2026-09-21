@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui_kit::base::SelectableText;
+use gpui_kit::base::{ElementExt as _, SelectableText, TextSelectionScopeId};
 use gpui_kit::component::{hover_card::HoverCard, *};
 use gpui_kit::*;
 use request::StatusCode;
@@ -45,6 +45,10 @@ impl ResponseView {
             .text_color(cx.theme().muted_foreground)
             .child(
                 HoverCard::new("response-status-details")
+                    .on_open_change(cx.listener(|this, open, _, cx| {
+                        this.detail_open[0] = *open;
+                        cx.notify();
+                    }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
                     .p(px(8.))
@@ -60,11 +64,16 @@ impl ResponseView {
                             .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(12.))
                                 .child(SelectableText::new("status-title", status.to_string())))
                             .child(SelectableText::new("status-description", status_description(status)).document_order(1))
+                            .text_selection_scope(TextSelectionScopeId::default())
                     }),
             )
             .child("•")
             .child(
                 HoverCard::new("response-time-details")
+                    .on_open_change(cx.listener(|this, open, _, cx| {
+                        this.detail_open[1] = *open;
+                        cx.notify();
+                    }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
                     .p(px(8.))
@@ -74,11 +83,16 @@ impl ResponseView {
                         panel("response-time-overlay", time_focus.clone(), owner, cx)
                             .w(px(406.))
                             .child(timing_details(metrics, processing, elapsed, cx))
+                            .text_selection_scope(TextSelectionScopeId::default())
                     }),
             )
             .child("•")
             .child(
                 HoverCard::new("response-size-details")
+                    .on_open_change(cx.listener(|this, open, _, cx| {
+                        this.detail_open[2] = *open;
+                        cx.notify();
+                    }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
                     .p(px(8.))
@@ -93,10 +107,11 @@ impl ResponseView {
                             .child(detail_row("response-decoded", 3, "Uncompressed", if encoded { "Not decoded".to_owned() } else { bytes_label(body_bytes) }))
                             .child(div().h(px(1.)).my_1().bg(cx.theme().border))
                             .child(detail_row("request-total", 4, "Request size (known)", bytes_label(metrics.request_header_bytes + metrics.request_body_bytes)).font_weight(FontWeight::SEMIBOLD))
-                            .child(detail_row("request-headers", 5, "Configured headers", bytes_label(metrics.request_header_bytes)))
+                            .child(detail_row("request-headers", 5, "Prepared headers", bytes_label(metrics.request_header_bytes)))
                             .child(detail_row("request-body", 6, "Body", bytes_label(metrics.request_body_bytes)))
                             .child(div().pt(px(4.)).text_size(px(10.)).text_color(cx.theme().muted_foreground)
-                                .child(SelectableText::new("size-note", "Header sizes use name: value text, excluding HTTP framing and header compression. Automatically added request headers are not included.").document_order(14)))
+                                .child(SelectableText::new("size-note", "Header sizes estimate prepared name: value text, excluding transport framing, HTTP/2 pseudo-headers and header compression.").document_order(14)))
+                            .text_selection_scope(TextSelectionScopeId::default())
                     }),
             )
             .child("•")

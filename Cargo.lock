@@ -5756,10 +5756,12 @@ name = "request"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "gpui-pre-http-client",
  "gpui-pre-reqwest",
  "gpui-pre-reqwest-client",
  "h2",
+ "percent-encoding",
  "rustls-pemfile",
  "serde",
  "serde_json",

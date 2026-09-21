@@ -10,6 +10,7 @@
 
 mod error;
 mod executor;
+mod generated_headers;
 mod http;
 mod model;
 mod preferences;
@@ -17,6 +18,7 @@ mod response;
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;
+pub use generated_headers::generated_headers;
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request};
 pub use preferences::{HttpVersion, RequestPreferences};

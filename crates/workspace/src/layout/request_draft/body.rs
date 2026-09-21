@@ -42,6 +42,7 @@ impl RequestDraft {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value();
                     this.request.body = (!value.is_empty()).then(|| value.as_bytes().to_vec());
+                    this.refresh_generated_headers(cx);
                     cx.notify();
                 }
             }));

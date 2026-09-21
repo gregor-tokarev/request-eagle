@@ -1,4 +1,4 @@
-use gpui_kit::base::{Tab, Tabs};
+use gpui_kit::base::{ElementExt as _, Tab, Tabs, TextSelectionScopeId};
 use gpui_kit::component::{input::EditorState, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ExecutionError;
@@ -26,6 +26,8 @@ pub(in crate::layout) struct ResponseView {
     pub(super) wrap: bool,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
+    pub(super) detail_open: [bool; 3],
+    background_selection_scope: TextSelectionScopeId,
 }
 
 impl ResponseView {
@@ -43,6 +45,8 @@ impl ResponseView {
             wrap: true,
             headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
+            detail_open: [false; 3],
+            background_selection_scope: TextSelectionScopeId::new(),
         }
     }
 
@@ -215,5 +219,12 @@ impl Render for ResponseView {
             .border_color(cx.theme().border)
             .child(self.toolbar(cx))
             .child(content)
+            // Root owns the active scope. While a hover card is open, exclude
+            // the response behind it from that scope; the card opts back in.
+            .text_selection_scope(if self.detail_open.iter().any(|open| *open) {
+                self.background_selection_scope
+            } else {
+                TextSelectionScopeId::default()
+            })
     }
 }

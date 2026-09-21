@@ -5,14 +5,46 @@ use request::RequestExecutor;
 
 use super::draft::RequestDraft;
 
-pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
-    let mut request = request.clone();
-    let path = request.path.trim();
-    request.path = if !path.is_empty() && !path.contains("://") {
+fn request_url(path: &str) -> String {
+    let path = path.trim();
+
+    if !path.is_empty() && !path.contains("://") {
         format!("https://{path}")
     } else {
         path.to_owned()
+    }
+}
+
+pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
+    let supports_body = matches!(request.method, Method::Post | Method::Put);
+    let body_bytes = if supports_body {
+        request.body.as_ref().map_or(0, Vec::len)
+    } else {
+        0
     };
+    let mut headers = request::generated_headers(
+        request.method,
+        &request_url(&request.path),
+        &request.headers,
+        body_bytes,
+    );
+
+    if supports_body
+        && request.body.is_some()
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+    {
+        headers.push(("Content-Type".into(), "application/json".into()));
+    }
+
+    headers
+}
+
+pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
+    let mut request = request.clone();
+    request.path = request_url(&request.path);
 
     if matches!(request.method, Method::Get | Method::Delete) {
         request.body = None;
@@ -31,6 +63,16 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
 }
 
 impl RequestDraft {
+    pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
+        self.generated_headers = generated_headers(&self.request);
+
+        if let Some(headers) = &self.headers {
+            headers.update(cx, |headers, cx| {
+                headers.set_generated_headers(&self.generated_headers, cx);
+            });
+        }
+    }
+
     pub(in crate::layout) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.task.is_some() {
             return;

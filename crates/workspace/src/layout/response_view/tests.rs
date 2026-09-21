@@ -180,11 +180,17 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
                 request_header_bytes: 10,
                 request_body_bytes: 6,
             };
-            view.finish(Ok(content), window, cx);
+            http.headers.append(
+                "set-cookie",
+                "underlying-cookie=do-not-copy; Path=/".parse().unwrap(),
+            );
+            view.finish(Ok(ResponseContent::new(content.execution)), window, cx);
             view
         });
         gpui_kit::component::Root::new(response, window, cx)
     });
+    let cookies = cx.debug_bounds("response-section-Cookies").unwrap();
+    cx.simulate_click(cookies.center(), Modifiers::default());
 
     for (trigger, panel, first, last, expected) in [
         (
@@ -199,7 +205,7 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
             "response-size-overlay",
             "detail-response-total",
             "detail-request-body",
-            "Response size\n45 B\nHeaders (estimated)\n42 B\nDownloaded body\n3 B\nUncompressed\n3 B\nRequest size (known)\n16 B\nConfigured headers\n10 B\nBody\n6 B",
+            "Response size\n45 B\nHeaders (estimated)\n42 B\nDownloaded body\n3 B\nUncompressed\n3 B\nRequest size (known)\n16 B\nPrepared headers\n10 B\nBody\n6 B",
         ),
     ] {
         cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::default());
@@ -221,7 +227,29 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
         cx.simulate_keystrokes("secondary-c");
         let copied = cx.read_from_clipboard().unwrap().text().unwrap();
         assert!(copied.contains(expected), "{panel}: {copied}");
+        assert!(
+            !copied.contains("underlying-cookie"),
+            "overlay selection leaked: {copied}"
+        );
     }
+
+    cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::default());
+    cx.executor().advance_clock(Duration::from_millis(400));
+    cx.run_until_parked();
+    let cell = cx.debug_bounds("response-header-value-0").unwrap();
+    let start = point(cell.left() + px(8.), cell.center().y);
+    let end = point(cell.right() - px(8.), cell.center().y);
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+    cx.simulate_keystrokes("secondary-c");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("do-not-copy")
+    );
 }
 
 #[gpui_kit::test]

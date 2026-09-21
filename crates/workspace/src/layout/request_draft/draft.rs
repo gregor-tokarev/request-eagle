@@ -25,6 +25,7 @@ pub(in crate::layout) struct RequestDraft {
     pub(in crate::layout) section: RequestSection,
     pub(super) params: Option<Entity<RequestFields>>,
     pub(super) headers: Option<Entity<RequestFields>>,
+    pub(super) generated_headers: Vec<(String, String)>,
     pub(super) body: Option<Entity<EditorState>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
@@ -54,6 +55,7 @@ impl RequestDraft {
             section: RequestSection::Headers,
             params: None,
             headers: None,
+            generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
             response: None,
             split: None,
@@ -80,6 +82,7 @@ impl RequestDraft {
 
     pub(in crate::layout) fn set_method(&mut self, method: Method, cx: &mut Context<Self>) {
         self.request.method = method;
+        self.refresh_generated_headers(cx);
 
         if !self.supports_body() && self.section == RequestSection::Body {
             self.section = RequestSection::Headers;
@@ -99,6 +102,8 @@ impl RequestDraft {
         } else {
             self.fields_state(window, cx);
         }
+
+        self.refresh_generated_headers(cx);
 
         self.response
             .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
@@ -125,6 +130,7 @@ impl RequestDraft {
                     |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.path = input.read(cx).value().to_string();
+                            this.refresh_generated_headers(cx);
                             cx.notify();
                         }
                     },
@@ -154,10 +160,16 @@ impl RequestDraft {
             } else {
                 self.request.query.as_deref().unwrap_or_default()
             };
-            let fields = cx.new(|cx| RequestFields::new(id, values, window, cx));
+            let generated = if is_headers {
+                self.generated_headers.as_slice()
+            } else {
+                &[]
+            };
+            let fields = cx.new(|cx| RequestFields::new(id, values, generated, window, cx));
             let subscription = cx.subscribe(&fields, move |this, _, event: &FieldsChanged, cx| {
                 if is_headers {
                     this.request.headers = event.0.clone();
+                    this.refresh_generated_headers(cx);
                 } else {
                     this.request.query = (!event.0.is_empty()).then(|| event.0.clone());
                 }
@@ -227,7 +239,7 @@ impl Render for RequestDraft {
                         .with_state(self.split.as_ref().expect("prepared request split"))
                         .child(
                             resizable_panel()
-                                .size(px(230.))
+                                .size(px(330.))
                                 .size_range(px(110.)..px(1200.))
                                 .child(
                                     configuration.cached(StyleRefinement::default().size_full()),

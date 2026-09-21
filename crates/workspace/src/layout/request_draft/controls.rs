@@ -195,7 +195,9 @@ impl RequestDraft {
                         Some(RequestSection::Params) => {
                             self.request.query.as_ref().map_or(0, Vec::len)
                         }
-                        Some(RequestSection::Headers) => self.request.headers.len(),
+                        Some(RequestSection::Headers) => {
+                            self.request.headers.len() + self.generated_headers.len()
+                        }
                         _ => 0,
                     };
 
@@ -218,7 +220,14 @@ impl RequestDraft {
                         })
                         .child(label)
                         .when(count > 0, |this| {
-                            this.child(div().text_size(px(11.)).child(count.to_string()))
+                            this.child(
+                                div()
+                                    .debug_selector(move || {
+                                        format!("request-section-{label}-count-{count}")
+                                    })
+                                    .text_size(px(11.))
+                                    .child(count.to_string()),
+                            )
                         })
                         .when_some(section, |this, section| {
                             this.on_click(cx.listener(move |this, _, window, cx| {

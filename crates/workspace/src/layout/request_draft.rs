@@ -4,6 +4,8 @@ mod draft;
 mod execution;
 
 #[cfg(test)]
+mod header_tests;
+#[cfg(test)]
 mod saved_tests;
 #[cfg(test)]
 mod tests;

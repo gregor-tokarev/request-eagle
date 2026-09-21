@@ -71,7 +71,14 @@ impl HttpExecutor {
             // Expose redirect responses just like other HTTP statuses.
             .follow_redirects(RedirectPolicy::NoFollow);
 
-        for (name, value) in request.headers {
+        let generated = crate::generated_headers(
+            request.method,
+            url.as_str(),
+            &request.headers,
+            request_body_bytes,
+        );
+
+        for (name, value) in request.headers.into_iter().chain(generated) {
             builder = builder.header(name, value);
         }
 

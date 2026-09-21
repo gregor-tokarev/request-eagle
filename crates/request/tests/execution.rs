@@ -132,7 +132,14 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
         assert_eq!(response.headers.get_all("set-cookie").iter().count(), 2);
         assert_eq!(response.headers["x-raw"].as_bytes(), b"\xff");
         assert_eq!(response.metrics.request_body_bytes, 3);
-        assert_eq!(response.metrics.request_header_bytes, 24);
+        let sent_header_bytes: usize = received
+            .head
+            .lines()
+            .skip(1)
+            .filter(|line| !line.is_empty())
+            .map(|line| line.len() + 2)
+            .sum();
+        assert_eq!(response.metrics.request_header_bytes, sent_header_bytes);
     });
 }
 
@@ -165,7 +172,10 @@ fn measures_waiting_and_download_separately() {
         assert!(metrics.waiting >= Duration::from_millis(30));
         assert!(metrics.download >= Duration::from_millis(50));
         assert!(metrics.prepare + metrics.waiting + metrics.download <= execution.elapsed);
-        assert_eq!(metrics.request_header_bytes, 0);
+        assert!(
+            metrics.request_header_bytes > 0,
+            "include generated request headers"
+        );
         assert_eq!(metrics.request_body_bytes, 0);
         assert_eq!(
             metrics.response_header_bytes,
@@ -372,6 +382,47 @@ fn preserves_valid_host_overrides_and_user_agent() {
             let Response::Http(response) = result.response;
             assert_eq!(response.status.as_u16(), 200);
         }
+    });
+}
+
+#[test]
+fn generated_preview_matches_headers_received_by_the_server() {
+    smol::block_on(async {
+        let (url, server) =
+            serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec())
+                .await;
+        let path = url.replacen("http://", "http://user:p%40ss@", 1);
+        let preview = request::generated_headers(Method::Post, &path, &[], 3);
+        executor()
+            .execute(HttpRequest {
+                method: Method::Post,
+                path,
+                body: Some(b"abc".to_vec()),
+                ..HttpRequest::default()
+            })
+            .await
+            .unwrap();
+        let received = server.await;
+
+        for (name, value) in preview {
+            assert!(
+                received
+                    .head
+                    .contains(&format!("\r\n{}: {value}\r\n", name.to_lowercase())),
+                "{}",
+                received.head
+            );
+        }
+        assert_eq!(
+            received
+                .head
+                .lines()
+                .skip(1)
+                .filter(|line| !line.is_empty())
+                .count(),
+            4
+        );
+        assert_eq!(received.body, b"abc");
     });
 }
 
