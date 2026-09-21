@@ -3,10 +3,10 @@ use std::time::Duration;
 use gpui_kit::{base::SelectableText, component::*, prelude::FluentBuilder as _, *};
 use request::HttpMetrics;
 
-const LABEL_WIDTH: Pixels = px(128.);
-const VALUE_WIDTH: Pixels = px(92.);
-const COLUMN_GAP: Pixels = px(12.);
-const ROW_HEIGHT: Pixels = px(36.);
+const LABEL_WIDTH: Pixels = px(96.);
+const VALUE_WIDTH: Pixels = px(72.);
+const COLUMN_GAP: Pixels = px(8.);
+const ROW_HEIGHT: Pixels = px(25.);
 
 pub(super) fn timing_details(
     metrics: HttpMetrics,
@@ -46,12 +46,12 @@ pub(super) fn timing_details(
     let total = elapsed.as_secs_f64().max(f64::EPSILON);
 
     v_flex()
-        .gap_3()
+        .gap(px(8.))
         .child(
             h_flex()
                 .debug_selector(|| "detail-time-title".into())
                 .justify_between()
-                .text_size(px(16.))
+                .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(SelectableText::new("time-title", "Response time"))
                 .child(SelectableText::new("time-total", duration_label(elapsed)).document_order(1)),
@@ -124,7 +124,7 @@ pub(super) fn timing_details(
                     h_flex()
                         .ml(LABEL_WIDTH + COLUMN_GAP)
                         .mr(VALUE_WIDTH + COLUMN_GAP)
-                        .pt_2()
+                        .pt(px(6.))
                         .justify_between()
                         .text_size(px(10.))
                         .text_color(cx.theme().muted_foreground)
@@ -133,7 +133,7 @@ pub(super) fn timing_details(
                         })),
                 ),
         )
-        .child(div().text_size(px(11.)).text_color(cx.theme().muted_foreground)
+        .child(div().text_size(px(10.)).text_color(cx.theme().muted_foreground)
             .child(SelectableText::new("timing-note", "Waiting includes connection setup, upload, and the server response. Separate DNS, TCP, TLS and first-byte timings are not available.").document_order(13)))
 }
 

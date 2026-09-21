@@ -47,6 +47,7 @@ impl ResponseView {
                 HoverCard::new("response-status-details")
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
+                    .p(px(8.))
                     .trigger(div()
                         .debug_selector(|| "response-status".into())
                         .px_2().py_1().rounded(px(5.))
@@ -55,8 +56,8 @@ impl ResponseView {
                         .child(SelectableText::new("response-status-text", status.to_string())))
                     .content(move |_, _, cx| {
                         panel("response-status-overlay", focus.clone(), owner, cx)
-                            .w(px(340.))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(15.))
+                            .w(px(238.))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(12.))
                                 .child(SelectableText::new("status-title", status.to_string())))
                             .child(SelectableText::new("status-description", status_description(status)).document_order(1))
                     }),
@@ -66,11 +67,12 @@ impl ResponseView {
                 HoverCard::new("response-time-details")
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
+                    .p(px(8.))
                     .trigger(div().debug_selector(|| "response-time".into()).cursor_text()
                         .child(SelectableText::new("response-time-text", duration_label(elapsed)).document_order(1)))
                     .content(move |_, _, cx| {
                         panel("response-time-overlay", time_focus.clone(), owner, cx)
-                            .w(px(580.))
+                            .w(px(406.))
                             .child(timing_details(metrics, processing, elapsed, cx))
                     }),
             )
@@ -79,11 +81,12 @@ impl ResponseView {
                 HoverCard::new("response-size-details")
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
+                    .p(px(8.))
                     .trigger(div().debug_selector(|| "response-size".into()).cursor_text()
                         .child(SelectableText::new("response-size-text", size_label(body_bytes + metrics.response_header_bytes)).document_order(2)))
                     .content(move |_, _, cx| {
                         panel("response-size-overlay", size_focus.clone(), owner, cx)
-                            .w(px(370.))
+                            .w(px(259.))
                             .child(detail_row("response-total", 0, "Response size", bytes_label(body_bytes + metrics.response_header_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("response-headers", 1, "Headers (estimated)", bytes_label(metrics.response_header_bytes)))
                             .child(detail_row("response-body", 2, "Downloaded body", bytes_label(body_bytes)))
@@ -92,7 +95,7 @@ impl ResponseView {
                             .child(detail_row("request-total", 4, "Request size (known)", bytes_label(metrics.request_header_bytes + metrics.request_body_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("request-headers", 5, "Configured headers", bytes_label(metrics.request_header_bytes)))
                             .child(detail_row("request-body", 6, "Body", bytes_label(metrics.request_body_bytes)))
-                            .child(div().pt_2().text_size(px(11.)).text_color(cx.theme().muted_foreground)
+                            .child(div().pt(px(4.)).text_size(px(10.)).text_color(cx.theme().muted_foreground)
                                 .child(SelectableText::new("size-note", "Header sizes use name: value text, excluding HTTP framing and header compression. Automatically added request headers are not included.").document_order(14)))
                     }),
             )
@@ -104,9 +107,9 @@ impl ResponseView {
 fn panel(id: &'static str, focus: FocusHandle, owner: EntityId, cx: &App) -> Div {
     v_flex()
         .debug_selector(move || id.to_owned())
-        .gap_3()
-        .p_3()
-        .text_size(px(13.))
+        .gap(px(6.))
+        .p(px(8.))
+        .text_size(px(11.))
         .text_color(cx.theme().foreground)
         .capture_any_mouse_down(move |event: &MouseDownEvent, window, cx| {
             if event.button == MouseButton::Left {
@@ -124,7 +127,7 @@ fn panel(id: &'static str, focus: FocusHandle, owner: EntityId, cx: &App) -> Div
 fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) -> Div {
     h_flex()
         .debug_selector(move || format!("detail-{id}"))
-        .gap_3()
+        .gap(px(8.))
         .child(
             div()
                 .flex_1()
