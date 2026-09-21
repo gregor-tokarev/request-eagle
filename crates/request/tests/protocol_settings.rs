@@ -8,20 +8,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, rustls};
 
 fn tls_config() -> rustls::ServerConfig {
-    let certificate =
-        rustls_pemfile::certs(&mut include_bytes!("fixtures/localhost.pem").as_slice())
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-    let key =
-        rustls_pemfile::private_key(&mut include_bytes!("fixtures/localhost-key.pem").as_slice())
-            .unwrap()
-            .unwrap();
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
 
     rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_safe_default_protocol_versions()
         .unwrap()
         .with_no_client_auth()
-        .with_single_cert(certificate, key)
+        .with_single_cert(vec![cert.der().clone()], signing_key.into())
         .unwrap()
 }
 

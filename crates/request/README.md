@@ -49,3 +49,6 @@ Run local-server tests, with request/response and error output:
 ```sh
 cargo test -p request -- --nocapture --test-threads=1
 ```
+
+TLS tests generate fresh self-signed certificates and private keys in memory for
+their loopback servers. No certificate or key fixtures are stored on disk.
