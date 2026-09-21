@@ -25,19 +25,36 @@ pub(super) struct RequestFields {
 impl EventEmitter<FieldsChanged> for RequestFields {}
 
 impl RequestFields {
-    pub(super) fn new(id: &'static str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(
+        id: &'static str,
+        values: &[(String, String)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut fields = Self {
             id,
             rows: Vec::new(),
         };
-        fields.append_row(window, cx);
+
+        for (key, value) in values {
+            fields.append_row(key, value, window, cx);
+        }
+        fields.append_row("", "", window, cx);
 
         fields
     }
 
-    fn append_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = cx.new(|cx| InputState::new(window, cx).placeholder("Key"));
-        let value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
+    fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let key = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Key")
+                .default_value(key.to_owned())
+        });
+        let value = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Value")
+                .default_value(value.to_owned())
+        });
         let description = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
         let subscriptions = [&key, &value]
             .into_iter()
@@ -48,7 +65,7 @@ impl RequestFields {
                             !row.key.read(cx).value().is_empty()
                                 || !row.value.read(cx).value().is_empty()
                         }) {
-                            this.append_row(window, cx);
+                            this.append_row("", "", window, cx);
                         }
 
                         this.emit_change(cx);

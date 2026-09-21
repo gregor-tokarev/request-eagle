@@ -56,13 +56,20 @@ impl Layout {
         );
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
-        let sidebar_subscription = cx.subscribe(&sidebar, |this, _, event, cx| match event {
-            CollectionPanelEvent::OpenRequest { path, name, method } => {
-                this.main_view.update(cx, |view, cx| {
-                    view.open_request(path, name.clone(), method, cx);
-                });
-            }
-        });
+        let sidebar_subscription =
+            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::OpenRequest {
+                    path,
+                    name,
+                    collection,
+                    request,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_request(path, name.clone(), collection.clone(), request, cx);
+                        view.prepare_request(window, cx);
+                    });
+                }
+            });
         window.focus(&sidebar.focus_handle(cx), cx);
 
         Self {

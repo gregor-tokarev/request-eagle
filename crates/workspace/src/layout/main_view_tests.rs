@@ -102,7 +102,17 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
 
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
-            view.open_request(saved_path, "Saved request".into(), "POST", cx);
+            view.open_request(
+                saved_path,
+                "Saved request".into(),
+                "Collection".into(),
+                &collection::HttpRequest {
+                    method: collection::Method::Post,
+                    ..Default::default()
+                }
+                .into(),
+                cx,
+            );
         });
     });
 
@@ -500,6 +510,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
     cx.read(|cx| assert_eq!(view.read(cx).tabs.len(), 1));
 
     let first_request = cx.debug_bounds("collection-row-2").unwrap();
+    let second_request = cx.debug_bounds("collection-row-3").unwrap();
     cx.simulate_click(first_request.center(), Modifiers::default());
     let first_page = cx.read(|cx| {
         let view = view.read(cx);
@@ -512,7 +523,6 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
         view.tabs[1].page.entity_id()
     });
 
-    let second_request = cx.debug_bounds("collection-row-3").unwrap();
     assert!(cx.debug_bounds("tab-method-2").is_some());
     cx.simulate_click(second_request.center(), Modifiers::default());
     cx.read(|cx| {
@@ -548,8 +558,24 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
 
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
-            view.open_request(first_path, "Same name".into(), "GET", cx);
-            view.open_request(second_path, "Same name".into(), "POST", cx);
+            view.open_request(
+                first_path,
+                "Same name".into(),
+                "Collection".into(),
+                &collection::HttpRequest::default().into(),
+                cx,
+            );
+            view.open_request(
+                second_path,
+                "Same name".into(),
+                "Collection".into(),
+                &collection::HttpRequest {
+                    method: collection::Method::Post,
+                    ..Default::default()
+                }
+                .into(),
+                cx,
+            );
         });
     });
     let first_page = cx.read(|cx| {
@@ -560,15 +586,36 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
 
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
-            view.open_request(first_path, "Renamed request".into(), "PUT", cx);
+            view.open_request(
+                first_path,
+                "Renamed request".into(),
+                "Renamed collection".into(),
+                &collection::HttpRequest {
+                    method: collection::Method::Put,
+                    ..Default::default()
+                }
+                .into(),
+                cx,
+            );
         });
     });
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(1));
         assert_eq!(view.read(cx).tabs[1].title, "Renamed request");
-        assert_eq!(view.read(cx).tabs[1].method, Some("PUT"));
+        assert_eq!(view.read(cx).tabs[1].method, Some("GET"));
         assert_eq!(view.read(cx).tabs[1].page.entity_id(), first_page);
+        let draft = view.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap();
+        assert_eq!(draft.read(cx).name, "Renamed request");
+        assert_eq!(
+            draft.read(cx).collection.as_deref(),
+            Some("Renamed collection")
+        );
         assert_eq!(view.read(cx).tabs[2].title, "Same name");
         assert_eq!(view.read(cx).tabs[2].method, Some("POST"));
     });

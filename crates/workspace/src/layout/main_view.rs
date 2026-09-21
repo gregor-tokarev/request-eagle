@@ -28,14 +28,6 @@ pub(crate) struct MainView {
     focus: FocusHandle,
 }
 
-struct EmptyPage;
-
-impl Render for EmptyPage {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full()
-    }
-}
-
 impl MainView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let mut view = Self {
@@ -79,7 +71,8 @@ impl MainView {
         &mut self,
         path: &Path,
         name: SharedString,
-        method: &'static str,
+        collection: SharedString,
+        request: &collection::Request,
         cx: &mut Context<Self>,
     ) {
         if let Some(index) = self
@@ -87,22 +80,38 @@ impl MainView {
             .iter()
             .position(|tab| tab.request_path.as_deref() == Some(path))
         {
-            self.tabs[index].title = name;
-            self.tabs[index].method = Some(method);
+            self.tabs[index].title = name.clone();
+            if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>() {
+                draft.update(cx, |draft, cx| {
+                    draft.name = name;
+                    draft.collection = Some(collection);
+                    cx.notify();
+                });
+            }
             self.select_tab(index, cx);
 
             return;
         }
 
-        let page = cx.new(|_| EmptyPage);
-        let index = self.open_tab(name, page, cx);
+        let collection::Request::Http(request) = request;
+        let draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
+        let index = self.open_draft(name, draft, cx);
         self.tabs[index].request_path = Some(path.to_path_buf());
-        self.tabs[index].method = Some(method);
     }
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
-        let page = cx.new(|_| RequestDraft::new());
+        self.open_draft(title.into(), RequestDraft::new(), cx);
+    }
+
+    fn open_draft(
+        &mut self,
+        title: SharedString,
+        draft: RequestDraft,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let method = draft.request.method.as_str();
+        let page = cx.new(|_| draft);
         let id = self.next_id;
         let subscription = cx.subscribe(&page, move |this, _, event: &MethodChanged, cx| {
             if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) {
@@ -112,8 +121,10 @@ impl MainView {
         });
 
         let index = self.open_tab(title, page, cx);
-        self.tabs[index].method = Some("GET");
+        self.tabs[index].method = Some(method);
         self.tabs[index]._request_subscription = Some(subscription);
+
+        index
     }
 
     /// Select by zero-based position. Missing positions leave selection unchanged.
@@ -175,13 +186,16 @@ impl MainView {
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prepare_request(window, cx);
+        window.focus(&self.focus, cx);
+    }
+
+    pub(crate) fn prepare_request(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.selected
             && let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
         {
             draft.update(cx, |draft, cx| draft.prepare(window, cx));
         }
-
-        window.focus(&self.focus, cx);
     }
 
     pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {

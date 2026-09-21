@@ -42,16 +42,21 @@ impl RequestDraft {
             )
             .child(
                 div()
+                    .debug_selector(|| "request-name".into())
                     .text_size(px(14.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Untitled Request"),
+                    .child(self.name.clone()),
             )
             .child(
                 div()
                     .debug_selector(|| "request-collection".into())
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
-                    .child("No collection"),
+                    .child(
+                        self.collection
+                            .clone()
+                            .unwrap_or_else(|| "No collection".into()),
+                    ),
             )
     }
 

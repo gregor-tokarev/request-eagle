@@ -16,8 +16,10 @@ pub(in crate::layout) enum RequestSection {
 
 pub(in crate::layout) struct MethodChanged(pub Method);
 
-/// An unsaved request owned by one tab, independent of the collections registry.
+/// An editable request snapshot owned by one tab, independent of the collections registry.
 pub(in crate::layout) struct RequestDraft {
+    pub(in crate::layout) name: SharedString,
+    pub(in crate::layout) collection: Option<SharedString>,
     pub(in crate::layout) request: HttpRequest,
     pub(in crate::layout) url: Option<Entity<InputState>>,
     pub(in crate::layout) section: RequestSection,
@@ -45,6 +47,8 @@ impl RequestDraft {
 
     pub(in crate::layout) fn new() -> Self {
         Self {
+            name: "Untitled Request".into(),
+            collection: None,
             request: HttpRequest::default(),
             url: None,
             section: RequestSection::Headers,
@@ -58,6 +62,19 @@ impl RequestDraft {
             address_view: None,
             configuration_view: None,
             _subscriptions: Vec::new(),
+        }
+    }
+
+    pub(in crate::layout) fn from_saved(
+        name: SharedString,
+        collection: SharedString,
+        request: HttpRequest,
+    ) -> Self {
+        Self {
+            name,
+            collection: Some(collection),
+            request,
+            ..Self::new()
         }
     }
 
@@ -132,7 +149,12 @@ impl RequestDraft {
 
         if slot.is_none() {
             let id = if is_headers { "headers" } else { "params" };
-            let fields = cx.new(|cx| RequestFields::new(id, window, cx));
+            let values = if is_headers {
+                self.request.headers.as_slice()
+            } else {
+                self.request.query.as_deref().unwrap_or_default()
+            };
+            let fields = cx.new(|cx| RequestFields::new(id, values, window, cx));
             let subscription = cx.subscribe(&fields, move |this, _, event: &FieldsChanged, cx| {
                 if is_headers {
                     this.request.headers = event.0.clone();

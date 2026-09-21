@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
-use collection::{CollectionRegistry, MovePlacement};
+use collection::{CollectionRegistry, MovePlacement, Request};
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
@@ -15,7 +15,8 @@ pub enum CollectionPanelEvent {
     OpenRequest {
         path: PathBuf,
         name: SharedString,
-        method: &'static str,
+        collection: SharedString,
+        request: Request,
     },
 }
 
