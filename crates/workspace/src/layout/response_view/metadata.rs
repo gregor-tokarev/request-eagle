@@ -5,7 +5,11 @@ use gpui_kit::component::{hover_card::HoverCard, *};
 use gpui_kit::*;
 use request::StatusCode;
 
-use super::{content::size_label, view::ResponseView};
+use super::{
+    content::size_label,
+    timing::{duration_label, timing_details},
+    view::ResponseView,
+};
 
 impl ResponseView {
     pub(super) fn metadata(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
@@ -65,32 +69,9 @@ impl ResponseView {
                     .trigger(div().debug_selector(|| "response-time".into()).cursor_text()
                         .child(SelectableText::new("response-time-text", duration_label(elapsed)).document_order(1)))
                     .content(move |_, _, cx| {
-                        let phases = [
-                            ("Prepare", metrics.prepare, cx.theme().muted_foreground),
-                            ("Wait for headers", metrics.waiting, cx.theme().warning),
-                            ("Download", metrics.download, cx.theme().success),
-                            ("Format body", processing, cx.theme().info),
-                        ];
-                        let mut offset = 0.;
-                        let total = elapsed.as_secs_f32().max(f32::EPSILON);
-
                         panel("response-time-overlay", time_focus.clone(), owner, cx)
-                            .w(px(500.))
-                            .child(detail_row("time-title", 0, "Response time", duration_label(elapsed)).font_weight(FontWeight::SEMIBOLD))
-                            .children(phases.into_iter().enumerate().map(|(index, (label, duration, color))| {
-                                let start = offset / total;
-                                offset += duration.as_secs_f32();
-                                h_flex().debug_selector(move || format!("timing-phase-{index}")).gap_3()
-                                    .child(div().w(px(128.)).flex_none().cursor_text()
-                                        .child(SelectableText::new(("phase-label", index), label).document_order((index * 2 + 2) as u64)))
-                                    .child(div().relative().flex_1().h(px(18.)).bg(cx.theme().muted)
-                                        .child(div().absolute().h_full().left(relative(start))
-                                            .w(relative(duration.as_secs_f32() / total)).min_w(px(1.)).bg(color)))
-                                    .child(div().w(px(90.)).flex_none().text_align(TextAlign::Right).cursor_text()
-                                        .child(SelectableText::new(("phase-duration", index), duration_label(duration)).document_order((index * 2 + 3) as u64)))
-                            }))
-                            .child(div().pt_2().text_size(px(11.)).text_color(cx.theme().muted_foreground)
-                                .child(SelectableText::new("timing-note", "Waiting includes connection setup, upload, and the server response. Separate DNS, TCP, TLS and first-byte timings are not available.").document_order(10)))
+                            .w(px(580.))
+                            .child(timing_details(metrics, processing, elapsed, cx))
                     }),
             )
             .child("•")
@@ -155,10 +136,6 @@ fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) 
                 .cursor_text()
                 .child(SelectableText::new((id, 1usize), value).document_order(order * 2 + 1)),
         )
-}
-
-fn duration_label(duration: Duration) -> String {
-    format!("{:.2} ms", duration.as_secs_f64() * 1000.)
 }
 
 fn bytes_label(bytes: usize) -> String {

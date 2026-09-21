@@ -225,6 +225,85 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn timing_waterfall_uses_one_elapsed_time_axis(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        cx.set_reduce_motion(true);
+    });
+    let mut response_view = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            let mut content = response(b"ok", "text/plain");
+            content.execution.elapsed = Duration::from_millis(250);
+            content.processing = Duration::from_millis(50);
+            let Response::Http(http) = &mut content.execution.response;
+            http.metrics = request::HttpMetrics {
+                prepare: Duration::from_millis(20),
+                waiting: Duration::from_millis(150),
+                download: Duration::from_millis(80),
+                ..Default::default()
+            };
+            view.finish(Ok(content), window, cx);
+            view
+        });
+        response_view = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+
+    for width in [1024., 640.] {
+        cx.simulate_resize(gpui_kit::size(px(width), px(768.)));
+        cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        let trigger = cx.debug_bounds("response-time").unwrap();
+        cx.simulate_mouse_move(trigger.center(), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+
+        let plot = cx.debug_bounds("timing-plot").unwrap();
+        let mut previous = None;
+        for (index, (start, duration)) in [(0., 20.), (20., 150.), (170., 80.), (250., 50.)]
+            .into_iter()
+            .enumerate()
+        {
+            let bar = cx
+                .debug_bounds(format!("timing-bar-{index}").leak())
+                .unwrap();
+            assert!((bar.left() - (plot.left() + plot.size.width * (start / 300.))).abs() < px(1.));
+            assert!((bar.size.width - plot.size.width * (duration / 300.)).abs() < px(1.));
+            assert!(bar.left() >= plot.left() && bar.right() <= plot.right() + px(1.));
+            if let Some((right, bottom)) = previous {
+                assert!(
+                    (bar.left() - right).abs() < px(1.),
+                    "phase bars should join end to start"
+                );
+                assert_eq!(bar.top(), bottom, "phase rows should be contiguous");
+            }
+            previous = Some((bar.right(), bar.bottom()));
+        }
+    }
+
+    // Empty measurements must not produce NaN geometry or imply a duration.
+    cx.update(|window, cx| {
+        response_view.as_ref().unwrap().update(cx, |view, cx| {
+            let mut content = response(b"", "text/plain");
+            content.execution.elapsed = Duration::ZERO;
+            content.processing = Duration::ZERO;
+            view.finish(Ok(content), window, cx);
+        });
+    });
+    assert!(cx.debug_bounds("timing-plot").is_some());
+    for index in 0..4 {
+        assert!(
+            cx.debug_bounds(format!("timing-bar-{index}").leak())
+                .is_none()
+        );
+    }
+}
+
+#[gpui_kit::test]
 fn virtual_headers_keep_scrolled_and_wrapped_values_selectable(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);

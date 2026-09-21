@@ -2,6 +2,7 @@ mod body;
 mod content;
 mod headers;
 mod metadata;
+mod timing;
 mod view;
 
 #[cfg(test)]
