@@ -249,13 +249,19 @@ impl CollectionPanel {
 
                 if branch {
                     this.toggle(index, cx);
-                } else if let ItemKind::Request(method) = this.tree.items[index].kind {
+                } else if let Some(file) = this.collections.file(&this.tree.items[index].path) {
                     let item = &this.tree.items[index];
+                    let mut root = index;
+
+                    while let Some(parent) = this.tree.items[root].parent {
+                        root = parent;
+                    }
 
                     cx.emit(CollectionPanelEvent::OpenRequest {
                         path: item.path.clone(),
                         name: item.label.clone(),
-                        method,
+                        collection: this.tree.items[root].label.clone(),
+                        request: file.request.clone(),
                     });
                 }
             }))

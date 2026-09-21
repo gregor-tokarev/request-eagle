@@ -2,7 +2,6 @@
 //! Keybindings have a separate store owned by keybindings_service.
 
 mod appearance;
-mod request;
 mod store;
 
 #[cfg(test)]

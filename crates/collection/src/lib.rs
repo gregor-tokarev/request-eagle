@@ -2,7 +2,6 @@ mod collection;
 mod entry;
 mod order;
 mod registry;
-mod request;
 
 #[cfg(test)]
 mod tests;

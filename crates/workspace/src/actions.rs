@@ -6,6 +6,7 @@ actions!(
         ToggleLeftSidebar,
         OpenSettings,
         OpenGeneralSettings,
+        SendRequest,
         NewTab,
         CloseTab,
         PreviousTab,
@@ -42,6 +43,19 @@ fn register_tab_action<A: Action>(
 }
 
 pub(crate) fn init(cx: &mut App) {
+    keybindings_service::register(
+        SendRequest,
+        "Send request",
+        "Send the request in the active tab.",
+        "Requests",
+        Some("secondary-enter"),
+        // Input has its own Command+Enter action. Match at the input as well
+        // as the workspace so it cannot consume the request shortcut.
+        Some("Workspace || (Workspace > Input)"),
+        cx,
+    )
+    .expect("default send request keybinding should be valid");
+
     register_tab_action(
         NewTab,
         "New tab",

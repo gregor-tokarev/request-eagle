@@ -7,7 +7,7 @@ use std::{
 use environment::{Environment, EnvironmentLoadError};
 use thiserror::Error;
 
-use crate::{Collection, CollectionLoadError};
+use crate::{Collection, CollectionLoadError, Entry, FileEntry};
 
 const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
@@ -110,6 +110,15 @@ impl CollectionRegistry {
         &self.collections
     }
 
+    /// Returns an already loaded request without reading its file on the UI thread.
+    pub fn file(&self, path: &Path) -> Option<&FileEntry> {
+        self.collections.iter().find_map(|collection| {
+            path.starts_with(&collection.path)
+                .then(|| find_file(&collection.entries, path))
+                .flatten()
+        })
+    }
+
     pub fn is_empty(&self) -> bool {
         self.collections.is_empty()
     }
@@ -117,6 +126,16 @@ impl CollectionRegistry {
     pub fn len(&self) -> usize {
         self.collections.len()
     }
+}
+
+fn find_file<'a>(entries: &'a [Entry], path: &Path) -> Option<&'a FileEntry> {
+    entries.iter().find_map(|entry| match entry {
+        Entry::File(file) if file.path == path => Some(file),
+        Entry::Directory(folder) if path.starts_with(&folder.path) => {
+            find_file(&folder.entries, path)
+        }
+        _ => None,
+    })
 }
 
 #[derive(Debug, Error)]

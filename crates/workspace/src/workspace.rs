@@ -56,13 +56,20 @@ impl Layout {
         );
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
-        let sidebar_subscription = cx.subscribe(&sidebar, |this, _, event, cx| match event {
-            CollectionPanelEvent::OpenRequest { path, name, method } => {
-                this.main_view.update(cx, |view, cx| {
-                    view.open_request(path, name.clone(), method, cx);
-                });
-            }
-        });
+        let sidebar_subscription =
+            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::OpenRequest {
+                    path,
+                    name,
+                    collection,
+                    request,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_request(path, name.clone(), collection.clone(), request, cx);
+                        view.prepare_request(window, cx);
+                    });
+                }
+            });
         window.focus(&sidebar.focus_handle(cx), cx);
 
         Self {
@@ -210,6 +217,10 @@ impl Render for Layout {
         let workspace = v_flex()
             .size_full()
             .key_context("Workspace")
+            .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
+                this.main_view
+                    .update(cx, |view, cx| view.send_request(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);
             }))

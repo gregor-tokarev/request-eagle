@@ -1,3 +1,4 @@
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
     button::*,
     checkbox::Checkbox,
@@ -20,24 +21,71 @@ pub(super) struct FieldsChanged(pub Vec<(String, String)>);
 pub(super) struct RequestFields {
     id: &'static str,
     rows: Vec<FieldRow>,
+    generated_headers: Vec<(SharedString, SharedString)>,
+    focus: FocusHandle,
 }
 
 impl EventEmitter<FieldsChanged> for RequestFields {}
 
 impl RequestFields {
-    pub(super) fn new(id: &'static str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(
+        id: &'static str,
+        values: &[(String, String)],
+        generated_headers: &[(String, String)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut fields = Self {
             id,
             rows: Vec::new(),
+            generated_headers: generated_headers
+                .iter()
+                .map(|(name, value)| (name.clone().into(), value.clone().into()))
+                .collect(),
+            focus: cx.focus_handle(),
         };
-        fields.append_row(window, cx);
+
+        for (key, value) in values {
+            fields.append_row(key, value, window, cx);
+        }
+        fields.append_row("", "", window, cx);
 
         fields
     }
 
-    fn append_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = cx.new(|cx| InputState::new(window, cx).placeholder("Key"));
-        let value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
+    pub(super) fn set_generated_headers(
+        &mut self,
+        headers: &[(String, String)],
+        cx: &mut Context<Self>,
+    ) {
+        if self.generated_headers.len() == headers.len()
+            && self
+                .generated_headers
+                .iter()
+                .zip(headers)
+                .all(|((name, value), (key, text))| name.as_ref() == key && value.as_ref() == text)
+        {
+            return;
+        }
+
+        self.generated_headers = headers
+            .iter()
+            .map(|(name, value)| (name.clone().into(), value.clone().into()))
+            .collect();
+        cx.notify();
+    }
+
+    fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let key = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Key")
+                .default_value(key.to_owned())
+        });
+        let value = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Value")
+                .default_value(value.to_owned())
+        });
         let description = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
         let subscriptions = [&key, &value]
             .into_iter()
@@ -48,7 +96,7 @@ impl RequestFields {
                             !row.key.read(cx).value().is_empty()
                                 || !row.value.read(cx).value().is_empty()
                         }) {
-                            this.append_row(window, cx);
+                            this.append_row("", "", window, cx);
                         }
 
                         this.emit_change(cx);
@@ -89,6 +137,7 @@ impl Render for RequestFields {
 
         v_flex()
             .debug_selector(move || format!("{id}-table"))
+            .track_focus(&self.focus)
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
@@ -97,7 +146,7 @@ impl Render for RequestFields {
                     .h(px(30.))
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(36.)).flex_none())
-                    .children(["Key", "Value"].map(|label| {
+                    .children(["Key", "Value", "Description"].map(|label| {
                         div()
                             .flex_1()
                             .min_w_0()
@@ -109,45 +158,68 @@ impl Render for RequestFields {
                             .items_center()
                             .child(label)
                     }))
-                    .child(
+                    .child(div().w(px(30.)).flex_none()),
+            )
+            .children(
+                self.generated_headers
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (name, value))| {
                         h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .px_2()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_ellipsis()
-                                    .child("Description"),
+                            .debug_selector(move || format!("headers-generated-row-{index}"))
+                            .min_h(px(32.))
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .capture_any_mouse_down(cx.listener(
+                                |this, event: &MouseDownEvent, window, cx| {
+                                    if event.button == MouseButton::Left {
+                                        window.focus(&this.focus, cx);
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                            .on_mouse_move(cx.listener(|_, event: &MouseMoveEvent, _, cx| {
+                                if event.pressed_button == Some(MouseButton::Left) {
+                                    cx.notify();
+                                }
+                            }))
+                            .child(div().w(px(36.)).flex_none())
+                            .children(
+                                [
+                                    ("key", name.clone()),
+                                    ("value", value.clone()),
+                                    ("description", SharedString::from("Auto-generated")),
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                .map(
+                                    |(column_index, (column, text))| {
+                                        div()
+                                            .debug_selector(move || {
+                                                format!("headers-generated-{column}-{index}")
+                                            })
+                                            .flex_1()
+                                            .min_w_0()
+                                            .px_2()
+                                            .py(px(7.))
+                                            .border_r_1()
+                                            .border_color(cx.theme().border)
+                                            .cursor_text()
+                                            .when(column == "description", |view| {
+                                                view.text_color(cx.theme().muted_foreground)
+                                            })
+                                            .child(
+                                                SelectableText::new(
+                                                    ("generated-header", index * 3 + column_index),
+                                                    text,
+                                                )
+                                                .document_order((index * 3 + column_index) as u64),
+                                            )
+                                    },
+                                ),
                             )
-                            .child(
-                                Button::new("bulk-edit")
-                                    .ghost()
-                                    .xsmall()
-                                    .label("Bulk Edit")
-                                    .disabled(true),
-                            )
-                            .when(id == "headers", |this| {
-                                this.child(
-                                    Button::new("header-presets")
-                                        .ghost()
-                                        .xsmall()
-                                        .label("Presets")
-                                        .child(Icon::new(IconName::ChevronDown).size(px(11.)))
-                                        .disabled(true),
-                                )
-                            }),
-                    )
-                    .child(
-                        Button::new("field-options")
-                            .ghost()
-                            .xsmall()
-                            .w(px(30.))
-                            .icon(IconName::Ellipsis)
-                            .disabled(true),
-                    ),
+                            .child(div().w(px(30.)).flex_none())
+                    }),
             )
             .children(self.rows.iter().enumerate().map(|(index, row)| {
                 let populated =
@@ -162,6 +234,7 @@ impl Render for RequestFields {
                         |this| {
                             this.child(
                                 Checkbox::new(("enabled", index))
+                                    .debug_selector(move || format!("{id}-enabled-{index}"))
                                     .checked(row.enabled)
                                     .on_click(cx.listener(move |this, enabled, _, cx| {
                                         this.rows[index].enabled = *enabled;

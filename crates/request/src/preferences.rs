@@ -3,18 +3,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersion {
+    /// Negotiate the version; a Host override differing from the URL uses HTTP/1.1.
     #[default]
     Auto,
     Http1_1,
     Http2,
 }
 
-/// Stored request defaults. These are not yet applied to outgoing requests.
+/// Stored defaults, applied when constructing a request executor.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RequestPreferences {
     pub http_version: HttpVersion,
+    /// Total deadline, including reading the response body. Zero disables it.
     pub timeout_ms: u64,
+    /// Maximum buffered response body in MiB (1,048,576 bytes). Zero is unlimited.
     pub max_response_size_mb: u64,
     pub ssl_certificate_verification: bool,
 }
