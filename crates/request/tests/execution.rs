@@ -276,6 +276,106 @@ fn rejects_invalid_urls_schemes_and_headers_before_sending() {
 }
 
 #[test]
+fn rejects_invalid_and_duplicate_host_headers_before_sending() {
+    smol::block_on(async {
+        let executor = executor();
+
+        for value in [
+            "requesteagleruntime/0.041",
+            "",
+            "https://example.com",
+            "example.com/path",
+            "example.com?query",
+            "example.com#fragment",
+            "user@example.com",
+            "bad host",
+            ":8080",
+            "example.com:invalid",
+            "example.com:65536",
+            "::1",
+            "[not-ipv6]",
+            "[::1]suffix",
+        ] {
+            let error = executor
+                .execute(HttpRequest {
+                    path: "http://127.0.0.1:1".into(),
+                    headers: vec![("hOsT".into(), value.into())],
+                    ..HttpRequest::default()
+                })
+                .await
+                .unwrap_err();
+
+            println!("\n  Host: {value:?} -> {error}");
+            assert!(matches!(
+                error,
+                ExecutionError::Http(HttpError::InvalidHost)
+            ));
+            assert!(error.to_string().contains("User-Agent"));
+        }
+
+        let error = executor
+            .execute(HttpRequest {
+                path: "http://127.0.0.1:1".into(),
+                headers: vec![
+                    ("Host".into(), "example.com".into()),
+                    ("host".into(), "example.com".into()),
+                ],
+                ..HttpRequest::default()
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutionError::Http(HttpError::MultipleHosts)
+        ));
+    });
+}
+
+#[test]
+fn preserves_valid_host_overrides_and_user_agent() {
+    smol::block_on(async {
+        let executor = executor();
+
+        for host in [
+            "example.com",
+            "example.com:8080",
+            "example.com:",
+            "localhost",
+            "127.0.0.1:8080",
+            "[::1]",
+            "[2001:db8::1]:8080",
+        ] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec(),
+            )
+            .await;
+            let result = executor
+                .execute(HttpRequest {
+                    path: url,
+                    headers: vec![
+                        ("Host".into(), host.into()),
+                        ("User-Agent".into(), "requesteagleruntime/0.041".into()),
+                    ],
+                    ..HttpRequest::default()
+                })
+                .await
+                .unwrap();
+            let received = server.await;
+
+            assert!(received.head.contains(&format!("\r\nhost: {host}\r\n")));
+            assert!(
+                received
+                    .head
+                    .contains("\r\nuser-agent: requesteagleruntime/0.041\r\n")
+            );
+            let Response::Http(response) = result.response;
+            assert_eq!(response.status.as_u16(), 200);
+        }
+    });
+}
+
+#[test]
 fn reports_transport_and_truncated_body_errors() {
     smol::block_on(async {
         for response in [

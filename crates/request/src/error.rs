@@ -31,6 +31,19 @@ pub enum HttpError {
     #[error("invalid HTTP request: {0}")]
     InvalidRequest(#[from] http_client::http::Error),
 
+    #[error(
+        "invalid Host header: expected a hostname and optional port (example.com:443). Use User-Agent for a client name/version"
+    )]
+    InvalidHost,
+
+    #[error("multiple Host headers: keep only one, or remove them to use the URL's host")]
+    MultipleHosts,
+
+    #[error(
+        "a custom Host that differs from the URL is not supported with forced HTTP/2. Choose Auto or HTTP/1.1 in request settings"
+    )]
+    Http2HostOverride,
+
     #[error("HTTP transport failed: {0:#}")]
     Transport(#[source] anyhow::Error),
 

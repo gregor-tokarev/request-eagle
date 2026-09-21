@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersion {
+    /// Negotiate the version; a Host override differing from the URL uses HTTP/1.1.
     #[default]
     Auto,
     Http1_1,
