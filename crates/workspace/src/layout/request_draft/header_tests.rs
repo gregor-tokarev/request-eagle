@@ -1,7 +1,254 @@
 use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
-use request::Method;
+use request::{
+    ApiKeyLocation, Authentication, HttpRequest, HttpVersion, Method, RequestExecutor,
+    RequestPreferences,
+};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::{RequestDraft, draft::RequestSection};
+use super::{
+    RequestDraft,
+    draft::RequestSection,
+    execution::{generated_headers, outgoing_request},
+};
+
+#[test]
+fn bearer_preview_masks_the_selected_token_and_execution_overrides_url_credentials() {
+    smol::block_on(async {
+        for explicit in [false, true] {
+            let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let request = HttpRequest {
+                path: format!("http://sam:pass@{}/", listener.local_addr().unwrap()),
+                authentication: Authentication::Bearer {
+                    token: "actual-token".into(),
+                },
+                headers: if explicit {
+                    vec![("aUtHoRiZaTiOn".into(), "Bearer explicit-token".into())]
+                } else {
+                    Vec::new()
+                },
+                ..HttpRequest::default()
+            };
+            let preview = generated_headers(&request);
+            let authorization = preview
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                authorization,
+                if explicit {
+                    vec![]
+                } else {
+                    vec!["Bearer [hidden]"]
+                }
+            );
+            assert!(!format!("{preview:?}").contains("actual-token"));
+            assert!(!format!("{preview:?}").contains("c2FtOnBhc3M="));
+
+            let server = smol::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut head = Vec::new();
+
+                while !head.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).await.unwrap();
+                    head.push(byte[0]);
+                    assert!(head.len() < 16 * 1024);
+                }
+
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+
+                String::from_utf8(head).unwrap()
+            });
+            RequestExecutor::new(&RequestPreferences {
+                http_version: HttpVersion::Http1_1,
+                timeout_ms: 2_000,
+                ..RequestPreferences::default()
+            })
+            .unwrap()
+            .execute(outgoing_request(&request))
+            .await
+            .unwrap();
+            let received = server.await;
+            let authorization = received
+                .lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+
+                    name.eq_ignore_ascii_case("authorization")
+                        .then(|| value.trim())
+                })
+                .collect::<Vec<_>>();
+            let expected = if explicit {
+                "Bearer explicit-token"
+            } else {
+                "Bearer actual-token"
+            };
+
+            assert!(received.starts_with("GET / HTTP/1.1\r\n"));
+            assert_eq!(authorization, vec![expected]);
+            assert!(!received.contains("Basic "));
+            assert!(!received.contains("[hidden]"));
+            assert_eq!(
+                request.authentication,
+                Authentication::Bearer {
+                    token: "actual-token".into()
+                }
+            );
+        }
+    });
+}
+
+#[test]
+fn auth_previews_mask_helper_values_and_preserve_url_basic_fallback() {
+    for (authentication, expected) in [
+        (
+            Authentication::Basic {
+                username: "helper-user".into(),
+                password: "helper-password".into(),
+            },
+            vec![("Authorization", "Basic [hidden]")],
+        ),
+        (
+            Authentication::ApiKey {
+                name: "X-Api-Key".into(),
+                value: "helper-secret".into(),
+                location: ApiKeyLocation::Header,
+            },
+            vec![
+                ("Authorization", "Basic c2FtOnBhc3M="),
+                ("X-Api-Key", "[hidden]"),
+            ],
+        ),
+        (
+            Authentication::ApiKey {
+                name: "api_key".into(),
+                value: "helper-secret".into(),
+                location: ApiKeyLocation::Query,
+            },
+            vec![("Authorization", "Basic c2FtOnBhc3M=")],
+        ),
+        (
+            Authentication::None,
+            vec![("Authorization", "Basic c2FtOnBhc3M=")],
+        ),
+    ] {
+        let request = HttpRequest {
+            path: "http://sam:pass@127.0.0.1:8080/".into(),
+            authentication,
+            ..HttpRequest::default()
+        };
+        let preview = generated_headers(&request);
+        let auth_headers = preview
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case("authorization") || name.eq_ignore_ascii_case("x-api-key")
+            })
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(auth_headers, expected);
+        assert!(preview.iter().all(|(name, _)| name != "api_key"));
+
+        for secret in ["helper-user", "helper-password", "helper-secret"] {
+            assert!(!format!("{preview:?}").contains(secret));
+        }
+    }
+}
+
+#[test]
+fn explicit_headers_suppress_auth_helper_preview_rows_case_insensitively() {
+    for (authentication, name) in [
+        (
+            Authentication::Basic {
+                username: "helper-user".into(),
+                password: "helper-password".into(),
+            },
+            "aUtHoRiZaTiOn",
+        ),
+        (
+            Authentication::Bearer {
+                token: "helper-token".into(),
+            },
+            "aUtHoRiZaTiOn",
+        ),
+        (
+            Authentication::ApiKey {
+                name: "X-Api-Key".into(),
+                value: "helper-key".into(),
+                location: ApiKeyLocation::Header,
+            },
+            "x-aPi-kEy",
+        ),
+    ] {
+        let request = HttpRequest {
+            path: "http://sam:pass@127.0.0.1:8080/".into(),
+            authentication,
+            headers: vec![(name.into(), "explicit-value".into())],
+            ..HttpRequest::default()
+        };
+        let preview = generated_headers(&request);
+
+        assert!(
+            preview
+                .iter()
+                .all(|(key, _)| !key.eq_ignore_ascii_case(name))
+        );
+        assert!(!format!("{preview:?}").contains("explicit-value"));
+        assert_eq!(outgoing_request(&request).headers, request.headers);
+    }
+}
+
+#[test]
+fn auth_preview_preserves_unresolved_templates_and_hides_credentials() {
+    for (authentication, name, expected) in [
+        (
+            Authentication::Bearer {
+                token: "{{token}}".into(),
+            },
+            "Authorization",
+            "Bearer [hidden]",
+        ),
+        (
+            Authentication::Basic {
+                username: "{{username}}".into(),
+                password: "{{password}}".into(),
+            },
+            "Authorization",
+            "Basic [hidden]",
+        ),
+        (
+            Authentication::ApiKey {
+                name: "{{header_name}}".into(),
+                value: "{{secret}}".into(),
+                location: ApiKeyLocation::Header,
+            },
+            "{{header_name}}",
+            "[hidden]",
+        ),
+    ] {
+        let request = HttpRequest {
+            path: "https://{{host}}/{{path}}".into(),
+            authentication: authentication.clone(),
+            ..HttpRequest::default()
+        };
+        let preview = generated_headers(&request);
+
+        assert!(preview.contains(&(name.into(), expected.into())));
+        assert_eq!(request.authentication, authentication);
+        assert_eq!(request.path, "https://{{host}}/{{path}}");
+        assert!(request.headers.is_empty());
+        assert_eq!(outgoing_request(&request).authentication, authentication);
+
+        for secret in ["{{token}}", "{{username}}", "{{password}}", "{{secret}}"] {
+            assert!(!format!("{preview:?}").contains(secret));
+        }
+    }
+}
 
 #[gpui_kit::test]
 fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut TestAppContext) {

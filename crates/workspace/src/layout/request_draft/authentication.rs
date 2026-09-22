@@ -164,6 +164,7 @@ impl RequestDraft {
             &editor,
             |this, _, event: &AuthenticationChanged, cx| {
                 this.request.authentication = event.0.clone();
+                this.refresh_generated_headers(cx);
                 cx.notify();
             },
         ));
@@ -278,9 +279,116 @@ impl Render for AuthenticationEditor {
 #[cfg(test)]
 mod tests {
     use gpui_kit::{Modifiers, TestAppContext};
-    use request::Authentication;
+    use request::{ApiKeyLocation, Authentication};
 
     use super::{AuthenticationKind, RequestDraft};
+
+    #[gpui_kit::test]
+    fn authentication_edits_refresh_masked_header_previews(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            request_eagle_theme::init(cx);
+        });
+        let (draft, cx) = cx.add_window_view(|window, cx| {
+            let mut draft = RequestDraft::from_saved(
+                "Authenticated request".into(),
+                "API".into(),
+                request::HttpRequest {
+                    path: "http://sam:pass@example.com/".into(),
+                    authentication: Authentication::ApiKey {
+                        name: "Authorization".into(),
+                        value: "saved-secret".into(),
+                        location: ApiKeyLocation::Header,
+                    },
+                    ..Default::default()
+                },
+            );
+            draft.prepare(window, cx);
+
+            draft
+        });
+        cx.read(|cx| {
+            assert!(
+                draft
+                    .read(cx)
+                    .generated_headers
+                    .contains(&("Authorization".into(), "[hidden]".into(),))
+            );
+        });
+        cx.update(|window, _| window.refresh());
+        let tab = cx.debug_bounds("request-section-Authentication").unwrap();
+        cx.simulate_click(tab.center(), Modifiers::default());
+        cx.update(|window, _| window.refresh());
+        let key_name = cx.debug_bounds("authentication-key-name").unwrap();
+        cx.simulate_click(key_name.center(), Modifiers::default());
+        cx.simulate_keystrokes("secondary-a");
+        cx.simulate_input("X-API-Key");
+        cx.read(|cx| {
+            let headers = &draft.read(cx).generated_headers;
+            assert!(headers.contains(&("X-API-Key".into(), "[hidden]".into())));
+            assert!(headers.contains(&("Authorization".into(), "Basic c2FtOnBhc3M=".into())));
+            assert!(
+                headers
+                    .iter()
+                    .all(|(_, value)| !value.contains("saved-secret"))
+            );
+        });
+        cx.update(|window, _| window.refresh());
+        assert!(cx.debug_bounds("request-section-Headers-count-5").is_some());
+        let editor = cx.read(|cx| {
+            draft
+                .read(cx)
+                .authentication_editor
+                .as_ref()
+                .unwrap()
+                .clone()
+        });
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.kind = AuthenticationKind::Bearer;
+                editor.changed(cx);
+            })
+        });
+        cx.update(|window, _| window.refresh());
+        assert!(cx.debug_bounds("request-section-Headers-count-4").is_some());
+        let token = cx.debug_bounds("authentication-token").unwrap();
+        cx.simulate_click(token.center(), Modifiers::default());
+        cx.simulate_input("edited-secret");
+        cx.read(|cx| {
+            let state = draft.read(cx);
+            assert_eq!(
+                state.request.authentication,
+                Authentication::Bearer {
+                    token: "edited-secret".into(),
+                }
+            );
+            assert!(
+                state
+                    .generated_headers
+                    .contains(&("Authorization".into(), "Bearer [hidden]".into(),))
+            );
+            assert!(state.generated_headers.iter().all(|(name, value)| {
+                name != "X-API-Key"
+                    && !value.contains("edited-secret")
+                    && !value.starts_with("Basic ")
+            }));
+            assert!(editor.read(cx).token.read(cx).presentation().is_masked());
+        });
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.kind = AuthenticationKind::None;
+                editor.changed(cx);
+            })
+        });
+        cx.read(|cx| {
+            assert!(
+                draft
+                    .read(cx)
+                    .generated_headers
+                    .contains(&("Authorization".into(), "Basic c2FtOnBhc3M=".into(),))
+            );
+        });
+    }
 
     #[gpui_kit::test]
     fn saved_authentication_opens_masked_and_edits_update_the_request(cx: &mut TestAppContext) {

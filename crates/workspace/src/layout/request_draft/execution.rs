@@ -4,7 +4,7 @@ use collection::{HttpRequest, Method};
 use environment::{Environment, EnvironmentLoadError};
 use gpui_kit::*;
 use preferences::Preferences;
-use request::{ExecutionError, RequestExecutor};
+use request::{ApiKeyLocation, Authentication, ExecutionError, RequestExecutor};
 
 use super::draft::RequestDraft;
 
@@ -30,7 +30,7 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     } else {
         0
     };
-    let explicit: Vec<_> = request
+    let mut effective: Vec<_> = request
         .headers
         .iter()
         .filter(|(name, _)| {
@@ -41,10 +41,37 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         })
         .cloned()
         .collect();
+
+    // These cells are selectable text, so keep helper credentials masked even
+    // when the Authentication editor has temporarily revealed an input.
+    let authentication = match &request.authentication {
+        Authentication::Basic { .. } => Some(("Authorization", "Basic [hidden]")),
+        Authentication::Bearer { .. } => Some(("Authorization", "Bearer [hidden]")),
+        Authentication::ApiKey {
+            name,
+            location: ApiKeyLocation::Header,
+            ..
+        } if !name.trim().is_empty() => Some((name.as_str(), "[hidden]")),
+        _ => None,
+    }
+    .filter(|(name, _)| {
+        !effective
+            .iter()
+            .any(|(key, _)| key.eq_ignore_ascii_case(name))
+            // Send supplies the body's Content-Type before applying helpers.
+            && !(name.eq_ignore_ascii_case("content-type")
+                && (form.is_some() || (supports_body && request.body.is_some())))
+    })
+    .map(|(name, value)| (name.to_owned(), value.to_owned()));
+
+    if let Some(authentication) = &authentication {
+        effective.push(authentication.clone());
+    }
+
     let mut headers = request::generated_headers(
         request.method,
         &request_url(&request.path),
-        &explicit,
+        &effective,
         body_bytes,
     );
 
@@ -57,12 +84,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.push(("Content-Type".into(), form.content_type().into()));
     } else if supports_body
         && request.body.is_some()
-        && !explicit
+        && !effective
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
     {
         headers.push(("Content-Type".into(), "application/json".into()));
     }
+
+    headers.extend(authentication);
 
     headers
 }
