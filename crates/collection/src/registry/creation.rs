@@ -61,6 +61,7 @@ impl CollectionRegistry {
                 body: None,
                 form: None,
                 query: None,
+                ..HttpRequest::default()
             }),
         )
     }

@@ -22,6 +22,25 @@ request collections in local, readable files.
 
 The project is in early development. macOS builds are available for Apple Silicon.
 
+## Reusing requests
+
+Use **Import** above the request tabs to paste a cURL command or choose a Postman
+v2 collection JSON file. Import creates a new saved collection, preserves nested
+folders, and opens the requests for editing. Existing collections are not replaced.
+Unsupported options, authentication schemes, and scripts produce an import error.
+
+The **Authentication** tab supports Basic, Bearer, and API key credentials. Use
+`{{name}}` placeholders in request fields and add matching strings to the
+collection's `environment.toml`, such as `base_url = "https://api.example.com"`.
+The app reloads this file on each Send and reports undefined variables before
+sending a request.
+
+**History** keeps the latest 100 request attempts and can reopen an editable copy.
+Open tabs and unsaved edits recover on the next launch. History and recovery are
+stored locally under `~/.request-eagle` with private file permissions; they can
+contain request credentials and bodies. Clear history from its panel.
+`REQUEST_EAGLE_STATE_DIR` selects a separate history/recovery directory for development.
+
 ## Releases
 
 The `Daily patch release` workflow checks `main` every day at 06:17 UTC. If there

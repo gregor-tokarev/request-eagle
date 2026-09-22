@@ -264,6 +264,7 @@ impl CollectionPanel {
                     cx.emit(CollectionPanelEvent::OpenRequest {
                         id: file.id.clone().into(),
                         path: item.path.clone(),
+                        environment_path: this.tree.items[root].path.join("environment.toml"),
                         name: item.label.clone(),
                         collection: this.tree.items[root].label.clone(),
                         folders: item

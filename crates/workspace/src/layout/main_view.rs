@@ -19,14 +19,21 @@ pub(super) struct PageTab {
     dirty: bool,
     pub(super) page: AnyView,
     _request_subscription: Option<Subscription>,
+    _workflow_subscriptions: Vec<Subscription>,
 }
 
 pub(crate) struct MainView {
     pub(super) tabs: Vec<PageTab>,
     pub(super) selected: Option<usize>,
     next_id: u64,
+    pub(crate) collection_paths: Vec<PathBuf>,
+    pub(super) recovery: Option<super::recovery::Recovery>,
+    pub(super) history: crate::history::History,
+    pub(super) history_visible: bool,
+    pub(super) workflow_error: Option<String>,
+    pub(super) storage_error: Option<String>,
     scroll: ScrollHandle,
-    scroll_to_tab: Option<usize>,
+    pub(super) scroll_to_tab: Option<usize>,
     focus: FocusHandle,
     pending_close: Option<u64>,
     save_error: Option<String>,
@@ -53,6 +60,12 @@ impl MainView {
             tabs: Vec::new(),
             selected: None,
             next_id: 1,
+            collection_paths: Vec::new(),
+            recovery: None,
+            history: crate::history::History::default(),
+            history_visible: false,
+            workflow_error: None,
+            storage_error: None,
             scroll: ScrollHandle::new(),
             scroll_to_tab: None,
             focus: cx.focus_handle(),
@@ -81,6 +94,7 @@ impl MainView {
             dirty: false,
             page: page.into(),
             _request_subscription: None,
+            _workflow_subscriptions: Vec::new(),
         });
         self.next_id += 1;
 
@@ -121,9 +135,15 @@ impl MainView {
         let collection::Request::Http(request) = request;
         let mut draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
         draft.folders = folders;
+        draft.environment_path = self
+            .collection_paths
+            .iter()
+            .find(|root| path.starts_with(root))
+            .map(|root| root.join("environment.toml"));
         let index = self.open_draft(name, draft, cx);
         self.tabs[index].request_path = Some(path.to_path_buf());
         self.tabs[index].request_id = Some(request_id);
+        self.save_session(cx);
     }
 
     pub(crate) fn relocate_request(
@@ -160,7 +180,7 @@ impl MainView {
         self.open_draft(title.into(), RequestDraft::new(), cx);
     }
 
-    fn open_draft(
+    pub(super) fn open_draft(
         &mut self,
         title: SharedString,
         draft: RequestDraft,
@@ -183,9 +203,22 @@ impl MainView {
             }
         });
 
+        let changed = cx.observe(&page, |this, page, cx| this.recover_draft_change(&page, cx));
+        let sent = cx.subscribe(
+            &page,
+            |this, _, entry: &crate::history::HistoryEntry, cx| {
+                if let Err(error) = this.history.push(entry.clone()) {
+                    this.storage_error = Some(format!("Could not save request history: {error}"));
+                }
+                cx.notify();
+            },
+        );
+
         let index = self.open_tab(title, page, cx);
         self.tabs[index].method = Some(method);
         self.tabs[index]._request_subscription = Some(subscription);
+        self.tabs[index]._workflow_subscriptions = vec![changed, sent];
+        self.save_session(cx);
 
         index
     }
@@ -203,6 +236,7 @@ impl MainView {
 
         self.selected = Some(index);
         self.scroll_to_tab = Some(index);
+        self.save_session(cx);
 
         cx.notify();
     }
@@ -268,6 +302,7 @@ impl MainView {
         });
 
         self.scroll_to_tab = self.selected;
+        self.save_session(cx);
 
         cx.notify();
     }
@@ -644,6 +679,7 @@ impl Render for MainView {
                     .bg(cx.theme().tab_bar)
                     .border_b_1()
                     .border_color(cx.theme().border)
+                    .child(self.workflow_toolbar(cx))
                     .child(self.tab_strip(window, cx))
                     .child(
                         Button::new("new-tab")
@@ -673,6 +709,29 @@ impl Render for MainView {
                         .text_color(cx.theme().danger)
                         .child(error),
                 )
+            })
+            .when_some(self.workflow_error.clone(), |view, error| {
+                view.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            })
+            .when_some(self.storage_error.clone(), |view, error| {
+                view.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            })
+            .when(self.history_visible, |view| {
+                view.child(self.history_panel(cx))
             })
             .child(
                 div()

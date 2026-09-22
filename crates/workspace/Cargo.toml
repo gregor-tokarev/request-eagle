@@ -9,11 +9,16 @@ dev-profiler = ["gpui-kit/profiler"]
 [dependencies]
 collection = { path = "../collection" }
 collection_panel = { path = "../collection_panel" }
+dirs = "6"
+environment = { path = "../environment" }
 settings_ui = { path = "../settings_ui" }
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html"] }
 preferences = { path = "../preferences" }
 request = { path = "../request" }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+tempfile = "3"
+url = "2"
 keybindings_service = { path = "../keybindings_service" }
 updater = { path = "../updater" }
 request_eagle_theme = { package = "theme", path = "../theme" }

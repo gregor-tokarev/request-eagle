@@ -31,6 +31,14 @@ operation, including the response body, is bounded by the timeout. Dropping its
 future cancels the operation. Response limits apply to both downloaded and decompressed body bytes, including
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
+`HttpRequest::authentication` supports Basic credentials, Bearer tokens, and API
+keys in a header or query parameter. The Authentication tab edits these values,
+which are saved with the request. Environment placeholders can keep reusable
+credentials outside shared request files. Explicit headers with the same name
+take precedence, ignoring case; explicit query parameters take precedence with
+case-sensitive names. Authentication headers are removed on cross-origin
+redirects, and API key query values are omitted from the Referer header.
+
 Proxy preferences default to the system/environment proxy. Custom mode supports
 HTTP or HTTPS proxy servers, separate HTTP/HTTPS request selection, Basic proxy
 authentication, and comma-separated bypass hosts, domains, and IP ranges. A domain
@@ -63,8 +71,18 @@ contents. File MIME types are inferred from their extensions, with
 application/octet-stream as the fallback. A missing or unreadable file produces
 an error before connecting. Form preparation is covered by the request timeout.
 
-URLs must be absolute and already resolved. Collection environment substitution,
-authentication editors, and UI Send actions are outside this module.
+URLs passed to the executor must be absolute and already resolved. Use
+`resolve_variables(&request, &variables)` to substitute `{{name}}` placeholders
+in the URL, header and query names and values, UTF-8 body, and authentication
+fields before execution. It returns a copy and reports missing variables or
+malformed placeholders before sending. Values are substituted once; binary
+bodies remain unchanged.
+
+The app reads the collection's `environment.toml` on every Send. Its top-level
+string entries supply the variables, for example `base_url = "https://api.example.com"`.
+Requests can then use `{{base_url}}/accounts` and `Bearer {{token}}` without
+replacing the saved templates. Environment values are inserted as written;
+query editor values receive URL encoding when the HTTP request is built.
 
 `Request` and `Response` are protocol enums. HTTP details live in `http.rs`, while
 `executor.rs` dispatches requests. Add WebSocket, GraphQL, gRPC, or another protocol

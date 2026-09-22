@@ -31,6 +31,7 @@ pub(super) struct Layout {
     _sidebar_subscription: Subscription,
     _request_save_subscription: Subscription,
     _new_request_save_subscription: Subscription,
+    _import_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -57,6 +58,11 @@ impl Layout {
             |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
         );
 
+        let collection_paths = collections
+            .collections()
+            .iter()
+            .map(|collection| collection.path.clone())
+            .collect();
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
@@ -83,12 +89,18 @@ impl Layout {
                 CollectionPanelEvent::OpenRequest {
                     id,
                     path,
+                    environment_path,
                     name,
                     collection,
                     folders,
                     request,
                 } => {
                     this.main_view.update(cx, |view, cx| {
+                        if let Some(root) = environment_path.parent()
+                            && !view.collection_paths.iter().any(|path| path == root)
+                        {
+                            view.collection_paths.push(root.to_path_buf());
+                        }
                         view.open_request(
                             path,
                             id.clone(),
@@ -103,8 +115,32 @@ impl Layout {
                 }
             });
         window.focus(&sidebar.focus_handle(cx), cx);
+        let main_view = cx.new(|cx| {
+            let mut view = MainView::new(cx);
+            view.collection_paths = collection_paths;
+            view
+        });
+        let import_subscription = cx.subscribe_in(
+            &main_view,
+            window,
+            |this, _, event: &crate::layout::workflow::ImportRequested, window, cx| {
+                let requests = event
+                    .requests
+                    .iter()
+                    .map(|request| collection::ImportedRequest {
+                        name: request.name.clone(),
+                        folders: request.folders.clone(),
+                        request: request.request.clone(),
+                    })
+                    .collect();
+                let result = this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.import_requests(&event.name, requests, window, cx)
+                });
+                this.main_view
+                    .update(cx, |view, cx| view.imported_requests(result, window, cx));
+            },
+        );
 
-        let main_view = cx.new(MainView::new);
         let request_save_subscription = cx.subscribe_in(
             &main_view,
             window,
@@ -143,6 +179,7 @@ impl Layout {
             _sidebar_subscription: sidebar_subscription,
             _request_save_subscription: request_save_subscription,
             _new_request_save_subscription: new_request_save_subscription,
+            _import_subscription: import_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -369,6 +406,13 @@ pub fn init(collections: CollectionRegistry, updater: Entity<Updater>, cx: &mut 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
         let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
+        if let Some(directory) = crate::layout::recovery::state_directory() {
+            layout.update(cx, |layout, cx| {
+                layout
+                    .main_view
+                    .update(cx, |view, cx| view.enable_workflow_storage(directory, cx));
+            });
+        }
         on_toggle_sidebar(&layout, cx);
         on_open_settings(&layout, window.window_handle(), cx);
 

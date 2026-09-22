@@ -7,7 +7,7 @@ use http_client::{
     },
 };
 
-use crate::HttpError;
+use crate::{Authentication, HttpError};
 
 const REDIRECT_LIMIT: u32 = 100;
 
@@ -16,6 +16,7 @@ pub(crate) async fn send(
     request: Request<Option<Vec<u8>>>,
     mut url: Url,
     follow: bool,
+    authentication: &Authentication,
 ) -> Result<Response<AsyncBody>, HttpError> {
     let (mut parts, body) = request.into_parts();
     let mut body = body.map(Bytes::from);
@@ -82,7 +83,8 @@ pub(crate) async fn send(
             }
         }
 
-        if next.host_str() != url.host_str()
+        if next.scheme() != url.scheme()
+            || next.host_str() != url.host_str()
             || next.port_or_known_default() != url.port_or_known_default()
         {
             for header in [
@@ -96,16 +98,24 @@ pub(crate) async fn send(
             }
 
             parts.headers.remove("cookie2");
+
+            if let Some(name) = authentication.header_name() {
+                parts.headers.remove(name);
+            }
         }
 
         // Match the transport's Referer behavior without including URL credentials.
         if !(url.scheme() == "https" && next.scheme() == "http") {
-            let _ = url.set_username("");
-            let _ = url.set_password(None);
+            let mut referer = url.clone();
+            let _ = referer.set_username("");
+            let _ = referer.set_password(None);
+            authentication.remove_query_credentials(&mut referer);
 
-            if let Ok(referer) = url.as_str().parse() {
+            if let Ok(referer) = referer.as_str().parse() {
                 parts.headers.insert(REFERER, referer);
             }
+        } else {
+            parts.headers.remove(REFERER);
         }
 
         parts.uri = uri;

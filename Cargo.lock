@@ -1077,6 +1077,7 @@ dependencies = [
  "dirs 6.0.0",
  "environment",
  "request",
+ "rustix",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -8953,15 +8954,20 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "collection_panel",
+ "dirs 6.0.0",
+ "environment",
  "gpui-kit",
  "keybindings_service",
  "preferences",
  "request",
+ "serde",
  "serde_json",
  "settings_ui",
  "smol",
+ "tempfile",
  "theme",
  "updater",
+ "url",
 ]
 
 [[package]]

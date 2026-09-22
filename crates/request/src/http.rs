@@ -82,6 +82,12 @@ impl HttpExecutor {
         }
 
         let request_body_bytes = request.body.as_ref().map_or(0, Vec::len);
+
+        request
+            .authentication
+            .apply(&mut request.headers, &mut url)?;
+        let authentication = request.authentication;
+
         let mut builder = Request::builder()
             .method(request.method.as_str())
             .uri(url.as_str());
@@ -141,9 +147,14 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
-        let response =
-            crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
-                .await?;
+        let response = crate::redirects::send(
+            client.as_ref(),
+            request,
+            url,
+            self.follow_all_redirects,
+            &authentication,
+        )
+        .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         let mut body = Vec::new();

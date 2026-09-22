@@ -24,6 +24,8 @@ pub struct HttpRequest {
     pub form: Option<FormBody>,
     #[serde(default)]
     pub query: Option<Vec<(String, String)>>,
+    #[serde(default, skip_serializing_if = "crate::Authentication::is_none")]
+    pub authentication: crate::Authentication,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -66,9 +68,9 @@ pub enum Method {
     Post,
     Put,
     Patch,
+    Delete,
     Head,
     Options,
-    Delete,
 }
 
 impl Method {
@@ -78,9 +80,9 @@ impl Method {
             Self::Post => "POST",
             Self::Put => "PUT",
             Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
             Self::Head => "HEAD",
             Self::Options => "OPTIONS",
-            Self::Delete => "DELETE",
         }
     }
 }

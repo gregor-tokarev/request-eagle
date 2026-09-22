@@ -1,9 +1,14 @@
+use std::{io, path::Path};
+
 use collection::{HttpRequest, Method};
+use environment::{Environment, EnvironmentLoadError};
 use gpui_kit::*;
 use preferences::Preferences;
-use request::RequestExecutor;
+use request::{ExecutionError, RequestExecutor};
 
 use super::draft::RequestDraft;
+
+impl EventEmitter<crate::history::HistoryEntry> for RequestDraft {}
 
 fn request_url(path: &str) -> String {
     let path = path.trim();
@@ -84,6 +89,26 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
     request
 }
 
+pub(super) fn resolve_request(
+    request: &HttpRequest,
+    environment_path: Option<&Path>,
+) -> Result<HttpRequest, ExecutionError> {
+    let variables = match environment_path.map(Environment::from_file) {
+        Some(Ok(environment)) => environment.entries,
+        Some(Err(EnvironmentLoadError::Read { source, .. }))
+            if source.kind() == io::ErrorKind::NotFound =>
+        {
+            Default::default()
+        }
+        Some(Err(error)) => return Err(ExecutionError::InvalidVariables(error.to_string())),
+        None => Default::default(),
+    };
+    let resolved = request::resolve_variables(request, &variables)
+        .map_err(|error| ExecutionError::InvalidVariables(error.to_string()))?;
+
+    Ok(outgoing_request(&resolved))
+}
+
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
         self.generated_headers = generated_headers(&self.request);
@@ -101,10 +126,17 @@ impl RequestDraft {
         }
 
         self.prepare(window, cx);
+        cx.emit(crate::history::HistoryEntry::new(
+            self.name.to_string(),
+            self.request.clone(),
+            self.environment_path.clone(),
+        ));
+
         let response = self.response.as_ref().unwrap().clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let request = outgoing_request(&self.request);
+        let request = self.request.clone();
+        let environment_path = self.environment_path.clone();
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -115,6 +147,10 @@ impl RequestDraft {
             .filter(|(settings, _)| settings == &preferences)
             .map(|(_, executor)| executor.clone());
         let task = cx.background_executor().spawn(async move {
+            let request = match resolve_request(&request, environment_path.as_deref()) {
+                Ok(request) => request,
+                Err(error) => return (None, Err(error)),
+            };
             let executor = match cached
                 .map(Ok)
                 .unwrap_or_else(|| RequestExecutor::new(&preferences))

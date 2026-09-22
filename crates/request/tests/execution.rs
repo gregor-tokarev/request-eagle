@@ -107,6 +107,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
                 ("tag".into(), "a & b".into()),
                 ("tag".into(), "c+d".into()),
             ]),
+            ..HttpRequest::default()
         };
         let run = executor().execute(&draft);
         draft.path = "http://unused.invalid".into();

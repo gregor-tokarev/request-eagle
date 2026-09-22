@@ -27,6 +27,7 @@ pub enum CollectionPanelEvent {
     OpenRequest {
         id: SharedString,
         path: PathBuf,
+        environment_path: PathBuf,
         name: SharedString,
         collection: SharedString,
         folders: Vec<SharedString>,

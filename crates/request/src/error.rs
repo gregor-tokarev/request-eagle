@@ -4,6 +4,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ExecutionError {
+    #[error("could not resolve request variables: {0}")]
+    InvalidVariables(String),
+
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
 
@@ -19,6 +22,9 @@ pub enum ExecutionError {
 
 #[derive(Debug, Error)]
 pub enum HttpError {
+    #[error("invalid authentication: {0}")]
+    InvalidAuthentication(&'static str),
+
     #[error("invalid proxy settings: {0}")]
     InvalidProxy(&'static str),
 

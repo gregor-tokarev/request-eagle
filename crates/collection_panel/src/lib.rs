@@ -3,6 +3,7 @@
 mod creation;
 mod dragging;
 mod editing;
+mod import;
 mod panel;
 mod rows;
 mod save_request;

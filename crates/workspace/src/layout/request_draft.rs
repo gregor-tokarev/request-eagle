@@ -1,3 +1,4 @@
+mod authentication;
 mod body;
 mod controls;
 mod draft;
@@ -13,5 +14,7 @@ mod header_tests;
 mod saved_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod variable_tests;
 
 pub(super) use draft::RequestDraft;

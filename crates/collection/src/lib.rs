@@ -9,6 +9,7 @@ mod tests;
 pub use collection::{Collection, CollectionLoadError, CollectionSaveError};
 pub use entry::{DirEntry, Entry, FileEntry};
 pub use registry::{
-    CollectionEditError, CollectionRegistry, CollectionRegistryLoadError, MovePlacement,
+    CollectionEditError, CollectionRegistry, CollectionRegistryLoadError, ImportedFile,
+    ImportedRequest, MovePlacement,
 };
 pub use request::{HttpRequest, Method, Request};

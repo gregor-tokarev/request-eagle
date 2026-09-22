@@ -12,6 +12,7 @@ pub(in crate::layout) enum RequestSection {
     Params,
     Headers,
     Body,
+    Authentication,
 }
 
 /// An editable request snapshot owned by one tab, independent of the collections registry.
@@ -21,6 +22,7 @@ pub(in crate::layout) struct RequestDraft {
     pub(in crate::layout) folders: Vec<SharedString>,
     pub(in crate::layout) request: HttpRequest,
     pub(in crate::layout) saved_request: HttpRequest,
+    pub(in crate::layout) environment_path: Option<std::path::PathBuf>,
     pub(in crate::layout) url: Option<Entity<InputState>>,
     pub(in crate::layout) section: RequestSection,
     pub(super) params: Option<Entity<RequestFields>>,
@@ -29,6 +31,7 @@ pub(in crate::layout) struct RequestDraft {
     pub(super) body: Option<Entity<EditorState>>,
     pub(super) url_form: Option<Entity<super::form_body::FormEditor>>,
     pub(super) multipart_form: Option<Entity<super::form_body::FormEditor>>,
+    pub(super) authentication_editor: Option<Entity<super::authentication::AuthenticationEditor>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
@@ -53,6 +56,7 @@ impl RequestDraft {
             folders: Vec::new(),
             request: HttpRequest::default(),
             saved_request: HttpRequest::default(),
+            environment_path: None,
             url: None,
             section: RequestSection::Headers,
             params: None,
@@ -61,6 +65,7 @@ impl RequestDraft {
             body: None,
             url_form: None,
             multipart_form: None,
+            authentication_editor: None,
             response: None,
             split: None,
             task: None,
@@ -110,10 +115,16 @@ impl RequestDraft {
         // notify GPUI; doing it inside render schedules an unnecessary frame.
         self.url_state(window, cx);
 
-        if self.section == RequestSection::Body {
-            self.prepare_body(window, cx);
-        } else {
-            self.fields_state(window, cx);
+        match self.section {
+            RequestSection::Body => {
+                self.prepare_body(window, cx);
+            }
+            RequestSection::Authentication => {
+                self.authentication_state(window, cx);
+            }
+            RequestSection::Params | RequestSection::Headers => {
+                self.fields_state(window, cx);
+            }
         }
 
         self.refresh_generated_headers(cx);
@@ -298,6 +309,7 @@ impl Render for RequestConfiguration {
                 let content = match draft.section {
                     RequestSection::Headers | RequestSection::Params => draft.fields(window, cx),
                     RequestSection::Body => draft.body(window, cx),
+                    RequestSection::Authentication => draft.authentication(window, cx),
                 };
 
                 v_flex()

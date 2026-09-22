@@ -14,9 +14,9 @@ use crate::actions::SendRequest;
 fn method_color(method: Method, cx: &App) -> Hsla {
     match method {
         Method::Get => cx.theme().success,
+        Method::Head | Method::Options => cx.theme().muted_foreground,
         Method::Post => cx.theme().warning,
         Method::Put | Method::Patch => cx.theme().info,
-        Method::Head | Method::Options => cx.theme().muted_foreground,
         Method::Delete => cx.theme().danger,
     }
 }
@@ -213,6 +213,7 @@ impl RequestDraft {
         let sections = [
             ("Params", Some(RequestSection::Params)),
             ("Headers", Some(RequestSection::Headers)),
+            ("Authentication", Some(RequestSection::Authentication)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
         ];
 
