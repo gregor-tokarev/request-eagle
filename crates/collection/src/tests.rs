@@ -148,11 +148,8 @@ body = [0, 255, 42]
 
             collection.save_files().unwrap();
 
-            collection = Collection::from_path(
-                &root,
-                environment(&root.join("environment.toml")),
-            )
-            .unwrap();
+            collection =
+                Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
             let Entry::File(entry) = &collection.entries[0] else {
                 panic!("expected request file");
             };
@@ -162,6 +159,25 @@ body = [0, 255, 42]
             assert_eq!(fs::read(&upload_path).unwrap(), [0, 255, 42]);
         }
     }
+
+    let Entry::File(entry) = &mut collection.entries[0] else {
+        panic!("expected request file");
+    };
+    let Request::Http(request) = &mut entry.request;
+    request.form = None;
+    collection.save_files().unwrap();
+
+    let reloaded =
+        Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+    let Entry::File(entry) = &reloaded.entries[0] else {
+        panic!("expected request file");
+    };
+    let Request::Http(request) = &entry.request;
+    assert!(
+        request.form.is_none(),
+        "switching back to raw removes the saved form"
+    );
+    assert_eq!(request.body, Some(vec![0, 255, 42]));
 
     fs::remove_dir_all(root).unwrap();
 }

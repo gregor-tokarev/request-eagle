@@ -158,6 +158,7 @@ request_custom = 'keep the request metadata'
         path: "https://example.com/v2/users".into(),
         headers: vec![("Accept".into(), "application/json".into())],
         body: Some(b"new body".to_vec()),
+        form: None,
         query: Some(vec![("page".into(), "2".into())]),
     };
 
