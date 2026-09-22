@@ -36,7 +36,9 @@ authentication, and comma-separated bypass hosts, domains, and IP ranges. A doma
 also matches its subdomains; `*.example.com` and `.example.com` are accepted, and
 `*` bypasses all destinations. Bypassed or unselected request types connect
 directly. Disabled mode ignores all proxies. Proxy settings are saved with the
-other local preferences, including credentials, and apply to the next request.
+other local preferences and apply to the next request. Credentials are held in
+memory by this crate; the preferences crate persists them in the OS keyring,
+with only a credential reference in the preferences file.
 In Settings > Proxy, pasting a full proxy URL into the host field fills the
 protocol, hostname, port, and authentication fields. Valid edits save automatically.
 

@@ -1,4 +1,5 @@
 use gpui_kit::component::{
+    button::Button,
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     select::{SearchableVec, Select, SelectEvent, SelectState},
@@ -26,6 +27,8 @@ pub(crate) struct ProxySettings {
     pub(super) password: Entity<InputState>,
     bypass: Entity<InputState>,
     pub(super) error: Option<String>,
+    save_generation: u64,
+    window: AnyWindowHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -121,7 +124,9 @@ impl ProxySettings {
             username,
             password,
             bypass,
-            error: None,
+            error: preferences::credential_error(cx).map(str::to_owned),
+            save_generation: 0,
+            window: window.window_handle(),
             _subscriptions: subscriptions,
         }
     }
@@ -138,6 +143,7 @@ impl ProxySettings {
         let proxy = match ProxyPreferences::from_url(&value) {
             Ok(proxy) => proxy,
             Err(error) => {
+                self.save_generation += 1;
                 self.error = Some(error.into());
                 cx.notify();
 
@@ -173,11 +179,18 @@ impl ProxySettings {
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
+        self.save_generation += 1;
+        let generation = self.save_generation;
         let mut proxy = self.draft.clone();
         proxy.host = self.host.read(cx).value().trim().to_owned();
         proxy.username = self.username.read(cx).value().to_string();
         proxy.password = self.password.read(cx).value().to_string();
         proxy.bypass = self.bypass.read(cx).value().trim().to_owned();
+        // Retain the marker on drafts whose empty fields need to be restored.
+        // Explicit credential edits are replacements, even while the store is locked.
+        proxy.credentials_unavailable = self.draft.credentials_unavailable
+            && proxy.username == self.draft.username
+            && proxy.password == self.draft.password;
 
         match self.port.read(cx).value().trim().parse::<u16>() {
             Ok(port) if port > 0 => proxy.port = port,
@@ -189,22 +202,43 @@ impl ProxySettings {
             _ => {}
         }
 
-        if let Err(error) = proxy.validate() {
+        let mut validation = proxy.clone();
+        validation.credentials_unavailable = false;
+
+        if let Err(error) = validation.validate() {
             self.error = Some(error.into());
         } else {
-            let result = if proxy == cx.global::<Preferences>().request.proxy {
-                Ok(())
-            } else {
-                preferences::update(cx, |preferences| preferences.request.proxy = proxy.clone())
-            };
-
-            match result {
-                Ok(()) => {
-                    self.draft = proxy;
-                    self.error = None;
-                }
-                Err(error) => self.error = Some(format!("Could not save proxy settings: {error}")),
-            }
+            self.draft = proxy.clone();
+            let save = preferences::update_proxy(proxy, cx);
+            let window = self.window;
+            cx.spawn(async move |this, cx| {
+                let result = save.await;
+                let _ = cx.update_window(window, |_, window, cx| {
+                    this.update(cx, |this, cx| {
+                        if this.save_generation == generation {
+                            if result.is_ok() {
+                                let saved = cx.global::<Preferences>().request.proxy.clone();
+                                if this.username.read(cx).value().as_ref() != saved.username {
+                                    this.username.update(cx, |input, cx| {
+                                        input.set_value(saved.username.clone(), window, cx)
+                                    });
+                                }
+                                if this.password.read(cx).value().as_ref() != saved.password {
+                                    this.password.update(cx, |input, cx| {
+                                        input.set_value(saved.password.clone(), window, cx)
+                                    });
+                                }
+                                this.draft = saved;
+                            }
+                            this.error = result
+                                .err()
+                                .map(|error| format!("Could not save proxy settings: {error}"));
+                            cx.notify();
+                        }
+                    })
+                });
+            })
+            .detach();
         }
 
         cx.notify();
@@ -415,6 +449,7 @@ impl Render for ProxySettings {
             )
             .when_some(self.error.clone(), |this, error| {
                 this.child(div().text_color(cx.theme().danger).child(error))
+                    .child(Button::new("retry-proxy-save").label("Retry").on_click(cx.listener(|this, _, _, cx| this.save(cx))))
             })
     }
 }

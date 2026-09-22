@@ -29,8 +29,14 @@ pub struct ProxyPreferences {
     pub http: bool,
     pub https: bool,
     pub authentication: bool,
+    // Read old preferences for migration, but never serialize credentials again.
+    #[serde(skip_serializing)]
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
+    /// Prevent authenticated requests while the OS credential store is unavailable.
+    #[serde(skip)]
+    pub credentials_unavailable: bool,
     /// Comma-separated hosts, domains, or IP ranges that connect directly.
     pub bypass: String,
 }
@@ -47,6 +53,7 @@ impl Default for ProxyPreferences {
             authentication: false,
             username: String::new(),
             password: String::new(),
+            credentials_unavailable: false,
             bypass: String::new(),
         }
     }
@@ -115,6 +122,12 @@ impl ProxyPreferences {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.mode != ProxyMode::Custom {
             return Ok(());
+        }
+
+        if self.authentication && self.credentials_unavailable {
+            return Err(
+                "Proxy credentials are unavailable. Unlock your keyring and retry in Settings > Proxy.",
+            );
         }
 
         if !self.http && !self.https {
