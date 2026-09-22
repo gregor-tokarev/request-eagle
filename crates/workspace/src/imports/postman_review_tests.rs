@@ -801,3 +801,68 @@ fn postman_keeps_control_escapes_and_safely_encoded_structured_query_fields() {
         }
     }
 }
+
+#[test]
+fn postman_raw_defaults_reject_unresolved_enabled_header_names() {
+    for language in [None, Some("json"), Some("text")] {
+        for headers in [
+            json!([{"key": "{{header_name}}", "value": "application/xml"}]),
+            json!("{{header_name}}: application/xml"),
+        ] {
+            let mut body = json!({"mode": "raw", "raw": "{}"});
+
+            if let Some(language) = language {
+                body["options"] = json!({"raw": {"language": language}});
+            }
+
+            let source = json!({"item": [{"request": {
+                "method": "POST", "url": "https://example.test", "header": headers, "body": body
+            }}]});
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(error.contains("Unresolved Postman header names"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn postman_raw_defaults_keep_literal_and_collection_resolved_content_type_names() {
+    for name in ["Content-Type", "{{header_name}}"] {
+        let source = json!({"variable": [{"key": "header_name", "value": "Content-Type"}], "item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "header": [{"key": name, "value": "application/xml"}],
+            "body": {"mode": "raw", "raw": "{}", "options": {"raw": {"language": "json"}}}
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.headers,
+            [("Content-Type".into(), "application/xml".into())]
+        );
+    }
+
+    for body in [
+        json!({"mode": "raw", "raw": ""}),
+        json!({"mode": "raw", "raw": "{}", "disabled": true}),
+    ] {
+        let source = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "header": [{"key": "{{header_name}}", "value": "application/xml"}], "body": body
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert!(imported[0].request.body.is_none());
+        assert_eq!(
+            imported[0].request.headers,
+            [("{{header_name}}".into(), "application/xml".into())]
+        );
+    }
+
+    let source = json!({"item": [{"request": {
+        "method": "POST", "url": "https://example.test",
+        "header": [{"key": "{{header_name}}", "value": "application/xml", "disabled": true}],
+        "body": {"mode": "raw", "raw": "{}", "options": {"raw": {"language": "json"}}}
+    }}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.headers,
+        [("Content-Type".into(), "application/json".into())]
+    );
+}

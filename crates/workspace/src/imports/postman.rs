@@ -497,6 +497,16 @@ fn read_body(
                 Some("html") => "text/html",
                 _ => "text/plain",
             };
+
+            if request.headers.iter().any(|(name, _)| name.contains("{{"))
+                && !request
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            {
+                return Err("Unresolved Postman header names can change the default Content-Type. Resolve the header names before importing raw bodies.".into());
+            }
+
             add_content_type(request, content_type);
 
             let is_json = strips_json_comments(raw, language, source_headers, &request.headers)?;

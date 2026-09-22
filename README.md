@@ -60,6 +60,8 @@ credential headers or query parameters. Remove the conflicting field or disable
 the helper before importing. Structured URL credentials must be moved to the
 request's Basic authentication helper first. Authentication values must be strings;
 declared attribute types must be `string`.
+Raw-body variable substitution is literal. JSON supplied through variables must
+already be valid JSON; Postman runtime comment removal is not applied to it.
 
 The **Authentication** tab supports Basic, Bearer, and API key credentials. Use
 `{{name}}` placeholders in request fields and add matching strings to the

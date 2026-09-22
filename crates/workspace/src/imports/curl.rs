@@ -408,6 +408,8 @@ fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
         );
     }
 
+    validate_form_parameter(name)?;
+
     let value = if literal {
         value
     } else {
@@ -428,9 +430,15 @@ fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
             return Err("Import cURL uploads using one absolute file path per --form flag.".into());
         }
 
+        let path = upload_path(path)?;
+
+        if let Some(filename) = path.file_name() {
+            validate_form_parameter(&filename.to_string_lossy())?;
+        }
+
         return Ok(MultipartField::File {
             name: name.into(),
-            path: upload_path(path)?,
+            path,
         });
     }
 
@@ -442,6 +450,18 @@ fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
         name: name.into(),
         value: value.into(),
     })
+}
+
+fn validate_form_parameter(value: &str) -> Result<(), String> {
+    // cURL and the encoder both escape quotes and CR/LF, but cURL leaves
+    // backslashes and other ASCII controls literal in names and filenames.
+    if value.chars().any(|character| {
+        character == '\\' || (character.is_ascii_control() && !matches!(character, '\r' | '\n'))
+    }) {
+        return Err("cURL multipart names and filenames with backslashes or ASCII control characters other than CR/LF cannot be preserved. Use a different name or filename.".into());
+    }
+
+    Ok(())
 }
 
 fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {

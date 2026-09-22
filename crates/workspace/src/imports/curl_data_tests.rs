@@ -457,3 +457,71 @@ fn curl_get_reuses_only_existing_query_separators() {
         }
     }
 }
+
+#[test]
+fn curl_multipart_rejects_name_characters_with_different_native_escaping() {
+    for character in (0_u8..=31)
+        .chain([127, b'\\'])
+        .map(char::from)
+        .filter(|character| !matches!(character, '\r' | '\n'))
+    {
+        for flag in ["-F", "--form", "--form-string"] {
+            let error = parse_import(&format!(
+                "curl https://example.test {flag} 'prefix{character}suffix=hello'"
+            ))
+            .unwrap_err();
+            assert!(error.contains("names and filenames"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn curl_multipart_rejects_filename_characters_with_different_native_escaping() {
+    for character in (0_u8..=31)
+        .chain([127, b'\\'])
+        .map(char::from)
+        .filter(|character| !matches!(character, '\r' | '\n'))
+    {
+        let error = parse_import(&format!(
+            "curl https://example.test -F 'file=@/tmp/prefix{character}suffix.txt'"
+        ))
+        .unwrap_err();
+        assert!(error.contains("names and filenames"), "{error}");
+    }
+}
+
+#[test]
+fn curl_multipart_retains_matching_parameter_escaping_and_literal_values() {
+    // Native cURL uses the same quote/CR/LF escaping and preserves UTF-8.
+    let name = "UTF-8 é漢🙂 \"\r\n";
+    let value = "literal\t\\value";
+
+    for flag in ["-F", "--form-string"] {
+        let imported = parse_import(&format!(
+            "curl https://example.test {flag} '{name}={value}'"
+        ))
+        .unwrap();
+        assert_eq!(
+            imported[0].request.form,
+            Some(FormBody::Multipart(vec![MultipartField::Text {
+                name: name.into(),
+                value: value.into(),
+            }]))
+        );
+    }
+
+    for path in [
+        "/tmp/UTF-8 é漢🙂 \r\nfile.txt",
+        "/tmp/folder\t\\name/upload-é.txt",
+    ] {
+        let imported =
+            parse_import(&format!("curl https://example.test -F 'file=@{path}'")).unwrap();
+        assert_eq!(
+            imported[0].request.form,
+            Some(FormBody::Multipart(vec![MultipartField::File {
+                name: "file".into(),
+                path: path.into(),
+            }]))
+        );
+    }
+}
