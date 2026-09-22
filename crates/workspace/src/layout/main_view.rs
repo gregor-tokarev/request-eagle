@@ -113,6 +113,33 @@ impl MainView {
         self.tabs[index].request_path = Some(path.to_path_buf());
     }
 
+    pub(crate) fn relocate_request(
+        &mut self,
+        previous_path: &Path,
+        path: &Path,
+        name: SharedString,
+        collection: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.request_path.as_deref() == Some(previous_path))
+        {
+            tab.request_path = Some(path.to_path_buf());
+            tab.title = name.clone();
+
+            if let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() {
+                draft.update(cx, |draft, cx| {
+                    draft.name = name;
+                    draft.collection = Some(collection);
+                    cx.notify();
+                });
+            }
+            cx.notify();
+        }
+    }
+
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
         self.open_draft(title.into(), RequestDraft::new(), cx);

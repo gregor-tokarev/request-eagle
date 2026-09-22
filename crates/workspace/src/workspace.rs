@@ -59,6 +59,22 @@ impl Layout {
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::RequestRelocated {
+                    previous_path,
+                    path,
+                    name,
+                    collection,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.relocate_request(
+                            previous_path,
+                            path,
+                            name.clone(),
+                            collection.clone(),
+                            cx,
+                        );
+                    });
+                }
                 CollectionPanelEvent::OpenRequest {
                     path,
                     name,

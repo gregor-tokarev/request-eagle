@@ -16,6 +16,12 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{editing::RenameEditor, tree::CollectionTree};
 
 pub enum CollectionPanelEvent {
+    RequestRelocated {
+        previous_path: PathBuf,
+        path: PathBuf,
+        name: SharedString,
+        collection: SharedString,
+    },
     OpenRequest {
         path: PathBuf,
         name: SharedString,

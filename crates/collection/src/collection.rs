@@ -6,7 +6,7 @@ use std::{
 
 use environment::Environment;
 use thiserror::Error;
-use toml_edit::{DocumentMut, Item, TableLike};
+use toml_edit::{DocumentMut, Item, TableLike, Value};
 use uuid::Uuid;
 
 use crate::{DirEntry, Entry, FileEntry};
@@ -232,12 +232,37 @@ fn merge_item(target: &mut Item, update: &Item) {
     }
 
     match (target, update) {
-        (Item::Value(target), Item::Value(update)) => {
+        (Item::Value(target), Item::Value(update)) => merge_value(target, update),
+        (target, update) => *target = update.clone(),
+    }
+}
+
+fn merge_value(target: &mut Value, update: &Value) {
+    match (target, update) {
+        (Value::String(target), Value::String(update)) if target.value() == update.value() => {}
+        (Value::Integer(target), Value::Integer(update)) if target.value() == update.value() => {}
+        (Value::Float(target), Value::Float(update)) if target.value() == update.value() => {}
+        (Value::Boolean(target), Value::Boolean(update)) if target.value() == update.value() => {}
+        (Value::Datetime(target), Value::Datetime(update)) if target.value() == update.value() => {}
+        (Value::Array(target), Value::Array(update)) => {
+            while target.len() > update.len() {
+                target.remove(target.len() - 1);
+            }
+
+            for (index, value) in update.iter().enumerate() {
+                if let Some(current) = target.get_mut(index) {
+                    merge_value(current, value);
+                } else {
+                    target.push_formatted(value.clone());
+                }
+            }
+        }
+        (Value::InlineTable(target), Value::InlineTable(update)) => merge_table(target, update),
+        (target, update) => {
             let decor = target.decor().clone();
             *target = update.clone();
             *target.decor_mut() = decor;
         }
-        (target, update) => *target = update.clone(),
     }
 }
 

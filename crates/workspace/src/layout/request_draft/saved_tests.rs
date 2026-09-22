@@ -389,3 +389,74 @@ fn reverting_an_edit_clears_dirty_state_and_closes_without_prompt(cx: &mut TestA
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
     assert!(cx.debug_bounds("unsaved-request-prompt").is_none());
 }
+
+#[gpui_kit::test]
+fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) {
+    let fixture = SavedRequestFixture::new();
+    fs::create_dir_all(fixture.directory.join("Other")).unwrap();
+    let (tabs, draft, cx) = fixture.open(cx);
+    edit_url(cx, "https://example.com/edited-before-rename");
+
+    click(cx, "collection-row-0");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Renamed API");
+    cx.simulate_keystrokes("enter");
+    let renamed = fixture.directory.join("Renamed API/example.toml");
+    cx.read(|cx| {
+        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&renamed));
+        assert_eq!(draft.read(cx).collection.as_deref(), Some("Renamed API"));
+        assert!(draft.read(cx).is_dirty());
+    });
+    cx.simulate_keystrokes("secondary-s");
+    assert!(cx.debug_bounds("request-save-error").is_none());
+    let collection::Request::Http(saved) =
+        collection::FileEntry::from_path(&renamed).unwrap().request;
+    assert_eq!(saved.path, "https://example.com/edited-before-rename");
+
+    // Expand the renamed collection, then drag the open request to another one.
+    click(cx, "collection-row-0");
+    let source = cx.debug_bounds("collection-row-1").unwrap().center();
+    let target = cx.debug_bounds("collection-row-2").unwrap().center();
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: source,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.simulate_event(gpui_kit::MouseMoveEvent {
+        position: target,
+        pressed_button: Some(gpui_kit::MouseButton::Left),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    cx.simulate_event(gpui_kit::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: target,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    let moved = fixture.directory.join("Other/example.toml");
+    cx.read(|cx| {
+        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&moved));
+        assert_eq!(draft.read(cx).collection.as_deref(), Some("Other"));
+    });
+    edit_url(cx, "https://example.com/edited-after-move");
+    cx.simulate_keystrokes("secondary-s");
+    cx.simulate_keystrokes("secondary-w");
+    click(cx, "collection-row-2");
+    cx.read(|cx| {
+        assert_eq!(tabs.read(cx).tabs.len(), 2);
+        let reopened = tabs.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap();
+        assert_eq!(
+            reopened.read(cx).request.path,
+            "https://example.com/edited-after-move"
+        );
+        assert!(!reopened.read(cx).is_dirty());
+    });
+}

@@ -260,3 +260,57 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     assert_eq!(reloaded.path, "https://example.com/edited");
     assert_eq!(reloaded.body, None);
 }
+
+#[test]
+fn request_saves_preserve_comments_inside_unchanged_and_edited_arrays() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let arrays = r#"headers = [
+  # Required response format.
+  [
+    'Accept', # Header name.
+    'application/json', # Header value.
+  ], # Required for this endpoint.
+]
+query = [
+  ['page', '1'], # Current page.
+  # Apply this filter.
+  ['active', 'true'], # Only active users.
+]
+"#;
+    fs::write(
+        &path,
+        format!(
+            "id = 'list'\nname = 'List users'\nschema_version = 1\n[request]\ntype = 'http'\nmethod = 'GET'\npath = '/users'\n{arrays}"
+        ),
+    )
+    .unwrap();
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
+    request.path = "https://example.com/edited".into();
+
+    registry.update_request(&path, (&request).into()).unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(
+        content.ends_with(arrays),
+        "array formatting changed: {content}"
+    );
+
+    request.headers[0].1 = "text/plain".into();
+    request.query.as_mut().unwrap()[0].1 = "2".into();
+    registry.update_request(&path, (&request).into()).unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    let edited_arrays = arrays
+        .replace("'application/json'", "\"text/plain\"")
+        .replace("'1'", "\"2\"");
+    assert!(
+        content.ends_with(&edited_arrays),
+        "array comments changed: {content}"
+    );
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    assert_eq!(reloaded.headers, request.headers);
+    assert_eq!(reloaded.query, request.query);
+}
