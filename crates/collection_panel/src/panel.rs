@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use collection::{CollectionRegistry, MovePlacement, Request};
 use gpui_kit::component::{
@@ -92,6 +96,22 @@ impl CollectionPanel {
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
         }
+    }
+
+    /// Save the editor's request and refresh the snapshot used when reopening it.
+    pub fn save_request(
+        &mut self,
+        path: &Path,
+        request: Request,
+        cx: &mut Context<Self>,
+    ) -> Result<(), collection::CollectionEditError> {
+        self.collections.update_request(path, request)?;
+        let selected = self
+            .selected
+            .map(|index| self.tree.items[index].path.clone());
+        self.rebuild_tree(selected.as_deref(), None, cx);
+
+        Ok(())
     }
 
     pub(super) fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {

@@ -7,7 +7,7 @@ pub enum Request {
     Http(HttpRequest),
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: Method,
     /// An absolute HTTP or HTTPS URL when executing the request.

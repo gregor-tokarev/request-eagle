@@ -1,11 +1,13 @@
 use std::{
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
 use environment::Environment;
 use thiserror::Error;
-use toml_edit::{DocumentMut, Item, Table};
+use toml_edit::{DocumentMut, Item, TableLike};
+use uuid::Uuid;
 
 use crate::{DirEntry, Entry, FileEntry};
 
@@ -185,12 +187,26 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
                 source,
             })?;
 
+    // Optional fields omitted by serialization must also disappear from the file.
+    if let Some(request) = document
+        .get_mut("request")
+        .and_then(Item::as_table_like_mut)
+    {
+        for field in ["body", "query"] {
+            if updates["request"].get(field).is_none() {
+                request.remove(field);
+            }
+        }
+    }
+
     merge_table(document.as_table_mut(), updates.as_table());
 
     let raw_content = document.to_string();
-    fs::write(&entry.path, &raw_content).map_err(|source| CollectionSaveError::Write {
-        path: entry.path.clone(),
-        source,
+    write_file_atomically(&entry.path, raw_content.as_bytes()).map_err(|source| {
+        CollectionSaveError::Write {
+            path: entry.path.clone(),
+            source,
+        }
     })?;
 
     entry.raw_content = raw_content;
@@ -198,7 +214,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
     Ok(())
 }
 
-fn merge_table(target: &mut Table, updates: &Table) {
+fn merge_table(target: &mut dyn TableLike, updates: &dyn TableLike) {
     for (key, update) in updates.iter() {
         if let Some(current) = target.get_mut(key) {
             merge_item(current, update);
@@ -209,10 +225,57 @@ fn merge_table(target: &mut Table, updates: &Table) {
 }
 
 fn merge_item(target: &mut Item, update: &Item) {
+    if let (Some(target), Some(update)) = (target.as_table_like_mut(), update.as_table_like()) {
+        merge_table(target, update);
+
+        return;
+    }
+
     match (target, update) {
-        (Item::Table(target), Item::Table(update)) => merge_table(target, update),
+        (Item::Value(target), Item::Value(update)) => {
+            let decor = target.decor().clone();
+            *target = update.clone();
+            *target.decor_mut() = decor;
+        }
         (target, update) => *target = update.clone(),
     }
+}
+
+fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
+    let permissions = match fs::metadata(path) {
+        Ok(metadata) => {
+            let permissions = metadata.permissions();
+            if permissions.readonly() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "The request file is read-only.",
+                ));
+            }
+
+            Some(permissions)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let temporary = path.with_file_name(format!(".request-eagle-{}.tmp", Uuid::new_v4()));
+    let mut file = fs::File::create_new(&temporary)?;
+    let result = (|| {
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+
+        fs::rename(&temporary, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+
+    result
 }
 
 fn file_name(path: &Path) -> String {

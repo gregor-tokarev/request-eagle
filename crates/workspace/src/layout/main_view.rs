@@ -4,7 +4,7 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::request_draft::{MethodChanged, RequestDraft};
+use super::request_draft::RequestDraft;
 use crate::actions::{CloseTab, NewTab};
 
 const TAB_WIDTH: Pixels = px(176.);
@@ -15,6 +15,7 @@ pub(super) struct PageTab {
     pub(super) title: SharedString,
     pub(super) request_path: Option<PathBuf>,
     pub(super) method: Option<&'static str>,
+    dirty: bool,
     pub(super) page: AnyView,
     _request_subscription: Option<Subscription>,
 }
@@ -26,7 +27,17 @@ pub(crate) struct MainView {
     scroll: ScrollHandle,
     scroll_to_tab: Option<usize>,
     focus: FocusHandle,
+    pending_close: Option<u64>,
+    save_error: Option<String>,
 }
+
+pub(crate) struct RequestSaveRequested {
+    pub(crate) tab_id: u64,
+    pub(crate) path: PathBuf,
+    pub(crate) request: collection::HttpRequest,
+}
+
+impl EventEmitter<RequestSaveRequested> for MainView {}
 
 impl MainView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
@@ -37,6 +48,8 @@ impl MainView {
             scroll: ScrollHandle::new(),
             scroll_to_tab: None,
             focus: cx.focus_handle(),
+            pending_close: None,
+            save_error: None,
         };
 
         view.new_tab(cx);
@@ -56,6 +69,7 @@ impl MainView {
             title: title.into(),
             request_path: None,
             method: None,
+            dirty: false,
             page: page.into(),
             _request_subscription: None,
         });
@@ -113,9 +127,16 @@ impl MainView {
         let method = draft.request.method.as_str();
         let page = cx.new(|_| draft);
         let id = self.next_id;
-        let subscription = cx.subscribe(&page, move |this, _, event: &MethodChanged, cx| {
-            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) {
-                tab.method = Some(event.0.as_str());
+        let subscription = cx.observe(&page, move |this, page, cx| {
+            let draft = page.read(cx);
+            let method = Some(draft.request.method.as_str());
+            let dirty = draft.is_dirty();
+
+            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id)
+                && (tab.method != method || tab.dirty != dirty)
+            {
+                tab.method = method;
+                tab.dirty = dirty;
                 cx.notify();
             }
         });
@@ -131,6 +152,11 @@ impl MainView {
     pub(crate) fn select_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.tabs.len() {
             return;
+        }
+
+        if self.selected != Some(index) {
+            self.pending_close = None;
+            self.save_error = None;
         }
 
         self.selected = Some(index);
@@ -169,6 +195,21 @@ impl MainView {
             return;
         }
 
+        if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
+            && draft.read(cx).is_dirty()
+        {
+            self.select_tab(index, cx);
+            self.pending_close = Some(self.tabs[index].id);
+            cx.notify();
+            return;
+        }
+
+        self.remove_tab(index, cx);
+    }
+
+    fn remove_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.pending_close = None;
+        self.save_error = None;
         self.tabs.remove(index);
         self.selected = self.selected.and_then(|selected| {
             if self.tabs.is_empty() {
@@ -183,6 +224,112 @@ impl MainView {
         self.scroll_to_tab = self.selected;
 
         cx.notify();
+    }
+
+    pub(crate) fn save_active_request(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.selected.and_then(|index| self.tabs.get(index)) else {
+            return;
+        };
+        let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() else {
+            return;
+        };
+        let Some(path) = tab.request_path.clone() else {
+            self.save_error = Some(
+                "This tab has no collection file. Create a request in the sidebar to save it."
+                    .into(),
+            );
+            cx.notify();
+            return;
+        };
+
+        self.save_error = None;
+        cx.emit(RequestSaveRequested {
+            tab_id: tab.id,
+            path,
+            request: draft.read(cx).request.clone(),
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn finish_save(
+        &mut self,
+        event: &RequestSaveRequested,
+        result: Result<(), collection::CollectionEditError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == event.tab_id) else {
+            return;
+        };
+
+        match result {
+            Ok(()) => {
+                if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>() {
+                    draft.update(cx, |draft, cx| draft.mark_saved(event.request.clone(), cx));
+                    self.tabs[index].dirty = draft.read(cx).is_dirty();
+                }
+                self.save_error = None;
+
+                if self.pending_close == Some(event.tab_id) && !self.tabs[index].dirty {
+                    self.remove_tab(index, cx);
+                    self.focus(window, cx);
+                }
+            }
+            Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
+        }
+
+        cx.notify();
+    }
+
+    fn close_confirmation(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        h_flex()
+            .debug_selector(|| "unsaved-request-prompt".into())
+            .flex_none()
+            .px_3()
+            .py_2()
+            .gap_2()
+            .bg(cx.theme().muted)
+            .child(
+                div()
+                    .flex_1()
+                    .child("Save changes before closing this request?"),
+            )
+            .child(
+                Button::new("save-and-close-request")
+                    .debug_selector(|| "save-and-close-request".into())
+                    .small()
+                    .primary()
+                    .label("Save")
+                    .on_click(cx.listener(|this, _, _, cx| this.save_active_request(cx))),
+            )
+            .child(
+                Button::new("discard-request-changes")
+                    .debug_selector(|| "discard-request-changes".into())
+                    .small()
+                    .label("Discard")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if let Some(index) = this
+                            .tabs
+                            .iter()
+                            .position(|tab| Some(tab.id) == this.pending_close)
+                        {
+                            this.remove_tab(index, cx);
+                            this.focus(window, cx);
+                        }
+                    })),
+            )
+            .child(
+                Button::new("cancel-close-request")
+                    .debug_selector(|| "cancel-close-request".into())
+                    .small()
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.pending_close = None;
+                        this.save_error = None;
+                        this.focus(window, cx);
+                        cx.notify();
+                    })),
+            )
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -289,7 +436,11 @@ impl MainView {
             .debug_selector(move || format!("page-tab-{id}"))
             .group("page-tab")
             .selected(selected)
-            .accessibility_label(tab.title.clone())
+            .accessibility_label(if tab.dirty {
+                format!("{}, unsaved changes", tab.title).into()
+            } else {
+                tab.title.clone()
+            })
             .set_position(index + 1, self.tabs.len())
             .flex_none()
             .w(TAB_WIDTH)
@@ -335,6 +486,15 @@ impl MainView {
                     .text_ellipsis()
                     .child(tab.title.clone()),
             )
+            .when(tab.dirty, |this| {
+                this.child(
+                    div()
+                        .debug_selector(move || format!("tab-dirty-{id}"))
+                        .flex_none()
+                        .text_color(cx.theme().warning)
+                        .child("•"),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -398,6 +558,20 @@ impl Render for MainView {
                             })),
                     ),
             )
+            .when(self.pending_close.is_some(), |this| {
+                this.child(self.close_confirmation(cx))
+            })
+            .when_some(self.save_error.clone(), |this, error| {
+                this.child(
+                    div()
+                        .debug_selector(|| "request-save-error".into())
+                        .flex_none()
+                        .px_3()
+                        .py_2()
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            })
             .child(
                 div()
                     .id("tab-content")

@@ -6,9 +6,29 @@ use std::{
 use thiserror::Error;
 
 use crate::collection::{load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry};
+use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request};
 
 impl CollectionRegistry {
+    /// Saves a request without replacing its identity or externally edited metadata.
+    pub fn update_request(
+        &mut self,
+        path: &Path,
+        request: Request,
+    ) -> Result<(), CollectionEditError> {
+        for collection in &mut self.collections {
+            if let Some(Entry::File(file)) = find_entry(&mut collection.entries, path) {
+                let mut updated = load_file(path)?;
+                updated.request = request;
+                save_file(&mut updated)?;
+                *file = updated;
+
+                return Ok(());
+            }
+        }
+
+        Err(CollectionEditError::NotFound)
+    }
+
     /// Request names live in TOML; collection and folder names live on disk.
     pub fn rename(&mut self, path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
         let name = name.trim();

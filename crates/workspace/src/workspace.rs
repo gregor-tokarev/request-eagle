@@ -29,6 +29,7 @@ pub(super) struct Layout {
 
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
+    _request_save_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -72,10 +73,22 @@ impl Layout {
             });
         window.focus(&sidebar.focus_handle(cx), cx);
 
+        let main_view = cx.new(MainView::new);
+        let request_save_subscription = cx.subscribe_in(
+            &main_view,
+            window,
+            |this, view, event: &crate::layout::main_view::RequestSaveRequested, window, cx| {
+                let result = this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.save_request(&event.path, event.request.clone().into(), cx)
+                });
+                view.update(cx, |view, cx| view.finish_save(event, result, window, cx));
+            },
+        );
+
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
-            main_view: cx.new(MainView::new),
+            main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
@@ -84,6 +97,7 @@ impl Layout {
             previous_focus: None,
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
+            _request_save_subscription: request_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -220,6 +234,10 @@ impl Render for Layout {
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.main_view
                     .update(cx, |view, cx| view.send_request(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SaveRequest, _, cx| {
+                this.main_view
+                    .update(cx, |view, cx| view.save_active_request(cx));
             }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);

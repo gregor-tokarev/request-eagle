@@ -7,6 +7,7 @@ actions!(
         OpenSettings,
         OpenGeneralSettings,
         SendRequest,
+        SaveRequest,
         NewTab,
         CloseTab,
         PreviousTab,
@@ -55,6 +56,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default send request keybinding should be valid");
+
+    keybindings_service::register(
+        SaveRequest,
+        "Save request",
+        "Save changes to the request in the active tab.",
+        "Requests",
+        Some("secondary-s"),
+        Some("Workspace || (Workspace > Input)"),
+        cx,
+    )
+    .expect("default save request keybinding should be valid");
 
     register_tab_action(
         NewTab,

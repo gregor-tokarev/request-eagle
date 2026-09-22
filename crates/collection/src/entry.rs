@@ -30,6 +30,12 @@ pub struct DirEntry {
     pub entries: Vec<Entry>,
 }
 
+impl FileEntry {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, crate::CollectionLoadError> {
+        crate::collection::load_file(path.as_ref())
+    }
+}
+
 impl Entry {
     pub fn path(&self) -> &Path {
         match self {
