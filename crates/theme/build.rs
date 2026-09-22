@@ -23,10 +23,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut generated = String::from("const EMBEDDED_THEME_SETS: &[&str] = &[\n");
     for path in theme_files {
         println!("cargo:rerun-if-changed={}", path.display());
-        generated.push_str(&format!(
-            "    include_str!({:?}),\n",
-            path.to_string_lossy()
-        ));
+
+        // Embed the contents so generated source is identical across worktrees.
+        let contents = fs::read_to_string(&path)?;
+        generated.push_str(&format!("    {contents:?},\n"));
     }
     generated.push_str("];\n");
 

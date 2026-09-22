@@ -22,6 +22,20 @@ request collections in local, readable files.
 
 The project is in early development. macOS builds are available for Apple Silicon.
 
+## Releases
+
+The `Daily patch release` workflow checks `main` every day at 06:17 UTC. If there
+are commits after the latest stable release tag, it increments the app's patch
+version in `Cargo.toml` and `Cargo.lock`, commits the change, and pushes a `vX.Y.Z`
+tag. It then calls the macOS workflow to build, sign, notarize, and publish the
+release. With no new commits, it skips publishing unless the latest tag still
+needs a release after a failed run. It can also be started manually from Actions.
+
+The workflow uses `GITHUB_TOKEN` with `contents: write` and the existing Apple
+signing secrets. Repository rules must allow this token to push release commits
+to `main` and create tags. The macOS workflow is called directly because tag
+pushes made with `GITHUB_TOKEN` do not trigger another workflow.
+
 ## Build from source
 
 On macOS, install Rust and the Xcode command-line tools. On Linux, install

@@ -1,6 +1,12 @@
 name: Release macOS
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to release
+        required: true
+        type: string
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
@@ -20,7 +26,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-macos-${{ github.ref }}
+  group: release-macos-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -35,12 +41,10 @@ jobs:
       - name: Resolve release tag
         id: release
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
+          tag="$RELEASE_TAG"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Expected a vX.Y.Z tag, got: $tag" >&2
             exit 1
