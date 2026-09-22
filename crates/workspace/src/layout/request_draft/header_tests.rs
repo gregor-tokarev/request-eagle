@@ -1,15 +1,95 @@
 use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
 use request::{
-    ApiKeyLocation, Authentication, HttpRequest, HttpVersion, Method, RequestExecutor,
-    RequestPreferences,
+    ApiKeyLocation, Authentication, FormBody, HttpRequest, HttpVersion, Method, MultipartField,
+    RequestExecutor, RequestPreferences,
 };
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{
     RequestDraft,
     draft::RequestSection,
-    execution::{generated_headers, outgoing_request},
+    execution::{generated_headers, outgoing_request, resolve_request},
 };
+
+#[test]
+fn form_owned_headers_skip_helpers_in_preview_and_variable_resolution() {
+    for form in [
+        FormBody::UrlEncoded(vec![("name".into(), "value".into())]),
+        FormBody::Multipart(vec![MultipartField::Text {
+            name: "name".into(),
+            value: "value".into(),
+        }]),
+    ] {
+        for name in ["cOnTeNt-TyPe", "cOnTeNt-LeNgTh", "tRaNsFeR-EnCoDiNg"] {
+            let request = HttpRequest {
+                method: Method::Post,
+                path: "https://example.test/form".into(),
+                form: Some(form.clone()),
+                authentication: Authentication::ApiKey {
+                    name: name.into(),
+                    value: "{{unused_helper}}".into(),
+                    location: ApiKeyLocation::Header,
+                },
+                ..Default::default()
+            };
+            let headers = generated_headers(&request);
+
+            assert!(headers.contains(&("Content-Type".into(), form.content_type().into())));
+            assert!(headers.iter().all(|(name, value)| {
+                !name.eq_ignore_ascii_case("transfer-encoding") && !value.contains("[hidden]")
+            }));
+            let lengths = headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .map(|(_, value)| value.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                lengths,
+                form.encoded_len()
+                    .map(|length| length.to_string())
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            );
+            let outgoing = resolve_request(&request, None).unwrap();
+            assert_eq!(outgoing.authentication, request.authentication);
+            assert_eq!(outgoing.form, request.form);
+            assert!(request.headers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn raw_and_inactive_form_framing_helpers_remain_active() {
+    for (method, form) in [
+        (Method::Post, None),
+        (
+            Method::Get,
+            Some(FormBody::UrlEncoded(vec![("name".into(), "value".into())])),
+        ),
+    ] {
+        for name in ["Content-Length", "Transfer-Encoding"] {
+            let request = HttpRequest {
+                method,
+                path: "https://example.test/form".into(),
+                body: Some(b"raw body".to_vec()),
+                form: form.clone(),
+                authentication: Authentication::ApiKey {
+                    name: name.into(),
+                    value: "{{active_helper}}".into(),
+                    location: ApiKeyLocation::Header,
+                },
+                ..Default::default()
+            };
+            assert!(generated_headers(&request).contains(&(name.into(), "[hidden]".into())));
+            assert!(
+                resolve_request(&request, None)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("active_helper")
+            );
+        }
+    }
+}
 
 #[test]
 fn bearer_preview_masks_the_selected_token_and_execution_overrides_url_credentials() {

@@ -5,8 +5,8 @@ use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    ExecutionError, HttpError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
-    RequestPreferences,
+    ApiKeyLocation, Authentication, ExecutionError, HttpError, HttpMetrics, HttpRequest,
+    HttpResponse, HttpVersion, RequestPreferences,
 };
 
 #[derive(Clone)]
@@ -70,13 +70,25 @@ impl HttpExecutor {
         if let Some(form) = request.form.take() {
             let (body, content_type) = form.encode().await?;
 
-            // Form mode owns the encoding and framing. Stale raw-body headers
-            // must not describe different bytes or an unrelated MIME boundary.
-            request.headers.retain(|(name, _)| {
-                !name.eq_ignore_ascii_case("content-type")
-                    && !name.eq_ignore_ascii_case("content-length")
-                    && !name.eq_ignore_ascii_case("transfer-encoding")
-            });
+            // Form mode owns the encoding and framing, including headers that
+            // would otherwise be supplied by an authentication helper.
+            let form_header = |name: &str| {
+                ["content-type", "content-length", "transfer-encoding"]
+                    .iter()
+                    .any(|header| name.eq_ignore_ascii_case(header))
+            };
+            request.headers.retain(|(name, _)| !form_header(name));
+
+            if let Authentication::ApiKey {
+                name,
+                location: ApiKeyLocation::Header,
+                ..
+            } = &request.authentication
+                && form_header(name)
+            {
+                request.authentication = Authentication::None;
+            }
+
             request.headers.push(("Content-Type".into(), content_type));
             request.body = Some(body);
         }

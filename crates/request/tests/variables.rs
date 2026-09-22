@@ -248,8 +248,12 @@ fn explicit_api_key_headers_and_queries_skip_unused_value_variables() {
 }
 
 #[test]
-fn form_content_type_skips_unused_api_key_value_variables() {
-    let variables = HashMap::from([("header".into(), "content-type".into())]);
+fn form_owned_headers_skip_unused_api_key_value_variables() {
+    let variables = HashMap::from([
+        ("header".into(), "content-type".into()),
+        ("length_header".into(), "content-length".into()),
+        ("encoding_header".into(), "transfer-encoding".into()),
+    ]);
 
     for form in [
         FormBody::UrlEncoded(vec![("name".into(), "eagle".into())]),
@@ -261,6 +265,10 @@ fn form_content_type_skips_unused_api_key_value_variables() {
         for (name, expected_name) in [
             ("cOnTeNt-TyPe", "cOnTeNt-TyPe"),
             ("{{header}}", "content-type"),
+            ("cOnTeNt-LeNgTh", "cOnTeNt-LeNgTh"),
+            ("{{length_header}}", "content-length"),
+            ("tRaNsFeR-EnCoDiNg", "tRaNsFeR-EnCoDiNg"),
+            ("{{encoding_header}}", "transfer-encoding"),
         ] {
             let template = HttpRequest {
                 method: Method::Post,
@@ -308,6 +316,8 @@ fn active_api_keys_still_require_values_when_forms_do_not_override_them() {
 
     for (form, name, location) in [
         (None, "Content-Type", ApiKeyLocation::Header),
+        (None, "Content-Length", ApiKeyLocation::Header),
+        (None, "Transfer-Encoding", ApiKeyLocation::Header),
         (
             Some(forms[0].clone()),
             "Content-Type",
@@ -320,6 +330,16 @@ fn active_api_keys_still_require_values_when_forms_do_not_override_them() {
         ),
         (Some(forms[0].clone()), "X-Api-Key", ApiKeyLocation::Header),
         (Some(forms[1].clone()), "X-Api-Key", ApiKeyLocation::Header),
+        (
+            Some(forms[0].clone()),
+            "Content-Length",
+            ApiKeyLocation::Query,
+        ),
+        (
+            Some(forms[1].clone()),
+            "Transfer-Encoding",
+            ApiKeyLocation::Query,
+        ),
     ] {
         let template = HttpRequest {
             method: Method::Post,
@@ -341,24 +361,26 @@ fn active_api_keys_still_require_values_when_forms_do_not_override_them() {
         );
     }
 
-    let raw_body = HttpRequest {
-        method: Method::Post,
-        body: Some(b"{}".to_vec()),
-        authentication: Authentication::ApiKey {
-            name: "Content-Type".into(),
-            value: "{{unused_type}}".into(),
-            location: ApiKeyLocation::Header,
-        },
-        ..HttpRequest::default()
-    };
+    for name in ["Content-Type", "Content-Length", "Transfer-Encoding"] {
+        let raw_body = HttpRequest {
+            method: Method::Post,
+            body: Some(b"{}".to_vec()),
+            authentication: Authentication::ApiKey {
+                name: name.into(),
+                value: "{{unused_type}}".into(),
+                location: ApiKeyLocation::Header,
+            },
+            ..HttpRequest::default()
+        };
 
-    assert_eq!(
-        resolve_variables(&raw_body, &HashMap::new()).unwrap_err(),
-        VariableError::Undefined {
-            name: "unused_type".into(),
-            field: "API key value",
-        }
-    );
+        assert_eq!(
+            resolve_variables(&raw_body, &HashMap::new()).unwrap_err(),
+            VariableError::Undefined {
+                name: "unused_type".into(),
+                field: "API key value",
+            }
+        );
+    }
 }
 
 #[test]

@@ -58,9 +58,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         !effective
             .iter()
             .any(|(key, _)| key.eq_ignore_ascii_case(name))
-            // Send supplies the body's Content-Type before applying helpers.
+            // Form encoding owns its media type and framing on Send.
+            && !(form.is_some()
+                && ["content-type", "content-length", "transfer-encoding"]
+                    .iter()
+                    .any(|header| name.eq_ignore_ascii_case(header)))
+            // Raw-body defaults also precede authentication helpers.
             && !(name.eq_ignore_ascii_case("content-type")
-                && (form.is_some() || (supports_body && request.body.is_some())))
+                && supports_body && request.body.is_some())
     })
     .map(|(name, value)| (name.to_owned(), value.to_owned()));
 

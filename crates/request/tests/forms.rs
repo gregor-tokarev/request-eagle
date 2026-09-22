@@ -6,8 +6,8 @@ use std::{
 };
 
 use request::{
-    ExecutionError, FormBody, HttpError, HttpRequest, HttpVersion, Method, MultipartField, Request,
-    RequestExecutor, RequestPreferences, Response,
+    ApiKeyLocation, Authentication, ExecutionError, FormBody, HttpError, HttpRequest, HttpVersion,
+    Method, MultipartField, Request, RequestExecutor, RequestPreferences, Response,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -309,6 +309,150 @@ fn forms_override_raw_body_and_conflicting_entity_headers() {
             assert_eq!(received.headers("x-custom"), vec!["retained"]);
             assert!(String::from_utf8_lossy(&received.body).contains("value"));
             assert!(!String::from_utf8_lossy(&received.body).contains("old raw body"));
+        }
+    });
+}
+
+#[test]
+fn forms_ignore_api_key_header_helpers_that_override_body_framing() {
+    smol::block_on(async {
+        for multipart in [false, true] {
+            for (name, value) in [
+                ("cOnTeNt-LeNgTh", "1"),
+                ("tRaNsFeR-EnCoDiNg", "chunked"),
+                ("cOnTeNt-TyPe", "application/bogus"),
+            ] {
+                let form = if multipart {
+                    FormBody::Multipart(vec![MultipartField::Text {
+                        name: "name".into(),
+                        value: "value".into(),
+                    }])
+                } else {
+                    FormBody::UrlEncoded(vec![("name".into(), "value".into())])
+                };
+                let (url, server) = serve().await;
+
+                executor()
+                    .execute(HttpRequest {
+                        method: Method::Post,
+                        path: format!("{url}/form"),
+                        form: Some(form),
+                        authentication: Authentication::ApiKey {
+                            name: name.into(),
+                            value: value.into(),
+                            location: ApiKeyLocation::Header,
+                        },
+                        ..HttpRequest::default()
+                    })
+                    .await
+                    .unwrap();
+                let received = server.await;
+                let content_types = received.headers("content-type");
+                assert_eq!(content_types.len(), 1);
+
+                let expected = if multipart {
+                    let boundary = content_types[0]
+                        .strip_prefix("multipart/form-data; boundary=")
+                        .unwrap();
+                    assert!(!boundary.is_empty());
+
+                    format!(
+                        "--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nvalue\r\n--{boundary}--\r\n"
+                    )
+                    .into_bytes()
+                } else {
+                    assert_eq!(content_types, vec!["application/x-www-form-urlencoded"]);
+
+                    b"name=value".to_vec()
+                };
+
+                assert!(received.head.starts_with("POST /form HTTP/1.1\r\n"));
+                assert_eq!(received.body, expected, "API key header {name}");
+                assert_eq!(
+                    received.headers("content-length"),
+                    vec![expected.len().to_string()]
+                );
+                assert!(received.headers("transfer-encoding").is_empty());
+            }
+        }
+    });
+}
+
+#[test]
+fn forms_preserve_api_key_queries_and_unrelated_headers() {
+    smol::block_on(async {
+        for multipart in [false, true] {
+            for (name, location, target) in [
+                (
+                    "Content-Length",
+                    ApiKeyLocation::Query,
+                    "/form?Content-Length=actual-key",
+                ),
+                ("X-Key", ApiKeyLocation::Header, "/form"),
+            ] {
+                let form = if multipart {
+                    FormBody::Multipart(vec![MultipartField::Text {
+                        name: "name".into(),
+                        value: "value".into(),
+                    }])
+                } else {
+                    FormBody::UrlEncoded(vec![("name".into(), "value".into())])
+                };
+                let (url, server) = serve().await;
+
+                executor()
+                    .execute(HttpRequest {
+                        method: Method::Post,
+                        path: format!("{url}/form"),
+                        form: Some(form),
+                        authentication: Authentication::ApiKey {
+                            name: name.into(),
+                            value: "actual-key".into(),
+                            location,
+                        },
+                        ..HttpRequest::default()
+                    })
+                    .await
+                    .unwrap();
+                let received = server.await;
+
+                assert!(
+                    received
+                        .head
+                        .starts_with(&format!("POST {target} HTTP/1.1\r\n"))
+                );
+
+                if location == ApiKeyLocation::Header {
+                    assert_eq!(received.headers("x-key"), vec!["actual-key"]);
+                } else {
+                    assert!(received.headers("x-key").is_empty());
+                }
+
+                let content_types = received.headers("content-type");
+                assert_eq!(content_types.len(), 1);
+                let expected = if multipart {
+                    let boundary = content_types[0]
+                        .strip_prefix("multipart/form-data; boundary=")
+                        .unwrap();
+                    assert!(!boundary.is_empty());
+
+                    format!(
+                        "--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nvalue\r\n--{boundary}--\r\n"
+                    )
+                    .into_bytes()
+                } else {
+                    assert_eq!(content_types, vec!["application/x-www-form-urlencoded"]);
+
+                    b"name=value".to_vec()
+                };
+
+                assert_eq!(received.body, expected);
+                assert_eq!(
+                    received.headers("content-length"),
+                    vec![expected.len().to_string()]
+                );
+                assert!(received.headers("transfer-encoding").is_empty());
+            }
         }
     });
 }

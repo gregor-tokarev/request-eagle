@@ -97,8 +97,11 @@ pub fn resolve_variables(
                         .headers
                         .iter()
                         .any(|(key, _)| key.eq_ignore_ascii_case(name))
-                        // Form encoding supplies Content-Type before authentication.
-                        || (resolved.form.is_some() && name.eq_ignore_ascii_case("content-type"))
+                        // Form encoding owns its media type and framing.
+                        || (resolved.form.is_some()
+                            && ["content-type", "content-length", "transfer-encoding"]
+                                .iter()
+                                .any(|header| name.eq_ignore_ascii_case(header)))
                 }
                 ApiKeyLocation::Query => {
                     let editor_override = resolved
