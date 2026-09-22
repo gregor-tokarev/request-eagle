@@ -15,15 +15,22 @@ if [[ ${1:-} == --session ]]; then
       --localconfig "$fixture/keepassxc-local.ini" "$fixture/test.kdbx" \
       >"$fixture/keepassxc.log" 2>&1 &
   provider_pid=$!
+  # --profile records method names and timings, without secret message bodies.
+  dbus-monitor --session --profile >"$fixture/dbus.log" 2>&1 &
+  monitor_pid=$!
   # KeePassXC can wait on an exit dialog; this disposable process owns only the
   # synthetic database, so cleanup must not wait for desktop interaction.
-  trap 'kill -KILL "$provider_pid" 2>/dev/null || true; wait "$provider_pid" 2>/dev/null || true' EXIT
+  trap 'kill -KILL "$provider_pid" "$monitor_pid" 2>/dev/null || true; wait "$provider_pid" "$monitor_pid" 2>/dev/null || true' EXIT
 
   ready=false
   for ((attempt = 0; attempt < 100; attempt++)); do
-    if dbus-send --session --print-reply --dest=org.freedesktop.secrets \
+    collection=$(dbus-send --session --print-reply --dest=org.freedesktop.secrets \
       /org/freedesktop/secrets org.freedesktop.Secret.Service.ReadAlias \
-      string:default 2>/dev/null | grep -q 'object path "/org/'; then
+      string:default 2>/dev/null | sed -n 's/.*object path "\(\/org\/[^" ]*\)"/\1/p') || true
+    if [[ -n $collection ]] && \
+      dbus-send --session --print-reply --dest=org.freedesktop.secrets \
+        "$collection" org.freedesktop.DBus.Properties.Get \
+        string:org.freedesktop.Secret.Collection string:Locked 2>/dev/null | grep -q 'boolean false'; then
       ready=true
       break
     fi
@@ -31,12 +38,19 @@ if [[ ${1:-} == --session ]]; then
   done
 
   if [[ $ready != true ]]; then
-    cat "$fixture/keepassxc.log" >&2
+    cat "$fixture/keepassxc.log" "$fixture/dbus.log" >&2
     echo 'KeePassXC did not expose its test database.' >&2
     exit 1
   fi
 
-  timeout 60s "$binary"
+  if timeout 60s "$binary"; then
+    echo 'KeePassXC round trip and deletion passed.'
+  else
+    status=$?
+    cat "$fixture/keepassxc.log" "$fixture/dbus.log" >&2
+    xdotool search --onlyvisible --name . getwindowname %@ >&2 || true
+    exit "$status"
+  fi
   exit
 fi
 

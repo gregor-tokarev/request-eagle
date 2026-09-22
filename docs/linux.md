@@ -74,7 +74,7 @@ It opens the app on headless Weston and checks that it submits a rendered Waylan
 buffer and stays running.
 
 To run the native credential check locally, install `keepassxc`,
-`xorg-server-xvfb`, and `xorg-xauth`, then:
+`xorg-server-xvfb`, `xorg-xauth`, and `xdotool`, then:
 
 ```sh
 cargo build --locked -p preferences --example proxy_keyring

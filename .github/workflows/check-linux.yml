@@ -29,12 +29,13 @@ jobs:
         run: |
           pacman --disable-sandbox -Syu --noconfirm --needed rust cmake clang git fontconfig \
             freetype2 libxcb libxkbcommon-x11 wayland openssl vulkan-headers \
-            vulkan-swrast mesa dbus xorg-server-xvfb xorg-xauth ttf-dejavu keepassxc weston
+            vulkan-swrast mesa dbus xorg-server-xvfb xorg-xauth xdotool ttf-dejavu keepassxc weston
 
       - uses: actions/checkout@v7
 
-      - name: Cache Cargo
-        uses: actions/cache@v6
+      - name: Restore Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry
@@ -48,6 +49,16 @@ jobs:
 
       - name: Test proxy, preferences, and settings
         run: cargo test --locked -p preferences -p settings_ui -p request -p theme
+
+      - name: Save Cargo cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arch-${{ hashFiles('Cargo.lock') }}
 
       - name: Check storage with KeePassXC and without a provider
         run: ./scripts/check-linux-keyring.sh

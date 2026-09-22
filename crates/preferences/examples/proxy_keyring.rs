@@ -51,23 +51,27 @@ async fn round_trip(cx: &mut AsyncApp) -> Result<()> {
         password: "request-eagle-smoke-password".into(),
         ..ProxyPreferences::default()
     };
+    println!("Saving synthetic credentials to the native store");
     cx.update(|cx| preferences::update_proxy(proxy.clone(), cx))
         .await?;
     let path = directory.path().join("preferences.json");
     let document = fs::read_to_string(&path)?;
     let check: Result<()> = async {
         ensure!(!document.contains(&proxy.username) && !document.contains(&proxy.password));
+        println!("Reloading credentials from the native store");
         cx.update(|cx| preferences::load(directory.path(), cx))
             .await?;
         ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy == proxy));
         Ok(())
     }
     .await;
+    println!("Deleting synthetic credentials from the native store");
     cx.update(|cx| preferences::update_proxy(ProxyPreferences::default(), cx))
         .await?;
     check?;
 
     // Reload the old reference to verify deletion, not just the JSON update.
+    println!("Verifying the deleted credential is unavailable");
     fs::write(&path, document)?;
     ensure!(
         cx.update(|cx| preferences::load(directory.path(), cx))
