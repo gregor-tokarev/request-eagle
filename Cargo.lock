@@ -5859,7 +5859,7 @@ dependencies = [
 
 [[package]]
 name = "request-eagle"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "collection",
  "gpui-kit",
