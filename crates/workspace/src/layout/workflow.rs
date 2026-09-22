@@ -27,6 +27,23 @@ impl MainView {
         {
             self.storage_error = Some(format!("Could not update request history: {error}"));
         }
+        for tab in &self.tabs {
+            let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() else {
+                continue;
+            };
+            let should_rebind = draft
+                .read(cx)
+                .environment_path
+                .as_ref()
+                .and_then(|path| path.parent())
+                .is_some_and(|root| previous_path.starts_with(root) && !root.is_dir());
+            if should_rebind {
+                draft.update(cx, |draft, cx| {
+                    draft.environment_path = Some(environment_path.to_path_buf());
+                    cx.notify();
+                });
+            }
+        }
         cx.notify();
     }
 

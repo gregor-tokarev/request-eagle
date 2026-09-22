@@ -215,6 +215,19 @@ impl CollectionPanel {
         self.apply_rows(rows, false, cx);
 
         if let Some((previous, destination)) = renamed {
+            if let Some(collection) = self
+                .collections
+                .collections()
+                .iter()
+                .find(|collection| collection.path == destination)
+            {
+                cx.emit(CollectionPanelEvent::CollectionRelocated {
+                    previous_path: previous.to_path_buf(),
+                    path: destination.to_path_buf(),
+                    environment_path: collection.local_env().path.clone(),
+                });
+            }
+
             for item in &self.tree.items {
                 if item.is_branch() {
                     continue;

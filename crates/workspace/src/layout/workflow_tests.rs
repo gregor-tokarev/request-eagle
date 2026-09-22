@@ -488,3 +488,264 @@ fn recovered_request_headers_are_ready_on_the_first_frame(cx: &mut TestAppContex
     assert!(cx.debug_bounds("request-section-Headers-count-5").is_some());
     assert!(cx.debug_bounds("headers-generated-value-4").is_some());
 }
+
+#[gpui_kit::test]
+async fn open_history_copy_follows_collection_rename_and_keeps_working(cx: &mut TestAppContext) {
+    use std::{fs, time::Duration};
+
+    use smol::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        cx.update(|window, _| window.refresh());
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    }
+
+    cx.executor().allow_parking();
+    let directory = tempfile::tempdir().unwrap();
+    let collections_path = directory.path().join("collections");
+    let original = collections_path.join("API");
+    let renamed = collections_path.join("Renamed API");
+    let state = directory.path().join("state");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(
+        original.join("example.toml"),
+        r#"id = "example"
+name = "Example"
+schema_version = 1
+[request]
+type = "http"
+method = "GET"
+path = "{{base_url}}/{{account}}"
+"#,
+    )
+    .unwrap();
+
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    fs::write(
+        original.join("environment.toml"),
+        format!("base_url = \"{url}\"\naccount = \"history-account\"\n"),
+    )
+    .unwrap();
+    let server = smol::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+
+        let head = String::from_utf8(head).unwrap();
+        assert!(
+            head.starts_with("GET /history-account HTTP/1.1\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("x-account: history-account\r\n"), "{head}");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let collections = CollectionRegistry::from_path(&collections_path).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+    });
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.enable_workflow_storage(state.clone(), cx);
+            view.history
+                .push(crate::history::HistoryEntry::new(
+                    "Past attempt".into(),
+                    request::HttpRequest {
+                        path: "{{base_url}}/{{account}}".into(),
+                        headers: vec![("X-Account".into(), "{{account}}".into())],
+                        ..Default::default()
+                    },
+                    Some(original.join("environment.toml")),
+                ))
+                .unwrap();
+            cx.notify();
+        });
+    });
+
+    click(cx, "request-history");
+    click(cx, "history-entry-0");
+    let copy = cx.read(|cx| {
+        let view = view.read(cx);
+
+        assert_eq!(view.tabs.len(), 2);
+        assert!(view.tabs[1].request_path.is_none());
+        assert!(view.tabs[1].request_id.is_none());
+
+        view.tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    cx.read(|cx| {
+        assert_eq!(
+            copy.read(cx).environment_path,
+            Some(original.join("environment.toml"))
+        )
+    });
+
+    click(cx, "collection-row-0");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Renamed API");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    assert!(!original.exists());
+    assert!(renamed.join("environment.toml").is_file());
+    cx.read(|cx| {
+        assert_eq!(
+            copy.read(cx).environment_path,
+            Some(renamed.join("environment.toml"))
+        );
+        assert_eq!(copy.read(cx).request.path, "{{base_url}}/{{account}}");
+        assert!(copy.read(cx).is_dirty());
+        assert!(view.read(cx).tabs[1].request_path.is_none());
+        assert!(view.read(cx).tabs[1].request_id.is_none());
+    });
+    let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot.tabs[1].environment_path,
+        Some(renamed.join("environment.toml"))
+    );
+    assert!(snapshot.tabs[1].request_path.is_none());
+    assert!(snapshot.tabs[1].request_id.is_none());
+    let history = crate::history::History::load(state.join("history.json")).unwrap();
+    assert_eq!(
+        history.entries[0].environment_path,
+        Some(renamed.join("environment.toml"))
+    );
+
+    click(cx, "send-request");
+    smol::future::or(server, async {
+        smol::Timer::after(Duration::from_secs(5)).await;
+        panic!("open history copy did not resolve the renamed collection environment");
+    })
+    .await;
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn history_copies_follow_rename_after_last_saved_request_is_deleted(cx: &mut TestAppContext) {
+    use std::fs;
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        cx.update(|window, _| window.refresh());
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let collections_path = directory.path().join("collections");
+    let original = collections_path.join("API");
+    let renamed = collections_path.join("Renamed API");
+    let state = directory.path().join("state");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(
+        original.join("example.toml"),
+        r#"id = "example"
+name = "Example"
+schema_version = 1
+[request]
+type = "http"
+method = "GET"
+path = "https://{{host}}/account"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        original.join("environment.toml"),
+        "host = \"example.test\"\n",
+    )
+    .unwrap();
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let collections = CollectionRegistry::from_path(&collections_path).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+    });
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.enable_workflow_storage(state.clone(), cx);
+            view.history
+                .push(crate::history::HistoryEntry::new(
+                    "Past attempt".into(),
+                    request::HttpRequest {
+                        path: "https://{{host}}/account".into(),
+                        ..Default::default()
+                    },
+                    Some(original.join("environment.toml")),
+                ))
+                .unwrap();
+            cx.notify();
+        });
+    });
+    click(cx, "request-history");
+    click(cx, "history-entry-0");
+    let copy = cx.read(|cx| {
+        view.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+
+    click(cx, "collection-row-1");
+    cx.simulate_keystrokes("backspace");
+    click(cx, "confirm-sidebar-delete");
+    assert!(!original.join("example.toml").exists());
+    assert!(original.join("environment.toml").is_file());
+
+    click(cx, "collection-row-0");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Renamed API");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    assert!(!original.exists());
+    assert!(renamed.join("environment.toml").is_file());
+    let copy_environment = cx.read(|cx| copy.read(cx).environment_path.clone());
+    let history = crate::history::History::load(state.join("history.json")).unwrap();
+    let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+        .load()
+        .unwrap()
+        .unwrap();
+    let expected = Some(renamed.join("environment.toml"));
+
+    assert_eq!(
+        (
+            copy_environment,
+            history.entries[0].environment_path.clone(),
+            snapshot.tabs[1].environment_path.clone(),
+        ),
+        (expected.clone(), expected.clone(), expected),
+        "renaming a collection must update environment bindings even when all saved requests were deleted"
+    );
+}

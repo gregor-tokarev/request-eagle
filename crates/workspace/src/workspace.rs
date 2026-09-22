@@ -66,6 +66,19 @@ impl Layout {
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::CollectionRelocated {
+                    previous_path,
+                    path,
+                    environment_path,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.collection_paths.retain(|root| root != previous_path);
+                        if !view.collection_paths.contains(path) {
+                            view.collection_paths.push(path.clone());
+                        }
+                        view.relocate_history_environment(previous_path, environment_path, cx);
+                    });
+                }
                 CollectionPanelEvent::RequestRelocated {
                     id,
                     previous_path,
@@ -76,7 +89,6 @@ impl Layout {
                     folders,
                 } => {
                     this.main_view.update(cx, |view, cx| {
-                        view.relocate_history_environment(previous_path, environment_path, cx);
                         if let Some(root) = environment_path.parent()
                             && !view.collection_paths.iter().any(|path| path == root)
                         {
