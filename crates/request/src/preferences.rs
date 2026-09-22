@@ -21,6 +21,7 @@ pub struct RequestPreferences {
     pub timeout_ms: u64,
     /// Maximum buffered response body in MiB (1,048,576 bytes). Zero is unlimited.
     pub max_response_size_mb: u64,
+    /// Verify server certificates by default. False explicitly permits invalid certificates.
     pub ssl_certificate_verification: bool,
     pub proxy: ProxyPreferences,
     pub follow_all_redirects: bool,
@@ -32,7 +33,7 @@ impl Default for RequestPreferences {
             http_version: HttpVersion::Auto,
             timeout_ms: 0,
             max_response_size_mb: 50,
-            ssl_certificate_verification: false,
+            ssl_certificate_verification: true,
             proxy: ProxyPreferences::default(),
             follow_all_redirects: true,
         }

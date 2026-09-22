@@ -293,6 +293,54 @@ async fn partial_documents_default_missing_fields_and_save_normally(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+async fn certificate_verification_defaults_and_saved_choices_survive_reload(
+    cx: &mut TestAppContext,
+) {
+    for (document, expected) in [
+        (None, true),
+        (Some(r#"{}"#), true),
+        (Some(r#"{"request":{"timeout_ms":250}}"#), true),
+        (
+            Some(r#"{"request":{"ssl_certificate_verification":true}}"#),
+            true,
+        ),
+        (
+            Some(r#"{"request":{"ssl_certificate_verification":false}}"#),
+            false,
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+
+        if let Some(document) = document {
+            fs::write(&path, document).unwrap();
+        }
+
+        cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+        cx.update(|cx| {
+            assert_eq!(
+                cx.global::<Preferences>()
+                    .request
+                    .ssl_certificate_verification,
+                expected,
+            );
+
+            update(cx, |p| p.appearance.editor_font = "Menlo".into()).unwrap();
+            cx.set_global(Preferences::default());
+        });
+        cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+        cx.read(|cx| {
+            assert_eq!(
+                cx.global::<Preferences>()
+                    .request
+                    .ssl_certificate_verification,
+                expected,
+            );
+        });
+    }
+}
+
+#[gpui_kit::test]
 async fn malformed_file_is_not_overwritten_and_can_be_reloaded_after_repair(
     cx: &mut TestAppContext,
 ) {

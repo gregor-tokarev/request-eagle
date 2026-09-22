@@ -30,6 +30,12 @@ operation, including the response body, is bounded by the timeout. Dropping its
 future cancels the operation. Response limits count body bytes, including for
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
+TLS certificate verification is enabled by default. New profiles and preference
+files that omit `ssl_certificate_verification` verify server certificates. An
+explicit stored value is preserved, including `false` saved by older versions.
+Existing users can enable verification in Settings > General. Disabling it allows
+untrusted certificates and applies to subsequent requests.
+
 Proxy preferences default to the system/environment proxy. Custom mode supports
 HTTP or HTTPS proxy servers, separate HTTP/HTTPS request selection, Basic proxy
 authentication, and comma-separated bypass hosts, domains, and IP ranges. A domain

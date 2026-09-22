@@ -56,6 +56,8 @@ fn custom(port: u16) -> ProxyPreferences {
 async fn send(proxy: ProxyPreferences, url: String, override_host: bool) {
     let executor = RequestExecutor::new(&RequestPreferences {
         proxy,
+        // The loopback TLS servers in these proxy tests use self-signed certificates.
+        ssl_certificate_verification: false,
         timeout_ms: 2_000,
         ..RequestPreferences::default()
     })
