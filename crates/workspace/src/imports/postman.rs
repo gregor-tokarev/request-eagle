@@ -37,11 +37,10 @@ fn collect_items(
     inherited_auth: &Authentication,
     result: &mut Vec<ImportedRequest>,
 ) -> Result<(), String> {
-    for item in items {
-        let name = item
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("Imported request");
+    for (item, name) in items
+        .iter()
+        .zip(super::postman_folders::sibling_names(items))
+    {
         reject_scripts(item).map_err(|error| format!("{name}: {error}"))?;
         let auth = authentication(item.get("auth"), inherited_auth)?;
 
@@ -106,7 +105,7 @@ fn request(value: &Value, inherited_auth: &Authentication) -> Result<HttpRequest
     if let Some(body) = value.get("body").filter(|body| !body.is_null())
         && !disabled(body)
     {
-        read_body(body, &mut request)?;
+        read_body(body, value.get("header"), &mut request)?;
     }
 
     Ok(request)
@@ -348,7 +347,11 @@ fn joined(value: Option<&Value>, separator: &str) -> Result<String, String> {
     }
 }
 
-fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
+fn read_body(
+    body: &Value,
+    source_headers: Option<&Value>,
+    request: &mut HttpRequest,
+) -> Result<(), String> {
     match body.get("mode").and_then(Value::as_str).unwrap_or("raw") {
         "raw" => {
             let raw = match body.get("raw") {
@@ -356,8 +359,6 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
                 Some(Value::String(raw)) => raw,
                 _ => return Err("The raw Postman body must be text.".into()),
             };
-            request.body = Some(raw.as_bytes().to_vec());
-
             let language = body
                 .pointer("/options/raw/language")
                 .and_then(Value::as_str);
@@ -369,6 +370,13 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
                 _ => "text/plain",
             };
             add_content_type(request, content_type);
+
+            let is_json = strips_json_comments(language, source_headers, &request.headers);
+            request.body = Some(if is_json {
+                super::json_comments::strip(raw).into_bytes()
+            } else {
+                raw.as_bytes().to_vec()
+            });
         }
         "urlencoded" => {
             let values = body
@@ -465,6 +473,51 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn strips_json_comments(
+    language: Option<&str>,
+    source_headers: Option<&Value>,
+    headers: &[(String, String)],
+) -> bool {
+    if let Some(language) = language.filter(|language| !language.is_empty()) {
+        return language == "json";
+    }
+
+    if let Some(source_headers) = source_headers.and_then(Value::as_array) {
+        let content_types = source_headers
+            .iter()
+            .filter(|header| {
+                header
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|key| key.eq_ignore_ascii_case("content-type"))
+            })
+            .collect::<Vec<_>>();
+
+        if content_types.is_empty() {
+            return false;
+        }
+
+        // Match Postman's presend selection, including its disabled-header
+        // behavior. Disabled descriptors still influence body preparation even
+        // though they are excluded from the outgoing headers above.
+        let selected = if content_types.len() == 1 {
+            content_types.first().copied()
+        } else {
+            content_types.into_iter().find(|header| !disabled(header))
+        };
+
+        return selected
+            .and_then(|header| header.get("value"))
+            .and_then(Value::as_str)
+            .is_none_or(super::json_comments::is_json_content_type);
+    }
+
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .is_some_and(|(_, value)| super::json_comments::is_json_content_type(value))
 }
 
 fn pairs(values: &[Value]) -> Result<Vec<(String, String)>, String> {
