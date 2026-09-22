@@ -8,16 +8,11 @@ written to JSON, including when other preferences are saved.
 - macOS uses Keychain through GPUI's native credential API. The item's server is
   `request-eagle.proxy/<UUID>` and its account is the fixed label `proxy`. The
   actual username is inside the encrypted value, alongside the password.
-- Linux uses `oo7` and the desktop Secret Service, supported by KeePassXC, GNOME
-  Keyring, and KWallet with Secret Service enabled. No GNOME desktop is required.
-  Items are labeled `Request Eagle proxy`.
+- Linux uses `oo7` and the desktop Secret Service, supported by GNOME Keyring and
+  KWallet with Secret Service enabled. Items are labeled `Request Eagle proxy`.
   The session D-Bus must be available and the user's keyring must be unlocked.
   In a sandbox, oo7 can instead use encrypted storage backed by the Secret portal.
   There is no plaintext fallback when secure storage is unavailable.
-  Encryption at rest depends on the provider: use a password-protected keyring
-  or KeePassXC database. A passwordless GNOME keyring stores unencrypted entries,
-  and Secret Service does not expose this policy to clients. See the
-  [Arch and Omarchy setup guide](../../docs/linux.md).
 
 Credential operations run in the background. Proxy edits are serialized so rapid
 input cannot overwrite a newer value with an older save. A new credential entry

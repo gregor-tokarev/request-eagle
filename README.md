@@ -4,7 +4,7 @@
 
 <h1 align="center">Request Eagle</h1>
 
-<p align="center">A native API client for macOS and Linux.</p>
+<p align="center">A native API client for macOS.</p>
 
 <p align="center">
   <a href="https://github.com/gregor-tokarev/request-eagle/releases/latest">Download for macOS</a>
@@ -21,7 +21,6 @@ request collections in local, readable files.
 - Light and dark themes with customizable keyboard shortcuts.
 
 The project is in early development. macOS builds are available for Apple Silicon.
-Linux users can build from source, including on [Arch Linux and Omarchy](docs/linux.md).
 
 ## Build from source
 
