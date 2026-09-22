@@ -182,24 +182,28 @@ impl ProxySettings {
         self.save_generation += 1;
         let generation = self.save_generation;
         let mut proxy = self.draft.clone();
-        proxy.host = self.host.read(cx).value().trim().to_owned();
-        proxy.username = self.username.read(cx).value().to_string();
-        proxy.password = self.password.read(cx).value().to_string();
-        proxy.bypass = self.bypass.read(cx).value().trim().to_owned();
-        // Retain the marker on drafts whose empty fields need to be restored.
-        // Explicit credential edits are replacements, even while the store is locked.
-        proxy.credentials_unavailable = self.draft.credentials_unavailable
-            && proxy.username == self.draft.username
-            && proxy.password == self.draft.password;
 
-        match self.port.read(cx).value().trim().parse::<u16>() {
-            Ok(port) if port > 0 => proxy.port = port,
-            _ if proxy.mode == ProxyMode::Custom => {
-                self.error = Some("Enter a proxy port between 1 and 65535.".into());
-                cx.notify();
-                return;
+        // Leaving Custom mode preserves the last valid fields. Rejected input
+        // may contain credentials and must not be saved as an inactive host.
+        if proxy.mode == ProxyMode::Custom {
+            proxy.host = self.host.read(cx).value().trim().to_owned();
+            proxy.username = self.username.read(cx).value().to_string();
+            proxy.password = self.password.read(cx).value().to_string();
+            proxy.bypass = self.bypass.read(cx).value().trim().to_owned();
+            // Retain the marker on drafts whose empty fields need to be restored.
+            // Explicit credential edits are replacements, even while the store is locked.
+            proxy.credentials_unavailable = self.draft.credentials_unavailable
+                && proxy.username == self.draft.username
+                && proxy.password == self.draft.password;
+
+            match self.port.read(cx).value().trim().parse::<u16>() {
+                Ok(port) if port > 0 => proxy.port = port,
+                _ => {
+                    self.error = Some("Enter a proxy port between 1 and 65535.".into());
+                    cx.notify();
+                    return;
+                }
             }
-            _ => {}
         }
 
         let mut validation = proxy.clone();

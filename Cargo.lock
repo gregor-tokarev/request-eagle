@@ -6486,6 +6486,7 @@ dependencies = [
  "preferences",
  "serde_json",
  "smol",
+ "tempfile",
  "theme",
  "updater",
 ]

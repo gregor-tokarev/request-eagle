@@ -22,21 +22,17 @@ pub(crate) async fn send(
     let mut redirects = 0;
 
     loop {
-        // The transport cannot change an explicit Host during a redirect.
-        // Handle those hops here, then delegate once the override is gone.
-        let follow_in_transport = follow && !parts.headers.contains_key(HOST);
-        parts.extensions.insert(if follow_in_transport {
-            RedirectPolicy::FollowLimit(REDIRECT_LIMIT - redirects)
-        } else {
-            RedirectPolicy::NoFollow
-        });
+        // Send each hop separately so the transport selects and authenticates
+        // its proxy again. Its injected Proxy-Authorization stays in the sent
+        // clone, never in the headers we carry to the next destination.
+        parts.extensions.insert(RedirectPolicy::NoFollow);
 
         let response = client
             .send(Request::from_parts(parts.clone(), body.clone().into()))
             .await
             .map_err(HttpError::Transport)?;
 
-        if !follow || follow_in_transport {
+        if !follow {
             return Ok(response);
         }
 

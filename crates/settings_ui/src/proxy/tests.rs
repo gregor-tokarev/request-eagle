@@ -1,6 +1,6 @@
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::{ClipboardItem, TestAppContext};
-use preferences::{Preferences, ProxyMode, ProxyProtocol};
+use preferences::{Preferences, ProxyMode, ProxyPreferences, ProxyProtocol};
 
 use super::ProxySettings;
 
@@ -91,6 +91,84 @@ fn an_invalid_custom_proxy_can_be_disabled(cx: &mut TestAppContext) {
             ProxyMode::Disabled
         );
     });
+}
+
+#[gpui_kit::test]
+async fn switching_modes_never_persists_rejected_host_credentials(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        preferences::load(directory.path(), cx)
+    })
+    .await
+    .unwrap();
+    cx.update(|cx| {
+        preferences::update_proxy(
+            ProxyPreferences {
+                mode: ProxyMode::Custom,
+                host: "original.example".into(),
+                ..ProxyPreferences::default()
+            },
+            cx,
+        )
+    })
+    .await
+    .unwrap();
+    let (page, cx) = cx.add_window_view(ProxySettings::new);
+
+    cx.update(|window, cx| {
+        page.read(cx)
+            .host
+            .clone()
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.write_to_clipboard(ClipboardItem::new_string(
+            "synthetic-user:synthetic-password@proxy.example:3128".into(),
+        ));
+    });
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a cmd-v"
+    } else {
+        "ctrl-a ctrl-v"
+    });
+    cx.run_until_parked();
+    cx.read(|cx| assert!(page.read(cx).error.is_some()));
+
+    for (label, mode) in [
+        ("No proxy", ProxyMode::Disabled),
+        ("Use system proxy", ProxyMode::System),
+    ] {
+        cx.update(|_, cx| {
+            page.read(cx).mode.clone().update(cx, |_, cx| {
+                cx.emit(SelectEvent::Confirm(Some(label.into())));
+            });
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert!(page.read(cx).error.is_none());
+            let saved = &cx.global::<Preferences>().request.proxy;
+            assert_eq!(saved.mode, mode);
+            assert_eq!(saved.host, "original.example");
+        });
+
+        let document = std::fs::read_to_string(directory.path().join("preferences.json")).unwrap();
+        assert!(!document.contains("synthetic-user"));
+        assert!(!document.contains("synthetic-password"));
+        let saved: Preferences = serde_json::from_str(&document).unwrap();
+        assert_eq!(saved.request.proxy.mode, mode);
+        assert_eq!(saved.request.proxy.host, "original.example");
+
+        cx.update(|_, cx| {
+            page.read(cx).mode.clone().update(cx, |_, cx| {
+                cx.emit(SelectEvent::Confirm(Some("Use custom proxy".into())));
+            });
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert!(page.read(cx).error.is_some());
+            assert_eq!(cx.global::<Preferences>().request.proxy.mode, mode);
+        });
+    }
 }
 
 #[gpui_kit::test]

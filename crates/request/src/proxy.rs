@@ -120,6 +120,15 @@ impl ProxyPreferences {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
+        // Even inactive endpoints are persisted. Never allow URL credentials
+        // or other invalid host input into that plaintext field.
+        let host = self.host.trim();
+        if (self.mode == ProxyMode::Custom || !host.is_empty())
+            && (host.is_empty() || url::Host::parse(host).is_err())
+        {
+            return Err("Enter a proxy hostname or IP address without a scheme or port.");
+        }
+
         if self.mode != ProxyMode::Custom {
             return Ok(());
         }
@@ -132,10 +141,6 @@ impl ProxyPreferences {
 
         if !self.http && !self.https {
             return Err("Select HTTP, HTTPS, or both for the custom proxy.");
-        }
-
-        if self.host.trim().is_empty() || url::Host::parse(self.host.trim()).is_err() {
-            return Err("Enter a proxy hostname or IP address without a scheme or port.");
         }
 
         if self.port == 0 {

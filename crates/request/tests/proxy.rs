@@ -314,6 +314,25 @@ fn invalid_custom_proxy_is_rejected_before_sending() {
 }
 
 #[test]
+fn inactive_proxy_settings_reject_credentials_in_the_host() {
+    for mode in [ProxyMode::System, ProxyMode::Disabled] {
+        let mut proxy = ProxyPreferences {
+            mode,
+            ..ProxyPreferences::default()
+        };
+        assert!(proxy.validate().is_ok());
+
+        for host in [
+            "user:password@proxy.example:3128",
+            "http://user:password@proxy.example:3128",
+        ] {
+            proxy.host = host.into();
+            assert!(proxy.validate().is_err());
+        }
+    }
+}
+
+#[test]
 fn older_preferences_keep_system_proxy_defaults_and_debug_redacts_credentials() {
     let preferences: RequestPreferences = serde_json::from_str("{}").unwrap();
     assert_eq!(preferences.proxy, ProxyPreferences::default());
@@ -454,6 +473,86 @@ fn redirects_to_bypassed_hosts_do_not_forward_proxy_credentials() {
             .await;
             proxy_server.await.unwrap();
             origin_server.await.unwrap();
+        }
+    });
+}
+
+#[test]
+fn same_port_redirects_to_direct_https_do_not_leak_proxy_credentials() {
+    smol::block_on(async {
+        for override_host in [false, true] {
+            let (proxy_listener, proxy_port) = listener();
+            let (origin_listener, origin_port) = listener();
+            let tls = acceptor();
+            let proxy_server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(proxy_listener).unwrap();
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let head = read_head(&mut stream).await;
+                assert!(head.contains("\r\nproxy-authorization: Basic dXNlcjpwYXNz\r\n"));
+                stream.write_all(format!(
+                    "HTTP/1.1 302 Found\r\nLocation: https://127.0.0.1:{origin_port}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                ).as_bytes()).await.unwrap();
+            });
+            let origin_server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(origin_listener).unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = tls.accept(stream).await.unwrap();
+                let head = read_head(&mut stream).await;
+                stream.write_all(RESPONSE).await.unwrap();
+                stream.shutdown().await.unwrap();
+
+                head
+            });
+            let mut proxy = custom(proxy_port);
+            proxy.https = false;
+
+            send(
+                proxy,
+                format!("http://127.0.0.1:{origin_port}/redirect"),
+                override_host,
+            )
+            .await;
+            proxy_server.await.unwrap();
+            let head = origin_server.await.unwrap().to_ascii_lowercase();
+            assert!(head.starts_with("get /final http/1.1\r\n"));
+            assert!(!head.contains("proxy-authorization"));
+        }
+    });
+}
+
+#[test]
+fn cross_host_redirects_authenticate_each_request_to_the_proxy() {
+    smol::block_on(async {
+        for override_host in [false, true] {
+            let (proxy_listener, proxy_port) = listener();
+            let proxy_server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(proxy_listener).unwrap();
+
+                for host in ["first.invalid", "second.invalid"] {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let head = read_head(&mut stream).await;
+                    assert!(head.starts_with(&format!("GET http://{host}/")));
+
+                    if !head.contains("\r\nproxy-authorization: Basic dXNlcjpwYXNz\r\n") {
+                        stream.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                        return;
+                    }
+
+                    if host == "first.invalid" {
+                        stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://second.invalid/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                    } else {
+                        stream.write_all(RESPONSE).await.unwrap();
+                    }
+                }
+            });
+
+            send(
+                custom(proxy_port),
+                "http://first.invalid/redirect".into(),
+                override_host,
+            )
+            .await;
+            proxy_server.await.unwrap();
         }
     });
 }
