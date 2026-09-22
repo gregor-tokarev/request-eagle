@@ -505,7 +505,9 @@ fn changing_and_clearing_authentication_removes_old_credentials_from_disk() {
     assert!(content.contains("new-token"));
 
     request.authentication = request::Authentication::None;
-    registry.update_request(&path, "list", request.into()).unwrap();
+    registry
+        .update_request(&path, "list", request.into())
+        .unwrap();
     let content = fs::read_to_string(&path).unwrap();
     assert!(!content.contains("authentication"));
     assert!(!content.contains("new-token"));

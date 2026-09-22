@@ -23,6 +23,7 @@ fn saved_tab(directory: &std::path::Path) -> RecoveredTab {
         name: "Saved request".into(),
         collection: Some("API".into()),
         request_path: Some(directory.join("API/request.toml")),
+        request_id: Some("original-request-id".into()),
         environment_path: Some(directory.join("API/environment.toml")),
         request: edited,
         saved_request: Some(baseline),
@@ -41,6 +42,7 @@ fn recovery_preserves_saved_and_untitled_edits_and_active_tab() {
                 name: "Untitled Request".into(),
                 collection: None,
                 request_path: None,
+                request_id: None,
                 environment_path: None,
                 request: HttpRequest {
                     path: "https://example.test/unsaved".into(),
@@ -85,6 +87,35 @@ fn missing_session_and_deliberately_closed_tabs_are_distinct() {
 
     assert!(empty.tabs.is_empty());
     assert!(empty.selected.is_none());
+}
+
+#[test]
+fn old_session_without_request_identity_does_not_invent_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session.json");
+    let store = SessionStore::new(&path);
+    store
+        .save(&SessionSnapshot {
+            tabs: vec![saved_tab(directory.path())],
+            selected: Some(0),
+        })
+        .unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    document["session"]["tabs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("request_id");
+    fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+
+    let restored = store.load().unwrap().unwrap();
+
+    assert!(restored.tabs[0].request_id.is_none());
+    assert_eq!(restored.tabs[0].request.path, "https://example.test/edited");
+    assert_eq!(
+        restored.tabs[0].saved_request.as_ref().unwrap().path,
+        "https://example.test/original"
+    );
 }
 
 #[test]

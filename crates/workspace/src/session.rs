@@ -21,6 +21,8 @@ pub(crate) struct RecoveredTab {
     pub(crate) name: String,
     pub(crate) collection: Option<String>,
     pub(crate) request_path: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) request_id: Option<String>,
     pub(crate) environment_path: Option<PathBuf>,
     pub(crate) request: HttpRequest,
     pub(crate) saved_request: Option<HttpRequest>,

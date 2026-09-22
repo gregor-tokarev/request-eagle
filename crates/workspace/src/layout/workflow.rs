@@ -99,6 +99,7 @@ impl MainView {
                         .into_owned();
                     self.open_request(
                         &file.path,
+                        file.id.into(),
                         file.name.into(),
                         collection.into(),
                         &file.request.into(),

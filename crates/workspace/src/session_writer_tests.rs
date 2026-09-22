@@ -11,6 +11,7 @@ fn checkpoint(name: &str) -> SessionCheckpoint {
             name: name.into(),
             collection: None,
             request_path: None,
+            request_id: None,
             environment_path: None,
             request: HttpRequest {
                 path: format!("https://example.test/{name}"),

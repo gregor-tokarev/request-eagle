@@ -47,6 +47,12 @@ fn postman_import_creates_saved_requests_and_keeps_folders(cx: &mut TestAppConte
     let reloaded = CollectionRegistry::from_path(directory.path()).unwrap();
     let saved = reloaded.file(&path).unwrap();
     assert_eq!(saved.name, "Read account");
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).tabs[1].request_id.as_deref(),
+            Some(saved.id.as_str())
+        )
+    });
     let collection::Request::Http(request) = &saved.request;
     assert!(
         matches!(&request.authentication, request::Authentication::Bearer {token} if token == "{{token}}")
@@ -190,6 +196,7 @@ fn recovered_saved_drafts_keep_dirty_state_and_save_auth_and_forms(cx: &mut Test
                 title: "Account".into(),
                 name: "Account".into(),
                 collection: Some("API".into()),
+                request_id: Some(file.id.clone()),
                 request_path: Some(file.path.clone()),
                 environment_path: Some(file.collection_path.join("environment.toml")),
                 request: edited.clone(),

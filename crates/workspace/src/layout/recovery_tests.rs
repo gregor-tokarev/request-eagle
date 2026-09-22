@@ -102,6 +102,7 @@ fn recovery_observes_edits_and_restores_saved_and_untitled_requests(cx: &mut Tes
         view.collection_paths = vec![collection_path.clone()];
         view.open_request(
             &saved_path,
+            "original-request-id".into(),
             "Create item".into(),
             "API".into(),
             &baseline.clone().into(),
@@ -161,6 +162,7 @@ fn recovery_observes_edits_and_restores_saved_and_untitled_requests(cx: &mut Tes
     restored.update(cx, |view, cx| {
         view.open_request(
             &saved_path,
+            "original-request-id".into(),
             "Create item".into(),
             "API".into(),
             &baseline.into(),
@@ -357,4 +359,113 @@ fn recovery_reports_background_write_failure_and_recovers_on_next_edit(cx: &mut 
             .path,
         "https://example.test/retried"
     );
+}
+
+#[gpui_kit::test]
+fn recovery_keeps_original_identity_when_saved_path_is_reused(cx: &mut TestAppContext) {
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::main_view::RequestSaveRequested;
+    use crate::session::{RecoveredTab, SessionSnapshot};
+
+    // Legacy snapshots have no identity. They must remain unsavable rather
+    // than acquiring the identity of whichever file now occupies the path.
+    for captured_id in [Some("original-request-id"), None] {
+        let directory = tempfile::tempdir().unwrap();
+        let file_path = directory.path().join("request.toml");
+        let state = directory.path().join("state");
+        fs::write(
+            &file_path,
+            r#"id = "replacement-request-id"
+name = "Replacement"
+schema_version = 1
+[request]
+type = "http"
+method = "GET"
+path = "https://example.test/replacement"
+"#,
+        )
+        .unwrap();
+        SessionStore::new(state.join("session.json"))
+            .save(&SessionSnapshot {
+                selected: Some(0),
+                tabs: vec![RecoveredTab {
+                    title: "Original".into(),
+                    name: "Original".into(),
+                    collection: Some("API".into()),
+                    request_path: Some(file_path.clone()),
+                    request_id: captured_id.map(Into::into),
+                    environment_path: None,
+                    request: HttpRequest {
+                        path: "https://example.test/original-edited".into(),
+                        ..Default::default()
+                    },
+                    saved_request: Some(HttpRequest {
+                        path: "https://example.test/original".into(),
+                        ..Default::default()
+                    }),
+                }],
+            })
+            .unwrap();
+
+        let view = restored_view(&state, cx);
+        let original = draft_at(&view, 0, cx);
+        cx.read(|cx| {
+            assert_eq!(view.read(cx).tabs[0].request_id.as_deref(), captured_id);
+            assert!(original.read(cx).is_dirty());
+        });
+
+        let requested_ids = Rc::new(RefCell::new(Vec::new()));
+        let _subscription = cx.update(|cx| {
+            let requested_ids = requested_ids.clone();
+            cx.subscribe(&view, move |_, event: &RequestSaveRequested, _| {
+                requested_ids
+                    .borrow_mut()
+                    .push(event.request_id.to_string());
+            })
+        });
+        view.update(cx, |view, cx| view.save_active_request(cx));
+        cx.run_until_parked();
+        assert_eq!(
+            requested_ids.borrow().as_slice(),
+            captured_id.into_iter().collect::<Vec<_>>()
+        );
+
+        let replacement = collection::FileEntry::from_path(&file_path).unwrap();
+        view.update(cx, |view, cx| {
+            view.open_request(
+                &file_path,
+                replacement.id.clone().into(),
+                replacement.name.clone().into(),
+                "API".into(),
+                &replacement.request,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let view = view.read(cx);
+
+            assert_eq!(view.tabs.len(), 2);
+            assert_eq!(view.tabs[0].request_id.as_deref(), captured_id);
+            assert_eq!(
+                view.tabs[1].request_id.as_deref(),
+                Some("replacement-request-id")
+            );
+            assert_ne!(view.tabs[0].page.entity_id(), view.tabs[1].page.entity_id());
+            assert_eq!(
+                original.read(cx).request.path,
+                "https://example.test/original-edited"
+            );
+        });
+        let saved = SessionStore::new(state.join("session.json"))
+            .load()
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.tabs[0].request_id.as_deref(), captured_id);
+        assert_eq!(
+            saved.tabs[1].request_id.as_deref(),
+            Some("replacement-request-id")
+        );
+    }
 }

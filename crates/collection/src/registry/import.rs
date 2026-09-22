@@ -23,6 +23,7 @@ pub struct ImportedRequest {
 
 #[derive(Clone, Debug)]
 pub struct ImportedFile {
+    pub id: String,
     pub path: PathBuf,
     pub name: String,
     pub request: HttpRequest,
@@ -145,6 +146,7 @@ fn stage_requests(
         write_private_file(&path, content.as_bytes())?;
         order.entry(parent).or_default().push(path.clone());
         files.push(ImportedFile {
+            id: entry.id,
             path,
             name,
             request: imported.request,

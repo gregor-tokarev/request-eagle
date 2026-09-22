@@ -79,6 +79,7 @@ fn matches_draft(recovered: &RecoveredTab, tab: &PageTab, draft: &RequestDraft) 
         && recovered.name == draft.name.as_ref()
         && recovered.collection.as_deref() == draft.collection.as_deref()
         && recovered.request_path == tab.request_path
+        && recovered.request_id.as_deref() == tab.request_id.as_deref()
         && recovered.environment_path == draft.environment_path
         && recovered.request == draft.request
         && recovered.saved_request.as_ref() == Some(&draft.saved_request)
@@ -90,6 +91,7 @@ fn recover_tab(tab: &PageTab, draft: &RequestDraft) -> RecoveredTab {
         name: draft.name.to_string(),
         collection: draft.collection.as_ref().map(ToString::to_string),
         request_path: tab.request_path.clone(),
+        request_id: tab.request_id.as_ref().map(ToString::to_string),
         environment_path: draft.environment_path.clone(),
         request: draft.request.clone(),
         saved_request: Some(draft.saved_request.clone()),
@@ -170,6 +172,7 @@ impl MainView {
             draft.environment_path = tab.environment_path;
             let index = self.open_draft(tab.title.into(), draft, cx);
             self.tabs[index].request_path = tab.request_path;
+            self.tabs[index].request_id = tab.request_id.map(Into::into);
         }
 
         self.selected = snapshot.selected;
