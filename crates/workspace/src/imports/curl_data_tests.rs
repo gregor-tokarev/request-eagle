@@ -174,14 +174,48 @@ fn curl_shell_keeps_non_posix_whitespace_inside_unquoted_arguments() {
 }
 
 #[test]
-fn curl_shell_splits_only_space_tab_and_newline_without_affecting_quoted_whitespace() {
+fn curl_shell_splits_space_and_tab_without_affecting_quoted_whitespace() {
     assert_eq!(
-        super::shell::words("curl\t--data-raw\n' a\t\nb ' https://example.test").unwrap(),
+        super::shell::words("curl\t--data-raw ' a\t\nb ' https://example.test").unwrap(),
         ["curl", "--data-raw", " a\t\nb ", "https://example.test"]
     );
 
     let json = "\r\n{\"item\":[{\"request\":\"https://example.test\"}]}\r\n";
     assert!(parse_import(json).is_ok());
+}
+
+#[test]
+fn curl_shell_rejects_unescaped_internal_command_newlines() {
+    for command in [
+        "curl https://example.test\n--data-raw payload",
+        "curl https://example.test \t\n--data-raw payload",
+        "curl https://example.test\n\n--data-raw payload",
+        "curl\nhttps://example.test",
+    ] {
+        let error = parse_import(command).unwrap_err();
+        assert!(error.contains("backslash before a newline"), "{error}");
+    }
+}
+
+#[test]
+fn curl_shell_keeps_outer_whitespace_continuations_and_quoted_newlines() {
+    let imported = parse_import(" \t\ncurl https://example.test\n\t ").unwrap();
+    assert_eq!(imported[0].request.method, Method::Get);
+
+    let imported = parse_import("curl https://example.test \\\n--data-raw pay\\\nload").unwrap();
+    assert_eq!(
+        imported[0].request.body.as_deref(),
+        Some(b"payload".as_slice())
+    );
+
+    for value in ["'pay\nload'", "\"pay\nload\""] {
+        let imported =
+            parse_import(&format!("curl https://example.test --data-raw {value}")).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(b"pay\nload".as_slice())
+        );
+    }
 }
 
 #[test]

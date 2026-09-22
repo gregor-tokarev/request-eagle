@@ -47,7 +47,10 @@ pub(super) fn words(input: &str) -> Result<Vec<String>, String> {
             (None, ';' | '|' | '&' | '<' | '>' | '(' | ')') => {
                 return Err("Import accepts one cURL command, without shell operators. Quote URLs and values.".into());
             }
-            (None, ' ' | '\t' | '\n') => {
+            (None, '\n') => {
+                return Err("Import accepts one cURL command. Use a backslash before a newline to continue the command, or quote a literal newline.".into());
+            }
+            (None, ' ' | '\t') => {
                 if started {
                     words.push(std::mem::take(&mut word));
                     started = false;

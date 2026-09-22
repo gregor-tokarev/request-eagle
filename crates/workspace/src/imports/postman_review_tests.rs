@@ -668,3 +668,60 @@ fn postman_keeps_backslashes_and_escapes_that_do_not_change_source_execution() {
         );
     }
 }
+
+#[test]
+fn postman_query_templates_keep_variable_names_opaque_during_literal_decoding() {
+    for name in ["token+name", "token%2Fname", "token&=name"] {
+        let placeholder = format!("{{{{{name}}}}}");
+        let source = json!({"item": [{"request": {"url": {
+            "protocol": "https", "host": "example.test", "path": ["x"],
+            "query": [{"key": placeholder, "value": format!("prefix%2F{placeholder}+suffix")},
+                {"key": "literal%2Fkey", "value": "a%2Fb+c"}]
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        let template = &imported[0].request;
+        assert_eq!(
+            template.query,
+            Some(vec![
+                (placeholder.clone(), format!("prefix/{placeholder} suffix")),
+                ("literal/key".into(), "a/b c".into())
+            ])
+        );
+
+        let resolved = request::resolve_variables(
+            template,
+            &std::collections::HashMap::from([(name.into(), "a&b=c".into())]),
+        )
+        .unwrap();
+        let mut url = url::Url::parse(&resolved.path).unwrap();
+        url.query_pairs_mut()
+            .extend_pairs(resolved.query.as_ref().unwrap());
+        assert_eq!(
+            url.as_str(),
+            "https://example.test/x?a%26b%3Dc=prefix%2Fa%26b%3Dc+suffix&literal%2Fkey=a%2Fb+c"
+        );
+    }
+}
+
+#[test]
+fn postman_query_template_decoding_keeps_literal_safety_guards() {
+    for (name, value, expected_error) in [
+        ("q", "%7B{{token+name}}", "percent-encoded braces"),
+        ("q", "{{token+name}}%7D", "percent-encoded braces"),
+        ("%7B{{key}}", "value", "percent-encoded braces"),
+        ("q", "%FF{{token+name}}", "UTF-8"),
+        ("{{key}}%FF", "value", "UTF-8"),
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "query": [{"key": name, "value": value}]
+        }}}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains(expected_error), "{error}");
+    }
+
+    let source = json!({"item": [{"request": {"url": {
+        "host": "example.test", "query": [{"key": "q", "value": "{{token+name}}"}, {"key": "flag"}]
+    }}}]});
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("valueless flags"), "{error}");
+}

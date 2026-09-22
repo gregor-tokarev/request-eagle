@@ -298,7 +298,7 @@ fn url_with_default_protocol(value: &str) -> Result<String, String> {
 }
 
 fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> {
-    let mut encoded = Vec::new();
+    let mut fields = Vec::new();
     let mut templated = false;
     let mut has_flags = false;
 
@@ -316,11 +316,7 @@ fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> 
 
         templated |= name.contains("{{") || value.is_some_and(|value| value.contains("{{"));
         has_flags |= value.is_none();
-        let name = encode_query_component(name, true);
-        encoded.push(match value {
-            Some(value) => format!("{name}={}", encode_query_component(value, false)),
-            None => name,
-        });
+        fields.push((name, value));
     }
 
     if templated {
@@ -328,21 +324,30 @@ fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> 
             return Err("Postman templated queries with valueless flags are not supported.".into());
         }
 
-        // Decode before runtime substitution so values supplied by the active
-        // environment are encoded as query values, including '&' and '='.
+        // Decode literal spans before substitution so environment values are
+        // encoded as query fields. Placeholder names must remain untouched.
         request.query = Some(
-            encoded
+            fields
                 .into_iter()
-                .map(|field| {
-                    let (name, value) = field.split_once('=').unwrap_or((&field, ""));
+                .map(|(name, value)| {
                     Ok((
-                        decode_query_component(name)?,
-                        decode_query_component(value)?,
+                        decode_templated_query_component(name)?,
+                        decode_templated_query_component(value.unwrap_or_default())?,
                     ))
                 })
                 .collect::<Result<_, String>>()?,
         );
-    } else if !encoded.is_empty() {
+    } else if !fields.is_empty() {
+        let encoded = fields
+            .into_iter()
+            .map(|(name, value)| {
+                let name = encode_query_component(name, true);
+                match value {
+                    Some(value) => format!("{name}={}", encode_query_component(value, false)),
+                    None => name,
+                }
+            })
+            .collect::<Vec<_>>();
         request.path.push('?');
         request.path.push_str(&encoded.join("&"));
     }
@@ -407,7 +412,7 @@ fn decode_query_component(value: &str) -> Result<String, String> {
         .map_err(|_| "Editable Postman query fields must contain UTF-8 text.".into())
 }
 
-fn decode_auth_query_component(value: &str) -> Result<String, String> {
+fn decode_templated_query_component(value: &str) -> Result<String, String> {
     let mut decoded = String::new();
     let mut rest = value;
 
@@ -762,8 +767,8 @@ fn authentication(
                     // SDK query credentials retain existing escapes and '+'.
                     // The editor stores decoded fields, then encodes at Send.
                     (
-                        decode_auth_query_component(&name)?,
-                        decode_auth_query_component(&value)?,
+                        decode_templated_query_component(&name)?,
+                        decode_templated_query_component(&value)?,
                     )
                 } else {
                     (name, value)
