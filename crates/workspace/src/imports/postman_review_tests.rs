@@ -1,0 +1,266 @@
+use request::{ApiKeyLocation, Authentication};
+use serde_json::json;
+
+use super::parse_import;
+
+#[test]
+fn postman_imports_object_and_array_authentication_attributes() {
+    for (kind, attributes, expected) in [
+        (
+            "basic",
+            json!({"username": "sam", "password": "pass"}),
+            Authentication::Basic {
+                username: "sam".into(),
+                password: "pass".into(),
+            },
+        ),
+        (
+            "bearer",
+            json!({"token": "secret"}),
+            Authentication::Bearer {
+                token: "secret".into(),
+            },
+        ),
+        (
+            "apikey",
+            json!({"key": "X-Api-Key", "value": "secret", "in": "header"}),
+            Authentication::ApiKey {
+                name: "X-Api-Key".into(),
+                value: "secret".into(),
+                location: ApiKeyLocation::Header,
+            },
+        ),
+        (
+            "apikey",
+            json!({"key": "api_key", "value": "secret", "in": "query"}),
+            Authentication::ApiKey {
+                name: "api_key".into(),
+                value: "secret".into(),
+                location: ApiKeyLocation::Query,
+            },
+        ),
+    ] {
+        let array = attributes
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| json!({"key": key, "value": value, "type": "string"}))
+            .collect::<Vec<_>>();
+
+        for attributes in [attributes, json!(array)] {
+            let collection = json!({"item": [{"request": {
+                "url": "https://example.test",
+                "auth": {"type": kind, (kind): attributes}
+            }}]});
+            let imported = parse_import(&collection.to_string()).unwrap();
+
+            assert_eq!(imported[0].request.authentication, expected);
+        }
+    }
+}
+
+#[test]
+fn postman_inherits_v2_object_authentication_and_resolves_defaults() {
+    let collection = json!({
+        "info": {"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},
+        "variable": [{"key": "user", "value": "sam"}],
+        "auth": {"type": "basic", "basic": {"username": "{{user}}", "password": "{{password}}"}},
+        "item": [
+            {"request": "https://example.test"},
+            {"auth": {"type": "bearer", "bearer": {"token": "folder-token"}}, "item": [
+                {"request": {"url": "https://example.test", "auth": null}},
+                {"request": {"url": "https://example.test", "auth": {"type": "noauth"}}}
+            ]}
+        ]
+    });
+    let imported = parse_import(&collection.to_string()).unwrap();
+
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::Basic {
+            username: "sam".into(),
+            password: "{{password}}".into(),
+        }
+    );
+    assert_eq!(
+        imported[1].request.authentication,
+        Authentication::Bearer {
+            token: "folder-token".into(),
+        }
+    );
+    assert_eq!(imported[2].request.authentication, Authentication::None);
+}
+
+#[test]
+fn postman_rejects_malformed_authentication_attributes() {
+    for attributes in [
+        json!(42),
+        json!("username=sam"),
+        json!({"username": 42}),
+        json!({"password": {"secret": "pass"}}),
+        json!([{"key": "username", "value": false}]),
+        json!([{"key": 42, "value": "sam"}]),
+        json!(["username"]),
+    ] {
+        let collection = json!({"item": [{"name": "Bad auth", "request": {
+            "url": "https://example.test",
+            "auth": {"type": "basic", "basic": attributes}
+        }}]});
+        let error = parse_import(&collection.to_string()).unwrap_err();
+
+        assert!(
+            error.contains("Bad auth: Postman basic authentication"),
+            "{error}"
+        );
+        assert!(error.contains("must be"), "{error}");
+    }
+}
+
+#[test]
+fn postman_raw_bodies_default_to_plain_text_and_keep_known_languages() {
+    for (language, expected) in [
+        (None, "text/plain"),
+        (Some("text"), "text/plain"),
+        (Some("json"), "application/json"),
+        (Some("javascript"), "application/javascript"),
+        (Some("xml"), "application/xml"),
+        (Some("html"), "text/html"),
+    ] {
+        let mut body = json!({"mode": "raw", "raw": "hello"});
+
+        if let Some(language) = language {
+            body["options"] = json!({"raw": {"language": language}});
+        }
+
+        let collection = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test", "body": body
+        }}]});
+        let imported = parse_import(&collection.to_string()).unwrap();
+
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(b"hello".as_slice())
+        );
+        assert_eq!(
+            imported[0].request.headers,
+            vec![("Content-Type".into(), expected.into())]
+        );
+    }
+}
+
+#[test]
+fn postman_raw_body_content_type_never_overrides_an_explicit_header() {
+    for body in [
+        json!({"mode": "raw", "raw": "hello"}),
+        json!({"mode": "raw", "raw": "hello", "options": {"raw": {"language": "json"}}}),
+    ] {
+        let collection = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test", "body": body,
+            "header": [{"key": "content-TYPE", "value": "application/custom"}]
+        }}]});
+        let imported = parse_import(&collection.to_string()).unwrap();
+
+        assert_eq!(
+            imported[0].request.headers,
+            vec![("content-TYPE".into(), "application/custom".into())]
+        );
+    }
+}
+
+#[test]
+fn postman_structured_urls_default_to_http() {
+    for host in [json!("example.test"), json!(["example", "test"])] {
+        let collection = json!({"item": [{"request": {"url": {
+            "host": host, "port": "8080", "path": ["items"],
+            "query": [{"key": "page", "value": "2"}]
+        }}}]});
+        let imported = parse_import(&collection.to_string()).unwrap();
+
+        assert_eq!(
+            imported[0].request.path,
+            "http://example.test:8080/items?page=2"
+        );
+    }
+}
+
+#[test]
+fn postman_text_urls_materialize_http_without_changing_explicit_protocols() {
+    for (source, expected) in [
+        ("example.test/items", "http://example.test/items"),
+        ("localhost:8080/items", "http://localhost:8080/items"),
+        ("[::1]:8080/items", "http://[::1]:8080/items"),
+        (
+            "example.test/items?next=https://other.test",
+            "http://example.test/items?next=https://other.test",
+        ),
+        ("https://example.test/items", "https://example.test/items"),
+        ("http://example.test/items", "http://example.test/items"),
+        ("HTTPS://example.test/items", "HTTPS://example.test/items"),
+        ("{{base_url}}/items", "{{base_url}}/items"),
+        ("{{protocol}}://example.test", "{{protocol}}://example.test"),
+        ("http{{s}}://example.test", "http{{s}}://example.test"),
+        ("example.test/{{id}}", "http://example.test/{{id}}"),
+    ] {
+        for request in [
+            json!(source),
+            json!({"url": source}),
+            json!({"url": {"raw": source}}),
+        ] {
+            let collection = json!({"item": [{"request": request}]});
+            let imported = parse_import(&collection.to_string()).unwrap();
+
+            assert_eq!(imported[0].request.path, expected);
+        }
+    }
+}
+
+#[test]
+fn postman_url_defaults_apply_after_collection_variable_resolution() {
+    for (base, expected) in [
+        ("example.test", "http://example.test/items"),
+        ("https://example.test", "https://example.test/items"),
+    ] {
+        let collection = json!({
+            "variable": [{"key": "base_url", "value": base}],
+            "item": [{"request": {"url": "{{base_url}}/items"}}]
+        });
+        let imported = parse_import(&collection.to_string()).unwrap();
+
+        assert_eq!(imported[0].request.path, expected);
+    }
+}
+
+#[test]
+fn postman_rejects_empty_and_hostless_text_urls() {
+    for source in ["", "  ", "/items", "//example.test/items"] {
+        for request in [
+            json!(source),
+            json!({"url": source}),
+            json!({"url": {"raw": source}}),
+        ] {
+            let collection = json!({"item": [{"request": request}]});
+
+            assert!(parse_import(&collection.to_string()).is_err(), "{source:?}");
+        }
+    }
+}
+
+#[test]
+fn postman_rejects_unsupported_explicit_protocols() {
+    for protocol in ["ftp", "file", "ws", "gopher"] {
+        let source = format!("{protocol}://example.test/items");
+
+        for request in [
+            json!(source),
+            json!({"url": source}),
+            json!({"url": {"raw": source}}),
+            json!({"url": {"protocol": protocol, "host": "example.test", "path": ["items"]}}),
+        ] {
+            let collection = json!({"item": [{"request": request}]});
+            let error = parse_import(&collection.to_string()).unwrap_err();
+
+            assert!(error.contains("not supported"), "{error}");
+            assert!(error.contains(protocol), "{error}");
+        }
+    }
+}

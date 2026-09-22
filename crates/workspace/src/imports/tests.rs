@@ -588,6 +588,21 @@ fn postman_structured_string_paths_consume_only_the_leading_separator() {
 fn curl_materializes_http_inference_without_using_the_editor_https_default() {
     for (source, expected) in [
         ("localhost:8080/path", "http://localhost:8080/path"),
+        ("localhost:8080/{{id}}", "http://localhost:8080/{{id}}"),
+        (
+            "localhost:{{port}}/items",
+            "http://localhost:{{port}}/items",
+        ),
+        ("api.{{domain}}/items", "http://api.{{domain}}/items"),
+        (
+            "example.test/?q={{query}}",
+            "http://example.test/?q={{query}}",
+        ),
+        ("{{base_url}}/items", "{{base_url}}/items"),
+        (
+            "{{scheme}}://example.test/items",
+            "{{scheme}}://example.test/items",
+        ),
         ("example.test/path", "http://example.test/path"),
         ("[::1]:8080/path", "http://[::1]:8080/path"),
         (
@@ -627,6 +642,81 @@ fn curl_materializes_http_inference_without_using_the_editor_https_default() {
             "Unexpectedly imported {source}"
         );
     }
+}
+
+#[test]
+fn curl_rejects_url_globs_without_collapsing_multiple_requests() {
+    for command in [
+        "curl 'http://127.0.0.1:1/{a,b}'",
+        "curl 'http://127.0.0.1:1/[1-2]'",
+        "curl 'http://127.0.0.1:1/[a-z]'",
+        "curl 'http://127.0.0.1:1/?tag[]=one'",
+        "curl 'http://[::1]:1/{a,b}'",
+        "curl '{{base_url}}/{a,b}'",
+        "curl 'http://{{host}}/[1-2]'",
+    ] {
+        assert!(
+            parse_import(command).unwrap_err().contains("globbing"),
+            "Unexpected result for {command}"
+        );
+    }
+
+    for command in [
+        "curl --globoff 'http://127.0.0.1:1/{a,b}'",
+        "curl 'http://127.0.0.1:1/{a,b}' --globoff",
+        "curl -g 'http://127.0.0.1:1/[1-2]'",
+        "curl 'http://127.0.0.1:1/[1-2]' -g",
+        "curl 'http://[::1]:1/path'",
+        "curl '[::1]:8080/path'",
+        "curl 'http://[{{address}}]:8080/path'",
+        "curl '{{base_url}}/items'",
+        "curl 'http://{{host}}/items/{{id}}'",
+    ] {
+        assert!(
+            parse_import(command).is_ok(),
+            "Unexpectedly rejected {command}"
+        );
+    }
+}
+
+#[test]
+fn curl_bearer_authentication_wins_over_user_in_both_orders() {
+    for options in [
+        "--oauth2-bearer token --user sam:pass",
+        "--user sam:pass --oauth2-bearer token",
+        "--oauth2-bearer previous --user sam:pass --oauth2-bearer token",
+    ] {
+        let imported = parse_import(&format!("curl http://localhost:8080 {options}")).unwrap();
+
+        assert_eq!(
+            imported[0].request.authentication,
+            Authentication::Bearer {
+                token: "token".into()
+            }
+        );
+    }
+}
+
+#[test]
+fn curl_combines_cookie_options_but_respects_explicit_cookie_headers() {
+    for options in [
+        "-b 'a=1' -H 'Cookie: b=2'",
+        "-H 'cookie: b=2' -b 'a=1'",
+        "-b 'a=1' -b 'c=3' -H 'Cookie: b=2'",
+    ] {
+        let imported = parse_import(&format!("curl http://localhost:8080 {options}")).unwrap();
+        let headers = &imported[0].request.headers;
+
+        assert_eq!(headers.len(), 1);
+        assert!(headers[0].0.eq_ignore_ascii_case("cookie"));
+        assert_eq!(headers[0].1, "b=2");
+    }
+
+    let imported = parse_import("curl http://localhost:8080 -b 'a=1' -b 'b=2'").unwrap();
+    assert_eq!(
+        imported[0].request.headers,
+        [("Cookie".into(), "a=1;b=2".into())]
+    );
 }
 
 #[test]

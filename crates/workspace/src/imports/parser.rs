@@ -1,7 +1,7 @@
 use request::{HttpRequest, Method};
 use std::path::PathBuf;
 
-/// An imported request, before the user chooses a collection to save it in.
+/// An imported request before storage assigns its native collection and file.
 #[derive(Debug)]
 pub(crate) struct ImportedRequest {
     pub name: String,

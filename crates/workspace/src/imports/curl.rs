@@ -18,11 +18,14 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
     let mut json_body = false;
     let mut plain_body = false;
     let mut compressed = false;
+    let mut globoff = false;
     let mut get = false;
     let mut head = false;
     let mut positional = false;
     let mut user_agent = None;
     let mut referer = None;
+    let mut bearer_token = None;
+    let mut cookies = Vec::new();
     let mut index = 1;
 
     while index < words.len() {
@@ -138,9 +141,7 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                 };
             }
             "--oauth2-bearer" => {
-                request.authentication = Authentication::Bearer {
-                    token: value.into(),
-                };
+                bearer_token = Some(value.to_owned());
             }
             "-A" | "--user-agent" => user_agent = Some(value.to_owned()),
             "-e" | "--referer" => {
@@ -158,7 +159,7 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                     );
                 }
 
-                request.headers.push(("Cookie".into(), value.into()));
+                cookies.push(value.to_owned());
             }
             "-G" | "--get" => get = true,
             "-I" | "--head" => head = true,
@@ -176,9 +177,8 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
             | "--include"
             | "-f"
             | "--fail"
-            | "--fail-with-body"
-            | "--globoff"
-            | "-g" => {}
+            | "--fail-with-body" => {}
+            "--globoff" | "-g" => globoff = true,
             "--compressed" => compressed = true,
             _ => {
                 return Err(format!(
@@ -190,6 +190,23 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
 
     if request.path.is_empty() {
         return Err("The cURL command has no URL.".into());
+    }
+
+    if !globoff && has_url_glob(&request.path) {
+        return Err("cURL URL globbing cannot be imported as one request. Use one expanded URL, or --globoff for literal braces and brackets.".into());
+    }
+
+    if let Some(token) = bearer_token {
+        request.authentication = Authentication::Bearer { token };
+    }
+
+    if !cookies.is_empty()
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+    {
+        request.headers.push(("Cookie".into(), cookies.join(";")));
     }
 
     if json_body && plain_body {
@@ -294,6 +311,48 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
     })
 }
 
+fn has_url_glob(path: &str) -> bool {
+    // Application variables are a supported template extension, not cURL sets.
+    let mut literal = String::new();
+    let mut rest = path;
+
+    while let Some(start) = rest.find("{{") {
+        literal.push_str(&rest[..start]);
+        let Some(end) = rest[start + 2..].find("}}") else {
+            return true;
+        };
+
+        literal.push_str("variable");
+        rest = &rest[start + 2 + end + 2..];
+    }
+
+    literal.push_str(rest);
+
+    // The brackets enclosing an IPv6 host do not trigger cURL URL expansion.
+    // Literal hosts have already passed URL validation; placeholders may stand
+    // for the address or port until Send.
+    let authority_start = literal.find("://").map_or(0, |index| index + 3);
+    let authority_end = literal[authority_start..]
+        .find(['/', '?', '#'])
+        .map_or(literal.len(), |index| authority_start + index);
+    let authority = &literal[authority_start..authority_end];
+    let host_start = authority
+        .rfind('@')
+        .map_or(authority_start, |index| authority_start + index + 1);
+    let ipv6_end = literal[host_start..authority_end]
+        .strip_prefix('[')
+        .and_then(|host| host.find(']').map(|index| host_start + index + 1));
+
+    literal
+        .char_indices()
+        .any(|(index, character)| match character {
+            '{' | '}' => true,
+            '[' => index != host_start || ipv6_end.is_none(),
+            ']' => Some(index) != ipv6_end,
+            _ => false,
+        })
+}
+
 fn split_option(word: &str) -> (&str, Option<&str>) {
     if word.starts_with("--") {
         word.split_once('=')
@@ -354,13 +413,6 @@ fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {
         return Err("The cURL URL is empty.".into());
     }
 
-    // Keep full URL templates unresolved until Send. Literal cURL URLs use
-    // cURL's protocol inference, independently of the address editor's default.
-    if value.contains("{{") {
-        request.path = value.into();
-        return Ok(());
-    }
-
     let explicit = value.split_once(':').filter(|(scheme, rest)| {
         scheme.starts_with(|character: char| character.is_ascii_alphabetic())
             && scheme.chars().all(|character| {
@@ -391,6 +443,29 @@ fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {
 
         format!("http://{value}")
     };
+
+    // A template in the authority may supply a complete URL. Path and query
+    // templates retain cURL's HTTP inference when the hostname is concrete.
+    let authority = path
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(&path)
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+
+    if authority.contains("{{") {
+        let scheme_template = value
+            .split_once("://")
+            .is_some_and(|(prefix, _)| prefix.contains("{{") && !prefix.contains(['/', '?', '#']));
+        request.path = if explicit.is_none() && (value.starts_with("{{") || scheme_template) {
+            value.into()
+        } else {
+            path
+        };
+        return Ok(());
+    }
+
     let parsed = url::Url::parse(&path).map_err(|error| format!("Invalid cURL URL: {error}"))?;
 
     if explicit.is_none()

@@ -25,10 +25,11 @@ The project is in early development. macOS builds are available for Apple Silico
 ## Reusing requests
 
 Use **Import** above the request tabs to paste a cURL command or choose a Postman
-v2 collection JSON file. Import creates a new saved collection, preserves nested
+v2 or v2.1 collection JSON file. Import creates a new saved collection, preserves nested
 folders, and opens the requests for editing. Existing collections are not replaced.
 Unsupported options, authentication schemes, scripts, and GET/HEAD request bodies
-produce an import error.
+produce an import error. cURL URL globbing must be expanded to one URL before
+import, or disabled with `--globoff` to preserve literal braces and brackets.
 
 Postman collection variables become literal defaults in the imported requests.
 Unresolved variables remain available for your collection environment. Use decoded

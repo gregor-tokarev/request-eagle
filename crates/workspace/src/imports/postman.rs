@@ -69,7 +69,7 @@ fn collect_items(
 fn request(value: &Value, inherited_auth: &Authentication) -> Result<HttpRequest, String> {
     if let Some(path) = value.as_str() {
         return Ok(HttpRequest {
-            path: path.into(),
+            path: url_with_default_protocol(path)?,
             authentication: inherited_auth.clone(),
             ..Default::default()
         });
@@ -114,14 +114,14 @@ fn request(value: &Value, inherited_auth: &Authentication) -> Result<HttpRequest
 
 fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
     request.path = if let Some(raw) = value.as_str() {
-        raw.into()
+        url_with_default_protocol(raw)?
     } else if let Some(raw) = value.get("raw").and_then(Value::as_str) {
-        raw.into()
+        url_with_default_protocol(raw)?
     } else {
         let protocol = value
             .get("protocol")
             .and_then(Value::as_str)
-            .unwrap_or("https");
+            .unwrap_or("http");
         let host = joined(value.get("host"), ".")?;
         let path = match value.get("path") {
             // Postman string paths include their leading separator; arrays hold
@@ -139,7 +139,7 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
             return Err("The Postman URL has no host or raw URL.".into());
         }
 
-        format!("{protocol}://{host}{port}/{path}")
+        url_with_default_protocol(&format!("{protocol}://{host}{port}/{path}"))?
     };
 
     if request.path.is_empty() {
@@ -180,6 +180,45 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn url_with_default_protocol(value: &str) -> Result<String, String> {
+    let value = value.trim();
+
+    if value.is_empty() {
+        return Err("The request URL is empty.".into());
+    }
+
+    let protocol = value.split_once("://").filter(|(protocol, _)| {
+        protocol.starts_with(|character: char| character.is_ascii_alphabetic())
+            && protocol
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "+-.".contains(character))
+    });
+
+    if let Some((protocol, _)) = protocol
+        && !protocol.eq_ignore_ascii_case("http")
+        && !protocol.eq_ignore_ascii_case("https")
+    {
+        return Err(format!(
+            "Postman protocol {protocol:?} is not supported. Import an HTTP or HTTPS URL."
+        ));
+    }
+
+    let has_protocol_template = value
+        .split(['/', '?', '#'])
+        .next()
+        .is_some_and(|prefix| prefix.contains("{{"));
+
+    // An environment variable before the path may supply the protocol or whole
+    // URL. Collection defaults have already been resolved before parsing.
+    if protocol.is_some() || has_protocol_template {
+        Ok(value.to_owned())
+    } else if value.starts_with('/') {
+        Err("A scheme-less Postman URL must start with a hostname.".into())
+    } else {
+        Ok(format!("http://{value}"))
+    }
 }
 
 fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> {
@@ -319,19 +358,17 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
             };
             request.body = Some(raw.as_bytes().to_vec());
 
-            if let Some(language) = body
+            let language = body
                 .pointer("/options/raw/language")
-                .and_then(Value::as_str)
-            {
-                let content_type = match language {
-                    "json" => "application/json",
-                    "javascript" => "application/javascript",
-                    "xml" => "application/xml",
-                    "html" => "text/html",
-                    _ => "text/plain",
-                };
-                add_content_type(request, content_type);
-            }
+                .and_then(Value::as_str);
+            let content_type = match language {
+                Some("json") => "application/json",
+                Some("javascript") => "application/javascript",
+                Some("xml") => "application/xml",
+                Some("html") => "text/html",
+                _ => "text/plain",
+            };
+            add_content_type(request, content_type);
         }
         "urlencoded" => {
             let values = body
@@ -461,16 +498,45 @@ fn authentication(
         .get("type")
         .and_then(Value::as_str)
         .ok_or("Postman authentication has no type.")?;
-    let attributes = value
-        .get(kind)
-        .and_then(Value::as_array)
-        .map(|pairs| pairs.as_slice())
-        .unwrap_or_default();
+    let attributes = match value.get(kind) {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Object(attributes)) => attributes
+            .iter()
+            .map(|(name, value)| (name.as_str(), Some(value)))
+            .collect(),
+        Some(Value::Array(attributes)) => attributes
+            .iter()
+            .map(|attribute| {
+                let name = attribute
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        format!("Postman {kind} authentication attribute keys must be text.")
+                    })?;
+
+                Ok((name, attribute.get("value")))
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        _ => {
+            return Err(format!(
+                "Postman {kind} authentication attributes must be an object or an array."
+            ));
+        }
+    };
+
+    for (name, value) in &attributes {
+        if !matches!(value, None | Some(Value::Null) | Some(Value::String(_))) {
+            return Err(format!(
+                "Postman {kind} authentication attribute {name:?} must be text."
+            ));
+        }
+    }
+
     let attribute = |name: &str| {
         attributes
             .iter()
-            .find(|attribute| attribute.get("key").and_then(Value::as_str) == Some(name))
-            .and_then(|attribute| attribute.get("value"))
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, value)| *value)
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned()
