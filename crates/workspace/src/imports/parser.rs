@@ -60,11 +60,13 @@ pub(super) fn add_content_type(request: &mut HttpRequest, value: &str) {
 
 pub(super) fn header(value: &str) -> Result<(String, String), String> {
     if let Some((key, value)) = value.split_once(':') {
-        if key.trim().is_empty() {
+        let key = key.trim_matches([' ', '\t']);
+
+        if key.is_empty() {
             return Err("An imported header has an empty name.".into());
         }
 
-        return Ok((key.trim().into(), value.trim_start().into()));
+        return Ok((key.into(), value.trim_start_matches([' ', '\t']).into()));
     }
 
     Err(format!("Header {value:?} must contain a name and a colon."))

@@ -183,3 +183,19 @@ fn curl_shell_splits_only_space_tab_and_newline_without_affecting_quoted_whitesp
     let json = "\r\n{\"item\":[{\"request\":\"https://example.test\"}]}\r\n";
     assert!(parse_import(json).is_ok());
 }
+
+#[test]
+fn curl_header_values_preserve_unicode_whitespace_and_trim_only_leading_http_ows() {
+    for whitespace in [
+        '\u{00a0}', '\u{0085}', '\u{2003}', '\u{202f}', '\u{3000}', '\u{feff}',
+    ] {
+        for value in [
+            format!("{whitespace}credential{whitespace}"),
+            whitespace.to_string(),
+        ] {
+            let imported =
+                parse_import(&format!("curl https://example.test -H 'X-Key: \t{value}'")).unwrap();
+            assert_eq!(imported[0].request.headers, [("X-Key".into(), value)]);
+        }
+    }
+}

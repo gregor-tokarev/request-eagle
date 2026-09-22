@@ -114,7 +114,14 @@ fn request(
         None | Some(Value::Null) => {}
         Some(Value::String(headers)) => {
             for line in headers.lines().filter(|line| !line.trim().is_empty()) {
-                request.headers.push(header(line)?);
+                let (key, value) = header(line)?;
+                // SDK string headers trim JavaScript whitespace at both ends.
+                // Array descriptor values are copied verbatim instead.
+                let value = value.trim_matches(|character: char| {
+                    character == '\u{feff}'
+                        || (character.is_whitespace() && character != '\u{0085}')
+                });
+                request.headers.push((key, value.into()));
             }
         }
         Some(Value::Array(headers)) => request.headers = pairs(headers)?,
@@ -633,19 +640,38 @@ fn authentication(
             .iter()
             .map(|(name, value)| (name.as_str(), Some(value)))
             .collect(),
-        Some(Value::Array(attributes)) => attributes
-            .iter()
-            .map(|attribute| {
-                let name = attribute
-                    .get("key")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        format!("Postman {kind} authentication attribute keys must be text.")
-                    })?;
+        Some(Value::Array(attributes)) => {
+            let mut assigned = std::collections::HashSet::new();
 
-                Ok((name, attribute.get("value")))
-            })
-            .collect::<Result<Vec<_>, String>>()?,
+            attributes
+                .iter()
+                .map(|attribute| {
+                    let name = attribute
+                        .get("key")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("Postman {kind} authentication attribute keys must be text.")
+                        })?;
+                    let value = attribute.get("value");
+
+                    if let Some(value_type) = attribute.get("type") {
+                        if value_type.as_str() != Some("string") {
+                            return Err(format!("Postman {kind} authentication attribute {name:?} must use string type before importing."));
+                        }
+
+                        if value.is_none() && !assigned.contains(name) {
+                            return Err(format!("Postman {kind} authentication attribute {name:?} with string type needs an explicit value before importing."));
+                        }
+                    }
+
+                    if value.is_some_and(Value::is_string) {
+                        assigned.insert(name);
+                    }
+
+                    Ok((name, value))
+                })
+                .collect::<Result<Vec<_>, String>>()?
+        }
         _ => {
             return Err(format!(
                 "Postman {kind} authentication attributes must be an object or an array."
@@ -654,7 +680,7 @@ fn authentication(
     };
 
     for (name, value) in &attributes {
-        if !matches!(value, None | Some(Value::Null) | Some(Value::String(_))) {
+        if !matches!(value, None | Some(Value::String(_))) {
             return Err(format!(
                 "Postman {kind} authentication attribute {name:?} must be text."
             ));
@@ -664,7 +690,8 @@ fn authentication(
     let attribute = |name: &str| {
         attributes
             .iter()
-            .find(|(key, _)| *key == name)
+            .rev()
+            .find(|(key, value)| *key == name && value.is_some())
             .and_then(|(_, value)| *value)
             .and_then(Value::as_str)
             .unwrap_or_default()

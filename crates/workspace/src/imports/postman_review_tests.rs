@@ -393,3 +393,29 @@ fn postman_path_variable_precedence_preserves_name_case_and_extensions() {
         "http://example.test/lower/upper/last.tar.gz"
     );
 }
+
+#[test]
+fn postman_string_headers_trim_sdk_whitespace_but_array_headers_preserve_values() {
+    for whitespace in ['\u{00a0}', '\u{2003}', '\u{202f}', '\u{3000}', '\u{feff}'] {
+        let value = format!("{whitespace}credential{whitespace}");
+        for (headers, expected) in [
+            (
+                json!(format!("X-Key: \t{value} \t")),
+                "credential".to_owned(),
+            ),
+            (json!([{"key": "X-Key", "value": value}]), value.clone()),
+        ] {
+            let source =
+                json!({"item": [{"request": {"url": "https://example.test", "header": headers}}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert_eq!(imported[0].request.headers, [("X-Key".into(), expected)]);
+        }
+    }
+
+    let source = json!({"item": [{"request": {"url": "https://example.test", "header": "X-Key: \u{0085}credential\u{0085}"}}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.headers,
+        [("X-Key".into(), "\u{0085}credential\u{0085}".into())]
+    );
+}

@@ -261,3 +261,135 @@ fn postman_query_api_key_checks_collisions_after_decoding_and_inheritance() {
         );
     }
 }
+
+#[test]
+fn postman_authentication_uses_last_present_attributes_even_when_disabled() {
+    for (auth, expected) in [
+        (
+            json!({"type": "basic", "basic": [
+                {"key": "username", "value": "old"}, {"key": "username", "value": "new", "disabled": true},
+                {"key": "password", "value": "old"}, {"key": "password", "value": "new"}
+            ]}),
+            Authentication::Basic {
+                username: "new".into(),
+                password: "new".into(),
+            },
+        ),
+        (
+            json!({"type": "bearer", "bearer": [
+                {"key": "token", "value": "old"}, {"key": "token", "value": "new", "disabled": true}
+            ]}),
+            Authentication::Bearer {
+                token: "new".into(),
+            },
+        ),
+        (
+            json!({"type": "apikey", "apikey": [
+                {"key": "key", "value": "old"}, {"key": "key", "value": "new"},
+                {"key": "value", "value": "old"}, {"key": "value", "value": "new", "disabled": true},
+                {"key": "in", "value": "header"}, {"key": "in", "value": "query"}
+            ]}),
+            Authentication::ApiKey {
+                name: "new".into(),
+                value: "new".into(),
+                location: ApiKeyLocation::Query,
+            },
+        ),
+    ] {
+        for source in [
+            source(auth.clone(), json!([])),
+            json!({"auth": auth, "item": [{"item": [{"request": {"url": "https://example.test", "auth": null}}]}]}),
+        ] {
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert_eq!(imported[0].request.authentication, expected);
+        }
+    }
+}
+
+#[test]
+fn postman_authentication_missing_values_preserve_prior_values_but_empty_values_replace_them() {
+    for (auth, expected) in [
+        (
+            json!({"type": "basic", "basic": [
+                {"key": "username", "value": "first"}, {"key": "username", "type": "string"},
+                {"key": "password", "value": "first"}, {"key": "password", "value": ""}
+            ]}),
+            Authentication::Basic {
+                username: "first".into(),
+                password: "".into(),
+            },
+        ),
+        (
+            json!({"type": "bearer", "bearer": [{"key": "token", "value": "first"}, {"key": "token"}]}),
+            Authentication::Bearer {
+                token: "first".into(),
+            },
+        ),
+        (
+            json!({"type": "bearer", "bearer": [{"key": "token", "value": "first"}, {"key": "token", "value": ""}]}),
+            Authentication::None,
+        ),
+        (
+            json!({"type": "apikey", "apikey": [
+                {"key": "key", "value": "key"}, {"key": "value", "value": "first"}, {"key": "value"},
+                {"key": "in", "value": "query"}, {"key": "in"}
+            ]}),
+            Authentication::ApiKey {
+                name: "key".into(),
+                value: "first".into(),
+                location: ApiKeyLocation::Query,
+            },
+        ),
+        (
+            json!({"type": "apikey", "apikey": [
+                {"key": "key", "value": "key"}, {"key": "value", "value": "first"}, {"key": "value", "value": ""},
+                {"key": "in", "value": "query"}, {"key": "in", "value": ""}
+            ]}),
+            Authentication::ApiKey {
+                name: "key".into(),
+                value: "".into(),
+                location: ApiKeyLocation::Header,
+            },
+        ),
+    ] {
+        let imported = parse_import(&source(auth, json!([])).to_string()).unwrap();
+        assert_eq!(imported[0].request.authentication, expected);
+    }
+}
+
+#[test]
+fn postman_rejects_authentication_types_and_values_that_need_sdk_coercion() {
+    for attribute in [
+        json!({"key": "token", "type": "number", "value": "00123"}),
+        json!({"key": "token", "type": "boolean", "value": "false"}),
+        json!({"key": "token", "type": "any", "value": "value"}),
+        json!({"key": "token", "type": null, "value": "value"}),
+        json!({"key": "token", "value": null}),
+        json!({"key": "token", "type": "string", "value": null}),
+        json!({"key": "token", "type": "string"}),
+    ] {
+        let source = source(json!({"type": "bearer", "bearer": [attribute]}), json!([]));
+        assert!(parse_import(&source.to_string()).is_err());
+    }
+
+    let source = source(
+        json!({"type": "basic", "basic": {"username": null}}),
+        json!([]),
+    );
+    assert!(parse_import(&source.to_string()).is_err());
+}
+
+#[test]
+fn postman_child_authentication_replaces_whole_parent_object_with_optional_fields_omitted() {
+    let source = json!({"auth": {"type": "basic", "basic": {"username": "parent", "password": "parent-password"}}, "item": [{"request": {
+        "url": "https://example.test", "auth": {"type": "basic", "basic": [{"key": "username", "type": "string", "value": "child"}]}
+    }}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::Basic {
+            username: "child".into(),
+            password: "".into()
+        }
+    );
+}

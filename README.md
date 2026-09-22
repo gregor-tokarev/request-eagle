@@ -50,7 +50,8 @@ application's transport preferences.
 Postman imports reject authentication helpers that could replace explicit
 credential headers or query parameters. Remove the conflicting field or disable
 the helper before importing. Structured URL credentials must be moved to the
-request's Basic authentication helper first.
+request's Basic authentication helper first. Authentication values must be strings;
+declared attribute types must be `string`.
 
 The **Authentication** tab supports Basic, Bearer, and API key credentials. Use
 `{{name}}` placeholders in request fields and add matching strings to the
