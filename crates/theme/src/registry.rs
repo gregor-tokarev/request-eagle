@@ -1,7 +1,7 @@
 use crate::{apply_preferences, theme_pair};
 
+use gpui_kit::App;
 use gpui_kit::component::{Theme, ThemeMode, ThemeRegistry};
-use gpui_kit::{App, SharedString};
 use preferences::{AppearanceMode, AppearancePreferences};
 
 include!(concat!(env!("OUT_DIR"), "/embedded_theme_sets.rs"));
@@ -67,8 +67,7 @@ fn link_saved_themes(cx: &mut App) {
 }
 
 pub fn apply(name: &str, cx: &mut App) -> bool {
-    let name = SharedString::from(name);
-    let Some(config) = ThemeRegistry::global(cx).themes().get(&name).cloned() else {
+    let Some(config) = crate::config(name, cx) else {
         return false;
     };
 

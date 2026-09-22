@@ -70,7 +70,41 @@ fn preview_cards_apply_the_selected_palette(cx: &mut TestAppContext) {
         request_eagle_theme::init(cx);
     });
 
-    let (_, cx) = cx.add_window_view(AppearanceSettings::new);
+    let (page, cx) = cx.add_window_view(AppearanceSettings::new);
+
+    cx.update(|_, cx| {
+        for name in ["Default Light", "Default Dark"] {
+            assert!(request_eagle_theme::apply(name, cx));
+
+            let preview = page
+                .read(cx)
+                .previews
+                .iter()
+                .find(|preview| preview.name == name)
+                .unwrap()
+                .colors;
+            let applied = gpui_kit::component::Theme::global(cx).colors;
+
+            assert_eq!(
+                [
+                    preview.primary,
+                    preview.success,
+                    preview.warning,
+                    preview.danger,
+                    preview.info,
+                ],
+                [
+                    applied.primary,
+                    applied.success,
+                    applied.warning,
+                    applied.danger,
+                    applied.info,
+                ],
+                "{name} preview swatches should match the applied palette"
+            );
+        }
+    });
+    cx.run_until_parked();
 
     for (selector, expected_light, expected_dark) in [
         (

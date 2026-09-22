@@ -31,6 +31,7 @@ pub fn apply_preferences(appearance: WindowAppearance, cx: &mut App) {
         .or_else(|| registry.themes().get(fallback.as_str()))
         .cloned()
         .expect("default appearance themes should be bundled");
+    let config = crate::config(&config.name, cx).expect("selected theme should be registered");
 
     let theme = Theme::global_mut(cx);
     theme.apply_config(&config);

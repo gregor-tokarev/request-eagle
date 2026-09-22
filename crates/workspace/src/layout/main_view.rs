@@ -298,10 +298,10 @@ impl MainView {
             .gap_2()
             .rounded(px(5.))
             .text_size(px(12.))
-            .text_color(cx.theme().muted_foreground)
+            .text_color(cx.theme().tab_foreground)
             .when(selected, |this| {
-                this.bg(cx.theme().tab_active)
-                    .text_color(cx.theme().foreground)
+                this.bg(cx.theme().tokens.tab_active.background)
+                    .text_color(cx.theme().tab_active_foreground)
             })
             .hover(|this| {
                 if selected {

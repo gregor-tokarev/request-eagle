@@ -13,12 +13,18 @@ use super::view::ResponseView;
 pub(super) struct ResponseBodyEditor(pub(super) Entity<EditorState>);
 
 impl Render for ResponseBodyEditor {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         Editor::new(&self.0)
             .h_full()
             .readonly(true)
             .appearance(false)
             .bordered(false)
+            .bg(cx
+                .theme()
+                .highlight_theme
+                .style
+                .editor_background
+                .unwrap_or_else(|| cx.theme().input_background()))
             .text_size(px(13.))
             .aria_label("Response body")
     }

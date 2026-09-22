@@ -138,40 +138,29 @@ impl RequestDraft {
                     ),
             )
             .child(
-                h_flex()
+                Button::new("send-request")
+                    .debug_selector(|| "send-request".into())
+                    .primary()
                     .h(px(40.))
+                    .w(px(84.))
                     .flex_none()
                     .rounded(px(7.))
-                    .overflow_hidden()
-                    .bg(rgb(0x2e66ce))
-                    .child(
-                        Button::new("send-request")
-                            .debug_selector(|| "send-request".into())
-                            .ghost()
-                            .h_full()
-                            .w(px(84.))
-                            .label(if sending { "Cancel" } else { "Send" })
-                            .accessibility_label(if sending {
-                                "Cancel request"
-                            } else {
-                                "Send request"
-                            })
-                            .text_color(rgb(0xffffff))
-                            .when(!sending, |button| {
-                                button.tooltip_with_action(
-                                    "Send request",
-                                    &SendRequest,
-                                    Some("Workspace"),
-                                )
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.task.is_some() {
-                                    this.cancel(cx);
-                                } else {
-                                    this.send(window, cx);
-                                }
-                            })),
-                    ),
+                    .label(if sending { "Cancel" } else { "Send" })
+                    .accessibility_label(if sending {
+                        "Cancel request"
+                    } else {
+                        "Send request"
+                    })
+                    .when(!sending, |button| {
+                        button.tooltip_with_action("Send request", &SendRequest, Some("Workspace"))
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.task.is_some() {
+                            this.cancel(cx);
+                        } else {
+                            this.send(window, cx);
+                        }
+                    })),
             )
     }
 
