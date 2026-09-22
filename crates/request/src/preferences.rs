@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ProxyPreferences;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersion {
@@ -20,6 +22,7 @@ pub struct RequestPreferences {
     /// Maximum buffered response body in MiB (1,048,576 bytes). Zero is unlimited.
     pub max_response_size_mb: u64,
     pub ssl_certificate_verification: bool,
+    pub proxy: ProxyPreferences,
     pub follow_all_redirects: bool,
 }
 
@@ -30,6 +33,7 @@ impl Default for RequestPreferences {
             timeout_ms: 0,
             max_response_size_mb: 50,
             ssl_certificate_verification: false,
+            proxy: ProxyPreferences::default(),
             follow_all_redirects: true,
         }
     }

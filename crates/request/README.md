@@ -30,6 +30,18 @@ operation, including the response body, is bounded by the timeout. Dropping its
 future cancels the operation. Response limits count body bytes, including for
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
+Proxy preferences default to the system/environment proxy. Custom mode supports
+HTTP or HTTPS proxy servers, separate HTTP/HTTPS request selection, Basic proxy
+authentication, and comma-separated bypass hosts, domains, and IP ranges. A domain
+also matches its subdomains; `*.example.com` and `.example.com` are accepted, and
+`*` bypasses all destinations. Bypassed or unselected request types connect
+directly. Disabled mode ignores all proxies. Proxy settings are saved with the
+other local preferences and apply to the next request. Credentials are held in
+memory by this crate; the preferences crate persists them in the OS keyring,
+with only a credential reference in the preferences file.
+In Settings > Proxy, pasting a full proxy URL into the host field fills the
+protocol, hostname, port, and authentication fields. Valid edits save automatically.
+
 HTTP redirects (301, 302, 303, 307, and 308) are followed by default, with a
 limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
 the same authority and removed when a redirect changes the host or port.

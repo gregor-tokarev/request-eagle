@@ -9,6 +9,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::general::GeneralSettings;
 use super::keybindings::KeybindingsPage;
+use super::proxy::ProxySettings;
 use crate::actions::CloseSettings;
 use updater::Updater;
 
@@ -19,6 +20,7 @@ pub enum SettingsEvent {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SettingsPage {
     General,
+    Proxy,
     Appearance,
     Keybindings,
 }
@@ -27,6 +29,7 @@ impl SettingsPage {
     fn title(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Proxy => "Proxy",
             Self::Appearance => "Appearance",
             Self::Keybindings => "Keybindings",
         }
@@ -35,6 +38,7 @@ impl SettingsPage {
     fn icon(self) -> Icon {
         match self {
             Self::General => Icon::new(IconName::Settings2),
+            Self::Proxy => Icon::default().path("icons/network.svg"),
             Self::Appearance => Icon::new(IconName::Palette),
             Self::Keybindings => Icon::default().path("icons/keyboard.svg"),
         }
@@ -44,6 +48,7 @@ impl SettingsPage {
 pub struct Settings {
     page: SettingsPage,
     general: Entity<GeneralSettings>,
+    proxy: Entity<ProxySettings>,
     appearance: Entity<appearance::AppearanceSettings>,
     keybindings: Entity<KeybindingsPage>,
     focus_handle: FocusHandle,
@@ -56,6 +61,7 @@ impl Settings {
         Self {
             page: SettingsPage::General,
             general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
+            proxy: cx.new(|cx| ProxySettings::new(window, cx)),
             appearance: cx.new(|cx| appearance::AppearanceSettings::new(window, cx)),
             keybindings: cx.new(|cx| KeybindingsPage::new(window, cx)),
             focus_handle: cx.focus_handle(),
@@ -64,7 +70,7 @@ impl Settings {
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
-            SettingsPage::General | SettingsPage::Appearance => {
+            SettingsPage::General | SettingsPage::Proxy | SettingsPage::Appearance => {
                 window.focus(&self.focus_handle, cx)
             }
             SettingsPage::Keybindings => self
@@ -83,6 +89,7 @@ impl Settings {
     fn page_buttons(&self, cx: &mut Context<Self>) -> Vec<Button> {
         [
             SettingsPage::General,
+            SettingsPage::Proxy,
             SettingsPage::Appearance,
             SettingsPage::Keybindings,
         ]
@@ -211,7 +218,11 @@ impl Render for Settings {
                             .items_center()
                             .px(if narrow { px(20.) } else { px(48.) })
                             .py(if narrow { px(24.) } else { px(48.) })
-                            .child(self.general.clone()),
+                            .child(if self.page == SettingsPage::Proxy {
+                                self.proxy.clone().into_any_element()
+                            } else {
+                                self.general.clone().into_any_element()
+                            }),
                     )
                     .into_any_element()
             });

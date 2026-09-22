@@ -62,13 +62,12 @@ impl RequestSettings {
         let version_subscription = cx.subscribe(
             &http_version,
             |this, _, event: &SelectEvent<VersionList>, cx| {
-                if let SelectEvent::Confirm(Some(label)) = event {
-                    if let Some(&(version, _)) = HTTP_VERSIONS
+                if let SelectEvent::Confirm(Some(label)) = event
+                    && let Some(&(version, _)) = HTTP_VERSIONS
                         .iter()
                         .find(|(_, candidate)| *candidate == label.as_ref())
-                    {
-                        this.save(|request| request.http_version = version, cx);
-                    }
+                {
+                    this.save(|request| request.http_version = version, cx);
                 }
             },
         );

@@ -37,34 +37,44 @@ pub fn run() {
             eprintln!("Failed to load key bindings: {error}");
         }
 
-        if let Some(home) = std::env::home_dir()
-            && let Err(error) = preferences::load(home.join(".request-eagle"), cx)
-        {
-            eprintln!("Failed to load preferences: {error:#}");
-        }
+        let preferences =
+            std::env::home_dir().map(|home| preferences::load(home.join(".request-eagle"), cx));
 
-        request_eagle_theme::init(cx);
+        cx.spawn(async move |cx| {
+            if let Some(load) = preferences
+                && let Err(error) = load.await
+            {
+                eprintln!("Failed to load preferences: {error:#}");
+            }
 
-        let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
-        actions::init(updater.clone(), cx);
-
-        let collections = match std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR") {
-            Some(path) => collection::CollectionRegistry::from_path(path),
-            None => collection::CollectionRegistry::load(),
-        }
-        .expect("Failed to load collections");
-
-        workspace::init(collections, updater, cx);
-
-        #[cfg(feature = "dev-profiler")]
-        for window in cx.windows() {
-            window
-                .update(cx, |_, window, _| {
-                    window.set_debug_frame_overlay_mode(DebugFrameOverlayMode::Full);
-                })
-                .expect("Failed to enable the development frame monitor");
-        }
-
-        menu::init(cx);
+            cx.update(open_workspace);
+        })
+        .detach();
     });
+}
+
+fn open_workspace(cx: &mut App) {
+    request_eagle_theme::init(cx);
+
+    let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
+    actions::init(updater.clone(), cx);
+
+    let collections = match std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR") {
+        Some(path) => collection::CollectionRegistry::from_path(path),
+        None => collection::CollectionRegistry::load(),
+    }
+    .expect("Failed to load collections");
+
+    workspace::init(collections, updater, cx);
+
+    #[cfg(feature = "dev-profiler")]
+    for window in cx.windows() {
+        window
+            .update(cx, |_, window, _| {
+                window.set_debug_frame_overlay_mode(DebugFrameOverlayMode::Full);
+            })
+            .expect("Failed to enable the development frame monitor");
+    }
+
+    menu::init(cx);
 }
