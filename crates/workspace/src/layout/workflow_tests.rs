@@ -240,3 +240,198 @@ fn recovered_saved_drafts_keep_dirty_state_and_save_auth_and_forms(cx: &mut Test
     cx.simulate_keystrokes("secondary-w");
     cx.read(|cx| assert!(view.read(cx).tabs.is_empty()));
 }
+
+#[gpui_kit::test]
+async fn sidebar_relocation_updates_environment_recovery_and_execution(cx: &mut TestAppContext) {
+    use std::{fs, time::Duration};
+
+    use smol::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        cx.update(|window, _| window.refresh());
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    }
+
+    cx.executor().allow_parking();
+    let directory = tempfile::tempdir().unwrap();
+    let collections_path = directory.path().join("collections");
+    let state = directory.path().join("state");
+    let source = collections_path.join("API");
+    let destination = collections_path.join("Other");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(
+        source.join("example.toml"),
+        r#"id = "example"
+name = "Example"
+schema_version = 1
+[request]
+type = "http"
+method = "GET"
+path = "{{base_url}}/{{account}}"
+headers = [["X-Collection", "{{account}}"]]
+[request.authentication]
+type = "bearer"
+token = "{{token}}"
+"#,
+    )
+    .unwrap();
+
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    for (root, account) in [(&source, "original"), (&destination, "destination")] {
+        fs::write(
+            root.join("environment.toml"),
+            format!(
+                "base_url = \"{url}\"\naccount = \"{account}\"\ntoken = \"{account}-secret\"\n"
+            ),
+        )
+        .unwrap();
+    }
+    let server = smol::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.starts_with("GET /destination HTTP/1.1\r\n"), "{head}");
+        assert!(head.contains("x-collection: destination\r\n"), "{head}");
+        assert!(
+            head.contains("authorization: Bearer destination-secret\r\n"),
+            "{head}"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let collections = CollectionRegistry::from_path(&collections_path).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+    });
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.enable_workflow_storage(state.clone(), cx)
+        });
+    });
+    click(cx, "collection-row-1");
+    let draft = cx.read(|cx| {
+        view.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).environment_path,
+            Some(source.join("environment.toml"))
+        )
+    });
+
+    click(cx, "collection-row-0");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Renamed API");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    let renamed = collections_path.join("Renamed API");
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).tabs[1].request_path,
+            Some(renamed.join("example.toml"))
+        );
+        assert_eq!(
+            draft.read(cx).environment_path,
+            Some(renamed.join("environment.toml"))
+        );
+    });
+    let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot.tabs[1].request_path,
+        Some(renamed.join("example.toml"))
+    );
+    assert_eq!(
+        snapshot.tabs[1].environment_path,
+        Some(renamed.join("environment.toml"))
+    );
+
+    click(cx, "collection-row-0");
+    let from = cx.debug_bounds("collection-row-1").unwrap().center();
+    let to = cx.debug_bounds("collection-row-2").unwrap().center();
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: from,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.simulate_event(gpui_kit::MouseMoveEvent {
+        position: to,
+        pressed_button: Some(gpui_kit::MouseButton::Left),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    cx.simulate_event(gpui_kit::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: to,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.run_until_parked();
+
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).tabs[1].request_path,
+            Some(destination.join("example.toml"))
+        );
+        assert_eq!(
+            draft.read(cx).environment_path,
+            Some(destination.join("environment.toml"))
+        );
+        assert_eq!(draft.read(cx).request.path, "{{base_url}}/{{account}}");
+    });
+    let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot.tabs[1].request_path,
+        Some(destination.join("example.toml"))
+    );
+    assert_eq!(
+        snapshot.tabs[1].environment_path,
+        Some(destination.join("environment.toml"))
+    );
+
+    click(cx, "send-request");
+    smol::future::or(server, async {
+        smol::Timer::after(Duration::from_secs(5)).await;
+        panic!("relocated request did not reach the destination environment endpoint");
+    })
+    .await;
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).history.entries[0].environment_path,
+            Some(destination.join("environment.toml"))
+        );
+    });
+}
