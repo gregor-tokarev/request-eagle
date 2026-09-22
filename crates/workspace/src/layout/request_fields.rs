@@ -250,7 +250,7 @@ impl Render for RequestFields {
                             ("description", &row.description),
                         ]
                         .map(|(column, input)| {
-                            div()
+                            h_flex()
                                 .debug_selector(move || format!("{id}-{column}-{index}"))
                                 .flex_1()
                                 .min_w_0()
