@@ -6,25 +6,29 @@ fn previews_only_headers_the_transport_adds() {
         generated_headers(Method::Get, "https://example.com/path", &[], 0),
         [
             ("Host".into(), "example.com".into()),
-            ("Accept".into(), "*/*".into())
+            ("Accept".into(), "*/*".into()),
+            ("Accept-Encoding".into(), "gzip".into())
         ]
     );
 
-    for method in [Method::Post, Method::Put] {
+    for method in [Method::Post, Method::Put, Method::Patch] {
         let headers = generated_headers(method, "http://[::1]:8080/path", &[], 0);
         assert_eq!(headers[0], ("Host".into(), "[::1]:8080".into()));
-        assert_eq!(headers[2], ("Content-Length".into(), "0".into()));
+        assert_eq!(headers[3], ("Content-Length".into(), "0".into()));
     }
 
     let body = "{\"name\":\"🦅\"}";
     let headers = generated_headers(Method::Post, "https://example.com", &[], body.len());
     assert_eq!(
-        headers[2],
+        headers[3],
         ("Content-Length".into(), body.len().to_string())
     );
     assert_eq!(
         generated_headers(Method::Get, "", &[], 0),
-        [("Accept".into(), "*/*".into())]
+        [
+            ("Accept".into(), "*/*".into()),
+            ("Accept-Encoding".into(), "gzip".into())
+        ]
     );
 }
 
@@ -33,6 +37,7 @@ fn explicit_headers_override_defaults_case_insensitively() {
     let headers = [
         ("hOsT".into(), "virtual.example".into()),
         ("ACCEPT".into(), "application/json".into()),
+        ("AcCePt-EnCoDiNg".into(), "identity".into()),
         ("content-LENGTH".into(), "12".into()),
         ("AUTHORIZATION".into(), "Bearer example".into()),
     ];

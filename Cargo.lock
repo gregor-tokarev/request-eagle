@@ -5846,6 +5846,7 @@ dependencies = [
  "anyhow",
  "base64",
  "bytes",
+ "flate2",
  "gpui-pre-http-client",
  "gpui-pre-reqwest",
  "gpui-pre-reqwest-client",

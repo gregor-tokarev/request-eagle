@@ -47,10 +47,10 @@ impl HttpExecutor {
 
     pub(crate) async fn execute(
         &self,
-        request: HttpRequest,
+        mut request: HttpRequest,
     ) -> Result<HttpResponse, ExecutionError> {
         let started = Instant::now();
-        let request_body_bytes = request.body.as_ref().map_or(0, Vec::len);
+        let is_head = request.method.as_str() == "HEAD";
         let mut url = Url::parse(&request.path).map_err(HttpError::InvalidUrl)?;
 
         if !matches!(url.scheme(), "http" | "https") {
@@ -67,6 +67,21 @@ impl HttpExecutor {
             url.query_pairs_mut().extend_pairs(query);
         }
 
+        if let Some(form) = request.form.take() {
+            let (body, content_type) = form.encode().await?;
+
+            // Form mode owns the encoding and framing. Stale raw-body headers
+            // must not describe different bytes or an unrelated MIME boundary.
+            request.headers.retain(|(name, _)| {
+                !name.eq_ignore_ascii_case("content-type")
+                    && !name.eq_ignore_ascii_case("content-length")
+                    && !name.eq_ignore_ascii_case("transfer-encoding")
+            });
+            request.headers.push(("Content-Type".into(), content_type));
+            request.body = Some(body);
+        }
+
+        let request_body_bytes = request.body.as_ref().map_or(0, Vec::len);
         let mut builder = Request::builder()
             .method(request.method.as_str())
             .uri(url.as_str());
@@ -155,6 +170,15 @@ impl HttpExecutor {
             }
         }
 
+        // HEAD and statuses without a body may describe an encoded representation
+        // in their headers, but there are no bytes to pass to a gzip decoder.
+        let (body, encoded_response_body_bytes) = if is_head
+            || matches!(parts.status.as_u16(), 204 | 205 | 304)
+        {
+            (body, None)
+        } else {
+            crate::response_encoding::decode_body(&parts.headers, body, self.max_response_bytes)?
+        };
         let download = received.elapsed();
         let response_header_bytes = parts
             .headers
@@ -174,6 +198,7 @@ impl HttpExecutor {
                 request_header_bytes,
                 request_body_bytes,
                 response_header_bytes,
+                encoded_response_body_bytes,
             },
         })
     }
@@ -186,6 +211,7 @@ fn build_client(
     let builder = reqwest::Client::builder()
         .use_rustls_tls()
         .danger_accept_invalid_certs(!preferences.ssl_certificate_verification)
+        // Decode explicitly so received headers and encoded body sizes survive.
         .no_gzip()
         .no_brotli()
         .no_deflate()

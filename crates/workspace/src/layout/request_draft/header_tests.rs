@@ -20,13 +20,13 @@ fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut 
     let refresh = |cx: &mut gpui_kit::VisualTestContext| cx.update(|window, _| window.refresh());
 
     refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-1").is_some());
+    assert!(cx.debug_bounds("request-section-Headers-count-2").is_some());
     assert!(cx.debug_bounds("headers-generated-value-0").is_some());
     let url = cx.debug_bounds("request-url").unwrap();
     cx.simulate_click(url.center(), Modifiers::default());
     cx.simulate_input("example.com:8443/path");
     refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-2").is_some());
+    assert!(cx.debug_bounds("request-section-Headers-count-3").is_some());
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).generated_headers[0],
@@ -72,14 +72,14 @@ fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut 
     });
     cx.read(|cx| {
         let headers = &draft.read(cx).generated_headers;
-        assert_eq!(headers[2], ("Content-Length".into(), "15".into()));
+        assert_eq!(headers[3], ("Content-Length".into(), "15".into()));
         assert_eq!(
-            headers[3],
+            headers[4],
             ("Content-Type".into(), "application/json".into())
         );
     });
     refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-4").is_some());
+    assert!(cx.debug_bounds("request-section-Headers-count-5").is_some());
     let tab = cx.debug_bounds("request-section-Headers").unwrap();
     cx.simulate_click(tab.center(), Modifiers::default());
     refresh(cx);
@@ -97,7 +97,7 @@ fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut 
 
     cx.update(|_, cx| draft.update(cx, |draft, cx| draft.set_method(Method::Get, cx)));
     cx.read(|cx| {
-        assert_eq!(draft.read(cx).generated_headers.len(), 2);
+        assert_eq!(draft.read(cx).generated_headers.len(), 3);
         assert!(
             draft.read(cx).request.body.is_some(),
             "preserve the draft body while GET excludes it"

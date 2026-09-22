@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 /// Protocol-specific request data shared by collection files and editable drafts.
@@ -17,8 +19,25 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>,
     #[serde(default)]
     pub body: Option<Vec<u8>>,
+    /// Structured form data takes precedence over the retained raw body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<FormBody>,
     #[serde(default)]
     pub query: Option<Vec<(String, String)>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "fields", rename_all = "snake_case")]
+pub enum FormBody {
+    UrlEncoded(Vec<(String, String)>),
+    Multipart(Vec<MultipartField>),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MultipartField {
+    Text { name: String, value: String },
+    File { name: String, path: PathBuf },
 }
 
 impl From<HttpRequest> for Request {
@@ -46,6 +65,9 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Patch,
+    Head,
+    Options,
     Delete,
 }
 
@@ -55,6 +77,9 @@ impl Method {
             Self::Get => "GET",
             Self::Post => "POST",
             Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Head => "HEAD",
+            Self::Options => "OPTIONS",
             Self::Delete => "DELETE",
         }
     }

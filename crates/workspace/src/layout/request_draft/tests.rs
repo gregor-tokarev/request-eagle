@@ -8,7 +8,7 @@ use super::{RequestDraft, draft::RequestSection, execution::outgoing_request};
 
 // Debug selectors are collected only during layout, not replayed from cached
 // controls. Refresh before querying geometry; interactions still use real input.
-fn element_bounds(
+pub(super) fn element_bounds(
     cx: &mut VisualTestContext,
     selector: &'static str,
 ) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
@@ -16,7 +16,7 @@ fn element_bounds(
     cx.debug_bounds(selector)
 }
 
-fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
+pub(super) fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -51,7 +51,7 @@ fn prepares_json_requests_without_mutating_the_draft() {
         .push(("content-type".into(), "application/custom+json".into()));
     assert_eq!(outgoing_request(&original).headers, original.headers);
 
-    for method in [Method::Get, Method::Delete] {
+    for method in [Method::Get, Method::Head] {
         original.method = method;
         assert!(outgoing_request(&original).body.is_none());
         assert!(original.body.is_some());
@@ -96,7 +96,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
         )
     });
 
-    for method in [Method::Get, Method::Delete] {
+    for method in [Method::Get, Method::Head] {
         cx.update(|window, cx| {
             draft.update(cx, |draft, cx| {
                 draft.set_method(method, cx);

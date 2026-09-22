@@ -27,6 +27,8 @@ pub(in crate::layout) struct RequestDraft {
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) url_form: Option<Entity<super::form_body::FormEditor>>,
+    pub(super) multipart_form: Option<Entity<super::form_body::FormEditor>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
@@ -57,6 +59,8 @@ impl RequestDraft {
             headers: None,
             generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
+            url_form: None,
+            multipart_form: None,
             response: None,
             split: None,
             task: None,
@@ -107,7 +111,7 @@ impl RequestDraft {
         self.url_state(window, cx);
 
         if self.section == RequestSection::Body {
-            self.body_state(window, cx);
+            self.prepare_body(window, cx);
         } else {
             self.fields_state(window, cx);
         }

@@ -264,6 +264,7 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
                 response_header_bytes: 42,
                 request_header_bytes: 10,
                 request_body_bytes: 6,
+                encoded_response_body_bytes: None,
             };
             http.headers.append(
                 "set-cookie",
@@ -334,6 +335,48 @@ fn response_overlays_open_on_hover_and_copy_details_in_order(cx: &mut TestAppCon
             .text()
             .unwrap()
             .contains("do-not-copy")
+    );
+}
+
+#[gpui_kit::test]
+fn decoded_response_sizes_show_downloaded_and_uncompressed_bytes(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        cx.set_reduce_motion(true);
+    });
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let response = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            let mut content = response(&[b'a'; 1_024], "text/plain");
+            let Response::Http(http) = &mut content.execution.response;
+            http.headers
+                .insert("content-encoding", "gzip".parse().unwrap());
+            http.metrics.encoded_response_body_bytes = Some(29);
+            http.metrics.response_header_bytes = 42;
+            view.finish(Ok(content), window, cx);
+            view
+        });
+        gpui_kit::component::Root::new(response, window, cx)
+    });
+    let trigger = cx.debug_bounds("response-size").unwrap();
+    cx.simulate_mouse_move(trigger.center(), None, Modifiers::default());
+    cx.executor().advance_clock(Duration::from_millis(400));
+    cx.run_until_parked();
+
+    let first = cx.debug_bounds("detail-response-total").unwrap();
+    let last = cx.debug_bounds("detail-response-decoded").unwrap();
+    let start = point(first.left() + px(1.), first.center().y);
+    let end = point(last.right() - px(1.), last.center().y);
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+    cx.simulate_keystrokes("secondary-c");
+
+    let copied = cx.read_from_clipboard().unwrap().text().unwrap();
+    assert!(
+        copied.contains("Response size\n71 B\nHeaders (estimated)\n42 B\nDownloaded body\n29 B\nUncompressed\n1.0 KB (1024 B)"),
+        "{copied}"
     );
 }
 

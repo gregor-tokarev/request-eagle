@@ -51,9 +51,13 @@ pub fn generated_headers(
         generated.push(("Accept".into(), "*/*".into()));
     }
 
+    if !has("accept-encoding") {
+        generated.push(("Accept-Encoding".into(), "gzip".into()));
+    }
+
     if !has("content-length")
         && !has("transfer-encoding")
-        && (body_bytes > 0 || matches!(method, Method::Post | Method::Put))
+        && (body_bytes > 0 || matches!(method, Method::Post | Method::Put | Method::Patch))
     {
         generated.push(("Content-Length".into(), body_bytes.to_string()));
     }

@@ -16,13 +16,15 @@ mod model;
 mod preferences;
 mod proxy;
 mod redirects;
+mod request_body;
 mod response;
+mod response_encoding;
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
-pub use model::{HttpRequest, Method, Request};
+pub use model::{FormBody, HttpRequest, Method, MultipartField, Request};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};

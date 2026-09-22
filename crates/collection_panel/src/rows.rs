@@ -143,7 +143,8 @@ impl CollectionPanel {
                         let color = match method {
                             "GET" => theme.success,
                             "POST" => theme.warning,
-                            "PUT" => theme.info,
+                            "PUT" | "PATCH" => theme.info,
+                            "HEAD" | "OPTIONS" => theme.muted_foreground,
                             _ => theme.danger,
                         };
 

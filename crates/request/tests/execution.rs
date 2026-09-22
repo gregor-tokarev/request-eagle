@@ -102,6 +102,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
                 ("X-Tag".into(), "two".into()),
             ],
             body: Some(vec![0, 255, 42]),
+            form: None,
             query: Some(vec![
                 ("tag".into(), "a & b".into()),
                 ("tag".into(), "c+d".into()),
@@ -190,7 +191,15 @@ fn executes_all_existing_methods_from_saved_requests() {
     smol::block_on(async {
         let executor = executor();
 
-        for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
+        for method in [
+            Method::Get,
+            Method::Post,
+            Method::Put,
+            Method::Patch,
+            Method::Head,
+            Method::Options,
+            Method::Delete,
+        ] {
             let (url, server) = serve(
                 b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}"
                     .to_vec(),
@@ -210,7 +219,11 @@ fn executes_all_existing_methods_from_saved_requests() {
                     .starts_with(&format!("{} /health HTTP/1.1", method.as_str()))
             );
             let Response::Http(response) = &result.response;
-            assert_eq!(response.body, b"{\"ok\":true}");
+            if method == Method::Head {
+                assert!(response.body.is_empty());
+            } else {
+                assert_eq!(response.body, b"{\"ok\":true}");
+            }
             report(&format!("{} /health", method.as_str()), &result);
         }
     });
@@ -807,7 +820,7 @@ fn generated_preview_matches_headers_received_by_the_server() {
                 .skip(1)
                 .filter(|line| !line.is_empty())
                 .count(),
-            4
+            5
         );
         assert_eq!(received.body, b"abc");
     });

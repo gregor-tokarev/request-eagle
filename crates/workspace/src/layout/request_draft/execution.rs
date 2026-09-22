@@ -16,23 +16,43 @@ fn request_url(path: &str) -> String {
 }
 
 pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
-    let supports_body = matches!(request.method, Method::Post | Method::Put);
-    let body_bytes = if supports_body {
+    let supports_body = !matches!(request.method, Method::Get | Method::Head);
+    let form = request.form.as_ref().filter(|_| supports_body);
+    let body_bytes = if let Some(form) = form {
+        form.encoded_len().unwrap_or(0)
+    } else if supports_body {
         request.body.as_ref().map_or(0, Vec::len)
     } else {
         0
     };
+    let explicit: Vec<_> = request
+        .headers
+        .iter()
+        .filter(|(name, _)| {
+            form.is_none()
+                || !["content-type", "content-length", "transfer-encoding"]
+                    .iter()
+                    .any(|header| name.eq_ignore_ascii_case(header))
+        })
+        .cloned()
+        .collect();
     let mut headers = request::generated_headers(
         request.method,
         &request_url(&request.path),
-        &request.headers,
+        &explicit,
         body_bytes,
     );
 
-    if supports_body
+    if let Some(form) = form {
+        if form.encoded_len().is_none() {
+            // The multipart boundary and file sizes are determined on send.
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("content-length"));
+        }
+
+        headers.push(("Content-Type".into(), form.content_type().into()));
+    } else if supports_body
         && request.body.is_some()
-        && !request
-            .headers
+        && !explicit
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
     {
@@ -46,9 +66,11 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
     let mut request = request.clone();
     request.path = request_url(&request.path);
 
-    if matches!(request.method, Method::Get | Method::Delete) {
+    if matches!(request.method, Method::Get | Method::Head) {
         request.body = None;
-    } else if request.body.is_some()
+        request.form = None;
+    } else if request.form.is_none()
+        && request.body.is_some()
         && !request
             .headers
             .iter()

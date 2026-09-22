@@ -10,7 +10,7 @@ use super::draft::RequestDraft;
 
 impl RequestDraft {
     pub(super) fn supports_body(&self) -> bool {
-        matches!(self.request.method, Method::Post | Method::Put)
+        !matches!(self.request.method, Method::Get | Method::Head)
     }
 
     pub(super) fn body_state(
@@ -52,6 +52,23 @@ impl RequestDraft {
     }
 
     pub(super) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let modes = self.body_modes(cx);
+        let content = if self.request.form.is_some() {
+            self.form_state(window, cx).into_any_element()
+        } else {
+            self.raw_body(window, cx)
+        };
+
+        v_flex()
+            .size_full()
+            .min_h_0()
+            .gap_2()
+            .child(modes)
+            .child(content)
+            .into_any_element()
+    }
+
+    fn raw_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let body = self.body_state(window, cx);
 
         v_flex()

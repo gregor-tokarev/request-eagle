@@ -3,6 +3,7 @@ use std::{collections::HashMap, time::SystemTime};
 use super::Collection;
 use crate::{Entry, Method, Request};
 use environment::Environment;
+use request::{FormBody, MultipartField};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -85,6 +86,82 @@ request_custom = "keep me too"
     let Request::Http(request) = &request.request;
 
     assert_eq!(request.path, "/v2/users");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn saves_and_reloads_form_bodies_with_new_http_methods() {
+    let root = test_directory();
+    let request_path = root.join("form.toml");
+    let upload_path = root.join("binary upload.bin");
+
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&upload_path, [0, 255, 42]).unwrap();
+    fs::write(
+        &request_path,
+        r#"id = "form-request"
+name = "Form request"
+schema_version = 1
+
+[request]
+type = "http"
+method = "POST"
+path = "https://example.com/upload"
+headers = [["Accept", "application/json"]]
+body = [0, 255, 42]
+"#,
+    )
+    .unwrap();
+
+    let mut collection =
+        Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+
+    for method in [Method::Patch, Method::Head, Method::Options] {
+        for form in [
+            FormBody::UrlEncoded(vec![
+                ("tag".into(), "first value".into()),
+                ("tag".into(), "東京 & more".into()),
+            ]),
+            FormBody::Multipart(vec![
+                MultipartField::Text {
+                    name: "tag".into(),
+                    value: "first value".into(),
+                },
+                MultipartField::Text {
+                    name: "tag".into(),
+                    value: "東京 & more".into(),
+                },
+                MultipartField::File {
+                    name: "attachment".into(),
+                    path: upload_path.clone(),
+                },
+            ]),
+        ] {
+            let Entry::File(entry) = &mut collection.entries[0] else {
+                panic!("expected request file");
+            };
+            let Request::Http(request) = &mut entry.request;
+            request.method = method;
+            request.form = Some(form);
+            let expected = request.clone();
+
+            collection.save_files().unwrap();
+
+            collection = Collection::from_path(
+                &root,
+                environment(&root.join("environment.toml")),
+            )
+            .unwrap();
+            let Entry::File(entry) = &collection.entries[0] else {
+                panic!("expected request file");
+            };
+            let Request::Http(request) = &entry.request;
+
+            assert_eq!(request, &expected);
+            assert_eq!(fs::read(&upload_path).unwrap(), [0, 255, 42]);
+        }
+    }
 
     fs::remove_dir_all(root).unwrap();
 }

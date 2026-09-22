@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use collection::{CollectionRegistry, Entry, FileEntry, Method, Request};
+use collection::{CollectionRegistry, Entry, FileEntry, Request};
 use gpui_kit::SharedString;
 
 use super::search::SearchIndex;
@@ -77,7 +77,7 @@ impl CollectionTree {
             .position(|item| item.path == file.path)
             .is_some_and(|index| {
                 let Request::Http(request) = &file.request;
-                let method = method_name(&file.request);
+                let method = request.method.as_str();
 
                 self.items[index].label.as_ref() != file.name
                     || self.items[index].kind != ItemKind::Request(method)
@@ -91,7 +91,7 @@ impl CollectionTree {
             return;
         };
         let Request::Http(request) = &file.request;
-        let method = method_name(&file.request);
+        let method = request.method.as_str();
         self.items[index].label = file.name.clone().into();
         self.items[index].kind = ItemKind::Request(method);
         self.search
@@ -120,7 +120,7 @@ impl CollectionTree {
                 }
                 Entry::File(file) => {
                     let Request::Http(request) = &file.request;
-                    let method = method_name(&file.request);
+                    let method = request.method.as_str();
 
                     search_texts.push(format!("{method} {} {}", file.name, request.path));
 
@@ -198,15 +198,4 @@ fn path_name(path: &Path) -> String {
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
         .into_owned()
-}
-
-fn method_name(request: &Request) -> &'static str {
-    let Request::Http(request) = request;
-
-    match request.method {
-        Method::Get => "GET",
-        Method::Post => "POST",
-        Method::Put => "PUT",
-        Method::Delete => "DELETE",
-    }
 }

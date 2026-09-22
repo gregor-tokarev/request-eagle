@@ -59,6 +59,7 @@ impl CollectionRegistry {
                 path: "/".to_owned(),
                 headers: Vec::new(),
                 body: None,
+                form: None,
                 query: None,
             }),
         )

@@ -1,4 +1,4 @@
-use std::{io, time::Duration};
+use std::{io, path::PathBuf, time::Duration};
 
 use thiserror::Error;
 
@@ -34,6 +34,13 @@ pub enum HttpError {
     #[error("invalid HTTP request: {0}")]
     InvalidRequest(#[from] http_client::http::Error),
 
+    #[error("could not read upload file {path}: {source}")]
+    ReadUpload {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     #[error(
         "invalid Host header: expected a hostname and optional port (example.com:443). Use User-Agent for a client name/version"
     )]
@@ -52,4 +59,7 @@ pub enum HttpError {
 
     #[error("could not read the HTTP response body: {0}")]
     ReadBody(#[source] io::Error),
+
+    #[error("could not decode the gzip response body: {0}")]
+    DecodeBody(#[source] io::Error),
 }
