@@ -314,3 +314,81 @@ query = [
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
 }
+
+#[test]
+fn deleting_and_reordering_rows_keeps_annotations_with_retained_keys() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let arrays = r#"headers = [
+  # Discarded header.
+  ['Discard', 'unused'], # Discarded header explanation.
+  # Accept header.
+  ['Accept', 'application/json'], # Accept explanation.
+  # Trace header.
+  ['X-Trace', 'one'], # Trace explanation.
+]
+query = [
+  # Discarded query.
+  ['discard', 'unused'], # Discarded query explanation.
+  # First tag.
+  ['tag', 'a'], # First tag explanation.
+  # Second tag.
+  ['tag', 'b'], # Second tag explanation.
+]
+"#;
+    fs::write(
+        &path,
+        format!(
+            "id = 'list'\nname = 'List users'\nschema_version = 1\n[request]\ntype = 'http'\nmethod = 'GET'\npath = '/users'\n{arrays}"
+        ),
+    )
+    .unwrap();
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
+    request.headers.remove(0);
+    request.query.as_mut().unwrap().remove(0);
+
+    registry.update_request(&path, (&request).into()).unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    let retained = arrays
+        .lines()
+        .filter(|line| !line.to_ascii_lowercase().contains("discard"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    assert!(
+        content.ends_with(&retained),
+        "row annotations changed: {content}"
+    );
+
+    request.headers.reverse();
+    request.headers[0].1 = "two".into();
+    request.query.as_mut().unwrap().reverse();
+    request.query.as_mut().unwrap()[0].1 = "c".into();
+
+    registry.update_request(&path, (&request).into()).unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    let reordered = r#"headers = [
+  # Trace header.
+  ['X-Trace', "two"], # Trace explanation.
+  # Accept header.
+  ['Accept', 'application/json'], # Accept explanation.
+]
+query = [
+  # Second tag.
+  ['tag', "c"], # Second tag explanation.
+  # First tag.
+  ['tag', 'a'], # First tag explanation.
+]
+"#;
+    assert!(
+        content.ends_with(reordered),
+        "row annotations moved: {content}"
+    );
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    assert_eq!(reloaded.headers, request.headers);
+    assert_eq!(reloaded.query, request.query);
+}
