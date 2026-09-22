@@ -243,6 +243,7 @@ impl CollectionPanel {
                         previous.join(relative)
                     },
                     path: item.path.clone(),
+                    environment_path: collection.local_env().path.clone(),
                     name: item.label.clone(),
                     folders: item
                         .path

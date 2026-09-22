@@ -70,11 +70,17 @@ impl Layout {
                     id,
                     previous_path,
                     path,
+                    environment_path,
                     name,
                     collection,
                     folders,
                 } => {
                     this.main_view.update(cx, |view, cx| {
+                        if let Some(root) = environment_path.parent()
+                            && !view.collection_paths.iter().any(|path| path == root)
+                        {
+                            view.collection_paths.push(root.to_path_buf());
+                        }
                         view.relocate_request(
                             previous_path,
                             path,

@@ -156,6 +156,11 @@ impl MainView {
         folders: Vec<SharedString>,
         cx: &mut Context<Self>,
     ) {
+        let environment_path = self
+            .collection_paths
+            .iter()
+            .find(|root| path.starts_with(root))
+            .map(|root| root.join("environment.toml"));
         if let Some(tab) = self.tabs.iter_mut().find(|tab| {
             tab.request_path.as_deref() == Some(previous_path)
                 && tab.request_id.as_ref() == Some(request_id)
@@ -168,9 +173,11 @@ impl MainView {
                     draft.name = name;
                     draft.collection = Some(collection);
                     draft.folders = folders;
+                    draft.environment_path = environment_path;
                     cx.notify();
                 });
             }
+            self.save_session(cx);
             cx.notify();
         }
     }

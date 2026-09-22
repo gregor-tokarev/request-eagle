@@ -20,6 +20,7 @@ pub enum CollectionPanelEvent {
         id: SharedString,
         previous_path: PathBuf,
         path: PathBuf,
+        environment_path: PathBuf,
         name: SharedString,
         collection: SharedString,
         folders: Vec<SharedString>,
