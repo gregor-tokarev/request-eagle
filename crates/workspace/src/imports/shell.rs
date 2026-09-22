@@ -34,6 +34,9 @@ pub(super) fn words(input: &str) -> Result<Vec<String>, String> {
                 );
             }
             (Some('"'), _) => word.push(character),
+            (None, '~') if !started => {
+                return Err("Shell tilde expansion is not supported. Replace the home directory with its absolute path, or quote a literal tilde.".into());
+            }
             (None, '\'' | '"') => {
                 quote = Some(character);
                 started = true;

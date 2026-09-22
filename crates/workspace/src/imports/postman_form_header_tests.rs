@@ -216,7 +216,7 @@ fn postman_raw_body_suppression_keeps_enabled_explicit_headers_and_skips_disable
 #[test]
 fn postman_raw_body_suppression_uses_the_last_enabled_headers_system_marker() {
     let ordinary = json!({"key": "Content-Type", "value": "application/custom"});
-    let system = json!({"key": "content-type", "value": "text/plain", "system": true});
+    let system = json!({"key": "Content-Type", "value": "text/plain", "system": true});
     let disabled = json!({"key": "Content-Type", "value": "text/plain", "disabled": true});
 
     for (headers, accepted) in [

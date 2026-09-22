@@ -429,3 +429,145 @@ fn postman_method_normalization_remains_separate_from_curl_custom_method_spellin
         assert_eq!(imported[0].request.method.as_str(), expected);
     }
 }
+
+#[test]
+fn postman_rejects_case_variant_header_duplicates_but_preserves_exact_duplicates() {
+    for headers in [
+        json!([{"key": "Authorization", "value": "Bearer first"},
+            {"key": "authorization", "value": "Bearer second"}]),
+        json!("Authorization: Bearer first\nauthorization: Bearer second"),
+        json!([{"key": "X-Api-Key", "value": "first"},
+            {"key": "X-API-KEY", "value": "second"}]),
+    ] {
+        let source = json!({"item": [{"request": {
+            "url": "https://example.test", "header": headers
+        }}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("different capitalization"), "{error}");
+    }
+
+    for headers in [
+        json!([{"key": "Authorization", "value": "Bearer first"},
+            {"key": "Authorization", "value": "Bearer second"}]),
+        json!("Authorization: Bearer first\nAuthorization: Bearer second"),
+    ] {
+        let source = json!({"item": [{"request": {
+            "url": "https://example.test", "header": headers
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.headers,
+            [
+                ("Authorization".into(), "Bearer first".into()),
+                ("Authorization".into(), "Bearer second".into())
+            ]
+        );
+    }
+}
+
+#[test]
+fn postman_path_variables_reject_declared_coercions_and_non_string_types() {
+    for variable in [
+        json!({"key": "id", "type": "string", "value": null}),
+        json!({"key": "id", "type": "string"}),
+        json!({"key": "id", "type": "string", "value": 7}),
+        json!({"key": "id", "type": "number", "value": "007"}),
+        json!({"key": "id", "type": "number", "value": 7}),
+        json!({"key": "id", "type": "boolean", "value": true}),
+        json!({"key": "id", "type": null, "value": "7"}),
+        json!({"key": "id", "type": "unknown", "value": "7"}),
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "path": ["users", ":id"], "variable": [variable]
+        }}}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(
+            error.contains("path variables") && error.contains("string type"),
+            "{error}"
+        );
+    }
+
+    for value in [json!(7), json!(1.0), json!(0.000001), json!(true)] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "path": ["users", ":id"],
+            "variable": [{"key": "id", "value": value}]
+        }}}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("field values must be strings"), "{error}");
+    }
+
+    for variable in [
+        json!({"key": "id", "value": "007"}),
+        json!({"key": "id", "type": "string", "value": "007"}),
+        json!({"key": "id", "type": "STRING", "value": "007"}),
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "path": ["users", ":id.json"], "variable": [variable]
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.path,
+            "http://example.test/users/007.json"
+        );
+    }
+}
+
+#[test]
+fn postman_retained_raw_text_without_a_body_mode_remains_inactive() {
+    for method in ["GET", "POST"] {
+        for headers in [
+            json!([]),
+            json!([{"key": "Content-Type", "value": "application/custom"}]),
+        ] {
+            let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": true}},
+            "item": [{"request": {"method": method, "url": "https://example.test",
+                "header": headers, "body": {"raw": "hello", "options": {"raw": {"language": "json"}}}
+            }}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert!(imported[0].request.body.is_none());
+            assert!(imported[0].request.form.is_none());
+            let expected_headers = if headers.as_array().unwrap().is_empty() {
+                vec![]
+            } else {
+                vec![("Content-Type".into(), "application/custom".into())]
+            };
+            assert_eq!(imported[0].request.headers, expected_headers);
+        }
+    }
+}
+
+#[test]
+fn postman_rejects_all_explicit_non_null_upload_filename_overrides() {
+    for filename in [
+        json!(""),
+        json!("custom.txt"),
+        json!(false),
+        json!(0),
+        json!({}),
+        json!([]),
+    ] {
+        let source = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test", "body": {
+                "mode": "formdata", "formdata": [{"key": "upload", "type": "file",
+                    "src": "/tmp/original.txt", "fileName": filename}]
+            }
+        }}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("filenames"), "{error}");
+    }
+
+    for field in [
+        json!({"key": "upload", "type": "file", "src": "/tmp/original.txt"}),
+        json!({"key": "upload", "type": "file", "src": "/tmp/original.txt", "fileName": null}),
+    ] {
+        let source = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "body": {"mode": "formdata", "formdata": [field]}
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert!(matches!(
+            imported[0].request.form,
+            Some(request::FormBody::Multipart(_))
+        ));
+    }
+}

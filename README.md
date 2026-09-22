@@ -31,9 +31,13 @@ Unsupported options, authentication schemes, scripts, and GET/HEAD request bodie
 produce an import error. Explicit cURL methods must use canonical uppercase spelling.
 cURL URL globbing must be expanded to one URL before
 import, or disabled with `--globoff` to preserve literal braces and brackets.
+Unquoted shell expansion and URL paths the executor would rewrite are rejected.
 
 Postman collection variables become literal defaults in the imported requests.
 Declared variable types must match their primitive values; coercion is rejected.
+Numeric defaults must be safe integers; use strings to retain other numeric text.
+URL path variables must contain text. Case-variant duplicate headers are rejected
+because Postman gives them different precedence from ordinary duplicate fields.
 Unresolved variables remain available for your collection environment. Use decoded
 values for variables in imported queries, for example `a/b` instead of `a%2Fb`.
 Static query escapes and valueless query flags are preserved. Multipart imports

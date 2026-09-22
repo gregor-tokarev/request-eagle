@@ -217,3 +217,82 @@ fn curl_explicit_methods_reject_spellings_that_would_change_on_send() {
 
     assert!(parse_import("curl https://example.test -X CUSTOM").is_err());
 }
+
+#[test]
+fn curl_rejects_paths_that_would_be_normalized_differently_on_send() {
+    for path in ["/a/%2e/b", "/a/.%2E/b", "/a/%2e./b", "/a/%2E%2e/b"] {
+        for host in ["https://example.test", "example.test", "{{base_url}}"] {
+            let error = parse_import(&format!("curl '{host}{path}'")).unwrap_err();
+            assert!(error.contains("encoded dot segments"), "{error}");
+        }
+    }
+
+    for host in ["https://example.test", "example.test", "{{base_url}}"] {
+        let error = parse_import(&format!("curl '{host}/a\\b'")).unwrap_err();
+        assert!(error.contains("backslashes"), "{error}");
+    }
+}
+
+#[test]
+fn curl_retains_supported_path_and_query_spelling() {
+    for path in [
+        "/a/../b",
+        "/a/./b",
+        "/a/%2ejson/b",
+        "/a/%2e%2e%2e/b",
+        "/a/%252e%252e/b",
+        "/a/%5cb",
+        "/a?path=/%2e%2e/b\\c",
+        "/a#/%2e%2e/b\\c",
+    ] {
+        let url = format!("https://example.test{path}");
+        let imported = parse_import(&format!("curl '{url}'")).unwrap();
+        assert_eq!(imported[0].request.path, url);
+    }
+
+    // cURL's default behavior also removes ordinary literal dot segments.
+    let imported = parse_import("curl 'https://example.test/a/../b'").unwrap();
+    assert_eq!(
+        url::Url::parse(&imported[0].request.path).unwrap().path(),
+        "/b"
+    );
+}
+
+#[test]
+fn curl_shell_rejects_unquoted_leading_tilde_expansion() {
+    for value in [
+        "~",
+        "~/documents",
+        "~root/documents",
+        "~+/documents",
+        "~-/documents",
+    ] {
+        let error =
+            parse_import(&format!("curl https://example.test --data-raw {value}")).unwrap_err();
+        assert!(error.contains("tilde expansion"), "{error}");
+    }
+}
+
+#[test]
+fn curl_shell_preserves_quoted_escaped_and_nonleading_literal_tildes() {
+    for value in [
+        "'~/documents'",
+        "\"~/documents\"",
+        "\\~/documents",
+        "''~/documents",
+        "'~'/documents",
+    ] {
+        let imported =
+            parse_import(&format!("curl https://example.test --data-raw {value}")).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(b"~/documents".as_slice())
+        );
+    }
+
+    let imported = parse_import("curl https://example.test --data-raw documents/~name").unwrap();
+    assert_eq!(
+        imported[0].request.body.as_deref(),
+        Some(b"documents/~name".as_slice())
+    );
+}

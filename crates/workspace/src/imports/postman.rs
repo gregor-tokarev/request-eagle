@@ -128,6 +128,18 @@ fn request(
         _ => return Err("Postman headers must be an array or text.".into()),
     }
 
+    let mut header_spellings = std::collections::HashMap::new();
+
+    for (name, _) in &request.headers {
+        if let Some(previous) = header_spellings.insert(name.to_ascii_lowercase(), name)
+            && previous != name
+        {
+            return Err(format!(
+                "Postman header {name:?} appears with different capitalization. Import cannot preserve that precedence; use one spelling before importing."
+            ));
+        }
+    }
+
     if let Some(body) = value.get("body").filter(|body| !body.is_null())
         && !disabled(body)
     {
@@ -206,7 +218,21 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
     if let Some(variables) = value.get("variable").and_then(Value::as_array) {
         // URL path variables use the last definition, even when disabled.
         // Empty definitions mask earlier values instead of falling back.
-        let variables = variables.iter().map(pair).collect::<Result<Vec<_>, _>>()?;
+        let variables = variables
+            .iter()
+            .map(|variable| {
+                if let Some(kind) = variable.get("type")
+                    && (!kind
+                        .as_str()
+                        .is_some_and(|kind| kind.eq_ignore_ascii_case("string"))
+                        || !variable.get("value").is_some_and(Value::is_string))
+                {
+                    return Err("Postman path variables with a declared type must use string type and a text value before importing.".into());
+                }
+
+                pair(variable)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         let suffix_start = request.path.find(['?', '#']).unwrap_or(request.path.len());
         let (path, suffix) = request.path.split_at(suffix_start);
         let resolved_path = path
@@ -423,7 +449,13 @@ fn read_body(
     content_type_override: bool,
     request: &mut HttpRequest,
 ) -> Result<(), String> {
-    match body.get("mode").and_then(Value::as_str).unwrap_or("raw") {
+    let Some(mode) = body.get("mode") else {
+        // Retained editor text is inactive until Postman selects a body mode.
+        return Ok(());
+    };
+    let mode = mode.as_str().ok_or("The Postman body mode must be text.")?;
+
+    match mode {
         "raw" => {
             if content_type_override {
                 super::postman_form_headers::validate_raw(source_headers, &request.headers)?;
@@ -488,11 +520,7 @@ fn read_body(
                     );
                 }
 
-                if field
-                    .get("fileName")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| !name.is_empty())
-                {
+                if field.get("fileName").is_some_and(|name| !name.is_null()) {
                     return Err(
                         "Custom Postman upload filenames are not supported by import.".into(),
                     );

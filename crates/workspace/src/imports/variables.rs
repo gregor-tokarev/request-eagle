@@ -51,7 +51,21 @@ pub(super) fn resolve_collection_defaults(collection: &mut Value) -> Result<(), 
             Some(Value::Null) => "null".into(),
             Some(Value::String(value)) => value.clone(),
             Some(Value::Bool(value)) => value.to_string(),
-            Some(Value::Number(value)) => value.to_string(),
+            Some(Value::Number(value)) => {
+                // JavaScript and serde_json can spell floating-point numbers
+                // differently. Safe integers retain the same exact decimal text.
+                let safe_integer = value.as_i64().is_some_and(|value| {
+                    (-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&value)
+                });
+
+                if !safe_integer {
+                    return Err(format!(
+                        "Postman variable {key:?} has an unsupported numeric default. Use an integer between -9007199254740991 and 9007199254740991, or a string default for other exact text."
+                    ));
+                }
+
+                value.to_string()
+            }
             _ => {
                 return Err(format!(
                     "Postman variable {key:?} must contain text, a number, or a boolean."
