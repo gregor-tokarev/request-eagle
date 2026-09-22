@@ -60,14 +60,18 @@ fn postman_json_comments_preserve_strings_escapes_unicode_and_templates() {
   "template": "{{name}}",
   "unicode": "Привет 🌍"
 }"#;
-    let expected = r#"{
-  "url": "https://example.test/a//b", 
-  "marker": "/* literal */",
+    let expected = concat!(
+        r#"{
+  "url": "https://example.test/a//b", "#,
+        "\n",
+        r#"  "marker": "/* literal */",
   "quote": "say \"//literal\"",
-  "slashes": "\\", 
-  "template": "{{name}}",
+  "slashes": "\\", "#,
+        "\n",
+        r#"  "template": "{{name}}",
   "unicode": "Привет 🌍"
-}"#;
+}"#
+    );
 
     assert_eq!(imported_body(raw, Some("json"), None), expected);
     assert!(serde_json::from_str::<Value>(expected).is_ok());

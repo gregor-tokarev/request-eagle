@@ -261,6 +261,13 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
     });
 
     if !form_fields.is_empty() {
+        if request.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("content-type")
+                && !value.trim().eq_ignore_ascii_case("multipart/form-data")
+        }) {
+            return Err("cURL multipart imports cannot preserve a custom Content-Type or its parameters. Remove the override or use bare multipart/form-data.".into());
+        }
+
         request.form = Some(FormBody::Multipart(form_fields));
     } else if !body_parts.is_empty() {
         let data = body_parts.join(if json_body { "" } else { "&" });

@@ -720,6 +720,40 @@ fn curl_combines_cookie_options_but_respects_explicit_cookie_headers() {
 }
 
 #[test]
+fn curl_multipart_rejects_content_type_overrides_that_form_encoding_cannot_preserve() {
+    for content_type in [
+        "application/vnd.example.form",
+        "multipart/mixed",
+        "multipart/form-data; boundary=custom",
+        "multipart/form-data; charset=UTF-8",
+        "{{content_type}}",
+    ] {
+        for options in [
+            format!("-H 'Content-Type: {content_type}' -F 'message=hello'"),
+            format!("--form-string 'message=hello' -H 'content-type: {content_type}'"),
+        ] {
+            let error = parse_import(&format!("curl https://example.test {options}")).unwrap_err();
+            assert!(
+                error.contains("custom Content-Type"),
+                "Unexpected error for {options}: {error}"
+            );
+        }
+    }
+
+    for options in [
+        "-F 'message=hello'",
+        "-H 'Content-Type: multipart/form-data' -F 'message=hello'",
+        "--form-string 'message=hello' -H 'content-type:  MuLtIpArT/FoRm-DaTa  '",
+    ] {
+        let imported = parse_import(&format!("curl https://example.test {options}")).unwrap();
+        assert!(matches!(
+            imported[0].request.form,
+            Some(FormBody::Multipart(_))
+        ));
+    }
+}
+
+#[test]
 fn import_rejects_bodies_that_the_selected_method_cannot_send() {
     for source in [
         "curl -X GET --data-raw 'payload' https://example.test/items",

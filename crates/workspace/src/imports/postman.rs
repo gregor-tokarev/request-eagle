@@ -21,8 +21,10 @@ pub(super) fn parse(input: &str) -> Result<Vec<ImportedRequest>, String> {
     reject_scripts(&collection)?;
 
     let auth = authentication(collection.get("auth"), &Authentication::None)?;
+    let content_type_override =
+        super::postman_form_headers::content_type_override(&collection, false);
     let mut result = Vec::new();
-    collect_items(items, &[], &auth, &mut result)?;
+    collect_items(items, &[], &auth, content_type_override, &mut result)?;
 
     if result.is_empty() {
         return Err("The Postman collection contains no requests.".into());
@@ -35,6 +37,7 @@ fn collect_items(
     items: &[Value],
     folders: &[String],
     inherited_auth: &Authentication,
+    inherited_content_type_override: bool,
     result: &mut Vec<ImportedRequest>,
 ) -> Result<(), String> {
     for (item, name) in items
@@ -43,13 +46,24 @@ fn collect_items(
     {
         reject_scripts(item).map_err(|error| format!("{name}: {error}"))?;
         let auth = authentication(item.get("auth"), inherited_auth)?;
+        let content_type_override = super::postman_form_headers::content_type_override(
+            item,
+            inherited_content_type_override,
+        );
 
         if let Some(children) = item.get("item").and_then(Value::as_array) {
             let mut child_folders = folders.to_vec();
             child_folders.push(name.to_owned());
-            collect_items(children, &child_folders, &auth, result)?;
+            collect_items(
+                children,
+                &child_folders,
+                &auth,
+                content_type_override,
+                result,
+            )?;
         } else if let Some(value) = item.get("request") {
-            let request = request(value, &auth).map_err(|error| format!("{name}: {error}"))?;
+            let request = request(value, &auth, content_type_override)
+                .map_err(|error| format!("{name}: {error}"))?;
             result.push(ImportedRequest {
                 name: name.into(),
                 folders: folders.to_vec(),
@@ -65,7 +79,11 @@ fn collect_items(
     Ok(())
 }
 
-fn request(value: &Value, inherited_auth: &Authentication) -> Result<HttpRequest, String> {
+fn request(
+    value: &Value,
+    inherited_auth: &Authentication,
+    content_type_override: bool,
+) -> Result<HttpRequest, String> {
     if let Some(path) = value.as_str() {
         return Ok(HttpRequest {
             path: url_with_default_protocol(path)?,
@@ -106,6 +124,10 @@ fn request(value: &Value, inherited_auth: &Authentication) -> Result<HttpRequest
         && !disabled(body)
     {
         read_body(body, value.get("header"), &mut request)?;
+    }
+
+    if let Some(form) = &request.form {
+        super::postman_form_headers::validate(form, &request.headers, content_type_override)?;
     }
 
     Ok(request)
