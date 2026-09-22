@@ -244,6 +244,14 @@ fn encode_query_component(value: &str, key: bool) -> String {
 }
 
 fn decode_query_component(value: &str) -> Result<String, String> {
+    let lower = value.to_ascii_lowercase();
+
+    if lower.contains("%7b") || lower.contains("%7d") {
+        return Err(
+            "Postman templated queries containing percent-encoded braces are not supported.".into(),
+        );
+    }
+
     let mut decoded = Vec::new();
     let bytes = value.as_bytes();
     let mut index = 0;
@@ -341,6 +349,16 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
                     return Err(
                         "Custom Postman multipart content types are not supported by import."
                             .into(),
+                    );
+                }
+
+                if field
+                    .get("fileName")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| !name.is_empty())
+                {
+                    return Err(
+                        "Custom Postman upload filenames are not supported by import.".into(),
                     );
                 }
 

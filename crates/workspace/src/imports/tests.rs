@@ -324,7 +324,7 @@ fn postman_reports_variable_cycles_and_empty_or_invalid_documents() {
 
 #[test]
 fn curl_imports_editable_multipart_without_reading_uploads() {
-    let imported = parse_import("curl https://example.test/upload -F 'description=hello' -F 'upload=@/nonexistent/file.bin' --form-string 'literal=@text;not-a-file'").unwrap();
+    let imported = parse_import("curl https://example.test/upload -F 'description= hello ' -F 'upload=@/nonexistent/file.bin ' --form-string 'literal=@text;not-a-file'").unwrap();
 
     assert_eq!(imported[0].request.method, Method::Post);
     assert_eq!(
@@ -352,6 +352,8 @@ fn curl_imports_editable_multipart_without_reading_uploads() {
         "curl https://example.test -F 'text=</tmp/a'",
         "curl https://example.test -F 'x=y' -d 'a=b'",
         "curl https://example.test -G -F 'x=y'",
+        "curl https://example.test -F 'x=\"quoted\"'",
+        "curl https://example.test -F 'x=(nested'",
     ] {
         assert!(
             parse_import(command).is_err(),
@@ -515,5 +517,31 @@ fn postman_limits_total_expanded_data() {
         parse_import(&collection.to_string())
             .unwrap_err()
             .contains("16 MiB")
+    );
+}
+
+#[test]
+fn postman_rejects_ambiguous_query_templates_and_unsupported_upload_names() {
+    let query = json!({"item": [{"request": {"url": {
+        "raw": "https://example.test", "query": [
+            {"key": "term", "value": "{{term}}"},
+            {"key": "literal", "value": "%7B%7Btoken%7D%7D"}
+        ]
+    }}}]});
+    assert!(
+        parse_import(&query.to_string())
+            .unwrap_err()
+            .contains("percent-encoded braces")
+    );
+
+    let upload = json!({"item": [{"request": {
+        "url": "https://example.test", "body": {"mode": "formdata", "formdata": [
+            {"key": "upload", "type": "file", "src": "/tmp/original.txt", "fileName": "custom.txt"}
+        ]}
+    }}]});
+    assert!(
+        parse_import(&upload.to_string())
+            .unwrap_err()
+            .contains("filenames")
     );
 }

@@ -29,6 +29,13 @@ v2 collection JSON file. Import creates a new saved collection, preserves nested
 folders, and opens the requests for editing. Existing collections are not replaced.
 Unsupported options, authentication schemes, and scripts produce an import error.
 
+Postman collection variables become literal defaults in the imported requests.
+Unresolved variables remain available for your collection environment. Use decoded
+values for variables in imported queries, for example `a/b` instead of `a%2Fb`.
+Static query escapes and valueless query flags are preserved. Multipart imports
+support text and absolute file paths. Custom part content types and filenames are
+not supported.
+
 The **Authentication** tab supports Basic, Bearer, and API key credentials. Use
 `{{name}}` placeholders in request fields and add matching strings to the
 collection's `environment.toml`, such as `base_url = "https://api.example.com"`.
