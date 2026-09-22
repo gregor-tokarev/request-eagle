@@ -725,3 +725,79 @@ fn postman_query_template_decoding_keeps_literal_safety_guards() {
     let error = parse_import(&source.to_string()).unwrap_err();
     assert!(error.contains("valueless flags"), "{error}");
 }
+
+#[test]
+fn postman_rejects_url_controls_before_trimming_or_executor_normalization() {
+    for control in ['\t', '\r', '\n'] {
+        for text in [
+            format!("https://example.test/a{control}b"),
+            format!("https://example.test/a?q=one{control}two"),
+            format!("https://example.test/a?q=one{control}"),
+        ] {
+            for request in [
+                json!(text),
+                json!({"url": text}),
+                json!({"url": {"raw": text}}),
+            ] {
+                let source = json!({"item": [{"request": request}]});
+                let error = parse_import(&source.to_string()).unwrap_err();
+                assert!(error.contains("literal TAB, CR, or LF"), "{error}");
+            }
+        }
+
+        for url in [
+            json!({"host": "example.test", "path": format!("/a{control}b")}),
+            json!({"host": "example.test", "path": [format!("a{control}b")]}),
+            json!({"host": "example.test", "path": [":id"],
+                "variable": [{"key": "id", "value": format!("a{control}b")}]}),
+        ] {
+            let source = json!({"item": [{"request": {"url": url}}]});
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(error.contains("literal TAB, CR, or LF"), "{error}");
+        }
+
+        let source = json!({"variable": [{"key": "value", "value": format!("a{control}b")}],
+            "item": [{"request": "https://example.test/{{value}}"}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("literal TAB, CR, or LF"), "{error}");
+    }
+}
+
+#[test]
+fn postman_keeps_control_escapes_and_safely_encoded_structured_query_fields() {
+    for (control, escaped) in [('\t', "%09"), ('\r', "%0D"), ('\n', "%0A")] {
+        let text = format!("https://example.test/a{escaped}b?q=one{escaped}two");
+        let source = json!({"item": [{"request": {"url": text}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.path, text);
+
+        for templated in [false, true] {
+            let mut fields = vec![json!({"key": "q", "value": format!("one{control}two")})];
+
+            if templated {
+                fields.push(json!({"key": "other", "value": "{{value}}"}));
+            }
+
+            let source = json!({"item": [{"request": {"url": {
+                "protocol": "https", "host": "example.test", "query": fields
+            }}}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            let resolved = request::resolve_variables(
+                &imported[0].request,
+                &std::collections::HashMap::from([("value".into(), "ok".into())]),
+            )
+            .unwrap();
+            let mut url = url::Url::parse(&resolved.path).unwrap();
+
+            if let Some(query) = resolved.query {
+                url.query_pairs_mut().extend_pairs(query);
+            }
+
+            let suffix = if templated { "&other=ok" } else { "" };
+            assert_eq!(
+                url.as_str(),
+                format!("https://example.test/?q=one{escaped}two{suffix}")
+            );
+        }
+    }
+}

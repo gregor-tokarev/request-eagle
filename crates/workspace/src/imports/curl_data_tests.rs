@@ -393,3 +393,67 @@ fn curl_data_urlencode_matches_native_bytes_for_raw_text() {
         assert!(imported[0].request.form.is_none());
     }
 }
+
+#[test]
+fn curl_multipart_rejects_nameless_text_and_file_parts() {
+    for flag in ["-F", "--form", "--form-string"] {
+        for value in ["=hello", "=", "=@/tmp/upload.txt", "=</tmp/input.txt"] {
+            let error =
+                parse_import(&format!("curl https://example.test {flag} '{value}'")).unwrap_err();
+            assert!(error.contains("Nameless cURL multipart fields"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn curl_multipart_retains_named_text_and_file_parts() {
+    for flag in ["-F", "--form", "--form-string"] {
+        for value in ["hello", ""] {
+            let imported =
+                parse_import(&format!("curl https://example.test {flag} 'named={value}'")).unwrap();
+            assert_eq!(
+                imported[0].request.form,
+                Some(FormBody::Multipart(vec![MultipartField::Text {
+                    name: "named".into(),
+                    value: value.into(),
+                }]))
+            );
+        }
+    }
+
+    let imported = parse_import("curl https://example.test -F 'file=@/tmp/upload.txt'").unwrap();
+    assert_eq!(
+        imported[0].request.form,
+        Some(FormBody::Multipart(vec![MultipartField::File {
+            name: "file".into(),
+            path: "/tmp/upload.txt".into(),
+        }]))
+    );
+}
+
+#[test]
+fn curl_get_reuses_only_existing_query_separators() {
+    // Native cURL appends after an empty query or trailing '&', but a '?' in
+    // an existing query value or an '&' in the path is not a separator.
+    for (path, expected) in [
+        ("/", "/?x=1"),
+        ("/?", "/?x=1"),
+        ("/?q=1", "/?q=1&x=1"),
+        ("/?q=1&", "/?q=1&x=1"),
+        ("/?q=?", "/?q=?&x=1"),
+        ("/path&", "/path&?x=1"),
+    ] {
+        for fragment in ["", "#details"] {
+            let imported = parse_import(&format!(
+                "curl 'https://example.test{path}{fragment}' -G -d x=1"
+            ))
+            .unwrap();
+            assert_eq!(
+                imported[0].request.path,
+                format!("https://example.test{expected}{fragment}")
+            );
+            assert_eq!(imported[0].request.method, Method::Get);
+            assert!(imported[0].request.body.is_none());
+        }
+    }
+}

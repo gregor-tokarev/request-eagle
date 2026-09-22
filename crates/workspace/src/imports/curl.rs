@@ -290,7 +290,11 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
 
         if get {
             let (path, fragment) = request.path.split_once('#').unwrap_or((&request.path, ""));
-            let separator = if path.contains('?') { '&' } else { '?' };
+            let separator = match path.split_once('?') {
+                None => "?",
+                Some((_, query)) if query.is_empty() || query.ends_with('&') => "",
+                Some(_) => "&",
+            };
             request.path = format!(
                 "{path}{separator}{data}{}",
                 if fragment.is_empty() {
@@ -396,6 +400,14 @@ fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
     let (name, value) = value
         .split_once('=')
         .ok_or("A cURL multipart field needs name=value.")?;
+
+    if name.is_empty() {
+        return Err(
+            "Nameless cURL multipart fields cannot be imported. Add a field name before '='."
+                .into(),
+        );
+    }
+
     let value = if literal {
         value
     } else {

@@ -255,10 +255,11 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
         request.path = format!("{resolved_path}{suffix}");
     }
 
-    Ok(())
+    reject_url_controls(&request.path)
 }
 
 fn url_with_default_protocol(value: &str) -> Result<String, String> {
+    reject_url_controls(value)?;
     let value = value.trim();
 
     if value.is_empty() {
@@ -295,6 +296,16 @@ fn url_with_default_protocol(value: &str) -> Result<String, String> {
     } else {
         Ok(format!("http://{value}"))
     }
+}
+
+fn reject_url_controls(value: &str) -> Result<(), String> {
+    // Postman escapes these bytes; the executor's URL parser discards them.
+    // Check before trimming and again after substituting URL path variables.
+    if value.contains(['\t', '\r', '\n']) {
+        return Err("Postman URLs containing literal TAB, CR, or LF are not supported by import. Percent-encode these characters before importing.".into());
+    }
+
+    Ok(())
 }
 
 fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> {

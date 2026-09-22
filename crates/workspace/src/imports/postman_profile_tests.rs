@@ -358,3 +358,113 @@ fn postman_range_header_helper_makes_accept_encoding_suppression_inert() {
     let error = parse_import(&source.to_string()).unwrap_err();
     assert!(error.contains("accept-encoding"), "{error}");
 }
+
+#[test]
+fn postman_rejects_variable_system_header_names_under_affected_suppression() {
+    for key in [
+        "content-length",
+        "content-type",
+        "host",
+        "accept-encoding",
+        "connection",
+    ] {
+        for system in [json!(true), json!("false")] {
+            let mut request = get();
+            request["header"] = json!([
+                {"key": key, "value": "explicit"},
+                {"key": "{{header_name}}", "value": "0", "system": system}
+            ]);
+
+            let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(
+                error.contains("variable system-owned header name"),
+                "{key}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn postman_keeps_variable_headers_without_active_system_ownership() {
+    for header in [
+        json!({"key": "{{header_name}}", "value": "custom"}),
+        json!({"key": "{{header_name}}", "value": "custom", "system": false}),
+        json!({"key": "{{header_name}}", "value": "custom", "system": null}),
+        json!({"key": "{{header_name}}", "value": "custom", "system": true, "disabled": true}),
+    ] {
+        let mut request = get();
+        request["header"] = json!([
+            {"key": "Host", "value": "example.test"},
+            {"key": "Content-Type", "value": "application/custom"},
+            {"key": "Content-Length", "value": "0"},
+            {"key": "Accept-Encoding", "value": "identity"},
+            {"key": "Connection", "value": "close"},
+            header
+        ]);
+        let source = collection(
+            json!({"disabledSystemHeaders": {"host": true, "content-type": true,
+                "content-length": true, "accept-encoding": true, "connection": true}}),
+            request,
+        );
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0]
+                .request
+                .headers
+                .iter()
+                .any(|(name, _)| name == "{{header_name}}"),
+            header.get("disabled").and_then(Value::as_bool) != Some(true)
+        );
+    }
+}
+
+#[test]
+fn postman_keeps_variable_system_headers_under_inert_or_ignored_suppression() {
+    for profile in [
+        json!({"disabledSystemHeaders": {"accept": true, "user-agent": true,
+            "cache-control": true, "postman-token": true}}),
+        json!({"disabledSystemHeaders": {"Content-Length": true,
+            "transfer-encoding": true, "unknown": true}}),
+        json!({"disabledSystemHeaders": {"host": false, "content-type": false,
+            "content-length": false, "accept-encoding": false, "connection": false}}),
+    ] {
+        let mut request = get();
+        request["header"] = json!([
+            {"key": "Accept", "value": "*/*"},
+            {"key": "{{header_name}}", "value": "custom", "system": true}
+        ]);
+
+        let source = collection(profile, request);
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert!(
+            imported[0]
+                .request
+                .headers
+                .iter()
+                .any(|(name, _)| name == "{{header_name}}")
+        );
+    }
+}
+
+#[test]
+fn postman_checks_system_header_names_after_resolving_collection_defaults() {
+    let mut request = get();
+    request["header"] = json!([
+        {"key": "{{header_name}}", "value": "0", "system": true}
+    ]);
+    let mut source = collection(
+        json!({"disabledSystemHeaders": {"content-length": true}}),
+        request,
+    );
+    source["variable"] = json!([{"key": "header_name", "value": "X-Custom"}]);
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.headers,
+        [("X-Custom".into(), "0".into())]
+    );
+
+    source["variable"][0]["value"] = json!("Transfer-Encoding");
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("content-length"), "{error}");
+}
