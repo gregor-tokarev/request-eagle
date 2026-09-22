@@ -5268,11 +5268,15 @@ name = "preferences"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-lock",
+ "futures-channel",
  "gpui-kit",
+ "oo7",
  "request",
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -5846,6 +5850,7 @@ dependencies = [
  "gpui-pre-reqwest",
  "gpui-pre-reqwest-client",
  "h2",
+ "ipnet",
  "percent-encoding",
  "rcgen",
  "serde",
@@ -6481,6 +6486,7 @@ dependencies = [
  "preferences",
  "serde_json",
  "smol",
+ "tempfile",
  "theme",
  "updater",
 ]
