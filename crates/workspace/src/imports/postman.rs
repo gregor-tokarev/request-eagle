@@ -499,7 +499,7 @@ fn read_body(
             };
             add_content_type(request, content_type);
 
-            let is_json = strips_json_comments(language, source_headers, &request.headers);
+            let is_json = strips_json_comments(raw, language, source_headers, &request.headers)?;
             request.body = Some(if is_json {
                 super::json_comments::strip(raw).into_bytes()
             } else {
@@ -606,13 +606,37 @@ fn read_body(
 }
 
 fn strips_json_comments(
+    raw: &str,
     language: Option<&str>,
     source_headers: Option<&Value>,
     headers: &[(String, String)],
-) -> bool {
+) -> Result<bool, String> {
     if let Some(language) = language.filter(|language| !language.is_empty()) {
-        return language == "json";
+        return Ok(language == "json");
     }
+
+    let unsupported = "Commented raw Postman bodies with a dynamic Content-Type are not supported by import. Set a literal Content-Type or raw language before importing.";
+    let dynamic_name = match source_headers.and_then(Value::as_array) {
+        Some(headers) => headers.iter().any(|header| {
+            header
+                .get("key")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.contains("{{"))
+        }),
+        None => headers.iter().any(|(name, _)| name.contains("{{")),
+    };
+
+    if dynamic_name && super::json_comments::strip(raw) != raw {
+        return Err(unsupported.into());
+    }
+
+    let matches = |value: &str| {
+        if value.contains("{{") && super::json_comments::strip(raw) != raw {
+            Err(unsupported.to_owned())
+        } else {
+            Ok(super::json_comments::is_json_content_type(value))
+        }
+    };
 
     if let Some(source_headers) = source_headers.and_then(Value::as_array) {
         let content_types = source_headers
@@ -626,7 +650,7 @@ fn strips_json_comments(
             .collect::<Vec<_>>();
 
         if content_types.is_empty() {
-            return false;
+            return Ok(false);
         }
 
         // Match Postman's presend selection, including its disabled-header
@@ -641,13 +665,13 @@ fn strips_json_comments(
         return selected
             .and_then(|header| header.get("value"))
             .and_then(Value::as_str)
-            .is_none_or(super::json_comments::is_json_content_type);
+            .map_or(Ok(true), matches);
     }
 
     headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-        .is_some_and(|(_, value)| super::json_comments::is_json_content_type(value))
+        .map_or(Ok(false), |(_, value)| matches(value))
 }
 
 fn pairs(values: &[Value]) -> Result<Vec<(String, String)>, String> {

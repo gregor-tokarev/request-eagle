@@ -179,3 +179,90 @@ fn postman_comment_preparation_retains_disabled_header_activation_without_sendin
         assert_eq!(imported[0].request.headers.len(), outgoing_count);
     }
 }
+
+#[test]
+fn postman_rejects_actual_comments_when_content_type_processing_remains_dynamic() {
+    for raw in ["{\n //comment\n \"a\":1\n}", "{ /*comment*/ \"a\":1 }"] {
+        for headers in [
+            json!([{"key": "Content-Type", "value": "{{ct}}"}]),
+            json!([{"key": "Content-Type", "value": "application/{{subtype}}"}]),
+            json!([{"key": "Content-Type", "value": "{{ct}}", "disabled": true}]),
+            json!("Content-Type: {{ct}}"),
+            json!([{"key": "{{header_name}}", "value": "application/json"}]),
+            json!([{"key": "{{header_name}}", "value": "application/json", "disabled": true}]),
+        ] {
+            for language in [None, Some("")] {
+                let mut body = json!({"mode": "raw", "raw": raw});
+
+                if let Some(language) = language {
+                    body["options"] = json!({"raw": {"language": language}});
+                }
+
+                let source = json!({"item": [{"request": {
+                    "method": "POST", "url": "https://example.test", "header": headers, "body": body
+                }}]});
+                let error = parse_import(&source.to_string()).unwrap_err();
+                assert!(error.contains("dynamic Content-Type"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn postman_dynamic_content_type_keeps_comment_like_json_strings_and_explicit_languages() {
+    let raw =
+        r#"{"url":"https://example.test/a//b","marker":"/*literal*/","quote":"say \"//literal\""}"#;
+    assert_eq!(imported_body(raw, None, Some("{{ct}}")), raw);
+
+    let commented = "{ /*comment*/ \"a\":1 }";
+    for (language, expected) in [
+        ("json", "{  \"a\":1 }"),
+        ("text", commented),
+        ("javascript", commented),
+    ] {
+        assert_eq!(
+            imported_body(commented, Some(language), Some("{{ct}}")),
+            expected
+        );
+
+        let source = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "header": [{"key": "{{header_name}}", "value": "{{ct}}"}],
+            "body": {"mode": "raw", "raw": commented, "options": {"raw": {"language": language}}}
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(expected.as_bytes())
+        );
+    }
+}
+
+#[test]
+fn postman_comment_processing_keeps_static_selection_and_resolved_collection_defaults() {
+    let raw = "{ /*comment*/ \"a\":1 }";
+    for (content_type, expected) in [("application/json", "{  \"a\":1 }"), ("text/plain", raw)] {
+        let source = json!({"item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "header": [{"key": "Content-Type", "value": content_type},
+                {"key": "Content-Type", "value": "{{irrelevant}}"}],
+            "body": {"mode": "raw", "raw": raw}
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(expected.as_bytes())
+        );
+
+        let source = json!({"variable": [{"key": "ct", "value": content_type}], "item": [{"request": {
+            "method": "POST", "url": "https://example.test",
+            "header": [{"key": "Content-Type", "value": "{{ct}}"}],
+            "body": {"mode": "raw", "raw": raw}
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(expected.as_bytes())
+        );
+    }
+}

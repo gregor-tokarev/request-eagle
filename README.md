@@ -49,7 +49,8 @@ Form imports reject Content-Type parameters or overrides that
 Postman or cURL preserves but Request Eagle's form encoder cannot reproduce,
 including custom multipart boundaries and suppressed system Content-Type headers.
 Raw Postman bodies that suppress the system Content-Type also require an enabled
-explicit Content-Type header before importing.
+explicit Content-Type header before importing. Commented raw bodies with dynamic
+Content-Type detection require an explicit body language or a literal Content-Type.
 Imports also reject unsupported Postman transport overrides, such as per-request
 redirect limits, certificate checks, HTTP versions, TLS restrictions, or
 suppression of headers the client would generate. Imported requests use the
