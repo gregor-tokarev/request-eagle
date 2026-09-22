@@ -63,6 +63,11 @@ impl CollectionRegistry {
         collection_paths.sort();
 
         for collection_path in collection_paths {
+            // Skip before metadata: a concurrent import may already have renamed this path.
+            if super::import::is_staging_path(&collection_path) {
+                continue;
+            }
+
             let metadata = fs::metadata(&collection_path).map_err(|source| {
                 CollectionRegistryLoadError::Read {
                     path: collection_path.clone(),

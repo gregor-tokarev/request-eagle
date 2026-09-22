@@ -15,6 +15,13 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+
         let _ = fs::remove_dir_all(&self.0);
     }
 }
@@ -283,6 +290,89 @@ fn import_does_not_replace_an_existing_empty_collection_directory() {
     assert_ne!(imported[0].collection_path, occupied);
     assert_eq!(fs::read_dir(occupied).unwrap().count(), 0);
     assert_eq!(registry.len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn import_only_requires_write_access_to_the_collections_directory() {
+    use std::{io, os::unix::fs::PermissionsExt};
+
+    let fixture = Fixture::new();
+    let collections = fixture.0.join("collections");
+    fs::create_dir_all(&collections).unwrap();
+    fs::set_permissions(&collections, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o500)).unwrap();
+
+    // Root can bypass mode bits. Check the effective restriction before claiming coverage.
+    match fs::write(fixture.0.join("parent-write-probe"), b"probe") {
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
+        Ok(()) => {
+            eprintln!("Skipping permission regression: this account can write through mode 0500.");
+            return;
+        }
+        Err(error) => panic!("unexpected permission probe failure: {error}"),
+    }
+
+    let mut registry = CollectionRegistry::from_path(&collections).unwrap();
+    registry.create_collection().unwrap();
+    let imported = registry
+        .import_requests(
+            "Team API",
+            vec![imported_request("Fetch", &[], "https://example.com")],
+        )
+        .unwrap();
+    let reloaded = CollectionRegistry::from_path(&collections).unwrap();
+
+    assert_eq!(reloaded.len(), 2);
+    assert!(reloaded.file(&imported[0].path).is_some());
+    assert_eq!(fs::read_dir(&collections).unwrap().count(), 2);
+}
+
+#[test]
+fn registry_ignores_staging_directories_but_loads_other_hidden_collections() {
+    let fixture = Fixture::new();
+    let staging = fixture
+        .0
+        .join(format!(".request-eagle-import-{}", Uuid::new_v4()));
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("request.toml"), "partially written request").unwrap();
+    fs::create_dir(fixture.0.join(".drafts")).unwrap();
+    fs::create_dir(fixture.0.join(".request-eagle-import-not-a-uuid")).unwrap();
+
+    let registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+
+    assert_eq!(registry.len(), 2);
+    assert!(
+        registry
+            .collections()
+            .iter()
+            .all(|collection| collection.path != staging)
+    );
+}
+
+#[test]
+fn collection_rename_cannot_hide_requests_under_a_reserved_staging_name() {
+    let fixture = Fixture::new();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let imported = registry
+        .import_requests(
+            "Team API",
+            vec![imported_request("Fetch", &[], "https://example.com")],
+        )
+        .unwrap();
+    let reserved_name = format!(".request-eagle-import-{}", Uuid::new_v4());
+
+    assert!(
+        registry
+            .rename(&imported[0].collection_path, &reserved_name)
+            .is_err()
+    );
+    assert!(
+        CollectionRegistry::from_path(&fixture.0)
+            .unwrap()
+            .file(&imported[0].path)
+            .is_some()
+    );
 }
 
 #[cfg(unix)]

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::collections::HashMap;
 
 use super::Collection;
 use crate::{Entry, Method, Request};
@@ -13,10 +13,7 @@ fn test_directory() -> PathBuf {
     std::env::temp_dir().join(format!(
         "request-eagle-collection-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        uuid::Uuid::new_v4()
     ))
 }
 

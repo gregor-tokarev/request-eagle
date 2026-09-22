@@ -14,6 +14,15 @@ use crate::{
     HttpRequest, Request,
 };
 
+const STAGING_PREFIX: &str = ".request-eagle-import-";
+
+pub(super) fn is_staging_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix(STAGING_PREFIX))
+        .is_some_and(|suffix| Uuid::parse_str(suffix).is_ok())
+}
+
 #[derive(Clone, Debug)]
 pub struct ImportedRequest {
     pub name: String,
@@ -46,12 +55,8 @@ impl CollectionRegistry {
             .as_ref()
             .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
         create_private_directory(directory, true)?;
-        let resolved_directory = fs::canonicalize(directory)?;
-        let parent = resolved_directory
-            .parent()
-            .ok_or_else(|| io::Error::other("Cannot import into the filesystem root."))?;
-        // Keep staged files outside the registry so another window never loads a partial import.
-        let staging = parent.join(format!(".request-eagle-import-{}", Uuid::new_v4()));
+        // The registry skips this reserved name until the complete import is renamed.
+        let staging = directory.join(format!("{STAGING_PREFIX}{}", Uuid::new_v4()));
         create_private_directory(&staging, false)?;
 
         let result = stage_requests(&staging, requests).and_then(|(mut collection, mut files)| {

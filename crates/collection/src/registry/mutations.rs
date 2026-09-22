@@ -47,6 +47,10 @@ impl CollectionRegistry {
 
         for collection in &mut self.collections {
             if collection.path == path {
+                if super::import::is_staging_path(Path::new(name)) {
+                    return Err(CollectionEditError::InvalidName);
+                }
+
                 let destination = rename_directory(path, name)?;
                 rebase_entries(&mut collection.entries, path, &destination);
                 rebase_path(&mut collection.local_env.path, path, &destination);
