@@ -545,3 +545,86 @@ fn postman_rejects_ambiguous_query_templates_and_unsupported_upload_names() {
             .contains("filenames")
     );
 }
+
+#[test]
+fn postman_path_variables_preserve_extensions_and_parameter_names() {
+    let imported = parse_import(&json!({"item": [{"request": {"url": {
+        "protocol": "https", "host": ["example", "test"],
+        "path": ["users", ":id.json", ":id-name.tar.gz", ":missing.json", ":empty.json"],
+        "variable": [{"key": "id", "value": "42"}, {"key": "id-name", "value": "99"}, {"key": "empty", "value": ""}]
+    }}}]}).to_string()).unwrap();
+
+    assert_eq!(
+        imported[0].request.path,
+        "https://example.test/users/42.json/99.tar.gz/:missing.json/:empty.json"
+    );
+}
+
+#[test]
+fn postman_structured_string_paths_consume_only_the_leading_separator() {
+    for (path, expected) in [
+        (json!("/v1/users"), "/v1/users"),
+        (json!("v1/users"), "/v1/users"),
+        (json!("//v1/users"), "//v1/users"),
+        (json!("/"), "/"),
+        (json!(["", "v1", "users"]), "//v1/users"),
+    ] {
+        let imported = parse_import(
+            &json!({"item": [{"request": {"url": {
+                "protocol": "https", "host": ["example", "test"], "path": path
+            }}}]})
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            imported[0].request.path,
+            format!("https://example.test{expected}")
+        );
+    }
+}
+
+#[test]
+fn curl_materializes_http_inference_without_using_the_editor_https_default() {
+    for (source, expected) in [
+        ("localhost:8080/path", "http://localhost:8080/path"),
+        ("example.test/path", "http://example.test/path"),
+        ("[::1]:8080/path", "http://[::1]:8080/path"),
+        (
+            "ftp.user@example.test/path",
+            "http://ftp.user@example.test/path",
+        ),
+        (
+            "example.test/path?next=https://other.test",
+            "http://example.test/path?next=https://other.test",
+        ),
+        (
+            "HTTPS:/ftp.example.test/path",
+            "https://ftp.example.test/path",
+        ),
+        ("http:///example.test/path", "http://example.test/path"),
+    ] {
+        let imported = parse_import(&format!("curl '{source}'")).unwrap();
+        assert_eq!(imported[0].request.path, expected);
+    }
+
+    for source in [
+        "ftp.example.test/path",
+        "FTP.example.test/path",
+        "%66tp.example.test/path",
+        "user:pass@ftp.example.test/path",
+        "dict.example.test",
+        "ldap.example.test",
+        "imap.example.test",
+        "smtp.example.test",
+        "pop3.example.test",
+        "ftp://example.test",
+        "//example.test/path",
+        "::1/path",
+    ] {
+        assert!(
+            parse_import(&format!("curl '{source}'")).is_err(),
+            "Unexpectedly imported {source}"
+        );
+    }
+}

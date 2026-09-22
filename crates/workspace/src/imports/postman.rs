@@ -123,7 +123,12 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
             .and_then(Value::as_str)
             .unwrap_or("https");
         let host = joined(value.get("host"), ".")?;
-        let path = joined(value.get("path"), "/")?;
+        let path = match value.get("path") {
+            // Postman string paths include their leading separator; arrays hold
+            // segments, where an empty first segment intentionally means '//'.
+            Some(Value::String(path)) => path.strip_prefix('/').unwrap_or(path).to_owned(),
+            path => joined(path, "/")?,
+        };
         let port = value
             .get("port")
             .and_then(Value::as_str)
@@ -156,11 +161,18 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
         let resolved_path = path
             .split('/')
             .map(|segment| {
-                segment
-                    .strip_prefix(':')
-                    .and_then(|name| variables.iter().find(|(key, _)| key == name))
-                    .map(|(_, value)| value.as_str())
-                    .unwrap_or(segment)
+                let Some(variable) = segment.strip_prefix(':') else {
+                    return segment.to_owned();
+                };
+                let name = variable.split('.').next().unwrap_or_default();
+
+                match variables
+                    .iter()
+                    .find(|(key, value)| key == name && !value.is_empty())
+                {
+                    Some((_, value)) => format!("{value}{}", &variable[name.len()..]),
+                    None => segment.to_owned(),
+                }
             })
             .collect::<Vec<_>>()
             .join("/");

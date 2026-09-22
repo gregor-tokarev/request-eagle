@@ -354,7 +354,56 @@ fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {
         return Err("The cURL URL is empty.".into());
     }
 
-    request.path = value.into();
+    // Keep full URL templates unresolved until Send. Literal cURL URLs use
+    // cURL's protocol inference, independently of the address editor's default.
+    if value.contains("{{") {
+        request.path = value.into();
+        return Ok(());
+    }
+
+    let explicit = value.split_once(':').filter(|(scheme, rest)| {
+        scheme.starts_with(|character: char| character.is_ascii_alphabetic())
+            && scheme.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+            })
+            && rest.starts_with('/')
+    });
+    let path = if let Some((scheme, rest)) = explicit {
+        let scheme = scheme.to_ascii_lowercase();
+
+        if !matches!(scheme.as_str(), "http" | "https") {
+            return Err(format!(
+                "cURL protocol {scheme:?} is not supported. Import an HTTP or HTTPS URL."
+            ));
+        }
+
+        let slash_count = rest.bytes().take_while(|byte| *byte == b'/').count();
+
+        if slash_count > 3 {
+            return Err("A cURL URL accepts at most three slashes after its protocol.".into());
+        }
+
+        format!("{scheme}://{}", &rest[slash_count..])
+    } else {
+        if value.starts_with('/') {
+            return Err("A scheme-less cURL URL must start with a hostname.".into());
+        }
+
+        format!("http://{value}")
+    };
+    let parsed = url::Url::parse(&path).map_err(|error| format!("Invalid cURL URL: {error}"))?;
+
+    if explicit.is_none()
+        && let Some(host) = parsed.host_str()
+        && let Some((prefix, _)) = host.split_once('.')
+        && matches!(prefix, "ftp" | "dict" | "ldap" | "imap" | "smtp" | "pop3")
+    {
+        return Err(format!(
+            "cURL infers unsupported protocol {prefix:?} for this hostname. Use an explicit HTTP or HTTPS URL if intended."
+        ));
+    }
+
+    request.path = path;
     Ok(())
 }
 
