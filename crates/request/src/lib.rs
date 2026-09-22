@@ -15,6 +15,7 @@ mod http;
 mod model;
 mod preferences;
 mod proxy;
+mod redirects;
 mod response;
 
 pub use error::{ExecutionError, HttpError};

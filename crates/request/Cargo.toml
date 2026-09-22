@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 base64 = "0.22"
+bytes = "1"
 percent-encoding = "2"
 http_client = { package = "gpui-pre-http-client", version = "=0.3.5" }
 ipnet = "2"

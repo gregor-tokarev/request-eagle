@@ -23,6 +23,7 @@ pub struct RequestPreferences {
     pub max_response_size_mb: u64,
     pub ssl_certificate_verification: bool,
     pub proxy: ProxyPreferences,
+    pub follow_all_redirects: bool,
 }
 
 impl Default for RequestPreferences {
@@ -33,6 +34,7 @@ impl Default for RequestPreferences {
             max_response_size_mb: 50,
             ssl_certificate_verification: false,
             proxy: ProxyPreferences::default(),
+            follow_all_redirects: true,
         }
     }
 }

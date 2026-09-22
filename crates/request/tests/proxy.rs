@@ -420,3 +420,40 @@ fn proxy_environment_child() {
         false,
     ));
 }
+
+#[test]
+fn redirects_to_bypassed_hosts_do_not_forward_proxy_credentials() {
+    smol::block_on(async {
+        for override_host in [false, true] {
+            let (proxy_listener, proxy_port) = listener();
+            let (origin_listener, origin_port) = listener();
+            let proxy_server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(proxy_listener).unwrap();
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let head = read_head(&mut stream).await;
+                assert!(head.to_lowercase().contains("\r\nproxy-authorization: basic dxnlcjpwyxnz\r\n"));
+                stream.write_all(format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{origin_port}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                ).as_bytes()).await.unwrap();
+            });
+            let origin_server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(origin_listener).unwrap();
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let head = read_head(&mut stream).await;
+                assert!(head.starts_with("GET /final HTTP/1.1\r\n"));
+                assert!(!head.to_lowercase().contains("proxy-authorization"));
+                stream.write_all(RESPONSE).await.unwrap();
+            });
+            let mut proxy = custom(proxy_port);
+            proxy.bypass = "127.0.0.1".into();
+            send(
+                proxy,
+                "http://destination.invalid/redirect".into(),
+                override_host,
+            )
+            .await;
+            proxy_server.await.unwrap();
+            origin_server.await.unwrap();
+        }
+    });
+}

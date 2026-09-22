@@ -30,6 +30,7 @@ struct Storage {
     legacy_credentials: bool,
     credentials: Rc<dyn CredentialStore>,
     proxy_writes: Rc<async_lock::Mutex<()>>,
+    proxy_revision: u64,
 }
 
 impl Default for Storage {
@@ -41,6 +42,7 @@ impl Default for Storage {
             legacy_credentials: false,
             credentials: Rc::new(NativeCredentialStore),
             proxy_writes: Rc::default(),
+            proxy_revision: 0,
         }
     }
 }
@@ -166,13 +168,24 @@ pub fn update(cx: &mut App, change: impl FnOnce(&mut Preferences)) -> Result<()>
 /// the JSON reference. A failed file save cannot damage the previous credentials.
 pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()>> {
     init(cx);
-    let writes = cx.global::<Storage>().proxy_writes.clone();
+    let storage = cx.global_mut::<Storage>();
+    storage.proxy_revision += 1;
+    let revision = storage.proxy_revision;
+    let writes = storage.proxy_writes.clone();
 
     // Detach the actual write from the caller: closing the editor must not cancel
     // a transaction after the OS has accepted its new secret.
     let (send, receive) = futures_channel::oneshot::channel();
     cx.spawn(async move |cx| {
         let _guard = writes.lock().await;
+
+        // Coalesce drafts still waiting for the keyring. Correctness must not
+        // depend on the executor polling foreground tasks in submission order.
+        if cx.read_global::<Storage, _>(|storage, _| storage.proxy_revision != revision) {
+            let _ = send.send(Ok(()));
+            return;
+        }
+
         let result: Result<()> = async {
             let (previous, path, credentials, legacy) = cx.update(|cx| {
                 check_load_error(cx)?;
@@ -277,6 +290,18 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
             saved
         }
         .await;
+        cx.update(|cx| {
+            if let Err(error) = &result {
+                cx.global_mut::<Storage>().credential_error = Some(error.to_string());
+            } else if !cx
+                .global::<Preferences>()
+                .request
+                .proxy
+                .credentials_unavailable
+            {
+                cx.global_mut::<Storage>().credential_error = None;
+            }
+        });
         let _ = send.send(result);
     })
     .detach();

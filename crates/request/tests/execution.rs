@@ -217,9 +217,9 @@ fn executes_all_existing_methods_from_saved_requests() {
 }
 
 #[test]
-fn redirects_and_http_errors_are_inspectable_responses() {
+fn http_errors_are_inspectable_responses() {
     smol::block_on(async {
-        for status in ["302 Found", "404 Not Found", "500 Internal Server Error"] {
+        for status in ["404 Not Found", "500 Internal Server Error"] {
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Length: 7\r\nLocation: http://unused.invalid/\r\nConnection: close\r\n\r\ndetails"
             );
@@ -240,6 +240,393 @@ fn redirects_and_http_errors_are_inspectable_responses() {
                 status[..3].parse::<u16>().unwrap()
             );
             assert_eq!(response.body, b"details");
+        }
+    });
+}
+
+#[test]
+fn redirects_follow_the_setting_and_preserve_http_method_semantics() {
+    smol::block_on(async {
+        for status in [301, 302, 303, 307, 308] {
+            for follow in [true, false] {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let url = format!("http://{}/start", listener.local_addr().unwrap());
+                let server = smol::spawn(async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let received = read_request(&mut stream).await;
+                    assert!(received.head.starts_with("POST /start HTTP/1.1\r\n"));
+                    assert_eq!(received.body, b"payload");
+
+                    stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 {status} Redirect\r\nLocation: /final\r\nContent-Length: 5\r\nConnection: close\r\n\r\nmoved"
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                    drop(stream);
+
+                    if follow {
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let received = read_request(&mut stream).await;
+
+                        if matches!(status, 307 | 308) {
+                            assert!(received.head.starts_with("POST /final HTTP/1.1\r\n"));
+                            assert_eq!(received.body, b"payload");
+                        } else {
+                            assert!(received.head.starts_with("GET /final HTTP/1.1\r\n"));
+                            assert!(received.body.is_empty());
+                        }
+
+                        stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone")
+                            .await
+                            .unwrap();
+                    }
+                });
+                let mut preferences = RequestPreferences {
+                    timeout_ms: 2_000,
+                    ..RequestPreferences::default()
+                };
+
+                if !follow {
+                    preferences.follow_all_redirects = false;
+                }
+
+                let result = RequestExecutor::new(&preferences)
+                    .unwrap()
+                    .execute(HttpRequest {
+                        method: Method::Post,
+                        path: url,
+                        body: Some(b"payload".to_vec()),
+                        ..HttpRequest::default()
+                    })
+                    .await
+                    .unwrap();
+                server.await;
+
+                let Response::Http(response) = result.response;
+
+                if follow {
+                    assert_eq!(response.status.as_u16(), 200);
+                    assert_eq!(response.body, b"done");
+                } else {
+                    assert_eq!(response.status.as_u16(), status);
+                    assert_eq!(response.headers["location"], "/final");
+                    assert_eq!(response.body, b"moved");
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn follows_redirect_chains_by_default() {
+    smol::block_on(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            for (step, status) in [301, 302, 303, 307, 308, 200].into_iter().enumerate() {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let received = read_request(&mut stream).await;
+                assert!(
+                    received
+                        .head
+                        .starts_with(&format!("GET /{step} HTTP/1.1\r\n"))
+                );
+
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status} Response\r\nLocation: /{}\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone",
+                            step + 1,
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let result = executor()
+            .execute(HttpRequest {
+                path: format!("{url}/0"),
+                ..HttpRequest::default()
+            })
+            .await
+            .unwrap();
+        server.await;
+
+        let Response::Http(response) = result.response;
+        assert_eq!(response.status.as_u16(), 200);
+        assert_eq!(response.body, b"done");
+    });
+}
+
+#[test]
+fn cross_host_redirects_update_host_and_strip_sensitive_headers() {
+    smol::block_on(async {
+        for http_version in [HttpVersion::Auto, HttpVersion::Http1_1] {
+            let (destination, destination_server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone".to_vec(),
+            )
+            .await;
+            let expected_host = destination.strip_prefix("http://").unwrap().to_owned();
+            let (url, server) = serve(
+                format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {destination}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .into_bytes(),
+            )
+            .await;
+            let executor = RequestExecutor::new(&RequestPreferences {
+                http_version,
+                timeout_ms: 2_000,
+                ..RequestPreferences::default()
+            })
+            .unwrap();
+            let result = executor
+                .execute(HttpRequest {
+                    path: url,
+                    headers: vec![
+                        ("Authorization".into(), "Bearer test-token".into()),
+                        ("Cookie".into(), "session=test-session".into()),
+                    ],
+                    ..HttpRequest::default()
+                })
+                .await
+                .unwrap();
+            server.await;
+            let received = destination_server.await;
+
+            assert!(received.head.starts_with("GET /final HTTP/1.1\r\n"));
+            assert!(
+                received
+                    .head
+                    .contains(&format!("\r\nhost: {expected_host}\r\n"))
+            );
+            assert!(!received.head.to_lowercase().contains("\r\nauthorization:"));
+            assert!(!received.head.to_lowercase().contains("\r\ncookie:"));
+
+            let Response::Http(response) = result.response;
+            assert_eq!(response.status.as_u16(), 200);
+            assert_eq!(response.body, b"done");
+        }
+    });
+}
+
+#[test]
+fn explicit_host_overrides_only_follow_redirects_on_the_same_authority() {
+    smol::block_on(async {
+        for (http_version, custom_host) in [
+            (HttpVersion::Auto, true),
+            (HttpVersion::Http1_1, true),
+            (HttpVersion::Http1_1, false),
+        ] {
+            for status in [301, 302, 303, 307, 308] {
+                let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let destination = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let origin_host = origin.local_addr().unwrap().to_string();
+                let destination_host = destination.local_addr().unwrap().to_string();
+                let url = format!("http://{origin_host}/start");
+                let explicit_host = if custom_host {
+                    "virtual.example".to_owned()
+                } else {
+                    origin_host.clone()
+                };
+                let expected_explicit_host = explicit_host.clone();
+                let server = smol::spawn(async move {
+                    for (listener, path, expected_host, location) in [
+                        (
+                            &origin,
+                            "/start",
+                            expected_explicit_host.as_str(),
+                            Some("/same".to_owned()),
+                        ),
+                        (
+                            &origin,
+                            "/same",
+                            expected_explicit_host.as_str(),
+                            Some(format!("http://{destination_host}/final")),
+                        ),
+                        (
+                            &destination,
+                            "/final",
+                            destination_host.as_str(),
+                            Some(format!("http://{origin_host}/back")),
+                        ),
+                        (&origin, "/back", origin_host.as_str(), None),
+                    ] {
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let received = read_request(&mut stream).await;
+                        let preserves_body = path == "/start" || matches!(status, 307 | 308);
+                        let method = if preserves_body { "POST" } else { "GET" };
+
+                        assert!(
+                            received
+                                .head
+                                .starts_with(&format!("{method} {path} HTTP/1.1\r\n"))
+                        );
+                        assert!(
+                            received
+                                .head
+                                .contains(&format!("\r\nhost: {expected_host}\r\n"))
+                        );
+                        assert_eq!(
+                            received.body,
+                            if preserves_body {
+                                b"payload".as_slice()
+                            } else {
+                                b""
+                            }
+                        );
+
+                        if matches!(path, "/start" | "/same") {
+                            assert!(
+                                received
+                                    .head
+                                    .contains("\r\nauthorization: Bearer test-token\r\n")
+                            );
+                            assert!(
+                                received
+                                    .head
+                                    .contains("\r\ncookie: session=test-session\r\n")
+                            );
+                        } else {
+                            assert!(!received.head.contains("\r\nauthorization:"));
+                            assert!(!received.head.contains("\r\ncookie:"));
+                        }
+
+                        let response = match location {
+                            Some(location) => format!(
+                                "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            ),
+                            None => "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone".to_owned(),
+                        };
+                        stream.write_all(response.as_bytes()).await.unwrap();
+                    }
+                });
+                let executor = RequestExecutor::new(&RequestPreferences {
+                    http_version,
+                    timeout_ms: 2_000,
+                    ..RequestPreferences::default()
+                })
+                .unwrap();
+                let result = executor
+                    .execute(HttpRequest {
+                        method: Method::Post,
+                        path: url,
+                        headers: vec![
+                            ("Host".into(), explicit_host),
+                            ("Authorization".into(), "Bearer test-token".into()),
+                            ("Cookie".into(), "session=test-session".into()),
+                        ],
+                        body: Some(b"payload".to_vec()),
+                        ..HttpRequest::default()
+                    })
+                    .await
+                    .unwrap();
+                server.await;
+
+                let Response::Http(response) = result.response;
+                assert_eq!(response.status.as_u16(), 200);
+                assert_eq!(response.body, b"done");
+            }
+        }
+    });
+}
+
+#[test]
+fn explicit_host_does_not_follow_redirects_when_disabled() {
+    smol::block_on(async {
+        let (url, server) = serve(
+            b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 5\r\nConnection: close\r\n\r\nmoved".to_vec(),
+        )
+        .await;
+        let executor = RequestExecutor::new(&RequestPreferences {
+            follow_all_redirects: false,
+            timeout_ms: 2_000,
+            ..RequestPreferences::default()
+        })
+        .unwrap();
+        let result = executor
+            .execute(HttpRequest {
+                path: url,
+                headers: vec![("Host".into(), "virtual.example".into())],
+                ..HttpRequest::default()
+            })
+            .await
+            .unwrap();
+        let received = server.await;
+        assert!(received.head.contains("\r\nhost: virtual.example\r\n"));
+
+        let Response::Http(response) = result.response;
+        assert_eq!(response.status.as_u16(), 302);
+        assert_eq!(response.headers["location"], "/final");
+        assert_eq!(response.body, b"moved");
+    });
+}
+
+#[test]
+fn explicit_host_redirects_share_the_transport_redirect_limit() {
+    smol::block_on(async {
+        for cross_authority in [false, true] {
+            let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let destination = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/0", origin.local_addr().unwrap());
+            let destination_url = format!("http://{}", destination.local_addr().unwrap());
+            let server = smol::spawn(async move {
+                for hop in 0..100 {
+                    let listener = if cross_authority && hop >= 2 {
+                        &destination
+                    } else {
+                        &origin
+                    };
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let received = read_request(&mut stream).await;
+                    assert!(
+                        received
+                            .head
+                            .starts_with(&format!("GET /{hop} HTTP/1.1\r\n"))
+                    );
+                    let location = if cross_authority && hop == 1 {
+                        format!("{destination_url}/{}", hop + 1)
+                    } else {
+                        format!("/{}", hop + 1)
+                    };
+
+                    stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            });
+            let executor = RequestExecutor::new(&RequestPreferences {
+                timeout_ms: 5_000,
+                ..RequestPreferences::default()
+            })
+            .unwrap();
+            let error = executor
+                .execute(HttpRequest {
+                    path: url,
+                    headers: vec![("Host".into(), "virtual.example".into())],
+                    ..HttpRequest::default()
+                })
+                .await
+                .unwrap_err();
+
+            assert!(matches!(
+                &error,
+                ExecutionError::Http(HttpError::Transport(_))
+            ));
+            assert!(error.to_string().contains("too many redirects"), "{error}");
+            server.await;
         }
     });
 }
@@ -661,4 +1048,13 @@ fn preserves_serialized_request_and_preference_formats() {
     assert_eq!(preferences.timeout_ms, 250);
     assert_eq!(preferences.max_response_size_mb, 50);
     assert!(!preferences.ssl_certificate_verification);
+    assert!(preferences.follow_all_redirects);
+
+    let preferences: RequestPreferences =
+        serde_json::from_str(r#"{"follow_all_redirects":false}"#).unwrap();
+    assert!(!preferences.follow_all_redirects);
+    assert_eq!(
+        serde_json::to_value(&preferences).unwrap()["follow_all_redirects"],
+        false
+    );
 }

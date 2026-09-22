@@ -140,7 +140,13 @@ async fn failed_keyring_write_keeps_previous_file_credentials_and_runtime(cx: &m
     assert!(cx.update(|cx| update_proxy(replacement, cx)).await.is_err());
     assert_eq!(fs::read(path).unwrap(), original);
     assert_eq!(store.entries.borrow().len(), 1);
-    cx.read(|cx| assert_eq!(cx.global::<Preferences>().request.proxy, proxy()));
+    cx.read(|cx| {
+        assert_eq!(cx.global::<Preferences>().request.proxy, proxy());
+        assert!(crate::credential_error(cx).is_some());
+    });
+    store.fail_write.set(false);
+    cx.update(|cx| update_proxy(proxy(), cx)).await.unwrap();
+    cx.read(|cx| assert!(crate::credential_error(cx).is_none()));
 }
 
 #[gpui_kit::test]
@@ -331,4 +337,72 @@ fn serialization_never_includes_credentials_but_accepts_legacy_values() {
         serde_json::from_str(r#"{"username":"proxy-user","password":"proxy-password"}"#).unwrap();
     assert_eq!(legacy.username, "proxy-user");
     assert_eq!(legacy.password, "proxy-password");
+}
+
+#[gpui_kit::test]
+async fn saves_and_reloads_the_shared_document(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.update(|cx| {
+        assert_eq!(cx.global::<Preferences>(), &Preferences::default());
+        assert!(!path.exists());
+        update(cx, |preferences| {
+            preferences.appearance.mode = AppearanceMode::System;
+            preferences.appearance.dark_theme = "Catppuccin Mocha".into();
+            preferences.appearance.editor_font = "Menlo".into();
+            preferences.request.follow_all_redirects = false;
+        })
+        .unwrap();
+        update(cx, |preferences| {
+            preferences.appearance.interface_font_size = 20.
+        })
+        .unwrap();
+    });
+    let expected = cx.read(|cx| cx.global::<Preferences>().clone());
+    let document: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(document["appearance"]["editor_font"], "Menlo");
+    assert_eq!(document["appearance"]["interface_font_size"], 20.);
+    assert_eq!(document["request"]["follow_all_redirects"], false);
+    cx.update(|cx| cx.set_global(Preferences::default()));
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.read(|cx| assert_eq!(cx.global::<Preferences>(), &expected));
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[gpui_kit::test]
+async fn failed_ordinary_save_does_not_publish_changes_or_leave_temporary_files(
+    cx: &mut TestAppContext,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.update(|cx| {
+        update(cx, |p| p.appearance.editor_font = "Menlo".into()).unwrap();
+        let original = cx.global::<Preferences>().clone();
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(update(cx, |p| p.appearance.mode = AppearanceMode::Light).is_err());
+        assert_eq!(cx.global::<Preferences>(), &original);
+        assert!(path.is_dir());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    });
+}
+
+#[gpui_kit::test]
+async fn closing_the_editor_keeps_the_latest_queued_save(cx: &mut TestAppContext) {
+    let store = install_store(cx);
+    let directory = tempfile::tempdir().unwrap();
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    let mut latest = proxy();
+    latest.password = "latest-password".into();
+    cx.update(|cx| {
+        drop(update_proxy(proxy(), cx));
+        drop(update_proxy(latest.clone(), cx));
+    });
+    cx.run_until_parked();
+    assert_eq!(store.entries.borrow().len(), 1);
+    cx.read(|cx| assert_eq!(cx.global::<Preferences>().request.proxy, latest));
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.read(|cx| assert_eq!(cx.global::<Preferences>().request.proxy, latest));
 }

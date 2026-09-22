@@ -1,6 +1,6 @@
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::*;
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::view::ResponseView;
 
@@ -68,7 +68,7 @@ impl ResponseView {
                         .flex_none()
                         .min_h(px(32.))
                         .py_2()
-                        .border_b_1()
+                        .when(index + 1 < rows.len(), |row| row.border_b_1())
                         .border_color(cx.theme().border)
                         .child(
                             div()

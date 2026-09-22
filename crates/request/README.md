@@ -42,10 +42,14 @@ with only a credential reference in the preferences file.
 In Settings > Proxy, pasting a full proxy URL into the host field fills the
 protocol, hostname, port, and authentication fields. Valid edits save automatically.
 
-HTTP statuses, including redirects, 4xx, and 5xx, are returned with their headers
-and body. Redirects are not followed. Headers retain repeated and non-UTF-8 values;
-bodies are not decoded or decompressed. Malformed input, transport failures,
-truncated bodies, timeouts, and oversized responses return typed errors.
+HTTP redirects (301, 302, 303, 307, and 308) are followed by default, with a
+limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
+the same authority and removed when a redirect changes the host or port.
+Set `follow_all_redirects` to `false` to inspect redirect responses directly.
+Final HTTP statuses, including 4xx and 5xx, are returned with their headers and
+body. Headers retain repeated and non-UTF-8 values; bodies are not decoded or
+decompressed. Malformed input, transport failures, truncated bodies, timeouts,
+and oversized responses return typed errors.
 
 URLs must be absolute and already resolved. Collection environment substitution,
 authentication editors, and UI Send actions are outside this module.
