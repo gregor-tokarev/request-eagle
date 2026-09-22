@@ -1,5 +1,6 @@
 use std::{
     fs,
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -200,6 +201,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     fs::remove_dir_all(directory).unwrap();
 }
 
+static NEXT_SAVED_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+
 struct SavedRequestFixture {
     directory: std::path::PathBuf,
     file: std::path::PathBuf,
@@ -209,8 +212,9 @@ struct SavedRequestFixture {
 impl SavedRequestFixture {
     fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
-            "request-eagle-save-{}-{}",
+            "request-eagle-save-{}-{}-{}",
             std::process::id(),
+            NEXT_SAVED_FIXTURE.fetch_add(1, Ordering::Relaxed),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
