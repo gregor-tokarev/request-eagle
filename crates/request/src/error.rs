@@ -19,6 +19,9 @@ pub enum ExecutionError {
 
 #[derive(Debug, Error)]
 pub enum HttpError {
+    #[error("invalid proxy settings: {0}")]
+    InvalidProxy(&'static str),
+
     #[error("could not initialize the HTTP client: {0}")]
     Client(#[source] reqwest::Error),
 

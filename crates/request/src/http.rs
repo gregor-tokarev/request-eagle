@@ -186,7 +186,11 @@ fn build_client(
         HttpVersion::Http1_1 => builder.http1_only(),
         HttpVersion::Http2 => builder.http2_prior_knowledge(),
     };
-    let client = builder.build().map_err(HttpError::Client)?;
+    let client = preferences
+        .proxy
+        .apply(builder)?
+        .build()
+        .map_err(HttpError::Client)?;
 
     Ok(Arc::new(client.into()))
 }

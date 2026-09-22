@@ -8,5 +8,5 @@ mod store;
 mod tests;
 
 pub use appearance::{AppearanceMode, AppearancePreferences};
-pub use request::{HttpVersion, RequestPreferences};
+pub use request::{HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol, RequestPreferences};
 pub use store::{Preferences, init, load, update};

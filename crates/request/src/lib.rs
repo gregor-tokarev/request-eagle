@@ -14,6 +14,7 @@ mod generated_headers;
 mod http;
 mod model;
 mod preferences;
+mod proxy;
 mod response;
 
 pub use error::{ExecutionError, HttpError};
@@ -22,4 +23,5 @@ pub use generated_headers::generated_headers;
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request};
 pub use preferences::{HttpVersion, RequestPreferences};
+pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};

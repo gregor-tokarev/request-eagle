@@ -3,6 +3,33 @@ use gpui_kit::TestAppContext;
 use std::fs;
 
 #[gpui_kit::test]
+fn proxy_settings_survive_a_reload(cx: &mut gpui_kit::TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+
+    cx.update(|cx| {
+        load(directory.path(), cx).unwrap();
+        update(cx, |preferences| {
+            preferences.request.proxy = crate::ProxyPreferences {
+                mode: crate::ProxyMode::Custom,
+                host: "proxy.example.com".into(),
+                port: 3128,
+                authentication: true,
+                username: "proxy-user".into(),
+                password: "proxy-password".into(),
+                bypass: "localhost, 127.0.0.1".into(),
+                ..crate::ProxyPreferences::default()
+            };
+        })
+        .unwrap();
+        let expected = cx.global::<Preferences>().request.proxy.clone();
+        cx.set_global(Preferences::default());
+        load(directory.path(), cx).unwrap();
+
+        assert_eq!(cx.global::<Preferences>().request.proxy, expected);
+    });
+}
+
+#[gpui_kit::test]
 fn saves_and_reloads_the_shared_document(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("preferences.json");

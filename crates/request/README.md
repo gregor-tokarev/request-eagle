@@ -30,6 +30,16 @@ operation, including the response body, is bounded by the timeout. Dropping its
 future cancels the operation. Response limits count body bytes, including for
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
+Proxy preferences default to the system/environment proxy. Custom mode supports
+HTTP or HTTPS proxy servers, separate HTTP/HTTPS request selection, Basic proxy
+authentication, and comma-separated bypass hosts, domains, and IP ranges. A domain
+also matches its subdomains; `*.example.com` and `.example.com` are accepted, and
+`*` bypasses all destinations. Bypassed or unselected request types connect
+directly. Disabled mode ignores all proxies. Proxy settings are saved with the
+other local preferences, including credentials, and apply to the next request.
+In Settings > Proxy, pasting a full proxy URL into the host field fills the
+protocol, hostname, port, and authentication fields. Valid edits save automatically.
+
 HTTP statuses, including redirects, 4xx, and 5xx, are returned with their headers
 and body. Redirects are not followed. Headers retain repeated and non-UTF-8 values;
 bodies are not decoded or decompressed. Malformed input, transport failures,
