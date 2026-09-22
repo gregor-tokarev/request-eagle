@@ -17,12 +17,14 @@ use super::{editing::RenameEditor, tree::CollectionTree};
 
 pub enum CollectionPanelEvent {
     RequestRelocated {
+        id: SharedString,
         previous_path: PathBuf,
         path: PathBuf,
         name: SharedString,
         collection: SharedString,
     },
     OpenRequest {
+        id: SharedString,
         path: PathBuf,
         name: SharedString,
         collection: SharedString,
@@ -108,10 +110,12 @@ impl CollectionPanel {
     pub fn save_request(
         &mut self,
         path: &Path,
+        expected_id: &str,
         request: Request,
         cx: &mut Context<Self>,
     ) -> Result<(), collection::CollectionEditError> {
-        self.collections.update_request(path, request)?;
+        self.collections
+            .update_request(path, expected_id, request)?;
         let selected = self
             .selected
             .map(|index| self.tree.items[index].path.clone());

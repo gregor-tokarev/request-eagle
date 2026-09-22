@@ -231,7 +231,12 @@ impl CollectionPanel {
                     continue;
                 };
 
+                let Some(file) = self.collections.file(&item.path) else {
+                    continue;
+                };
+
                 cx.emit(CollectionPanelEvent::RequestRelocated {
+                    id: file.id.clone().into(),
                     previous_path: if relative.as_os_str().is_empty() {
                         previous.to_path_buf()
                     } else {

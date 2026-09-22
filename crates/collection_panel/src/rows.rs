@@ -261,6 +261,7 @@ impl CollectionPanel {
                     }
 
                     cx.emit(CollectionPanelEvent::OpenRequest {
+                        id: file.id.clone().into(),
                         path: item.path.clone(),
                         name: item.label.clone(),
                         collection: this.tree.items[root].label.clone(),

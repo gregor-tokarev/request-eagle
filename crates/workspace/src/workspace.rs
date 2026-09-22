@@ -60,6 +60,7 @@ impl Layout {
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
                 CollectionPanelEvent::RequestRelocated {
+                    id,
                     previous_path,
                     path,
                     name,
@@ -69,6 +70,7 @@ impl Layout {
                         view.relocate_request(
                             previous_path,
                             path,
+                            id,
                             name.clone(),
                             collection.clone(),
                             cx,
@@ -76,13 +78,21 @@ impl Layout {
                     });
                 }
                 CollectionPanelEvent::OpenRequest {
+                    id,
                     path,
                     name,
                     collection,
                     request,
                 } => {
                     this.main_view.update(cx, |view, cx| {
-                        view.open_request(path, name.clone(), collection.clone(), request, cx);
+                        view.open_request(
+                            path,
+                            id.clone(),
+                            name.clone(),
+                            collection.clone(),
+                            request,
+                            cx,
+                        );
                         view.prepare_request(window, cx);
                     });
                 }
@@ -95,7 +105,12 @@ impl Layout {
             window,
             |this, view, event: &crate::layout::main_view::RequestSaveRequested, window, cx| {
                 let result = this.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.save_request(&event.path, event.request.clone().into(), cx)
+                    sidebar.save_request(
+                        &event.path,
+                        &event.request_id,
+                        event.request.clone().into(),
+                        cx,
+                    )
                 });
                 view.update(cx, |view, cx| view.finish_save(event, result, window, cx));
             },

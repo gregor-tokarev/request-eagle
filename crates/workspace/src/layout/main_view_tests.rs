@@ -104,6 +104,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
         view.update(cx, |view, cx| {
             view.open_request(
                 saved_path,
+                "saved".into(),
                 "Saved request".into(),
                 "Collection".into(),
                 &collection::HttpRequest {
@@ -560,6 +561,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
         view.update(cx, |view, cx| {
             view.open_request(
                 first_path,
+                "first".into(),
                 "Same name".into(),
                 "Collection".into(),
                 &collection::HttpRequest::default().into(),
@@ -567,6 +569,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
             );
             view.open_request(
                 second_path,
+                "second".into(),
                 "Same name".into(),
                 "Collection".into(),
                 &collection::HttpRequest {
@@ -588,6 +591,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
         view.update(cx, |view, cx| {
             view.open_request(
                 first_path,
+                "first".into(),
                 "Renamed request".into(),
                 "Renamed collection".into(),
                 &collection::HttpRequest {

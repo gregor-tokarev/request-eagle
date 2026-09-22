@@ -14,6 +14,7 @@ pub(super) struct PageTab {
     pub(super) id: u64,
     pub(super) title: SharedString,
     pub(super) request_path: Option<PathBuf>,
+    pub(super) request_id: Option<SharedString>,
     pub(super) method: Option<&'static str>,
     dirty: bool,
     pub(super) page: AnyView,
@@ -34,6 +35,7 @@ pub(crate) struct MainView {
 pub(crate) struct RequestSaveRequested {
     pub(crate) tab_id: u64,
     pub(crate) path: PathBuf,
+    pub(crate) request_id: SharedString,
     pub(crate) request: collection::HttpRequest,
 }
 
@@ -68,6 +70,7 @@ impl MainView {
             id: self.next_id,
             title: title.into(),
             request_path: None,
+            request_id: None,
             method: None,
             dirty: false,
             page: page.into(),
@@ -84,16 +87,16 @@ impl MainView {
     pub(crate) fn open_request(
         &mut self,
         path: &Path,
+        request_id: SharedString,
         name: SharedString,
         collection: SharedString,
         request: &collection::Request,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self
-            .tabs
-            .iter()
-            .position(|tab| tab.request_path.as_deref() == Some(path))
-        {
+        if let Some(index) = self.tabs.iter().position(|tab| {
+            tab.request_path.as_deref() == Some(path)
+                && tab.request_id.as_ref() == Some(&request_id)
+        }) {
             self.tabs[index].title = name.clone();
             if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>() {
                 draft.update(cx, |draft, cx| {
@@ -111,21 +114,22 @@ impl MainView {
         let draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
         let index = self.open_draft(name, draft, cx);
         self.tabs[index].request_path = Some(path.to_path_buf());
+        self.tabs[index].request_id = Some(request_id);
     }
 
     pub(crate) fn relocate_request(
         &mut self,
         previous_path: &Path,
         path: &Path,
+        request_id: &SharedString,
         name: SharedString,
         collection: SharedString,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.request_path.as_deref() == Some(previous_path))
-        {
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| {
+            tab.request_path.as_deref() == Some(previous_path)
+                && tab.request_id.as_ref() == Some(request_id)
+        }) {
             tab.request_path = Some(path.to_path_buf());
             tab.title = name.clone();
 
@@ -260,7 +264,8 @@ impl MainView {
         let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() else {
             return;
         };
-        let Some(path) = tab.request_path.clone() else {
+        let (Some(path), Some(request_id)) = (tab.request_path.clone(), tab.request_id.clone())
+        else {
             self.save_error = Some(
                 "This tab has no collection file. Create a request in the sidebar to save it."
                     .into(),
@@ -273,6 +278,7 @@ impl MainView {
         cx.emit(RequestSaveRequested {
             tab_id: tab.id,
             path,
+            request_id,
             request: draft.read(cx).request.clone(),
         });
         cx.notify();

@@ -138,7 +138,7 @@ fn saving_request_preserves_latest_metadata_comments_and_unknown_fields() {
     fs::write(
         &path,
         r#"# externally edited request
-id = 'external-id' # stable identity
+id = 'list' # stable identity
 name = 'External name' # display name
 schema_version = 3 # schema comment
 custom = 'keep the metadata'
@@ -161,10 +161,12 @@ request_custom = 'keep the request metadata'
         query: Some(vec![("page".into(), "2".into())]),
     };
 
-    registry.update_request(&path, (&updated).into()).unwrap();
+    registry
+        .update_request(&path, "list", (&updated).into())
+        .unwrap();
 
     let cached = registry.file(&path).unwrap();
-    assert_eq!(cached.id, "external-id");
+    assert_eq!(cached.id, "list");
     assert_eq!(cached.name, "External name");
     assert_eq!(cached.schema_version, 3);
     let loaded = FileEntry::from_path(&path).unwrap();
@@ -194,7 +196,9 @@ request_custom = 'keep the request metadata'
         query: None,
         ..updated
     };
-    registry.update_request(&path, cleared.into()).unwrap();
+    registry
+        .update_request(&path, "list", cleared.into())
+        .unwrap();
     let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
     assert_eq!(reloaded.body, None);
     assert_eq!(reloaded.query, None);
@@ -214,6 +218,7 @@ fn failed_request_save_keeps_file_and_registry_unchanged() {
 
     let result = registry.update_request(
         &path,
+        "list",
         HttpRequest {
             path: "https://example.com/edited".into(),
             ..HttpRequest::default()
@@ -231,6 +236,72 @@ fn failed_request_save_keeps_file_and_registry_unchanged() {
 }
 
 #[test]
+fn stale_save_cannot_overwrite_a_request_recreated_at_the_same_path() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let path = registry.create_request(&root.join("API/Users")).unwrap();
+    let original_id = registry.file(&path).unwrap().id.clone();
+
+    registry.delete(&path).unwrap();
+    let replacement_path = registry.create_request(&root.join("API/Users")).unwrap();
+    assert_eq!(replacement_path, path);
+    let replacement_id = registry.file(&path).unwrap().id.clone();
+    assert_ne!(replacement_id, original_id);
+    let replacement_content = fs::read_to_string(&path).unwrap();
+
+    let result = registry.update_request(
+        &path,
+        &original_id,
+        HttpRequest {
+            path: "https://example.com/stale-edits".into(),
+            ..HttpRequest::default()
+        }
+        .into(),
+    );
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), replacement_content);
+    let cached = registry.file(&path).unwrap();
+    assert_eq!(cached.id, replacement_id);
+    assert_eq!(cached.raw_content, replacement_content);
+    let Request::Http(request) = &cached.request;
+    assert_eq!(request.path, "/");
+}
+
+#[test]
+fn stale_save_cannot_overwrite_an_externally_replaced_request() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let original_content = fs::read_to_string(&path).unwrap();
+    let replacement_id = uuid::Uuid::new_v4().to_string();
+    let replacement_content = original_content
+        .replace("id = 'list'", &format!("id = '{replacement_id}'"))
+        .replace("path = '/users'", "path = '/replacement'");
+    fs::write(&path, &replacement_content).unwrap();
+
+    let result = registry.update_request(
+        &path,
+        "list",
+        HttpRequest {
+            path: "https://example.com/stale-edits".into(),
+            ..HttpRequest::default()
+        }
+        .into(),
+    );
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), replacement_content);
+    let cached = registry.file(&path).unwrap();
+    assert_eq!(cached.id, "list");
+    assert_eq!(cached.raw_content, original_content);
+    let Request::Http(request) = &cached.request;
+    assert_eq!(request.path, "/users");
+}
+
+#[test]
 fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     let fixture = Fixture::new();
     let root = &fixture.0;
@@ -245,6 +316,7 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     registry
         .update_request(
             &path,
+            "list",
             HttpRequest {
                 path: "https://example.com/edited".into(),
                 ..HttpRequest::default()
@@ -290,7 +362,9 @@ query = [
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
     request.path = "https://example.com/edited".into();
 
-    registry.update_request(&path, (&request).into()).unwrap();
+    registry
+        .update_request(&path, "list", (&request).into())
+        .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(
@@ -300,7 +374,9 @@ query = [
 
     request.headers[0].1 = "text/plain".into();
     request.query.as_mut().unwrap()[0].1 = "2".into();
-    registry.update_request(&path, (&request).into()).unwrap();
+    registry
+        .update_request(&path, "list", (&request).into())
+        .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     let edited_arrays = arrays
@@ -349,7 +425,9 @@ query = [
     request.headers.remove(0);
     request.query.as_mut().unwrap().remove(0);
 
-    registry.update_request(&path, (&request).into()).unwrap();
+    registry
+        .update_request(&path, "list", (&request).into())
+        .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     let retained = arrays
@@ -368,7 +446,9 @@ query = [
     request.query.as_mut().unwrap().reverse();
     request.query.as_mut().unwrap()[0].1 = "c".into();
 
-    registry.update_request(&path, (&request).into()).unwrap();
+    registry
+        .update_request(&path, "list", (&request).into())
+        .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     let reordered = r#"headers = [

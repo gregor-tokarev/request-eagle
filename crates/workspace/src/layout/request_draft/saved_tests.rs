@@ -460,3 +460,67 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
         assert!(!reopened.read(cx).is_dirty());
     });
 }
+
+fn context_click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+    cx.update(|window, _| window.refresh());
+    let position = cx.debug_bounds(selector).unwrap().center();
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        button: gpui_kit::MouseButton::Right,
+        position,
+        click_count: 1,
+        ..Default::default()
+    });
+    cx.simulate_event(gpui_kit::MouseUpEvent {
+        button: gpui_kit::MouseButton::Right,
+        position,
+        click_count: 1,
+        ..Default::default()
+    });
+}
+
+#[gpui_kit::test]
+fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut TestAppContext) {
+    let mut fixture = SavedRequestFixture::new();
+    let reused = fixture.directory.join("API/New Request.toml");
+    fs::rename(&fixture.file, &reused).unwrap();
+    fixture.file = reused;
+    let (tabs, draft, cx) = fixture.open(cx);
+    edit_url(cx, "https://example.com/old-draft");
+
+    click(cx, "collection-row-1");
+    cx.simulate_keystrokes("backspace");
+    click(cx, "confirm-sidebar-delete");
+    assert!(!fixture.file.exists());
+
+    context_click(cx, "collection-row-0");
+    cx.simulate_keystrokes("down enter");
+    cx.simulate_input("Different request");
+    cx.simulate_keystrokes("enter");
+    let before = collection::FileEntry::from_path(&fixture.file).unwrap();
+    assert_ne!(before.id, "example");
+    assert_eq!(before.name, "Different request");
+
+    click(cx, "page-tab-2");
+    cx.simulate_keystrokes("secondary-s");
+    assert!(cx.debug_bounds("request-save-error").is_some());
+    let after = collection::FileEntry::from_path(&fixture.file).unwrap();
+    assert_eq!(after.id, before.id);
+    let collection::Request::Http(after_request) = after.request;
+    assert_eq!(after_request.path, "/", "old tab overwrote a new request");
+    cx.read(|cx| assert!(draft.read(cx).is_dirty()));
+
+    click(cx, "collection-row-1");
+    cx.read(|cx| {
+        let tabs = tabs.read(cx);
+        assert_eq!(tabs.tabs.len(), 3, "a new file needs its own draft");
+        assert_eq!(tabs.tabs[2].request_id.as_deref(), Some(before.id.as_str()));
+        assert_ne!(tabs.tabs[2].page.entity_id(), draft.entity_id());
+    });
+    edit_url(cx, "https://example.com/new-draft");
+    cx.simulate_keystrokes("secondary-s");
+    let collection::Request::Http(saved) = collection::FileEntry::from_path(&fixture.file)
+        .unwrap()
+        .request;
+    assert_eq!(saved.path, "https://example.com/new-draft");
+    cx.read(|cx| assert_eq!(draft.read(cx).request.path, "https://example.com/old-draft"));
+}
