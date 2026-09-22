@@ -1,4 +1,5 @@
 pub(crate) mod bottom_panel;
+mod history;
 pub(crate) mod main_view;
 pub(crate) mod recovery;
 pub(crate) mod request_draft;
@@ -8,6 +9,8 @@ pub(crate) mod save_request;
 pub(crate) mod top_panel;
 pub(crate) mod workflow;
 
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod main_view_tests;
 

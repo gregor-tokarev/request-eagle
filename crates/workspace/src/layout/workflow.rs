@@ -21,11 +21,11 @@ impl MainView {
         environment_path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        if let Err(error) = self
+        if self
             .history
             .relocate_environment(previous_path, environment_path)
         {
-            self.storage_error = Some(format!("Could not update request history: {error}"));
+            self.save_history(cx);
         }
         for tab in &self.tabs {
             let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() else {
@@ -191,15 +191,17 @@ impl MainView {
                     .child(div().flex_1().child("Recent requests"))
                     .child(
                         Button::new("clear-history")
+                            .debug_selector(|| "clear-history".into())
                             .ghost()
                             .small()
-                            .label("Clear history")
+                            .label(if self.history.is_clearing() {
+                                "Clearing history…"
+                            } else {
+                                "Clear history"
+                            })
+                            .disabled(self.history.is_clearing())
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Err(error) = this.history.clear() {
-                                    this.storage_error =
-                                        Some(format!("Could not clear history: {error}"));
-                                }
-                                cx.notify();
+                                this.clear_history(cx);
                             })),
                     ),
             )
@@ -238,7 +240,7 @@ impl MainView {
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         let mut draft = RequestDraft::new();
                                         draft.name = entry.name.clone().into();
-                                        draft.request = entry.request.clone();
+                                        draft.request = (*entry.request).clone();
                                         draft.environment_path = entry.environment_path.clone();
                                         this.open_draft(entry.name.clone().into(), draft, cx);
                                         this.history_visible = false;

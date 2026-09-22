@@ -144,10 +144,10 @@ fn history_reopens_an_editable_copy_and_clears_persisted_entries(cx: &mut TestAp
     });
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
-            view.history.clear().unwrap();
-            cx.notify();
+            view.clear_history(cx);
         })
     });
+    cx.run_until_parked();
     assert!(
         crate::history::History::load(directory.path().join("history.json"))
             .unwrap()
@@ -564,8 +564,8 @@ path = "{{base_url}}/{{account}}"
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.enable_workflow_storage(state.clone(), cx);
-            view.history
-                .push(crate::history::HistoryEntry::new(
+            view.record_history(
+                crate::history::HistoryEntry::new(
                     "Past attempt".into(),
                     request::HttpRequest {
                         path: "{{base_url}}/{{account}}".into(),
@@ -573,9 +573,9 @@ path = "{{base_url}}/{{account}}"
                         ..Default::default()
                     },
                     Some(original.join("environment.toml")),
-                ))
-                .unwrap();
-            cx.notify();
+                ),
+                cx,
+            );
         });
     });
 
@@ -693,17 +693,17 @@ path = "https://{{host}}/account"
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.enable_workflow_storage(state.clone(), cx);
-            view.history
-                .push(crate::history::HistoryEntry::new(
+            view.record_history(
+                crate::history::HistoryEntry::new(
                     "Past attempt".into(),
                     request::HttpRequest {
                         path: "https://{{host}}/account".into(),
                         ..Default::default()
                     },
                     Some(original.join("environment.toml")),
-                ))
-                .unwrap();
-            cx.notify();
+                ),
+                cx,
+            );
         });
     });
     click(cx, "request-history");
@@ -785,17 +785,17 @@ fn history_copy_follows_case_only_then_ordinary_collection_rename(cx: &mut TestA
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.enable_workflow_storage(state.clone(), cx);
-            view.history
-                .push(crate::history::HistoryEntry::new(
+            view.record_history(
+                crate::history::HistoryEntry::new(
                     "Past attempt".into(),
                     request::HttpRequest {
                         path: "https://{{host}}/account".into(),
                         ..Default::default()
                     },
                     Some(original.join("environment.toml")),
-                ))
-                .unwrap();
-            cx.notify();
+                ),
+                cx,
+            );
         });
     });
     click(cx, "request-history");

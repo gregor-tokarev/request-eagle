@@ -32,6 +32,8 @@ pub(crate) struct MainView {
     pub(super) history_visible: bool,
     pub(super) workflow_error: Option<String>,
     pub(super) storage_error: Option<String>,
+    pub(super) history_error: Option<String>,
+    pub(super) _workflow_quit: Option<Subscription>,
     scroll: ScrollHandle,
     pub(super) scroll_to_tab: Option<usize>,
     focus: FocusHandle,
@@ -66,6 +68,8 @@ impl MainView {
             history_visible: false,
             workflow_error: None,
             storage_error: None,
+            history_error: None,
+            _workflow_quit: None,
             scroll: ScrollHandle::new(),
             scroll_to_tab: None,
             focus: cx.focus_handle(),
@@ -215,10 +219,7 @@ impl MainView {
         let sent = cx.subscribe(
             &page,
             |this, _, entry: &crate::history::HistoryEntry, cx| {
-                if let Err(error) = this.history.push(entry.clone()) {
-                    this.storage_error = Some(format!("Could not save request history: {error}"));
-                }
-                cx.notify();
+                this.record_history(entry.clone(), cx);
             },
         );
 
@@ -732,6 +733,17 @@ impl Render for MainView {
             .when_some(self.storage_error.clone(), |view, error| {
                 view.child(
                     div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            })
+            .when_some(self.history_error.clone(), |view, error| {
+                view.child(
+                    div()
+                        .debug_selector(|| "history-storage-error".into())
                         .px_3()
                         .py_2()
                         .text_size(px(12.))

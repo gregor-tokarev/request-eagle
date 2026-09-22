@@ -23,7 +23,6 @@ pub(super) struct Recovery {
     order: Vec<u64>,
     selected: Option<usize>,
     revision: u64,
-    _quit: Subscription,
 }
 
 impl Recovery {
@@ -125,8 +124,23 @@ impl MainView {
     pub(crate) fn enable_workflow_storage(&mut self, directory: PathBuf, cx: &mut Context<Self>) {
         match crate::history::History::load(directory.join("history.json")) {
             Ok(history) => self.history = history,
-            Err(error) => self.storage_error = Some(format!("Could not load history: {error}")),
+            Err(error) => self.history_error = Some(format!("Could not load history: {error}")),
         }
+
+        self._workflow_quit = Some(cx.on_app_quit(|_, cx| {
+            // GPUI drains queued events before its shutdown timeout starts.
+            // Append a final synchronous flush after pending Send events, and
+            // retain this view while GPUI removes its windows.
+            let view = cx.entity();
+            cx.defer(move |cx| {
+                view.update(cx, |this, cx| {
+                    this.flush_session(cx);
+                    this.flush_history();
+                });
+            });
+
+            async {}
+        }));
 
         let store = SessionStore::new(directory.join("session.json"));
         match store.load() {
@@ -135,19 +149,12 @@ impl MainView {
                     self.restore_session(snapshot, cx);
                 }
 
-                let quit = cx.on_app_quit(|this, cx| {
-                    // Include edits whose observer has not run yet. The writer
-                    // prevents older work from replacing this final snapshot.
-                    this.flush_session(cx);
-                    async {}
-                });
                 self.recovery = Some(Recovery {
                     writer: SessionWriter::new(store),
                     cached: HashMap::new(),
                     order: Vec::new(),
                     selected: None,
                     revision: 0,
-                    _quit: quit,
                 });
                 self.save_session(cx);
             }
