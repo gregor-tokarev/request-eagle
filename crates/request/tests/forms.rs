@@ -219,6 +219,53 @@ fn sends_multipart_text_and_binary_file_with_matching_boundary() {
 }
 
 #[test]
+fn multipart_infers_file_content_types_and_preserves_binary_bytes() {
+    smol::block_on(async {
+        let bytes = b"\x00\xff\r\nfile contents";
+
+        for (filename, content_type) in [
+            ("notes.txt", "text/plain"),
+            ("image.png", "image/png"),
+            (
+                "data.unknown-request-eagle-extension",
+                "application/octet-stream",
+            ),
+        ] {
+            let upload = UploadFile::new(filename, bytes);
+            let (url, server) = serve().await;
+            executor()
+                .execute(HttpRequest {
+                    method: Method::Post,
+                    path: url,
+                    form: Some(FormBody::Multipart(vec![MultipartField::File {
+                        name: "attachment".into(),
+                        path: upload.path.clone(),
+                    }])),
+                    ..HttpRequest::default()
+                })
+                .await
+                .unwrap();
+            let received = server.await;
+            let content_types = received.headers("content-type");
+            assert_eq!(content_types.len(), 1);
+
+            let boundary = content_types[0]
+                .strip_prefix("multipart/form-data; boundary=")
+                .unwrap();
+            let mut expected = format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"{filename}\"\r\n\
+                 Content-Type: {content_type}\r\n\r\n"
+            )
+            .into_bytes();
+            expected.extend_from_slice(bytes);
+            expected.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+            assert_eq!(received.body, expected, "upload {filename}");
+        }
+    });
+}
+
+#[test]
 fn forms_override_raw_body_and_conflicting_entity_headers() {
     smol::block_on(async {
         for form in [

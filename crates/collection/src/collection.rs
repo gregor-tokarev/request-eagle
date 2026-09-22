@@ -225,6 +225,17 @@ fn merge_table(target: &mut dyn TableLike, updates: &dyn TableLike) {
 }
 
 fn merge_item(target: &mut Item, update: &Item) {
+    // Inline tables can only contain values. Preserve their representation when
+    // serialization emits nested tables or arrays of tables for form fields.
+    if target.is_value()
+        && !update.is_value()
+        && let Ok(update) = update.clone().into_value()
+    {
+        merge_item(target, &Item::Value(update));
+
+        return;
+    }
+
     if let (Some(target), Some(update)) = (target.as_table_like_mut(), update.as_table_like()) {
         merge_table(target, update);
 

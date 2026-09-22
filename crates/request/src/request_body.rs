@@ -18,13 +18,16 @@ impl FormBody {
     }
 
     pub(crate) async fn encode(self) -> Result<(Vec<u8>, String), HttpError> {
-        match self {
+        // Encoding and boundary scans can be expensive even without file fields.
+        // Keep that work off the executor so request deadlines remain responsive.
+        smol::unblock(move || match self {
             Self::UrlEncoded(fields) => Ok((
                 encode_urlencoded(&fields),
                 "application/x-www-form-urlencoded".into(),
             )),
-            Self::Multipart(fields) => encode_multipart(fields).await,
-        }
+            Self::Multipart(fields) => encode_multipart(fields),
+        })
+        .await
     }
 }
 
@@ -35,7 +38,7 @@ fn encode_urlencoded(fields: &[(String, String)]) -> Vec<u8> {
         .into_bytes()
 }
 
-async fn encode_multipart(fields: Vec<MultipartField>) -> Result<(Vec<u8>, String), HttpError> {
+fn encode_multipart(fields: Vec<MultipartField>) -> Result<(Vec<u8>, String), HttpError> {
     let mut parts = Vec::with_capacity(fields.len());
 
     for field in fields {
@@ -47,17 +50,16 @@ async fn encode_multipart(fields: Vec<MultipartField>) -> Result<(Vec<u8>, Strin
                     .into_bytes()
             }
             MultipartField::File { name, path } => {
-                let data = smol::fs::read(&path)
-                    .await
-                    .map_err(|source| HttpError::ReadUpload {
-                        path: path.clone(),
-                        source,
-                    })?;
+                let data = std::fs::read(&path).map_err(|source| HttpError::ReadUpload {
+                    path: path.clone(),
+                    source,
+                })?;
                 let name = escape_parameter(&name);
                 let filename =
                     escape_parameter(&path.file_name().unwrap_or_default().to_string_lossy());
+                let content_type = mime_guess::from_path(&path).first_or_octet_stream();
                 let mut part = format!(
-                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
                 )
                 .into_bytes();
 

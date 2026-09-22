@@ -5852,6 +5852,7 @@ dependencies = [
  "gpui-pre-reqwest-client",
  "h2",
  "ipnet",
+ "mime_guess",
  "percent-encoding",
  "rcgen",
  "serde",

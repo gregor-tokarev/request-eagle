@@ -181,3 +181,155 @@ body = [0, 255, 42]
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn repeatedly_saves_multipart_fields_in_an_inline_request_without_losing_user_content() {
+    let root = test_directory();
+    let request_path = root.join("inline.toml");
+    let upload_path = root.join("file upload.bin");
+
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&upload_path, [0, 255, 42]).unwrap();
+    fs::write(
+        &request_path,
+        r#"# user's inline request
+id = 'inline-request'
+name = 'Inline request'
+schema_version = 1
+custom = 'keep me' # root annotation
+
+request = { type = 'http', method = 'POST', path = 'https://example.com', headers = [], request_custom = 'keep me too' } # request annotation
+
+[metadata]
+# unrelated table annotation
+owner = 'request author'
+"#,
+    )
+    .unwrap();
+
+    let mut collection =
+        Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+    let Entry::File(entry) = &mut collection.entries[0] else {
+        panic!("expected request file");
+    };
+    let Request::Http(request) = &mut entry.request;
+    request.form = Some(FormBody::Multipart(vec![
+        MultipartField::Text {
+            name: "description".into(),
+            value: "first line\n東京 & more".into(),
+        },
+        MultipartField::File {
+            name: "attachment".into(),
+            path: upload_path.clone(),
+        },
+    ]));
+    let expected = request.clone();
+
+    collection.save_files().unwrap();
+    collection.save_files().unwrap();
+
+    let saved = fs::read_to_string(&request_path).unwrap();
+    for content in [
+        "# user's inline request",
+        "custom = 'keep me' # root annotation",
+        "request_custom = 'keep me too'",
+        "# request annotation",
+        "# unrelated table annotation",
+        "owner = 'request author'",
+    ] {
+        assert!(saved.contains(content), "missing {content:?} in {saved}");
+    }
+
+    let reloaded =
+        Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+    let Entry::File(entry) = &reloaded.entries[0] else {
+        panic!("expected request file");
+    };
+    let Request::Http(request) = &entry.request;
+
+    assert_eq!(request, &expected);
+    assert_eq!(fs::read(&upload_path).unwrap(), [0, 255, 42]);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn repeatedly_saves_mode_changes_and_clearing_for_existing_inline_forms() {
+    for request_source in [
+        "request = { type = 'http', method = 'POST', path = 'https://example.com', headers = [], request_custom = 'keep me too', form = { type = 'url_encoded', fields = [['tag', 'initial']] } } # form annotation\n",
+        "[request]\ntype = 'http'\nmethod = 'POST'\npath = 'https://example.com'\nheaders = []\nrequest_custom = 'keep me too'\nform = { type = 'url_encoded', fields = [['tag', 'initial']] } # form annotation\n",
+    ] {
+        let root = test_directory();
+        let request_path = root.join("inline-form.toml");
+        let upload_path = root.join("upload.bin");
+
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&upload_path, [1, 2, 3]).unwrap();
+        fs::write(
+            &request_path,
+            format!(
+                "# user's inline form\nid = 'inline-form'\nname = 'Inline form'\nschema_version = 1\ncustom = 'keep me' # root annotation\n\n{request_source}\n[metadata]\n# unrelated table annotation\nowner = 'request author'\n"
+            ),
+        )
+        .unwrap();
+
+        let mut collection =
+            Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+
+        for form in [
+            Some(FormBody::UrlEncoded(vec![("tag".into(), "initial".into())])),
+            Some(FormBody::Multipart(vec![
+                MultipartField::Text {
+                    name: "tag".into(),
+                    value: "first\nsecond".into(),
+                },
+                MultipartField::File {
+                    name: "attachment".into(),
+                    path: upload_path.clone(),
+                },
+            ])),
+            Some(FormBody::UrlEncoded(vec![
+                ("tag".into(), "updated & value".into()),
+                ("tag".into(), "東京".into()),
+            ])),
+            None,
+        ] {
+            let Entry::File(entry) = &mut collection.entries[0] else {
+                panic!("expected request file");
+            };
+            let Request::Http(request) = &mut entry.request;
+            request.form = form;
+            let expected = request.clone();
+
+            collection.save_files().unwrap();
+            collection.save_files().unwrap();
+
+            let saved = fs::read_to_string(&request_path).unwrap();
+            for content in [
+                "# user's inline form",
+                "custom = 'keep me' # root annotation",
+                "request_custom = 'keep me too'",
+                "# unrelated table annotation",
+                "owner = 'request author'",
+            ] {
+                assert!(saved.contains(content), "missing {content:?} in {saved}");
+            }
+
+            if expected.form.is_some() {
+                assert!(saved.contains("# form annotation"), "{saved}");
+            }
+
+            collection =
+                Collection::from_path(&root, environment(&root.join("environment.toml"))).unwrap();
+            let Entry::File(entry) = &collection.entries[0] else {
+                panic!("expected request file");
+            };
+            let Request::Http(request) = &entry.request;
+
+            assert_eq!(request, &expected);
+            assert_eq!(fs::read(&upload_path).unwrap(), [1, 2, 3]);
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}

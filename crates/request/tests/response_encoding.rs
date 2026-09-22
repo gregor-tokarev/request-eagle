@@ -201,8 +201,8 @@ fn bodyless_responses_do_not_attempt_to_decode_gzip_metadata() {
 #[test]
 fn gzip_decoding_respects_the_total_request_deadline() {
     smol::block_on(async {
-        // A small transfer that expands enough to keep the gzip decoder busy
-        // beyond the deadline. Compression happens before execution starts.
+        // A small transfer that makes decoding exceed the deadline in debug
+        // builds. Optimized decoders may finish sooner. Compress before execution.
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(&vec![b'x'; 50 * 1024 * 1024]).unwrap();
         let payload = encoder.finish().unwrap();
@@ -242,9 +242,20 @@ fn gzip_decoding_respects_the_total_request_deadline() {
             .await;
         server.await;
 
-        assert!(matches!(
-            result,
-            Err(ExecutionError::Timeout { timeout }) if timeout == Duration::from_millis(50)
-        ));
+        match result {
+            Err(ExecutionError::Timeout { timeout }) => {
+                assert_eq!(timeout, Duration::from_millis(50));
+            }
+            Ok(execution) => {
+                assert!(
+                    execution.elapsed <= Duration::from_millis(50),
+                    "decoding completed after the deadline: {:?}",
+                    execution.elapsed
+                );
+                let Response::Http(response) = execution.response;
+                assert_eq!(response.body.len(), 50 * 1024 * 1024);
+            }
+            Err(error) => panic!("unexpected request failure: {error}"),
+        }
     });
 }

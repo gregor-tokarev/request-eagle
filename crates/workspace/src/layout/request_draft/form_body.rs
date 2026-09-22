@@ -119,6 +119,8 @@ struct FormRow {
     name: Entity<TextareaState>,
     value: Entity<TextareaState>,
     file: bool,
+    // Ignore untouched editor rows while preserving saved empty fields.
+    placeholder: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -158,6 +160,10 @@ impl FormEditor {
             }
         }
 
+        for row in &mut editor.rows {
+            row.placeholder = false;
+        }
+
         if editor.rows.is_empty() {
             editor.append("", "", false, window, cx);
         }
@@ -192,8 +198,16 @@ impl FormEditor {
         let subscriptions = [&name, &value]
             .into_iter()
             .map(|input| {
-                cx.subscribe(input, |this, _, event: &InputEvent, cx| {
+                cx.subscribe(input, |this, input, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change) {
+                        if let Some(row) = this
+                            .rows
+                            .iter_mut()
+                            .find(|row| row.name == input || row.value == input)
+                        {
+                            row.placeholder = false;
+                        }
+
                         this.emit_change(cx);
                     }
                 })
@@ -204,6 +218,7 @@ impl FormEditor {
             name,
             value,
             file,
+            placeholder: true,
             _subscriptions: subscriptions,
         });
     }
@@ -217,7 +232,7 @@ impl FormEditor {
                         let name = row.name.read(cx).value().to_string();
                         let value = row.value.read(cx).value().to_string();
 
-                        if name.is_empty() && value.is_empty() {
+                        if row.placeholder && name.is_empty() && value.is_empty() {
                             return None;
                         }
 
@@ -240,7 +255,8 @@ impl FormEditor {
                         let name = row.name.read(cx).value().to_string();
                         let value = row.value.read(cx).value().to_string();
 
-                        (!name.is_empty() || !value.is_empty()).then_some((name, value))
+                        (!row.placeholder || !name.is_empty() || !value.is_empty())
+                            .then_some((name, value))
                     })
                     .collect(),
             )

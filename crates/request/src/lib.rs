@@ -20,6 +20,9 @@ mod request_body;
 mod response;
 mod response_encoding;
 
+#[cfg(test)]
+mod request_body_tests;
+
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;

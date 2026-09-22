@@ -49,16 +49,19 @@ the same authority and removed when a redirect changes the host or port.
 Set `follow_all_redirects` to `false` to inspect redirect responses directly.
 Final HTTP statuses, including 4xx and 5xx, are returned with their headers and
 body. Headers retain repeated and non-UTF-8 values. Requests advertise gzip unless
-an explicit Accept-Encoding overrides it, and gzip responses are decompressed
-while their original headers and downloaded byte counts are retained. Unsupported
-content encodings remain unchanged. Malformed input, transport failures, corrupt
+an explicit Accept-Encoding overrides it or the request contains Range. Complete
+gzip responses are decompressed while their original headers and downloaded byte
+counts are retained. Partial byte-range responses and unsupported content encodings
+remain unchanged. Malformed input, transport failures, corrupt
 gzip streams, truncated bodies, timeouts, and oversized responses return typed errors.
 
 `HttpRequest.form` supports URL-encoded fields and multipart text or file fields.
 A form takes precedence over the retained raw body. Form encoding sets Content-Type
 and Content-Length automatically, replacing conflicting framing headers. Upload
 files are read when sending; saved requests store their paths, not copies of their
-contents. A missing or unreadable file produces an error before connecting.
+contents. File MIME types are inferred from their extensions, with
+application/octet-stream as the fallback. A missing or unreadable file produces
+an error before connecting. Form preparation is covered by the request timeout.
 
 URLs must be absolute and already resolved. Collection environment substitution,
 authentication editors, and UI Send actions are outside this module.

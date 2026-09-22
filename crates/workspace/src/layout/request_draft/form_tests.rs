@@ -115,7 +115,7 @@ fn form_preview_uses_encoded_length_and_does_not_default_to_json() {
     }
 }
 
-fn check_multiline_form(form: FormBody, selector: &'static str, cx: &mut TestAppContext) {
+fn check_form_round_trip(form: FormBody, selector: &'static str, cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
@@ -159,7 +159,7 @@ fn check_multiline_form(form: FormBody, selector: &'static str, cx: &mut TestApp
 
 #[gpui_kit::test]
 fn urlencoded_form_preserves_saved_and_edited_line_breaks(cx: &mut TestAppContext) {
-    check_multiline_form(
+    check_form_round_trip(
         FormBody::UrlEncoded(vec![(
             "field\r\nname".into(),
             "first\r\nsecond\nthird".into(),
@@ -171,10 +171,31 @@ fn urlencoded_form_preserves_saved_and_edited_line_breaks(cx: &mut TestAppContex
 
 #[gpui_kit::test]
 fn multipart_form_preserves_saved_and_edited_line_breaks(cx: &mut TestAppContext) {
-    check_multiline_form(
+    check_form_round_trip(
         FormBody::Multipart(vec![MultipartField::Text {
             name: "field\r\nname".into(),
             value: "first\r\nsecond\nthird".into(),
+        }]),
+        "request-body-mode-multipart",
+        cx,
+    );
+}
+
+#[gpui_kit::test]
+fn urlencoded_form_preserves_saved_empty_fields(cx: &mut TestAppContext) {
+    check_form_round_trip(
+        FormBody::UrlEncoded(vec![(String::new(), String::new())]),
+        "request-body-mode-urlencoded",
+        cx,
+    );
+}
+
+#[gpui_kit::test]
+fn multipart_form_preserves_saved_empty_fields(cx: &mut TestAppContext) {
+    check_form_round_trip(
+        FormBody::Multipart(vec![MultipartField::Text {
+            name: String::new(),
+            value: String::new(),
         }]),
         "request-body-mode-multipart",
         cx,
