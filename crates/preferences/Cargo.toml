@@ -3,6 +3,11 @@ name = "preferences"
 version = "0.1.0"
 edition = "2024"
 
+[[test]]
+name = "native_keyring"
+# GPUI's native application loop must run on the process's main thread.
+harness = false
+
 [dependencies]
 anyhow.workspace = true
 async-lock = "3"

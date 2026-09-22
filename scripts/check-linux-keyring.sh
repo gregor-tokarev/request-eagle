@@ -4,11 +4,10 @@ set -euo pipefail
 
 if [[ ${1:-} == --session ]]; then
   fixture=$2
-  binary=$3
 
   # This bus has no service activation directories, so no installed keyring can
   # be started implicitly. Check the missing-provider path before starting ours.
-  timeout 30s "$binary" --unavailable
+  timeout 30s cargo test --locked -p preferences --test native_keyring -- --unavailable
 
   printf '%s\n' request-eagle-test-password | \
     keepassxc --pw-stdin --config "$fixture/keepassxc.ini" \
@@ -43,7 +42,7 @@ if [[ ${1:-} == --session ]]; then
     exit 1
   fi
 
-  if timeout 60s "$binary"; then
+  if timeout 60s cargo test --locked -p preferences --test native_keyring -- --round-trip; then
     echo 'KeePassXC round trip and deletion passed.'
   else
     status=$?
@@ -54,7 +53,9 @@ if [[ ${1:-} == --session ]]; then
   exit
 fi
 
-binary=$(realpath "${1:-${CARGO_TARGET_DIR:-target}/debug/examples/proxy_keyring}")
+# Compile before opening the isolated desktop session so its timeouts cover
+# native storage operations rather than a cold build.
+cargo test --locked -p preferences --test native_keyring --no-run
 script=$(realpath "$0")
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
@@ -115,4 +116,4 @@ env XDG_CONFIG_HOME="$fixture/config" XDG_CACHE_HOME="$fixture/cache" \
   XDG_DATA_HOME="$fixture/data" XDG_RUNTIME_DIR="$fixture/runtime" \
   QT_QPA_PLATFORM=xcb WAYLAND_DISPLAY= \
   dbus-run-session --config-file "$fixture/bus.conf" -- \
-    xvfb-run -a bash "$script" --session "$fixture" "$binary"
+    xvfb-run -a bash "$script" --session "$fixture"

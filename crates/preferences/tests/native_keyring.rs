@@ -1,4 +1,4 @@
-//! Manual native-store smoke test. Uses a temporary preferences directory and
+//! Native-store integration test. Uses a temporary preferences directory and
 //! synthetic credentials, then removes its keyring entry. Never uses app settings.
 use anyhow::{Result, ensure};
 use gpui_kit::{App, AsyncApp};
@@ -13,6 +13,13 @@ use std::{
 
 fn main() {
     let unavailable = std::env::args().any(|argument| argument == "--unavailable");
+
+    // Ordinary cargo test runs must not open the user's native credential store.
+    if !unavailable && !std::env::args().any(|argument| argument == "--round-trip") {
+        println!("Native keyring checks skipped; run scripts/check-linux-keyring.sh on Linux.");
+        return;
+    }
+
     let passed = Arc::new(AtomicBool::new(false));
     let result = passed.clone();
     gpui_kit::application().run(move |cx: &mut App| {

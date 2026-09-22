@@ -37,9 +37,4 @@ cancel a pending credential write.
 
 ```sh
 cargo test -p preferences -p settings_ui -p request
-cargo run -p preferences --example proxy_keyring
 ```
-
-The manual example uses synthetic credentials and a temporary preferences folder,
-checks a native keyring round trip, and removes its entry. It never reads the
-user's Request Eagle settings. On Linux, run it inside an unlocked desktop session.
