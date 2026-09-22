@@ -58,21 +58,27 @@ impl CollectionRegistry {
         // The registry skips this reserved name until the complete import is renamed.
         let staging = directory.join(format!("{STAGING_PREFIX}{}", Uuid::new_v4()));
         create_private_directory(&staging, false)?;
+        let base = safe_name(name, "Imported Collection");
+        // The reserved component adds 58 bytes, exceeding a space plus any usize suffix
+        // (at most 21 bytes). Every final path is shorter than its validated staged path.
+        let staged_collection = staging.join(&base);
 
-        let result = stage_requests(&staging, requests).and_then(|(mut collection, mut files)| {
-            let base = safe_name(name, "Imported Collection");
+        let result = (|| {
+            create_private_directory(&staged_collection, false)?;
+            let (mut collection, mut files) = stage_requests(&staged_collection, requests)?;
 
             for number in 1.. {
                 let destination = numbered_path(directory, &base, number, false);
 
-                match publish_directory(&staging, &destination) {
+                match publish_directory(&staged_collection, &destination) {
                     Ok(()) => {
-                        rebase_entries(&mut collection.entries, &staging, &destination);
+                        rebase_entries(&mut collection.entries, &staged_collection, &destination);
                         collection.path = destination.clone();
                         collection.local_env.path = destination.join("environment.toml");
 
                         for file in &mut files {
-                            file.path = destination.join(file.path.strip_prefix(&staging).unwrap());
+                            file.path = destination
+                                .join(file.path.strip_prefix(&staged_collection).unwrap());
                             file.collection_path = destination.clone();
                         }
 
@@ -85,11 +91,13 @@ impl CollectionRegistry {
             }
 
             unreachable!()
-        });
+        })();
 
-        if result.is_err()
-            && let Err(cleanup) = fs::remove_dir_all(&staging)
-        {
+        if result.is_ok() {
+            // Publication already committed the import. An empty, hidden staging directory
+            // left by a cleanup failure must not make a retry duplicate the saved collection.
+            let _ = fs::remove_dir(&staging);
+        } else if let Err(cleanup) = fs::remove_dir_all(&staging) {
             return Err(io::Error::other(format!(
                 "{}; could not remove staged import {}: {cleanup}",
                 result.unwrap_err(),

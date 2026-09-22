@@ -274,6 +274,90 @@ fn failed_staging_removes_every_request_without_publishing_a_collection() {
     assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn import_rejects_paths_that_would_become_unreadable_after_publication() {
+    use rustix::io::Errno;
+
+    let fixture = Fixture::new();
+    let probe = fixture
+        .0
+        .join(format!(".request-eagle-import-{}", Uuid::new_v4()));
+    fs::create_dir_all(&probe).unwrap();
+    let mut parent = probe.clone();
+    let mut folders = Vec::new();
+
+    // Measure usable depth with the old staging prefix and its longest metadata filename.
+    // The 65-byte stride is smaller than the final collection name's 122-byte expansion.
+    loop {
+        if folders.len() == 128 {
+            eprintln!(
+                "Skipping path-limit regression: no filesystem limit found within 128 levels."
+            );
+            return;
+        }
+
+        let name = "d".repeat(64);
+        let child = parent.join(&name);
+        let result = fs::create_dir(&child)
+            .and_then(|()| fs::write(child.join(".request-eagle-order.json"), b"[]"));
+
+        match result {
+            Ok(()) => {
+                folders.push(name);
+                parent = child;
+            }
+            Err(error) if error.raw_os_error() == Some(Errno::NAMETOOLONG.raw_os_error()) => break,
+            Err(error) => panic!("unexpected path-limit probe failure: {error}"),
+        }
+    }
+
+    fs::remove_dir_all(&probe).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let name = "c".repeat(180);
+    let request = ImportedRequest {
+        name: "r".into(),
+        folders,
+        request: HttpRequest::default(),
+    };
+    let result = registry.import_requests(&name, vec![request.clone()]);
+
+    assert!(
+        result.is_err(),
+        "oversized paths must fail before publication"
+    );
+    assert!(registry.is_empty());
+    assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 0);
+    assert!(
+        CollectionRegistry::from_path(&fixture.0)
+            .unwrap()
+            .is_empty()
+    );
+
+    // Reducing depth must still allow a long collection name and normal reloading.
+    let mut shorter = request;
+    let Some(depth) = shorter.folders.len().checked_sub(4) else {
+        eprintln!("Skipping successful deep import: the temporary directory path is too long.");
+        return;
+    };
+    shorter.folders.truncate(depth);
+    let imported = registry
+        .import_requests(&name, vec![shorter.clone()])
+        .unwrap();
+    let collision = registry.import_requests(&name, vec![shorter]).unwrap();
+
+    assert!(fs::read(&imported[0].path).is_ok());
+    assert!(fs::read(&collision[0].path).is_ok());
+    assert_ne!(imported[0].path, collision[0].path);
+    assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 2);
+
+    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+
+    assert_eq!(reloaded.len(), 2);
+    assert!(reloaded.file(&imported[0].path).is_some());
+    assert!(reloaded.file(&collision[0].path).is_some());
+}
+
 #[test]
 fn import_does_not_replace_an_existing_empty_collection_directory() {
     let fixture = Fixture::new();
