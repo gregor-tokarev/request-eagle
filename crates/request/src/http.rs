@@ -14,6 +14,7 @@ pub(crate) struct HttpExecutor {
     client: Arc<reqwest_client::ReqwestClient>,
     host_override_client: Option<Arc<reqwest_client::ReqwestClient>>,
     http_version: HttpVersion,
+    redirect_policy: RedirectPolicy,
     max_response_bytes: Option<u64>,
 }
 
@@ -39,6 +40,11 @@ impl HttpExecutor {
             client,
             host_override_client,
             http_version: preferences.http_version,
+            redirect_policy: if preferences.follow_all_redirects {
+                RedirectPolicy::FollowAll
+            } else {
+                RedirectPolicy::NoFollow
+            },
             max_response_bytes,
         })
     }
@@ -68,8 +74,7 @@ impl HttpExecutor {
         let mut builder = Request::builder()
             .method(request.method.as_str())
             .uri(url.as_str())
-            // Expose redirect responses just like other HTTP statuses.
-            .follow_redirects(RedirectPolicy::NoFollow);
+            .follow_redirects(self.redirect_policy.clone());
 
         let generated = crate::generated_headers(
             request.method,
@@ -77,6 +82,7 @@ impl HttpExecutor {
             &request.headers,
             request_body_bytes,
         );
+        let generated_host = generated.iter().any(|(name, _)| name == "Host");
 
         for (name, value) in request.headers.into_iter().chain(generated) {
             builder = builder.header(name, value);
@@ -118,6 +124,12 @@ impl HttpExecutor {
             .iter()
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
             .sum();
+
+        if generated_host {
+            // Let the transport regenerate Host when a redirect changes the URL.
+            request.headers_mut().remove(HOST);
+        }
+
         let prepared = Instant::now();
         let response = client.send(request).await.map_err(HttpError::Transport)?;
         let received = Instant::now();

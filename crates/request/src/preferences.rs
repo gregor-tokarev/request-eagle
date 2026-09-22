@@ -20,6 +20,7 @@ pub struct RequestPreferences {
     /// Maximum buffered response body in MiB (1,048,576 bytes). Zero is unlimited.
     pub max_response_size_mb: u64,
     pub ssl_certificate_verification: bool,
+    pub follow_all_redirects: bool,
 }
 
 impl Default for RequestPreferences {
@@ -29,6 +30,7 @@ impl Default for RequestPreferences {
             timeout_ms: 0,
             max_response_size_mb: 50,
             ssl_certificate_verification: false,
+            follow_all_redirects: true,
         }
     }
 }
