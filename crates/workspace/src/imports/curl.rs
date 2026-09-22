@@ -270,7 +270,17 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
 
         request.form = Some(FormBody::Multipart(form_fields));
     } else if !body_parts.is_empty() {
-        let data = body_parts.join(if json_body { "" } else { "&" });
+        let mut data = String::new();
+
+        for part in body_parts {
+            // cURL tests the accumulated length, so leading empty arguments
+            // add no separator. Empty arguments after content still add '&'.
+            if !json_body && !data.is_empty() {
+                data.push('&');
+            }
+
+            data.push_str(&part);
+        }
 
         if get {
             let (path, fragment) = request.path.split_once('#').unwrap_or((&request.path, ""));

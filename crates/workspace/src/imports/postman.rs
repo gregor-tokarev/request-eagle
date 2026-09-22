@@ -80,6 +80,7 @@ fn request(
             authentication: inherited_auth.clone(),
             ..Default::default()
         };
+        super::postman_auth::validate(&request)?;
         super::postman_profiles::validate(profile, &request, None)?;
 
         return Ok(request);
@@ -134,12 +135,17 @@ fn request(
         super::postman_form_headers::validate(form, &request.headers, content_type_override)?;
     }
 
+    super::postman_auth::validate(&request)?;
     super::postman_profiles::validate(profile, &request, value.get("header"))?;
 
     Ok(request)
 }
 
 fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
+    if value.get("auth").is_some_and(|auth| !auth.is_null()) {
+        return Err("Postman structured URL authentication is not supported by import. Move the credentials to the request's Basic authentication helper before importing.".into());
+    }
+
     request.path = if let Some(raw) = value.as_str() {
         url_with_default_protocol(raw)?
     } else if let Some(raw) = value.get("raw").and_then(Value::as_str) {
@@ -634,18 +640,35 @@ fn authentication(
             username: attribute("username"),
             password: attribute("password"),
         },
-        "bearer" => Authentication::Bearer {
-            token: attribute("token"),
-        },
-        "apikey" => Authentication::ApiKey {
-            name: attribute("key"),
-            value: attribute("value"),
-            location: match attribute("in").as_str() {
-                "header" | "" => ApiKeyLocation::Header,
-                "query" => ApiKeyLocation::Query,
-                location => return Err(format!("Unsupported API key location {location:?}.")),
-            },
-        },
+        "bearer" => {
+            let token = attribute("token");
+
+            if token.is_empty() {
+                Authentication::None
+            } else {
+                Authentication::Bearer { token }
+            }
+        }
+        "apikey" => {
+            let name = attribute("key");
+            let value = attribute("value");
+
+            if name.is_empty() && value.is_empty() {
+                Authentication::None
+            } else {
+                Authentication::ApiKey {
+                    name,
+                    value,
+                    location: match attribute("in").as_str() {
+                        "header" | "" => ApiKeyLocation::Header,
+                        "query" => ApiKeyLocation::Query,
+                        location => {
+                            return Err(format!("Unsupported API key location {location:?}."));
+                        }
+                    },
+                }
+            }
+        }
         kind => {
             return Err(format!(
                 "Postman authentication type {kind:?} is not supported."
