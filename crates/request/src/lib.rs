@@ -14,6 +14,7 @@ mod generated_headers;
 mod http;
 mod model;
 mod preferences;
+mod redirects;
 mod response;
 
 pub use error::{ExecutionError, HttpError};

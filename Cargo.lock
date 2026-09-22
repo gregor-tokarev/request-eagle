@@ -5841,6 +5841,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
  "gpui-pre-http-client",
  "gpui-pre-reqwest",
  "gpui-pre-reqwest-client",

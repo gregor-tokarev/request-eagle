@@ -19,6 +19,7 @@ fn saves_and_reloads_the_shared_document(cx: &mut TestAppContext) {
             preferences.appearance.mode = AppearanceMode::System;
             preferences.appearance.dark_theme = "Catppuccin Mocha".into();
             preferences.appearance.editor_font = "Menlo".into();
+            preferences.request.follow_all_redirects = false;
         })
         .unwrap();
         update(cx, |preferences| {
@@ -31,6 +32,7 @@ fn saves_and_reloads_the_shared_document(cx: &mut TestAppContext) {
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(document["appearance"]["editor_font"], "Menlo");
         assert_eq!(document["appearance"]["interface_font_size"], 20.);
+        assert_eq!(document["request"]["follow_all_redirects"], false);
         cx.set_global(Preferences::default());
         load(directory.path(), cx).unwrap();
         assert_eq!(

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use http_client::http::{HeaderMap, header::HOST, uri::Authority};
-use http_client::{AsyncBody, HttpClient, HttpRequestExt, RedirectPolicy, Request, Url};
+use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
@@ -14,6 +14,7 @@ pub(crate) struct HttpExecutor {
     client: Arc<reqwest_client::ReqwestClient>,
     host_override_client: Option<Arc<reqwest_client::ReqwestClient>>,
     http_version: HttpVersion,
+    follow_all_redirects: bool,
     max_response_bytes: Option<u64>,
 }
 
@@ -39,6 +40,7 @@ impl HttpExecutor {
             client,
             host_override_client,
             http_version: preferences.http_version,
+            follow_all_redirects: preferences.follow_all_redirects,
             max_response_bytes,
         })
     }
@@ -67,9 +69,7 @@ impl HttpExecutor {
 
         let mut builder = Request::builder()
             .method(request.method.as_str())
-            .uri(url.as_str())
-            // Expose redirect responses just like other HTTP statuses.
-            .follow_redirects(RedirectPolicy::NoFollow);
+            .uri(url.as_str());
 
         let generated = crate::generated_headers(
             request.method,
@@ -77,13 +77,14 @@ impl HttpExecutor {
             &request.headers,
             request_body_bytes,
         );
+        let generated_host = generated.iter().any(|(name, _)| name == "Host");
 
         for (name, value) in request.headers.into_iter().chain(generated) {
             builder = builder.header(name, value);
         }
 
         let mut request = builder
-            .body(request.body.map(AsyncBody::from).unwrap_or_default())
+            .body(request.body)
             .map_err(HttpError::InvalidRequest)?;
 
         let host = validate_host(request.headers())?;
@@ -118,8 +119,16 @@ impl HttpExecutor {
             .iter()
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
             .sum();
+
+        if generated_host {
+            // Let the transport regenerate Host when a redirect changes the URL.
+            request.headers_mut().remove(HOST);
+        }
+
         let prepared = Instant::now();
-        let response = client.send(request).await.map_err(HttpError::Transport)?;
+        let response =
+            crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
+                .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         let mut body = Vec::new();

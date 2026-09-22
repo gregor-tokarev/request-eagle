@@ -177,6 +177,7 @@ impl Render for RequestSettings {
             .global::<Preferences>()
             .request
             .ssl_certificate_verification;
+        let follow_all_redirects = cx.global::<Preferences>().request.follow_all_redirects;
 
         v_flex()
             .w_full()
@@ -219,6 +220,19 @@ impl Render for RequestSettings {
                         .checked(verify_ssl)
                         .on_click(cx.listener(|this, checked, _, cx| {
                             this.save(|request| request.ssl_certificate_verification = *checked, cx);
+                        })),
+                ),
+                cx,
+            ))
+            .child(request_row(
+                "Follow all redirects",
+                "Automatically follow HTTP redirects to the final response.",
+                h_flex().justify_end().child(
+                    Switch::new("follow-all-redirects")
+                        .accessibility_label("Follow all redirects")
+                        .checked(follow_all_redirects)
+                        .on_click(cx.listener(|this, checked, _, cx| {
+                            this.save(|request| request.follow_all_redirects = *checked, cx);
                         })),
                 ),
                 cx,
