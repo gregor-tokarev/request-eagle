@@ -390,7 +390,12 @@ fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
     let (name, value) = value
         .split_once('=')
         .ok_or("A cURL multipart field needs name=value.")?;
-    let value = if literal { value } else { value.trim() };
+    let value = if literal {
+        value
+    } else {
+        // cURL's ISSPACE includes vertical tab but never Unicode whitespace.
+        value.trim_matches([' ', '\t', '\n', '\r', '\u{000b}', '\u{000c}'])
+    };
 
     if !literal && value.starts_with(['(', ')', '"']) {
         return Err("Quoted or nested cURL multipart values cannot be imported. Use --form-string for literal text.".into());

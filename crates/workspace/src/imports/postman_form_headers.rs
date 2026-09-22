@@ -1,4 +1,4 @@
-use request::FormBody;
+use request::{ApiKeyLocation, Authentication, FormBody, HttpRequest};
 use serde_json::Value;
 
 pub(super) fn validate(
@@ -58,6 +58,42 @@ pub(super) fn validate(
         if preserved_override {
             return Err("Postman form imports cannot preserve custom Content-Type parameters or boundaries. Use the bare form Content-Type or a raw body.".into());
         }
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_request(
+    request: &HttpRequest,
+    content_type_override: bool,
+) -> Result<(), String> {
+    if let Authentication::ApiKey {
+        name,
+        value,
+        location: ApiKeyLocation::Header,
+    } = &request.authentication
+    {
+        if name.contains("{{") && (request.form.is_some() || content_type_override) {
+            return Err("Postman form or suppressed Content-Type imports require a literal API-key header name before its Content-Type behavior can be preserved.".into());
+        }
+
+        if name.eq_ignore_ascii_case("content-type") {
+            // Postman marks helper headers as system-owned, so this setting
+            // removes the helper's Content-Type even when it is explicit.
+            if content_type_override {
+                return Err("Postman imports cannot preserve an API-key Content-Type header while the system Content-Type is disabled.".into());
+            }
+
+            if let Some(form) = &request.form {
+                let mut headers = request.headers.clone();
+                headers.push((name.clone(), value.clone()));
+                return validate(form, &headers, false);
+            }
+        }
+    }
+
+    if let Some(form) = &request.form {
+        validate(form, &request.headers, content_type_override)?;
     }
 
     Ok(())

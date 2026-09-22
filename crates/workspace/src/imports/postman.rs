@@ -74,12 +74,19 @@ fn request(
     inherited_auth: &Authentication,
     profile: &Map<String, Value>,
 ) -> Result<HttpRequest, String> {
+    let content_type_override = super::postman_profiles::truthy(
+        profile
+            .get("disabledSystemHeaders")
+            .and_then(|headers| headers.get("content-type")),
+    );
+
     if let Some(path) = value.as_str() {
         let request = HttpRequest {
             path: url_with_default_protocol(path)?,
             authentication: inherited_auth.clone(),
             ..Default::default()
         };
+        super::postman_form_headers::validate_request(&request, content_type_override)?;
         super::postman_auth::validate(&request)?;
         super::postman_profiles::validate(profile, &request, None)?;
 
@@ -114,12 +121,6 @@ fn request(
         _ => return Err("Postman headers must be an array or text.".into()),
     }
 
-    let content_type_override = super::postman_profiles::truthy(
-        profile
-            .get("disabledSystemHeaders")
-            .and_then(|headers| headers.get("content-type")),
-    );
-
     if let Some(body) = value.get("body").filter(|body| !body.is_null())
         && !disabled(body)
     {
@@ -131,9 +132,7 @@ fn request(
         )?;
     }
 
-    if let Some(form) = &request.form {
-        super::postman_form_headers::validate(form, &request.headers, content_type_override)?;
-    }
+    super::postman_form_headers::validate_request(&request, content_type_override)?;
 
     super::postman_auth::validate(&request)?;
     super::postman_profiles::validate(profile, &request, value.get("header"))?;
@@ -198,7 +197,9 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
     }
 
     if let Some(variables) = value.get("variable").and_then(Value::as_array) {
-        let variables = pairs(variables)?;
+        // URL path variables use the last definition, even when disabled.
+        // Empty definitions mask earlier values instead of falling back.
+        let variables = variables.iter().map(pair).collect::<Result<Vec<_>, _>>()?;
         let suffix_start = request.path.find(['?', '#']).unwrap_or(request.path.len());
         let (path, suffix) = request.path.split_at(suffix_start);
         let resolved_path = path
@@ -209,12 +210,11 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
                 };
                 let name = variable.split('.').next().unwrap_or_default();
 
-                match variables
-                    .iter()
-                    .find(|(key, value)| key == name && !value.is_empty())
-                {
-                    Some((_, value)) => format!("{value}{}", &variable[name.len()..]),
-                    None => segment.to_owned(),
+                match variables.iter().rev().find(|(key, _)| key == name) {
+                    Some((_, value)) if !value.is_empty() => {
+                        format!("{value}{}", &variable[name.len()..])
+                    }
+                    _ => segment.to_owned(),
                 }
             })
             .collect::<Vec<_>>()
@@ -451,7 +451,11 @@ fn read_body(
                 .get("urlencoded")
                 .and_then(Value::as_array)
                 .ok_or("The urlencoded body must contain a field array.")?;
-            request.form = Some(FormBody::UrlEncoded(pairs(values)?));
+            let fields = pairs(values)?;
+
+            if !fields.is_empty() {
+                request.form = Some(FormBody::UrlEncoded(fields));
+            }
         }
         "formdata" => {
             let values = body
@@ -531,7 +535,9 @@ fn read_body(
                 }
             }
 
-            request.form = Some(FormBody::Multipart(fields));
+            if !fields.is_empty() {
+                request.form = Some(FormBody::Multipart(fields));
+            }
         }
         mode => {
             return Err(format!(
@@ -592,20 +598,22 @@ fn pairs(values: &[Value]) -> Result<Vec<(String, String)>, String> {
     values
         .iter()
         .filter(|value| !disabled(value))
-        .map(|value| {
-            let key = value
-                .get("key")
-                .and_then(Value::as_str)
-                .ok_or("A Postman field is missing its key.")?;
-            let value = match value.get("value") {
-                None | Some(Value::Null) => String::new(),
-                Some(Value::String(value)) => value.clone(),
-                _ => return Err("Postman field values must be strings.".into()),
-            };
-
-            Ok((key.into(), value))
-        })
+        .map(pair)
         .collect()
+}
+
+fn pair(value: &Value) -> Result<(String, String), String> {
+    let key = value
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or("A Postman field is missing its key.")?;
+    let value = match value.get("value") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(value)) => value.clone(),
+        _ => return Err("Postman field values must be strings.".into()),
+    };
+
+    Ok((key.into(), value))
 }
 
 fn authentication(

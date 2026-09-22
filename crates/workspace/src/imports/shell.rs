@@ -41,7 +41,7 @@ pub(super) fn words(input: &str) -> Result<Vec<String>, String> {
             (None, ';' | '|' | '&' | '<' | '>' | '(' | ')') => {
                 return Err("Import accepts one cURL command, without shell operators. Quote URLs and values.".into());
             }
-            (None, character) if character.is_whitespace() => {
+            (None, ' ' | '\t' | '\n') => {
                 if started {
                     words.push(std::mem::take(&mut word));
                     started = false;

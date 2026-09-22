@@ -344,3 +344,52 @@ fn postman_accepts_raw_only_convenience_but_rejects_hostless_structured_urls() {
         );
     }
 }
+
+#[test]
+fn postman_path_variables_select_last_duplicate_even_when_disabled() {
+    for definitions in [
+        json!([{"key": "id", "value": "first"}, {"key": "id", "value": "last"}]),
+        json!([{"key": "id", "value": "first"}, {"key": "id", "value": "last", "disabled": true}]),
+        json!([{"key": "id", "value": "last", "disabled": true}]),
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "path": ["users", ":id.json"], "variable": definitions
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.path,
+            "http://example.test/users/last.json"
+        );
+    }
+}
+
+#[test]
+fn postman_empty_path_variable_masks_earlier_value_without_falling_back() {
+    for last in [
+        json!({"key": "id", "value": ""}),
+        json!({"key": "id", "value": null}),
+        json!({"key": "id"}),
+        json!({"key": "id", "value": "", "disabled": true}),
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "host": "example.test", "path": [":id", ":id.json"],
+            "variable": [{"key": "id", "value": "first"}, last]
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.path, "http://example.test/:id/:id.json");
+    }
+}
+
+#[test]
+fn postman_path_variable_precedence_preserves_name_case_and_extensions() {
+    let source = json!({"item": [{"request": {"url": {
+        "host": "example.test", "path": [":id", ":ID", ":id-name.tar.gz"],
+        "variable": [{"key": "id", "value": "lower"}, {"key": "ID", "value": "upper"},
+            {"key": "id-name", "value": "first"}, {"key": "id-name", "value": "last"}]
+    }}}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.path,
+        "http://example.test/lower/upper/last.tar.gz"
+    );
+}

@@ -1,4 +1,4 @@
-use request::Method;
+use request::{FormBody, Method, MultipartField};
 
 use super::parse_import;
 
@@ -86,4 +86,100 @@ fn curl_empty_json_arguments_do_not_hide_unsupported_mixed_data_modes() {
             assert!(error.contains("cannot mix cURL --json"));
         }
     }
+}
+
+#[test]
+fn curl_multipart_trims_only_its_six_ascii_whitespace_characters() {
+    for whitespace in [' ', '\t', '\n', '\r', '\u{000b}', '\u{000c}'] {
+        for (value, expected) in [
+            (format!("{whitespace}hello{whitespace}"), "hello"),
+            (whitespace.to_string(), ""),
+        ] {
+            let imported =
+                parse_import(&format!("curl https://example.test -F 'field={value}'")).unwrap();
+            assert_eq!(
+                imported[0].request.form,
+                Some(FormBody::Multipart(vec![MultipartField::Text {
+                    name: "field".into(),
+                    value: expected.into()
+                }]))
+            );
+        }
+    }
+}
+
+#[test]
+fn curl_multipart_preserves_unicode_whitespace_in_text_and_upload_paths() {
+    for whitespace in ['\u{00a0}', '\u{2003}', '\u{202f}', '\u{3000}'] {
+        for value in [
+            format!("{whitespace}hello{whitespace}"),
+            whitespace.to_string(),
+        ] {
+            let imported = parse_import(&format!(
+                "curl https://example.test -F 'field= \t{value}\r '"
+            ))
+            .unwrap();
+            assert_eq!(
+                imported[0].request.form,
+                Some(FormBody::Multipart(vec![MultipartField::Text {
+                    name: "field".into(),
+                    value
+                }]))
+            );
+        }
+
+        let path = format!("/nonexistent/upload.txt{whitespace}");
+        let imported =
+            parse_import(&format!("curl https://example.test -F 'file=@{path}'")).unwrap();
+        assert_eq!(
+            imported[0].request.form,
+            Some(FormBody::Multipart(vec![MultipartField::File {
+                name: "file".into(),
+                path: path.into()
+            }]))
+        );
+    }
+}
+
+#[test]
+fn curl_form_string_preserves_ascii_and_unicode_whitespace() {
+    let value = " \t\n\r\u{000b}\u{000c}\u{00a0}hello\u{2003} ";
+    let imported = parse_import(&format!(
+        "curl https://example.test --form-string 'field={value}'"
+    ))
+    .unwrap();
+    assert_eq!(
+        imported[0].request.form,
+        Some(FormBody::Multipart(vec![MultipartField::Text {
+            name: "field".into(),
+            value: value.into()
+        }]))
+    );
+}
+
+#[test]
+fn curl_shell_keeps_non_posix_whitespace_inside_unquoted_arguments() {
+    for whitespace in [
+        '\r', '\u{000b}', '\u{000c}', '\u{00a0}', '\u{2003}', '\u{202f}', '\u{3000}',
+    ] {
+        for value in [
+            format!("a{whitespace}--data-raw{whitespace}b"),
+            format!("payload{whitespace}"),
+        ] {
+            let imported =
+                parse_import(&format!("curl https://example.test --data-raw {value}")).unwrap();
+            assert_eq!(imported[0].request.body.as_deref(), Some(value.as_bytes()));
+        }
+    }
+}
+
+#[test]
+fn curl_shell_splits_only_space_tab_and_newline_without_affecting_quoted_whitespace() {
+    assert_eq!(
+        super::shell::words("curl\t--data-raw\n' a\t\nb ' https://example.test").unwrap(),
+        ["curl", "--data-raw", " a\t\nb ", "https://example.test"]
+    );
+
+    let json = "\r\n{\"item\":[{\"request\":\"https://example.test\"}]}\r\n";
+    assert!(parse_import(json).is_ok());
 }

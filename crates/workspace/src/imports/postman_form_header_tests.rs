@@ -232,3 +232,136 @@ fn postman_raw_body_suppression_uses_the_last_enabled_headers_system_marker() {
         assert_eq!(parse_import(&source.to_string()).is_ok(), accepted);
     }
 }
+
+#[test]
+fn postman_empty_and_all_disabled_forms_send_no_body_for_every_supported_method() {
+    for mode in ["formdata", "urlencoded"] {
+        for fields in [
+            json!([]),
+            json!([{"key": "unused", "value": "value", "type": "text", "disabled": true}]),
+        ] {
+            for method in ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] {
+                let source = json!({"protocolProfileBehavior": {"disableBodyPruning": true}, "item": [{"request": {
+                    "method": method, "url": "https://example.test", "body": {"mode": mode, mode: fields}
+                }}]});
+                let imported = parse_import(&source.to_string()).unwrap();
+                assert!(imported[0].request.body.is_none());
+                assert!(imported[0].request.form.is_none());
+                assert!(imported[0].request.headers.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn postman_pruned_forms_keep_explicit_headers_and_skip_form_content_type_overrides() {
+    for mode in ["formdata", "urlencoded"] {
+        for content_type in [
+            "application/custom",
+            "multipart/form-data; boundary=custom",
+            "application/x-www-form-urlencoded; charset=UTF-8",
+            "",
+        ] {
+            let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": true, "content-length": true}}, "item": [{"request": {
+                "method": "POST", "url": "https://example.test", "body": {"mode": mode, mode: []},
+                "header": [{"key": "Content-Type", "value": content_type}, {"key": "Content-Length", "value": "5"}]
+            }}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert!(imported[0].request.form.is_none());
+            assert_eq!(
+                imported[0].request.headers,
+                [
+                    ("Content-Type".into(), content_type.into()),
+                    ("Content-Length".into(), "5".into())
+                ]
+            );
+        }
+
+        let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": true}}, "item": [{"request": {
+            "method": "POST", "url": "https://example.test", "body": {"mode": mode, mode: []},
+            "header": [{"key": "Content-Type", "value": "disabled", "disabled": true}]
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert!(imported[0].request.form.is_none());
+        assert!(imported[0].request.headers.is_empty());
+    }
+}
+
+#[test]
+fn postman_enabled_form_fields_with_empty_names_or_values_are_not_pruned() {
+    for mode in ["formdata", "urlencoded"] {
+        for key in ["field", ""] {
+            let source = json!({"item": [{"request": {
+                "method": "POST", "url": "https://example.test",
+                "body": {"mode": mode, mode: [{"key": key, "value": "", "type": "text"}]}
+            }}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert!(imported[0].request.form.is_some());
+        }
+
+        let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-length": true}}, "item": [{"request": {
+            "method": "POST", "url": "https://example.test", "body": {"mode": mode, mode: []}
+        }}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("disabledSystemHeaders.content-length"));
+    }
+}
+
+#[test]
+fn postman_validates_content_type_supplied_by_api_key_helpers() {
+    for (mode, content_type, accepted) in [
+        (
+            "urlencoded",
+            "application/x-www-form-urlencoded; charset=UTF-8",
+            false,
+        ),
+        ("formdata", "multipart/form-data; boundary=custom", false),
+        ("urlencoded", "{{content_type}}", false),
+        ("formdata", "{{content_type}}", false),
+        ("urlencoded", "application/x-www-form-urlencoded", true),
+        ("formdata", "multipart/form-data", true),
+        ("urlencoded", "application/custom", true),
+        ("formdata", "application/custom", true),
+    ] {
+        let source = json!({"auth": {"type": "apikey", "apikey": {
+            "key": "content-TYPE", "value": content_type, "in": "header"
+        }}, "item": [{"request": request(mode, None)}]});
+        assert_eq!(
+            parse_import(&source.to_string()).is_ok(),
+            accepted,
+            "{mode}: {content_type}"
+        );
+    }
+
+    let mut request = request("formdata", None);
+    request["auth"] = json!({"type": "apikey", "apikey": {"key": "{{header_name}}", "value": "value", "in": "header"}});
+    assert!(parse_import(&json!({"item": [{"request": request}]}).to_string()).is_err());
+}
+
+#[test]
+fn postman_pruned_forms_keep_helper_content_type_unless_system_headers_are_disabled() {
+    for mode in ["formdata", "urlencoded"] {
+        let request = json!({"method": "POST", "url": "https://example.test", "body": {"mode": mode, mode: []}});
+        for suppressed in [false, true] {
+            let source = json!({
+                "auth": {"type": "apikey", "apikey": {"key": "Content-Type", "value": "application/custom", "in": "header"}},
+                "protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": suppressed}},
+                "item": [{"request": request}]
+            });
+            assert_eq!(parse_import(&source.to_string()).is_ok(), !suppressed);
+        }
+    }
+
+    for request in [
+        json!("https://example.test"),
+        request("urlencoded", None),
+        request("formdata", None),
+    ] {
+        let source = json!({
+            "auth": {"type": "apikey", "apikey": {"key": "Content-Type", "value": "application/x-www-form-urlencoded", "in": "header"}},
+            "protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": true}},
+            "item": [{"request": request}]
+        });
+        assert!(parse_import(&source.to_string()).is_err());
+    }
+}

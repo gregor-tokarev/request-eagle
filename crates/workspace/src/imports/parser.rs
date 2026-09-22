@@ -10,7 +10,10 @@ pub(crate) struct ImportedRequest {
 }
 
 pub(crate) fn parse_import(input: &str) -> Result<Vec<ImportedRequest>, String> {
-    let input = input.trim().trim_start_matches('\u{feff}');
+    let input = input
+        .trim_matches([' ', '\t', '\n'])
+        .trim_start_matches('\u{feff}');
+    let json_input = input.trim_matches([' ', '\t', '\n', '\r']);
 
     if input.is_empty() {
         return Err("Paste a cURL command or a Postman collection JSON file.".into());
@@ -20,8 +23,8 @@ pub(crate) fn parse_import(input: &str) -> Result<Vec<ImportedRequest>, String> 
         return Err("Imports must be 16 MiB or smaller.".into());
     }
 
-    let requests = if input.starts_with('{') {
-        super::postman::parse(input)?
+    let requests = if json_input.starts_with('{') {
+        super::postman::parse(json_input)?
     } else {
         vec![super::curl::parse(input)?]
     };
