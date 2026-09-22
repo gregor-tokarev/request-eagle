@@ -1,9 +1,9 @@
-use std::io::Write;
+use std::{io::Write, time::Duration};
 
 use flate2::{Compression, write::GzEncoder};
 use request::{
-    Execution, ExecutionError, HttpError, HttpRequest, HttpVersion, Method, RequestExecutor,
-    RequestPreferences, Response,
+    Execution, ExecutionError, HttpError, HttpRequest, HttpVersion, Method, ProxyMode,
+    RequestExecutor, RequestPreferences, Response,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -195,5 +195,56 @@ fn bodyless_responses_do_not_attempt_to_decode_gzip_metadata() {
             assert!(response.body.is_empty());
             assert_eq!(response.headers["content-encoding"], "gzip");
         }
+    });
+}
+
+#[test]
+fn gzip_decoding_respects_the_total_request_deadline() {
+    smol::block_on(async {
+        // A small transfer that expands enough to keep the gzip decoder busy
+        // beyond the deadline. Compression happens before execution starts.
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&vec![b'x'; 50 * 1024 * 1024]).unwrap();
+        let payload = encoder.finish().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+                assert!(head.len() < 16 * 1024);
+            }
+
+            let mut response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            )
+            .into_bytes();
+            response.extend(payload);
+            let _ = stream.write_all(&response).await;
+        });
+        let mut preferences = RequestPreferences {
+            http_version: HttpVersion::Http1_1,
+            timeout_ms: 50,
+            ..RequestPreferences::default()
+        };
+        preferences.proxy.mode = ProxyMode::Disabled;
+        let result = RequestExecutor::new(&preferences)
+            .unwrap()
+            .execute(HttpRequest {
+                path: url,
+                ..HttpRequest::default()
+            })
+            .await;
+        server.await;
+
+        assert!(matches!(
+            result,
+            Err(ExecutionError::Timeout { timeout }) if timeout == Duration::from_millis(50)
+        ));
     });
 }

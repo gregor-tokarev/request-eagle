@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui_kit::component::{
     button::*,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, Textarea, TextareaState},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -116,8 +116,8 @@ impl RequestDraft {
 }
 
 struct FormRow {
-    name: Entity<InputState>,
-    value: Entity<InputState>,
+    name: Entity<TextareaState>,
+    value: Entity<TextareaState>,
     file: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -174,12 +174,14 @@ impl FormEditor {
         cx: &mut Context<Self>,
     ) {
         let name = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
+                .auto_grow(1, 4)
                 .placeholder("Name")
                 .default_value(name.to_owned())
         });
         let value = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
+                .auto_grow(1, 4)
                 .placeholder(if file {
                     "Select a file or enter its path"
                 } else {
@@ -316,8 +318,8 @@ impl Render for FormEditor {
                             .min_w_0()
                             .debug_selector(move || format!("form-name-{index}"))
                             .child(
-                                Input::new(&row.name)
-                                    .small()
+                                Textarea::new(&row.name)
+                                    .text_size(px(13.))
                                     .aria_label(format!("Form field name {}", index + 1)),
                             ),
                     )
@@ -326,7 +328,7 @@ impl Render for FormEditor {
                             .flex_1()
                             .min_w_0()
                             .debug_selector(move || format!("form-value-{index}"))
-                            .child(Input::new(&row.value).small().aria_label(format!(
+                            .child(Textarea::new(&row.value).text_size(px(13.)).aria_label(format!(
                                 "Form field {} {}",
                                 if row.file { "file path" } else { "value" },
                                 index + 1

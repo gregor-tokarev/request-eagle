@@ -5,7 +5,7 @@ use http_client::http::{HeaderMap, header::CONTENT_ENCODING};
 
 use crate::{ExecutionError, HttpError};
 
-pub(crate) fn decode_body(
+pub(crate) async fn decode_body(
     headers: &HeaderMap,
     mut body: Vec<u8>,
     limit_bytes: Option<u64>,
@@ -41,33 +41,38 @@ pub(crate) fn decode_body(
         return Ok((body, None));
     }
 
-    let encoded_bytes = body.len();
+    // CPU-heavy decompression must yield to the executor so the total request
+    // deadline can fire while this work runs on the blocking pool.
+    smol::unblock(move || {
+        let encoded_bytes = body.len();
 
-    for _ in 0..layers {
-        // A gzip representation may contain several concatenated members.
-        let mut decoder = MultiGzDecoder::new(body.as_slice());
-        let mut decoded = Vec::new();
+        for _ in 0..layers {
+            // A gzip representation may contain several concatenated members.
+            let mut decoder = MultiGzDecoder::new(body.as_slice());
+            let mut decoded = Vec::new();
 
-        match limit_bytes {
-            Some(limit_bytes) => {
-                decoder
-                    .take(limit_bytes.saturating_add(1))
-                    .read_to_end(&mut decoded)
-                    .map_err(HttpError::DecodeBody)?;
+            match limit_bytes {
+                Some(limit_bytes) => {
+                    decoder
+                        .take(limit_bytes.saturating_add(1))
+                        .read_to_end(&mut decoded)
+                        .map_err(HttpError::DecodeBody)?;
 
-                if decoded.len() as u64 > limit_bytes {
-                    return Err(ExecutionError::ResponseTooLarge { limit_bytes });
+                    if decoded.len() as u64 > limit_bytes {
+                        return Err(ExecutionError::ResponseTooLarge { limit_bytes });
+                    }
+                }
+                None => {
+                    decoder
+                        .read_to_end(&mut decoded)
+                        .map_err(HttpError::DecodeBody)?;
                 }
             }
-            None => {
-                decoder
-                    .read_to_end(&mut decoded)
-                    .map_err(HttpError::DecodeBody)?;
-            }
+
+            body = decoded;
         }
 
-        body = decoded;
-    }
-
-    Ok((body, Some(encoded_bytes)))
+        Ok((body, Some(encoded_bytes)))
+    })
+    .await
 }

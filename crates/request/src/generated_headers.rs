@@ -51,7 +51,9 @@ pub fn generated_headers(
         generated.push(("Accept".into(), "*/*".into()));
     }
 
-    if !has("accept-encoding") {
+    // Byte ranges apply to the selected representation. Do not opt range
+    // requests into gzip unless the caller explicitly asks for it.
+    if !has("accept-encoding") && !has("range") {
         generated.push(("Accept-Encoding".into(), "gzip".into()));
     }
 

@@ -172,13 +172,15 @@ impl HttpExecutor {
 
         // HEAD and statuses without a body may describe an encoded representation
         // in their headers, but there are no bytes to pass to a gzip decoder.
-        let (body, encoded_response_body_bytes) = if is_head
-            || matches!(parts.status.as_u16(), 204 | 205 | 304)
-        {
-            (body, None)
-        } else {
-            crate::response_encoding::decode_body(&parts.headers, body, self.max_response_bytes)?
-        };
+        // A 206 body contains a range of the encoded representation, which need
+        // not be a complete gzip stream. Keep those bytes and headers intact.
+        let (body, encoded_response_body_bytes) =
+            if is_head || matches!(parts.status.as_u16(), 204 | 205 | 206 | 304) {
+                (body, None)
+            } else {
+                crate::response_encoding::decode_body(&parts.headers, body, self.max_response_bytes)
+                    .await?
+            };
         let download = received.elapsed();
         let response_header_bytes = parts
             .headers

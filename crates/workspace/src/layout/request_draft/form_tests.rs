@@ -114,3 +114,69 @@ fn form_preview_uses_encoded_length_and_does_not_default_to_json() {
         assert!(outgoing_request(&request).body.is_none());
     }
 }
+
+fn check_multiline_form(form: FormBody, selector: &'static str, cx: &mut TestAppContext) {
+    let (draft, cx) = draft(cx);
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.request.method = Method::Post;
+            draft.request.form = Some(form.clone());
+            draft.saved_request = draft.request.clone();
+            draft.section = RequestSection::Body;
+            draft.prepare(window, cx);
+        })
+    });
+
+    let mode = element_bounds(cx, selector).unwrap();
+    cx.simulate_click(mode.center(), Modifiers::default());
+    cx.read(|cx| {
+        assert_eq!(draft.read(cx).request.form.as_ref(), Some(&form));
+        assert!(!draft.read(cx).is_dirty());
+    });
+
+    let add = element_bounds(cx, "add-form-text").unwrap();
+    cx.simulate_click(add.center(), Modifiers::default());
+    let value = element_bounds(cx, "form-value-1").unwrap();
+    cx.simulate_click(value.center(), Modifiers::default());
+    cx.simulate_input("new\r\nmultiline\nvalue");
+
+    let mut expected = form.clone();
+    match &mut expected {
+        FormBody::UrlEncoded(fields) => fields.push(("".into(), "new\r\nmultiline\nvalue".into())),
+        FormBody::Multipart(fields) => fields.push(MultipartField::Text {
+            name: "".into(),
+            value: "new\r\nmultiline\nvalue".into(),
+        }),
+    }
+
+    cx.read(|cx| assert_eq!(draft.read(cx).request.form.as_ref(), Some(&expected)));
+    let raw = element_bounds(cx, "request-body-mode-raw").unwrap();
+    cx.simulate_click(raw.center(), Modifiers::default());
+    let mode = element_bounds(cx, selector).unwrap();
+    cx.simulate_click(mode.center(), Modifiers::default());
+    cx.read(|cx| assert_eq!(draft.read(cx).request.form.as_ref(), Some(&expected)));
+}
+
+#[gpui_kit::test]
+fn urlencoded_form_preserves_saved_and_edited_line_breaks(cx: &mut TestAppContext) {
+    check_multiline_form(
+        FormBody::UrlEncoded(vec![(
+            "field\r\nname".into(),
+            "first\r\nsecond\nthird".into(),
+        )]),
+        "request-body-mode-urlencoded",
+        cx,
+    );
+}
+
+#[gpui_kit::test]
+fn multipart_form_preserves_saved_and_edited_line_breaks(cx: &mut TestAppContext) {
+    check_multiline_form(
+        FormBody::Multipart(vec![MultipartField::Text {
+            name: "field\r\nname".into(),
+            value: "first\r\nsecond\nthird".into(),
+        }]),
+        "request-body-mode-multipart",
+        cx,
+    );
+}
