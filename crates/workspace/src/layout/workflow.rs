@@ -15,6 +15,21 @@ pub(crate) struct ImportRequested {
 impl EventEmitter<ImportRequested> for MainView {}
 
 impl MainView {
+    pub(crate) fn relocate_history_environment(
+        &mut self,
+        previous_path: &std::path::Path,
+        environment_path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = self
+            .history
+            .relocate_environment(previous_path, environment_path)
+        {
+            self.storage_error = Some(format!("Could not update request history: {error}"));
+        }
+        cx.notify();
+    }
+
     pub(super) fn workflow_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let view = cx.entity().downgrade();
         let file_view = view.clone();

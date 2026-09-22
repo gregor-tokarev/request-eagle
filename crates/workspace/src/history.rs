@@ -1,6 +1,6 @@
 use std::{
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -57,6 +57,35 @@ impl History {
         self.entries.insert(0, entry);
         self.entries.truncate(HISTORY_LIMIT);
         self.save()
+    }
+
+    pub fn relocate_environment(
+        &mut self,
+        previous_request: &Path,
+        environment: &Path,
+    ) -> io::Result<()> {
+        let mut changed = false;
+        for entry in &mut self.entries {
+            let Some(previous_environment) = &entry.environment_path else {
+                continue;
+            };
+            let Some(previous_collection) = previous_environment.parent() else {
+                continue;
+            };
+
+            // A collection rename moves the environment with it. Moving one
+            // request into another existing collection keeps past runs bound
+            // to their original collection's still-available environment.
+            if previous_request.starts_with(previous_collection) && !previous_collection.is_dir() {
+                entry.environment_path = Some(environment.to_path_buf());
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.save()?;
+        }
+        Ok(())
     }
 
     pub fn clear(&mut self) -> io::Result<()> {
@@ -116,5 +145,47 @@ mod tests {
         fs::write(&path, b"not json").unwrap();
         assert!(History::load(path.clone()).is_err());
         assert_eq!(fs::read(path).unwrap(), b"not json");
+    }
+}
+
+#[cfg(test)]
+mod relocation_tests {
+    use super::{History, HistoryEntry};
+
+    #[test]
+    fn collection_rename_updates_persisted_history_but_request_move_keeps_original_environment() {
+        let directory = tempfile::tempdir().unwrap();
+        let before = directory.path().join("Old API");
+        let after = directory.path().join("Renamed API");
+        let other = directory.path().join("Other API");
+        std::fs::create_dir_all(&before).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let state = directory.path().join("history.json");
+        let mut history = History::load(state.clone()).unwrap();
+        history
+            .push(HistoryEntry::new(
+                "Item".into(),
+                request::HttpRequest::default(),
+                Some(before.join("environment.toml")),
+            ))
+            .unwrap();
+
+        history
+            .relocate_environment(&before.join("item.toml"), &other.join("environment.toml"))
+            .unwrap();
+        assert_eq!(
+            history.entries[0].environment_path,
+            Some(before.join("environment.toml"))
+        );
+
+        std::fs::rename(&before, &after).unwrap();
+        history
+            .relocate_environment(&before.join("item.toml"), &after.join("environment.toml"))
+            .unwrap();
+        let restored = History::load(state).unwrap();
+        assert_eq!(
+            restored.entries[0].environment_path,
+            Some(after.join("environment.toml"))
+        );
     }
 }

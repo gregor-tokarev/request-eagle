@@ -76,6 +76,7 @@ impl Layout {
                     folders,
                 } => {
                     this.main_view.update(cx, |view, cx| {
+                        view.relocate_history_environment(previous_path, environment_path, cx);
                         if let Some(root) = environment_path.parent()
                             && !view.collection_paths.iter().any(|path| path == root)
                         {
