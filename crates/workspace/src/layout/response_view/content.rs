@@ -5,14 +5,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-const DISPLAY_LIMIT: usize = 1024 * 1024;
-
 pub(in crate::layout) struct ResponseContent {
     pub(super) execution: Execution,
-    pub(super) raw: String,
-    pub(super) pretty: Option<String>,
+    pub(super) raw: SharedString,
+    pub(super) pretty: Option<SharedString>,
     pub(super) language: &'static str,
-    pub(super) truncated: bool,
     pub(super) processing: Duration,
     pub(super) headers: Arc<[(SharedString, SharedString)]>,
     pub(super) cookies: Arc<[(SharedString, SharedString)]>,
@@ -23,25 +20,18 @@ impl ResponseContent {
     pub(in crate::layout) fn new(execution: Execution) -> Self {
         let started = Instant::now();
         let Response::Http(response) = &execution.response;
-        let mut end = response.body.len().min(DISPLAY_LIMIT);
-
-        // Do not split a UTF-8 character at the display boundary.
-        while end < response.body.len() && end > 0 && response.body[end] & 0xc0 == 0x80 {
-            end -= 1;
-        }
-
-        let truncated = end < response.body.len();
-        let raw = String::from_utf8_lossy(&response.body[..end]).into_owned();
+        let raw: SharedString = String::from_utf8_lossy(&response.body).into_owned().into();
         let content_type = response
             .headers
             .get("content-type")
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
         let is_json = content_type.contains("json") || raw.trim_start().starts_with(['{', '[']);
-        let pretty = if !truncated && is_json {
+        let pretty = if is_json {
             serde_json::from_str::<serde_json::Value>(&raw)
                 .ok()
                 .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                .map(Into::into)
         } else {
             None
         };
@@ -81,7 +71,6 @@ impl ResponseContent {
             raw,
             pretty,
             language,
-            truncated,
             processing: started.elapsed(),
             headers,
             cookies,

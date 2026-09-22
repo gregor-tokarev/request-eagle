@@ -22,7 +22,7 @@ fn response(body: &[u8], content_type: &str) -> ResponseContent {
 }
 
 #[test]
-fn response_formatting_preserves_raw_bytes_and_limits_display_text() {
+fn response_formatting_preserves_the_entire_body() {
     let json = response(b"{\"a\":1}", "application/json");
     assert_eq!(json.raw, "{\"a\":1}");
     assert_eq!(json.pretty.as_deref(), Some("{\n  \"a\": 1\n}"));
@@ -34,9 +34,86 @@ fn response_formatting_preserves_raw_bytes_and_limits_display_text() {
 
     let oversized = "a".repeat(1_048_575) + "é";
     let large = response(oversized.as_bytes(), "text/plain");
-    assert!(large.truncated);
-    assert_eq!(large.raw.len(), 1_048_575);
+    assert_eq!(large.raw.as_ref(), oversized);
+    assert_eq!(large.raw.len(), 1_048_577);
     assert_eq!(large.http().body.len(), 1_048_577);
+}
+
+#[gpui_kit::test]
+fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let raw = format!(
+        "[{}\"needle ☃ tail\"]",
+        "{\"name\":\"memory test\"},".repeat(60_000)
+    );
+    let content = response(raw.as_bytes(), "application/json");
+    let pretty = content.pretty.clone().unwrap();
+    let mut view = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let response = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            view.finish(Ok(content), window, cx);
+            view
+        });
+        view = Some(response.clone());
+        gpui_kit::component::Root::new(response, window, cx)
+    });
+    let view = view.unwrap();
+
+    for (is_pretty, expected) in [
+        (false, raw.as_str()),
+        (true, pretty.as_ref()),
+        (false, raw.as_str()),
+    ] {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(is_pretty, window, cx)));
+        cx.update(|window, cx| view.update(cx, |view, cx| view.open_response_search(window, cx)));
+        cx.simulate_input("needle ☃ tail");
+        cx.read(|cx| {
+            let view = view.read(cx);
+            assert!(view.wrap);
+            let body = view.virtual_body.as_ref().unwrap().read(cx);
+            assert!(body.wrap);
+            assert_eq!(body.text.to_string(), expected);
+            let start = expected.find("needle ☃ tail").unwrap();
+            assert!(start > 1024 * 1024, "search must reach past the old cutoff");
+            assert_eq!(body.selection, start..start + "needle ☃ tail".len());
+            assert!(
+                body.painted.iter().any(|row| row.range.contains(&start)),
+                "search must reveal the match on screen"
+            );
+        });
+        let copy = cx.debug_bounds("response-copy").unwrap();
+        cx.simulate_click(copy.center(), Modifiers::default());
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(raw.as_str())
+        );
+    }
+    let body = cx.debug_bounds("response-body").unwrap();
+    cx.simulate_click(body.center(), Modifiers::default());
+    cx.simulate_keystrokes("secondary-a secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().as_deref(),
+        Some(raw.as_str())
+    );
+
+    for _ in 0..2 {
+        let wrap = cx.debug_bounds("response-wrap").unwrap();
+        cx.simulate_click(wrap.center(), Modifiers::default());
+    }
+    cx.read(|cx| assert!(view.read(cx).virtual_body.as_ref().unwrap().read(cx).wrap));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.finish(Ok(response(b"short response", "text/plain")), window, cx)
+        })
+    });
+    cx.read(|cx| {
+        assert!(view.read(cx).virtual_body.is_none());
+        assert!(view.read(cx).wrap);
+    });
 }
 
 #[gpui_kit::test]

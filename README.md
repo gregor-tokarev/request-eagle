@@ -121,3 +121,39 @@ cargo test -p workspace --release response_interaction_benchmark \
 
 This uses the same 8.33 ms p99 CPU budget and window sizes. Run it serially without
 competing builds or benchmarks; native GPU presentation must be checked separately.
+
+The response viewer displays and searches the complete body, with wrapping on
+by default. Responses over 256 KiB, or containing a line over 32 KiB, use an
+app-owned read-only viewport. These thresholds choose the renderer; they do not
+limit the displayed text. Smaller responses keep the standard syntax editor.
+
+The custom viewport uses GPUI's line-breaking helper to index row starts as byte
+offsets. It shapes and paints only visible rows, including when the response is
+one long minified line. Search uses GPUI's matcher over the entire response and
+highlights the current match. Raw/JSON switching, selection, copying and the
+wrapping toggle remain available. No dependency patches or vendored crates are
+required.
+
+The normal test suite checks full-body search beyond 1 MiB and allocation traffic
+while scrolling responses over 10 MiB at two window widths:
+
+```sh
+cargo test -p workspace --release response_view -- --nocapture
+```
+
+The allocation tests count Rust allocation traffic, not retained or GPU memory.
+Native memory checks must also exercise response loading, Raw/JSON switching,
+scrolling and searching near the end. Memory still scales with the stored body,
+formatted JSON and search results; viewport rendering does not shape offscreen
+text. Large responses currently use plain text without syntax coloring.
+
+For standard-editor HTML measurements, save the decoded HTTP body locally and run:
+
+```sh
+REQUEST_EAGLE_HTML_FIXTURE=/tmp/page.html cargo test -p workspace --release \
+  standard_html_editor_benchmark -- --ignored --nocapture --test-threads=1
+```
+
+This deliberately uses the standard editor to measure wrapping, scrolling,
+search and allocation traffic at 1024 and 640 px. It excludes native GPU
+presentation and retained memory, which must be checked in the app.

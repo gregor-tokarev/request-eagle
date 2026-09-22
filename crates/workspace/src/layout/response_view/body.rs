@@ -33,13 +33,20 @@ impl Render for ResponseBodyEditor {
 impl ResponseView {
     pub(super) fn body(&self, cx: &mut Context<Self>) -> AnyElement {
         let content = self.content.as_ref().unwrap();
-        let editor_view = self.editor_view.as_ref().unwrap();
         let view = cx.entity().downgrade();
 
         v_flex()
             .flex_1()
             .min_h_0()
             .gap_2()
+            .when(self.virtual_body.is_some(), |view| {
+                view.capture_action(cx.listener(
+                    |this, _: &gpui_kit::base::input::Search, window, cx| {
+                        this.open_response_search(window, cx);
+                        cx.stop_propagation();
+                    },
+                ))
+            })
             .child(
                 h_flex()
                     .flex_none()
@@ -104,6 +111,9 @@ impl ResponseView {
                                         editor.set_soft_wrap(this.wrap, window, cx)
                                     });
                                 }
+                                if let Some(body) = &this.virtual_body {
+                                    body.update(cx, |body, cx| body.set_wrap(this.wrap, cx));
+                                }
                                 cx.notify();
                             })),
                     )
@@ -113,10 +123,8 @@ impl ResponseView {
                             .small()
                             .icon(IconName::Search)
                             .accessibility_label("Search response")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(editor) = &this.editor {
-                                    editor.update(cx, |editor, cx| editor.open_search(false, cx));
-                                }
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_response_search(window, cx);
                             })),
                     )
                     .child(
@@ -135,13 +143,8 @@ impl ResponseView {
                             })),
                     ),
             )
-            .when(content.truncated, |view| {
-                view.child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(cx.theme().warning)
-                        .child("Showing the first 1 MB. Copy includes the full response."),
-                )
+            .when(self.body_search.is_some(), |view| {
+                view.child(self.body_search_bar(cx))
             })
             .child(
                 div()
@@ -149,29 +152,67 @@ impl ResponseView {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(
-                        editor_view
+                    .child(if let Some(body) = &self.virtual_body {
+                        body.clone()
+                            .cached(StyleRefinement::default().size_full())
+                            .into_any_element()
+                    } else {
+                        self.editor_view
+                            .as_ref()
+                            .unwrap()
                             .clone()
-                            .cached(StyleRefinement::default().size_full()),
-                    ),
+                            .cached(StyleRefinement::default().size_full())
+                            .into_any_element()
+                    }),
             )
             .into_any_element()
     }
 
-    fn set_pretty(&mut self, pretty: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn set_body_text(
+        &mut self,
+        text: SharedString,
+        language: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.body_search = None;
+        self.editor = None;
+        self.editor_view = None;
+        self.virtual_body = None;
+
+        // Moderate HTML responses often contain script lines just over 16 KiB.
+        // Keep the standard editor's highlighting and input behavior for these;
+        // larger individual lines still incur expensive wrapping/search layouts.
+        if text.len() > 256 * 1024 || text.split('\n').any(|line| line.len() > 32 * 1024) {
+            self.virtual_body =
+                Some(cx.new(|cx| super::virtual_body::VirtualBody::new(text, self.wrap, cx)));
+        } else {
+            let editor = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .language(language)
+                    .line_number(true)
+                    .soft_wrap(self.wrap)
+                    .searchable(true)
+                    .replaceable(false)
+                    .default_value(text)
+            });
+            self.editor_view = Some(cx.new(|_| ResponseBodyEditor(editor.clone())));
+            self.editor = Some(editor);
+        }
+    }
+
+    pub(super) fn set_pretty(&mut self, pretty: bool, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(content) = &self.content {
             self.pretty = pretty && content.pretty.is_some();
             let text = if self.pretty {
                 content.pretty.as_ref().unwrap()
             } else {
                 &content.raw
-            };
-
-            if let Some(editor) = &self.editor {
-                editor.update(cx, |editor, cx| editor.set_value(text.clone(), window, cx));
             }
+            .clone();
+            let language = content.language;
+            self.set_body_text(text, language, window, cx);
         }
-
         cx.notify();
     }
 }

@@ -24,6 +24,8 @@ pub(in crate::layout) struct ResponseView {
     section: Section,
     pub(super) pretty: bool,
     pub(super) wrap: bool,
+    pub(super) virtual_body: Option<Entity<super::virtual_body::VirtualBody>>,
+    pub(super) body_search: Option<super::search::BodySearch>,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
     pub(super) detail_open: [bool; 3],
@@ -43,6 +45,8 @@ impl ResponseView {
             section: Section::Body,
             pretty: false,
             wrap: true,
+            virtual_body: None,
+            body_search: None,
             headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
             detail_open: [false; 3],
@@ -54,6 +58,8 @@ impl ResponseView {
         self.content = None;
         self.editor = None;
         self.editor_view = None;
+        self.body_search = None;
+        self.virtual_body = None;
         self.loading = true;
         self.error = false;
         self.message = "Sending request…".into();
@@ -73,6 +79,8 @@ impl ResponseView {
         cx: &mut Context<Self>,
     ) {
         self.loading = false;
+        self.body_search = None;
+        self.virtual_body = None;
 
         match result {
             Ok(content) => {
@@ -80,16 +88,7 @@ impl ResponseView {
                 self.cookies_list.reset(content.cookies.len());
                 self.pretty = content.pretty.is_some();
                 let text = content.pretty.as_ref().unwrap_or(&content.raw).clone();
-                let editor = cx.new(|cx| {
-                    EditorState::new(window, cx)
-                        .language(content.language)
-                        .line_number(true)
-                        .soft_wrap(self.wrap)
-                        .replaceable(false)
-                        .default_value(text)
-                });
-                self.editor_view = Some(cx.new(|_| ResponseBodyEditor(editor.clone())));
-                self.editor = Some(editor);
+                self.set_body_text(text, content.language, window, cx);
                 self.content = Some(content);
                 self.error = false;
             }
