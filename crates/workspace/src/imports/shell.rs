@@ -37,6 +37,9 @@ pub(super) fn words(input: &str) -> Result<Vec<String>, String> {
             (None, '~') if !started => {
                 return Err("Shell tilde expansion is not supported. Replace the home directory with its absolute path, or quote a literal tilde.".into());
             }
+            (None, '*' | '?' | '[') => {
+                return Err("Shell filename expansion is not supported. Quote or escape literal wildcard characters.".into());
+            }
             (None, '\'' | '"') => {
                 quote = Some(character);
                 started = true;

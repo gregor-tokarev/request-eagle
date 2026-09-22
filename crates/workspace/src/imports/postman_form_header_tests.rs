@@ -156,7 +156,7 @@ fn postman_content_type_override_does_not_reject_raw_disabled_or_unchanged_forms
 fn postman_raw_bodies_reject_inherited_content_type_suppression_without_an_explicit_header() {
     let profile = json!({"disabledSystemHeaders": {"content-type": true}});
 
-    for raw in ["hello", ""] {
+    for raw in ["hello", " "] {
         for headers in [
             json!([]),
             json!([{"key": "Accept", "value": "application/json"}]),

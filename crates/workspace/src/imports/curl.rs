@@ -472,26 +472,12 @@ fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {
         format!("http://{value}")
     };
 
-    // cURL retains encoded dot segments and literal backslashes, whereas the
-    // executor's URL parser normalizes them to a different request path.
+    // cURL retains literal backslashes, whereas the executor's URL parser
+    // normalizes them to a different request path. Postman also normalizes them.
     let address = path.split(['?', '#']).next().unwrap_or_default();
 
     if address.contains('\\') {
         return Err("cURL URL backslashes cannot be preserved on Send. Import a URL without literal backslashes.".into());
-    }
-
-    let raw_path = address
-        .split_once("://")
-        .and_then(|(_, rest)| rest.find('/').map(|start| &rest[start..]))
-        .unwrap_or_default();
-
-    if raw_path.split('/').any(|segment| {
-        matches!(
-            segment.to_ascii_lowercase().as_str(),
-            "%2e" | ".%2e" | "%2e." | "%2e%2e"
-        )
-    }) {
-        return Err("cURL URL encoded dot segments cannot be preserved on Send. Import a URL without encoded dot segments.".into());
     }
 
     // A template in the authority may supply a complete URL. Path and query

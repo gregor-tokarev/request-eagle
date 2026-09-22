@@ -537,6 +537,50 @@ fn postman_retained_raw_text_without_a_body_mode_remains_inactive() {
 }
 
 #[test]
+fn postman_empty_raw_bodies_remain_inactive_and_keep_explicit_headers() {
+    for method in ["GET", "POST", "HEAD"] {
+        for suppressed in [false, true] {
+            for headers in [
+                json!([]),
+                json!([{"key": "Content-Type", "value": "application/custom"}]),
+            ] {
+                for body in [
+                    json!({"mode": "raw", "raw": ""}),
+                    json!({"mode": "raw", "raw": "", "options": {"raw": {"language": "json"}}}),
+                    json!({"mode": "raw", "raw": null}),
+                    json!({"mode": "raw"}),
+                ] {
+                    let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": suppressed}},
+                    "item": [{"request": {"method": method, "url": "https://example.test",
+                        "header": headers, "body": body
+                    }}]});
+                    let imported = parse_import(&source.to_string()).unwrap();
+                    let request = &imported[0].request;
+                    assert!(request.body.is_none());
+                    assert!(request.form.is_none());
+                    let expected_headers = if headers.as_array().unwrap().is_empty() {
+                        vec![]
+                    } else {
+                        vec![("Content-Type".into(), "application/custom".into())]
+                    };
+                    assert_eq!(request.headers, expected_headers);
+                }
+            }
+        }
+    }
+
+    let source = json!({"item": [{"request": {
+        "method": "POST", "url": "https://example.test", "body": {"mode": "raw", "raw": " "}
+    }}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(imported[0].request.body.as_deref(), Some(b" ".as_slice()));
+    assert_eq!(
+        imported[0].request.headers,
+        [("Content-Type".into(), "text/plain".into())]
+    );
+}
+
+#[test]
 fn postman_rejects_all_explicit_non_null_upload_filename_overrides() {
     for filename in [
         json!(""),
@@ -569,5 +613,58 @@ fn postman_rejects_all_explicit_non_null_upload_filename_overrides() {
             imported[0].request.form,
             Some(request::FormBody::Multipart(_))
         ));
+    }
+}
+
+#[test]
+fn postman_rejects_encoded_dot_segments_after_constructing_the_final_url() {
+    for segment in ["%2e", ".%2E", "%2e.", "%2E%2e"] {
+        for url in [
+            json!(format!("https://example.test/a/{segment}/b")),
+            json!({"raw": format!("https://example.test/a/{segment}/b")}),
+            json!({"host": "example.test", "path": ["a", segment, "b"]}),
+            json!({"host": "example.test", "path": ["a", ":segment", "b"],
+                "variable": [{"key": "segment", "value": segment}]}),
+            json!(format!("{{{{base_url}}}}/a/{segment}/b")),
+        ] {
+            let source = json!({"item": [{"request": {"url": url}}]});
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(error.contains("encoded dot segments"), "{error}");
+        }
+    }
+
+    let source = json!({"variable": [{"key": "segment", "value": "%2e%2e"}],
+        "item": [{"request": "https://example.test/a/{{segment}}/b"}]});
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("encoded dot segments"), "{error}");
+}
+
+#[test]
+fn postman_keeps_backslashes_and_escapes_that_do_not_change_source_execution() {
+    for path in [
+        "/a/%2ejson/b",
+        "/a/%252e%252e/b",
+        "/a?path=/%2e%2e/b",
+        "/a#/%2e%2e/b",
+    ] {
+        let url = format!("https://example.test{path}");
+        let source = json!({"item": [{"request": {"url": url}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.path, url);
+    }
+
+    // Native Postman and the executor both turn literal path backslashes into
+    // separators. cURL preserves them and has its own explicit rejection.
+    for url in [
+        json!("https://example.test/a\\b"),
+        json!({"protocol": "https", "host": "example.test", "path": ["a\\b"]}),
+        json!({"protocol": "https", "host": "example.test", "path": "/a\\b"}),
+    ] {
+        let source = json!({"item": [{"request": {"url": url}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            url::Url::parse(&imported[0].request.path).unwrap().path(),
+            "/a/b"
+        );
     }
 }

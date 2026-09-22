@@ -155,12 +155,12 @@ fn collection_defaults_use_the_last_enabled_definition_without_merging_types() {
             json!([
                 {"key": "value", "type": "number", "value": 1}, last
             ]),
-            "{{value}}",
+            "value={{value}}",
         );
         let imported = parse_import(&source.to_string()).unwrap();
         assert_eq!(
             imported[0].request.body.as_deref(),
-            Some(expected.as_bytes())
+            Some(format!("value={expected}").as_bytes())
         );
     }
 

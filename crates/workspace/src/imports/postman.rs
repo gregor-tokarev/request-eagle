@@ -457,15 +457,20 @@ fn read_body(
 
     match mode {
         "raw" => {
-            if content_type_override {
-                super::postman_form_headers::validate_raw(source_headers, &request.headers)?;
-            }
-
             let raw = match body.get("raw") {
                 None | Some(Value::Null) => "",
                 Some(Value::String(raw)) => raw,
                 _ => return Err("The raw Postman body must be text.".into()),
             };
+
+            if raw.is_empty() {
+                return Ok(());
+            }
+
+            if content_type_override {
+                super::postman_form_headers::validate_raw(source_headers, &request.headers)?;
+            }
+
             let language = body
                 .pointer("/options/raw/language")
                 .and_then(Value::as_str);

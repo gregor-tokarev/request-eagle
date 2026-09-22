@@ -32,6 +32,7 @@ produce an import error. Explicit cURL methods must use canonical uppercase spel
 cURL URL globbing must be expanded to one URL before
 import, or disabled with `--globoff` to preserve literal braces and brackets.
 Unquoted shell expansion and URL paths the executor would rewrite are rejected.
+Quote cURL URLs containing `?`, `*`, or `[` to keep those characters literal.
 
 Postman collection variables become literal defaults in the imported requests.
 Declared variable types must match their primitive values; coercion is rejected.

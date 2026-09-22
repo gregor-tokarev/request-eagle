@@ -29,6 +29,11 @@ pub(crate) fn parse_import(input: &str) -> Result<Vec<ImportedRequest>, String> 
         vec![super::curl::parse(input)?]
     };
 
+    for imported in &requests {
+        validate_url_path(&imported.request.path)
+            .map_err(|error| format!("{}: {error}", imported.name))?;
+    }
+
     if let Some(imported) = requests.iter().find(|imported| {
         matches!(imported.request.method, Method::Get | Method::Head)
             && (imported.request.body.is_some() || imported.request.form.is_some())
@@ -41,6 +46,28 @@ pub(crate) fn parse_import(input: &str) -> Result<Vec<ImportedRequest>, String> 
     }
 
     Ok(requests)
+}
+
+fn validate_url_path(path: &str) -> Result<(), String> {
+    // Both sources retain encoded dot segments. The executor's URL parser
+    // removes them, so validate the final path after source variables resolve.
+    let address = path.split(['?', '#']).next().unwrap_or_default();
+    let authority_and_path = address.split_once("://").map_or(address, |(_, rest)| rest);
+    let raw_path = authority_and_path
+        .find(['/', '\\'])
+        .map(|start| &authority_and_path[start..])
+        .unwrap_or_default();
+
+    if raw_path.split(['/', '\\']).any(|segment| {
+        matches!(
+            segment.to_ascii_lowercase().as_str(),
+            "%2e" | ".%2e" | "%2e." | "%2e%2e"
+        )
+    }) {
+        return Err("URL encoded dot segments cannot be preserved on Send. Import a URL without encoded dot segments.".into());
+    }
+
+    Ok(())
 }
 
 pub(super) fn method(value: &str) -> Result<Method, String> {

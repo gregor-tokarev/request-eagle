@@ -296,3 +296,31 @@ fn curl_shell_preserves_quoted_escaped_and_nonleading_literal_tildes() {
         Some(b"documents/~name".as_slice())
     );
 }
+
+#[test]
+fn curl_shell_rejects_unquoted_filename_expansion() {
+    for value in ["*.txt", "file?.txt", "[ab].txt", "'prefix'*.txt"] {
+        for flags in ["", "--globoff "] {
+            let error = parse_import(&format!(
+                "curl {flags}https://example.test --data-raw {value}"
+            ))
+            .unwrap_err();
+            assert!(error.contains("Shell filename expansion"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn curl_shell_preserves_quoted_and_escaped_literal_wildcards() {
+    for value in ["'*?[ab].txt'", "\"*?[ab].txt\"", "\\*\\?\\[ab].txt"] {
+        let imported =
+            parse_import(&format!("curl https://example.test --data-raw {value}")).unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(b"*?[ab].txt".as_slice())
+        );
+    }
+
+    let imported = parse_import("curl 'https://example.test/?q=*'").unwrap();
+    assert_eq!(imported[0].request.path, "https://example.test/?q=*");
+}
