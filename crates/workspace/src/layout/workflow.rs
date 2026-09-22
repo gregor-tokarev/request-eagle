@@ -36,7 +36,7 @@ impl MainView {
                 .environment_path
                 .as_ref()
                 .and_then(|path| path.parent())
-                .is_some_and(|root| previous_path.starts_with(root) && !root.is_dir());
+                .is_some_and(|root| root == previous_path);
             if should_rebind {
                 draft.update(cx, |draft, cx| {
                     draft.environment_path = Some(environment_path.to_path_buf());

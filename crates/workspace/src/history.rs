@@ -61,7 +61,7 @@ impl History {
 
     pub fn relocate_environment(
         &mut self,
-        previous_request: &Path,
+        previous_collection: &Path,
         environment: &Path,
     ) -> io::Result<()> {
         let mut changed = false;
@@ -69,14 +69,14 @@ impl History {
             let Some(previous_environment) = &entry.environment_path else {
                 continue;
             };
-            let Some(previous_collection) = previous_environment.parent() else {
+            let Some(collection) = previous_environment.parent() else {
                 continue;
             };
 
-            // A collection rename moves the environment with it. Moving one
-            // request into another existing collection keeps past runs bound
-            // to their original collection's still-available environment.
-            if previous_request.starts_with(previous_collection) && !previous_collection.is_dir() {
+            // The collection relocation event gives the original root. Do not
+            // infer relocation from filesystem existence: case-only renames
+            // leave the old spelling readable on case-insensitive filesystems.
+            if collection == previous_collection {
                 entry.environment_path = Some(environment.to_path_buf());
                 changed = true;
             }
@@ -153,6 +153,33 @@ mod relocation_tests {
     use super::{History, HistoryEntry};
 
     #[test]
+    fn collection_relocation_updates_history_even_when_old_spelling_is_readable() {
+        let directory = tempfile::tempdir().unwrap();
+        let before = directory.path().join("API");
+        let after = directory.path().join("api");
+        std::fs::create_dir(&before).unwrap();
+        let state = directory.path().join("history.json");
+        let mut history = History::load(state.clone()).unwrap();
+        history
+            .push(HistoryEntry::new(
+                "Item".into(),
+                request::HttpRequest::default(),
+                Some(before.join("environment.toml")),
+            ))
+            .unwrap();
+
+        // Emulate the case-insensitive alias on every test platform.
+        assert!(before.is_dir());
+        history
+            .relocate_environment(&before, &after.join("environment.toml"))
+            .unwrap();
+        assert_eq!(
+            History::load(state).unwrap().entries[0].environment_path,
+            Some(after.join("environment.toml")),
+        );
+    }
+
+    #[test]
     fn collection_rename_updates_persisted_history_but_request_move_keeps_original_environment() {
         let directory = tempfile::tempdir().unwrap();
         let before = directory.path().join("Old API");
@@ -180,7 +207,7 @@ mod relocation_tests {
 
         std::fs::rename(&before, &after).unwrap();
         history
-            .relocate_environment(&before.join("item.toml"), &after.join("environment.toml"))
+            .relocate_environment(&before, &after.join("environment.toml"))
             .unwrap();
         let restored = History::load(state).unwrap();
         assert_eq!(

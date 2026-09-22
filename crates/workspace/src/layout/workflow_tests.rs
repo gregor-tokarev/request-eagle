@@ -749,3 +749,106 @@ path = "https://{{host}}/account"
         "renaming a collection must update environment bindings even when all saved requests were deleted"
     );
 }
+
+#[gpui_kit::test]
+fn history_copy_follows_case_only_then_ordinary_collection_rename(cx: &mut TestAppContext) {
+    use std::fs;
+
+    fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+        cx.update(|window, _| window.refresh());
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let collections_path = directory.path().join("collections");
+    let original = collections_path.join("API");
+    let state = directory.path().join("state");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(
+        original.join("environment.toml"),
+        "host = \"example.test\"\n",
+    )
+    .unwrap();
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let collections = CollectionRegistry::from_path(&collections_path).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+    });
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.enable_workflow_storage(state.clone(), cx);
+            view.history
+                .push(crate::history::HistoryEntry::new(
+                    "Past attempt".into(),
+                    request::HttpRequest {
+                        path: "https://{{host}}/account".into(),
+                        ..Default::default()
+                    },
+                    Some(original.join("environment.toml")),
+                ))
+                .unwrap();
+            cx.notify();
+        });
+    });
+    click(cx, "request-history");
+    click(cx, "history-entry-0");
+    let copy = cx.read(|cx| {
+        view.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+
+    // On a case-insensitive filesystem, the first rename leaves the old path
+    // readable. Its exact stored spelling still has to follow the rename so
+    // the second relocation can find every binding.
+    for name in ["api", "Renamed API"] {
+        click(cx, "collection-row-0");
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input(name);
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        let environment = collections_path.join(name).join("environment.toml");
+        assert!(environment.is_file());
+        let history = crate::history::History::load(state.join("history.json")).unwrap();
+        let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+            .load()
+            .unwrap()
+            .unwrap();
+        let copy_environment = cx.read(|cx| {
+            assert!(view.read(cx).tabs[1].request_path.is_none());
+            assert!(view.read(cx).tabs[1].request_id.is_none());
+            copy.read(cx).environment_path.clone()
+        });
+        observed.push((
+            name,
+            copy_environment,
+            history.entries[0].environment_path.clone(),
+            snapshot.tabs[1].environment_path.clone(),
+        ));
+        expected.push((
+            name,
+            Some(environment.clone()),
+            Some(environment.clone()),
+            Some(environment),
+        ));
+    }
+
+    assert_eq!(
+        observed, expected,
+        "open copies, persisted history, and session recovery must follow both collection renames"
+    );
+}
