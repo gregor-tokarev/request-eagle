@@ -103,7 +103,19 @@ pub(super) fn resolve_request(
         Some(Err(error)) => return Err(ExecutionError::InvalidVariables(error.to_string())),
         None => Default::default(),
     };
-    let resolved = request::resolve_variables(request, &variables)
+    let mut template = request.clone();
+    if matches!(template.method, Method::Get | Method::Head) {
+        template.body = None;
+        template.form = None;
+    } else if template.form.is_some() {
+        template.headers.retain(|(name, _)| {
+            !["content-type", "content-length", "transfer-encoding"]
+                .iter()
+                .any(|header| name.eq_ignore_ascii_case(header))
+        });
+    }
+
+    let resolved = request::resolve_variables(&template, &variables)
         .map_err(|error| ExecutionError::InvalidVariables(error.to_string()))?;
 
     Ok(outgoing_request(&resolved))

@@ -1,4 +1,4 @@
-use request::{ApiKeyLocation, Authentication, Method};
+use request::{ApiKeyLocation, Authentication, FormBody, Method, MultipartField};
 use serde_json::json;
 
 use super::parse_import;
@@ -171,11 +171,8 @@ fn postman_imports_nested_requests_with_query_once_and_disabled_fields_omitted()
     assert_eq!(imported[0].name, "Update");
     assert_eq!(imported[0].folders, ["People"]);
     assert_eq!(request.method, Method::Patch);
-    assert_eq!(request.path, "https://example.test/users/42");
-    assert_eq!(
-        request.query,
-        Some(vec![("q".into(), "a b".into()), ("q".into(), "c".into())])
-    );
+    assert_eq!(request.path, "https://example.test/users/42?q=a%20b&q=c");
+    assert_eq!(request.query, None);
     assert_eq!(
         request.headers,
         vec![
@@ -232,7 +229,10 @@ fn postman_builds_structured_urls_and_encodes_form_bodies() {
     let request = &imported[0].request;
 
     assert_eq!(request.path, "http://api.example.test:8080/v1/login");
-    assert_eq!(request.body.as_deref(), Some(b"user=a+b%2Bc".as_slice()));
+    assert_eq!(
+        request.form,
+        Some(FormBody::UrlEncoded(vec![("user".into(), "a b+c".into())]))
+    );
     assert_eq!(
         request.headers[0],
         ("Accept".into(), "application/json".into())
@@ -273,7 +273,7 @@ fn postman_resolves_collection_defaults_and_preserves_environment_placeholders()
 fn postman_reports_unsupported_data_before_returning_partial_import() {
     for request in [
         json!({"url": "https://example.test", "body": {"mode": "file", "file": {"src": "/private"}}}),
-        json!({"url": "https://example.test", "body": {"mode": "formdata", "formdata": []}}),
+        json!({"url": "https://example.test", "body": {"mode": "graphql", "graphql": {}}}),
         json!({"url": "https://example.test", "auth": {"type": "oauth2"}}),
         json!({"url": "https://example.test", "method": "TRACE"}),
         json!({"url": "https://example.test", "body": {"mode": "raw", "raw": {"invalid": "object"}}}),
@@ -320,4 +320,200 @@ fn postman_reports_variable_cycles_and_empty_or_invalid_documents() {
             "Unexpectedly imported {input:?}"
         );
     }
+}
+
+#[test]
+fn curl_imports_editable_multipart_without_reading_uploads() {
+    let imported = parse_import("curl https://example.test/upload -F 'description=hello' -F 'upload=@/nonexistent/file.bin' --form-string 'literal=@text;not-a-file'").unwrap();
+
+    assert_eq!(imported[0].request.method, Method::Post);
+    assert_eq!(
+        imported[0].request.form,
+        Some(FormBody::Multipart(vec![
+            MultipartField::Text {
+                name: "description".into(),
+                value: "hello".into()
+            },
+            MultipartField::File {
+                name: "upload".into(),
+                path: "/nonexistent/file.bin".into()
+            },
+            MultipartField::Text {
+                name: "literal".into(),
+                value: "@text;not-a-file".into()
+            },
+        ]))
+    );
+
+    for command in [
+        "curl https://example.test -F 'file=@relative.bin'",
+        "curl https://example.test -F 'file=@/tmp/file;type=text/plain'",
+        "curl https://example.test -F 'file=@/tmp/a,/tmp/b'",
+        "curl https://example.test -F 'text=</tmp/a'",
+        "curl https://example.test -F 'x=y' -d 'a=b'",
+        "curl https://example.test -G -F 'x=y'",
+    ] {
+        assert!(
+            parse_import(command).is_err(),
+            "Unexpectedly imported {command}"
+        );
+    }
+}
+
+#[test]
+fn curl_header_shortcuts_follow_precedence_and_json_get_has_json_headers() {
+    let imported = parse_import("curl https://example.test -A first -A second -e https://first.test -e https://second.test -H 'user-agent: explicit' -G --json '{}'").unwrap();
+    let request = &imported[0].request;
+
+    assert_eq!(request.method, Method::Get);
+    assert_eq!(request.path, "https://example.test?{}");
+    assert_eq!(
+        request.headers,
+        vec![
+            ("user-agent".into(), "explicit".into()),
+            ("Referer".into(), "https://second.test".into()),
+            ("Content-Type".into(), "application/json".into()),
+            ("Accept".into(), "application/json".into()),
+        ]
+    );
+}
+
+#[test]
+fn postman_preserves_escaped_queries_plus_signs_and_valueless_flags() {
+    let imported = parse_import(
+        &json!({"item": [{"request": {"url": {
+            "raw": "https://example.test/?old=discarded",
+            "query": [
+                {"key": "q", "value": "a%2Fb+c"},
+                {"key": "a=b", "value": "one&two=three#four"},
+                {"key": "flag", "value": null},
+                {"key": "empty", "value": ""},
+                {"key": "utf8", "value": "Привет"},
+                {"key": "bytes", "value": "%FF%zz"},
+                {"key": "disabled", "value": "no", "disabled": true}
+            ]
+        }}}]})
+        .to_string(),
+    )
+    .unwrap();
+    let request = &imported[0].request;
+
+    assert_eq!(
+        request.path,
+        "https://example.test/?q=a%2Fb+c&a%3Db=one%26two=three%23four&flag&empty=&utf8=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82&bytes=%FF%zz"
+    );
+    assert!(request.query.is_none());
+    assert_eq!(
+        url::Url::parse(&request.path).unwrap().as_str(),
+        request.path
+    );
+}
+
+#[test]
+fn postman_resolves_path_variables_before_raw_query_and_fragment() {
+    for suffix in ["?q=one", "#details", "?q=one#details"] {
+        let imported = parse_import(
+            &json!({"item": [{"request": {"url": {
+                "raw": format!("https://example.test/users/:id{suffix}"),
+                "variable": [{"key": "id", "value": "42"}]
+            }}}]})
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            imported[0].request.path,
+            format!("https://example.test/users/42{suffix}")
+        );
+    }
+}
+
+#[test]
+fn postman_preserves_environment_variables_in_form_and_query_until_execution() {
+    let imported = parse_import(
+        &json!({"item": [{"request": {
+            "method": "POST",
+            "url": {"raw": "https://example.test", "query": [
+                {"key": "search", "value": "{{term}}"},
+                {"key": "literal", "value": "a%2Fb+c"}
+            ]},
+            "body": {"mode": "urlencoded", "urlencoded": [{"key": "token", "value": "{{token}}"}]}
+        }}]})
+        .to_string(),
+    )
+    .unwrap();
+    let template = &imported[0].request;
+    let resolved = request::resolve_variables(
+        template,
+        &std::collections::HashMap::from([
+            ("term".into(), "one&two=three".into()),
+            ("token".into(), "a+b".into()),
+        ]),
+    )
+    .unwrap();
+    let mut url = url::Url::parse(&resolved.path).unwrap();
+    url.query_pairs_mut()
+        .extend_pairs(resolved.query.as_ref().unwrap());
+
+    assert_eq!(
+        url.as_str(),
+        "https://example.test/?search=one%26two%3Dthree&literal=a%2Fb+c"
+    );
+    assert_eq!(
+        resolved.form,
+        Some(FormBody::UrlEncoded(vec![("token".into(), "a+b".into())]))
+    );
+    assert_eq!(
+        template.form,
+        Some(FormBody::UrlEncoded(vec![(
+            "token".into(),
+            "{{token}}".into()
+        )]))
+    );
+}
+
+#[test]
+fn postman_imports_multipart_file_arrays_and_text_fields() {
+    let imported = parse_import(&json!({"item": [{"request": {
+        "method": "POST", "url": "https://example.test/upload",
+        "body": {"mode": "formdata", "formdata": [
+            {"key": "description", "type": "text", "value": "{{description}}"},
+            {"key": "files", "type": "file", "src": ["/nonexistent/a.bin", "/nonexistent/b.bin"]},
+            {"key": "disabled", "type": "file", "src": null, "disabled": true}
+        ]}
+    }}]}).to_string()).unwrap();
+
+    assert_eq!(
+        imported[0].request.form,
+        Some(FormBody::Multipart(vec![
+            MultipartField::Text {
+                name: "description".into(),
+                value: "{{description}}".into()
+            },
+            MultipartField::File {
+                name: "files".into(),
+                path: "/nonexistent/a.bin".into()
+            },
+            MultipartField::File {
+                name: "files".into(),
+                path: "/nonexistent/b.bin".into()
+            },
+        ]))
+    );
+}
+
+#[test]
+fn postman_limits_total_expanded_data() {
+    let collection = json!({
+        "variable": [{"key": "large", "value": "x".repeat(1024 * 1024)}],
+        "item": (0..17).map(|index| json!({"name": index.to_string(), "request": {
+            "url": "https://example.test", "body": {"mode": "raw", "raw": "{{large}}"}
+        }})).collect::<Vec<_>>()
+    });
+
+    assert!(
+        parse_import(&collection.to_string())
+            .unwrap_err()
+            .contains("16 MiB")
+    );
 }

@@ -149,3 +149,94 @@ fn history_reopens_an_editable_copy_and_clears_persisted_entries(cx: &mut TestAp
             .is_empty()
     );
 }
+
+#[gpui_kit::test]
+fn recovered_saved_drafts_keep_dirty_state_and_save_auth_and_forms(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let collections_path = directory.path().join("collections");
+    let state = directory.path().join("state");
+    let mut collections = CollectionRegistry::from_path(&collections_path).unwrap();
+    let original = request::HttpRequest {
+        path: "https://example.com/original".into(),
+        ..Default::default()
+    };
+    let imported = collections
+        .import_requests(
+            "API",
+            vec![collection::ImportedRequest {
+                name: "Account".into(),
+                folders: vec![],
+                request: original.clone(),
+            }],
+        )
+        .unwrap();
+    let file = &imported[0];
+    let edited = request::HttpRequest {
+        method: request::Method::Patch,
+        path: "https://example.com/edited".into(),
+        authentication: request::Authentication::Bearer {
+            token: "{{token}}".into(),
+        },
+        form: Some(request::FormBody::UrlEncoded(vec![(
+            "name".into(),
+            "first & last".into(),
+        )])),
+        ..Default::default()
+    };
+    crate::session::SessionStore::new(state.join("session.json"))
+        .save(&crate::session::SessionSnapshot {
+            selected: Some(0),
+            tabs: vec![crate::session::RecoveredTab {
+                title: "Account".into(),
+                name: "Account".into(),
+                collection: Some("API".into()),
+                request_path: Some(file.path.clone()),
+                environment_path: Some(file.collection_path.join("environment.toml")),
+                request: edited.clone(),
+                saved_request: Some(original),
+            }],
+        })
+        .unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+    });
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.enable_workflow_storage(state.clone(), cx);
+            view.focus(window, cx);
+        })
+    });
+    let draft = cx.read(|cx| {
+        view.read(cx).tabs[0]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    cx.read(|cx| assert!(draft.read(cx).is_dirty()));
+    cx.simulate_keystrokes("secondary-w");
+    assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
+    let cancel = cx.debug_bounds("cancel-close-request").unwrap();
+    cx.simulate_click(cancel.center(), Modifiers::default());
+    cx.simulate_keystrokes("secondary-s");
+    cx.read(|cx| assert!(!draft.read(cx).is_dirty()));
+    let reloaded = CollectionRegistry::from_path(&collections_path).unwrap();
+    let collection::Request::Http(saved) = &reloaded.file(&file.path).unwrap().request;
+    assert_eq!(saved, &edited);
+    cx.update(|_, cx| view.update(cx, |view, cx| view.flush_session(cx)));
+    let snapshot = crate::session::SessionStore::new(state.join("session.json"))
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.tabs[0].saved_request.as_ref(), Some(&edited));
+    assert_eq!(snapshot.tabs[0].request, edited);
+    cx.simulate_keystrokes("secondary-w");
+    cx.read(|cx| assert!(view.read(cx).tabs.is_empty()));
+}

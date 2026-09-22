@@ -47,6 +47,7 @@ fn imported_requests_reload_with_all_request_fields_and_authentication() {
         authentication: Authentication::Bearer {
             token: "{{api_token}}".into(),
         },
+        ..Default::default()
     };
     let expected = serde_json::to_value(&request).unwrap();
     let imported = registry

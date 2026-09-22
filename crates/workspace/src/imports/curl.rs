@@ -1,6 +1,6 @@
-use request::{Authentication, HttpRequest, Method};
+use request::{Authentication, FormBody, HttpRequest, Method, MultipartField};
 
-use super::parser::{ImportedRequest, add_content_type, header, method};
+use super::parser::{ImportedRequest, add_content_type, header, method, upload_path};
 
 pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
     let words = super::shell::words(input)?;
@@ -14,12 +14,15 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
     let mut request = HttpRequest::default();
     let mut explicit_method = None;
     let mut body_parts = Vec::new();
+    let mut form_fields = Vec::new();
     let mut json_body = false;
     let mut plain_body = false;
     let mut compressed = false;
     let mut get = false;
     let mut head = false;
     let mut positional = false;
+    let mut user_agent = None;
+    let mut referer = None;
     let mut index = 1;
 
     while index < words.len() {
@@ -59,6 +62,9 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                 | "-b"
                 | "--cookie"
                 | "--oauth2-bearer"
+                | "-F"
+                | "--form"
+                | "--form-string"
         );
 
         let value = if takes_value {
@@ -119,6 +125,9 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                 body_parts.push(encode_data(value)?);
                 plain_body = true;
             }
+            "-F" | "--form" | "--form-string" => {
+                form_fields.push(form_field(value, option == "--form-string")?);
+            }
             "-u" | "--user" => {
                 let (username, password) = value.split_once(':').ok_or(
                     "cURL --user needs username:password. Interactive password prompts cannot be imported.",
@@ -133,8 +142,14 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                     token: value.into(),
                 };
             }
-            "-A" | "--user-agent" => request.headers.push(("User-Agent".into(), value.into())),
-            "-e" | "--referer" => request.headers.push(("Referer".into(), value.into())),
+            "-A" | "--user-agent" => user_agent = Some(value.to_owned()),
+            "-e" | "--referer" => {
+                if value.ends_with(";auto") {
+                    return Err("cURL's automatic Referer option cannot be imported.".into());
+                }
+
+                referer = Some(value.to_owned());
+            }
             "-b" | "--cookie" => {
                 if !value.contains('=') {
                     return Err(
@@ -184,6 +199,27 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
         );
     }
 
+    if !form_fields.is_empty() && (!body_parts.is_empty() || head || get) {
+        return Err(
+            "cURL multipart fields cannot be mixed with raw data, --head, or --get.".into(),
+        );
+    }
+
+    for (name, value) in [("User-Agent", user_agent), ("Referer", referer)] {
+        if let Some(value) = value
+            && !request
+                .headers
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case(name))
+        {
+            if value.is_empty() {
+                return Err(format!("cURL removal of {name} cannot be imported."));
+            }
+
+            request.headers.push((name.into(), value));
+        }
+    }
+
     if compressed
         && !request
             .headers
@@ -201,13 +237,15 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
 
     request.method = explicit_method.unwrap_or(if head {
         Method::Head
-    } else if get || body_parts.is_empty() {
+    } else if get || (body_parts.is_empty() && form_fields.is_empty()) {
         Method::Get
     } else {
         Method::Post
     });
 
-    if !body_parts.is_empty() {
+    if !form_fields.is_empty() {
+        request.form = Some(FormBody::Multipart(form_fields));
+    } else if !body_parts.is_empty() {
         let data = body_parts.join(if json_body { "" } else { "&" });
 
         if get {
@@ -231,6 +269,10 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
                     "application/x-www-form-urlencoded"
                 },
             );
+        }
+
+        if json_body {
+            add_content_type(&mut request, "application/json");
         }
 
         if json_body
@@ -259,13 +301,43 @@ fn split_option(word: &str) -> (&str, Option<&str>) {
     } else if word.len() > 2
         && matches!(
             word.get(..2),
-            Some("-X" | "-H" | "-d" | "-u" | "-A" | "-e" | "-b")
+            Some("-X" | "-H" | "-d" | "-u" | "-A" | "-e" | "-b" | "-F")
         )
     {
         (&word[..2], Some(&word[2..]))
     } else {
         (word, None)
     }
+}
+
+fn form_field(value: &str, literal: bool) -> Result<MultipartField, String> {
+    let (name, value) = value
+        .split_once('=')
+        .ok_or("A cURL multipart field needs name=value.")?;
+
+    if !literal && value.contains(';') {
+        return Err("Custom cURL multipart attributes are not supported. Use --form-string for literal semicolons.".into());
+    }
+
+    if !literal && let Some(path) = value.strip_prefix('@') {
+        if path.contains([',', '"']) {
+            return Err("Import cURL uploads using one absolute file path per --form flag.".into());
+        }
+
+        return Ok(MultipartField::File {
+            name: name.into(),
+            path: upload_path(path)?,
+        });
+    }
+
+    if !literal && value.starts_with('<') {
+        return Err("cURL file-backed text fields cannot be imported. Paste the field value with --form-string.".into());
+    }
+
+    Ok(MultipartField::Text {
+        name: name.into(),
+        value: value.into(),
+    })
 }
 
 fn set_url(request: &mut HttpRequest, value: &str) -> Result<(), String> {

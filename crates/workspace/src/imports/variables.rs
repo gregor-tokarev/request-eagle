@@ -33,24 +33,36 @@ pub(super) fn resolve_collection_defaults(collection: &mut Value) -> Result<(), 
         defaults.insert(key.to_owned(), value);
     }
 
-    replace_strings(collection, &defaults, &mut BTreeMap::new())
+    replace_strings(
+        collection,
+        &defaults,
+        &mut BTreeMap::new(),
+        &mut (16 * 1024 * 1024),
+    )
 }
 
 fn replace_strings(
     value: &mut Value,
     defaults: &BTreeMap<String, String>,
     cache: &mut BTreeMap<String, String>,
+    remaining: &mut usize,
 ) -> Result<(), String> {
     match value {
-        Value::String(text) => *text = expand(text, defaults, cache, &mut Vec::new())?,
+        Value::String(text) => {
+            let expanded = expand(text, defaults, cache, &mut Vec::new())?;
+            *remaining = remaining
+                .checked_sub(expanded.len())
+                .ok_or("Expanded Postman values exceed the 16 MiB import limit.")?;
+            *text = expanded;
+        }
         Value::Array(values) => {
             for value in values {
-                replace_strings(value, defaults, cache)?;
+                replace_strings(value, defaults, cache, remaining)?;
             }
         }
         Value::Object(values) => {
             for value in values.values_mut() {
-                replace_strings(value, defaults, cache)?;
+                replace_strings(value, defaults, cache, remaining)?;
             }
         }
         _ => {}

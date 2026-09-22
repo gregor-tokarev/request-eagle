@@ -192,9 +192,21 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         .get_mut("request")
         .and_then(Item::as_table_like_mut)
     {
-        for field in ["body", "query", "form"] {
+        for field in ["body", "query", "form", "authentication"] {
             if updates["request"].get(field).is_none() {
                 request.remove(field);
+            }
+        }
+    }
+
+    if let Some(authentication) = document
+        .get_mut("request")
+        .and_then(|request| request.get_mut("authentication"))
+        .and_then(Item::as_table_like_mut)
+    {
+        for field in ["username", "password", "token", "name", "value", "location"] {
+            if updates["request"]["authentication"].get(field).is_none() {
+                authentication.remove(field);
             }
         }
     }

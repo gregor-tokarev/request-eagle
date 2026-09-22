@@ -1,4 +1,5 @@
 use request::{HttpRequest, Method};
+use std::path::PathBuf;
 
 /// An imported request, before the user chooses a collection to save it in.
 #[derive(Debug)]
@@ -51,4 +52,14 @@ pub(super) fn header(value: &str) -> Result<(String, String), String> {
     }
 
     Err(format!("Header {value:?} must contain a name and a colon."))
+}
+
+pub(super) fn upload_path(value: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(value);
+
+    if !path.is_absolute() && !value.starts_with("{{") {
+        return Err("Imported uploads need an absolute file path or an environment variable containing one.".into());
+    }
+
+    Ok(path)
 }

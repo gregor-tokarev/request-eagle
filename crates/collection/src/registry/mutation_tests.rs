@@ -160,6 +160,7 @@ request_custom = 'keep the request metadata'
         body: Some(b"new body".to_vec()),
         form: None,
         query: Some(vec![("page".into(), "2".into())]),
+        ..Default::default()
     };
 
     registry
@@ -472,4 +473,42 @@ query = [
     let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
+}
+
+#[test]
+fn changing_and_clearing_authentication_removes_old_credentials_from_disk() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut request = HttpRequest {
+        path: "https://example.com/account".into(),
+        authentication: request::Authentication::Basic {
+            username: "old-user".into(),
+            password: "old-password".into(),
+        },
+        ..Default::default()
+    };
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+    assert!(fs::read_to_string(&path).unwrap().contains("old-password"));
+
+    request.authentication = request::Authentication::Bearer {
+        token: "new-token".into(),
+    };
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(!content.contains("old-user"));
+    assert!(!content.contains("old-password"));
+    assert!(content.contains("new-token"));
+
+    request.authentication = request::Authentication::None;
+    registry.update_request(&path, "list", request.into()).unwrap();
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(!content.contains("authentication"));
+    assert!(!content.contains("new-token"));
+    let Request::Http(saved) = FileEntry::from_path(&path).unwrap().request;
+    assert_eq!(saved.authentication, request::Authentication::None);
 }

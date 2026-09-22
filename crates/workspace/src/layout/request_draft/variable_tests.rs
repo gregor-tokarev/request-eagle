@@ -7,7 +7,7 @@ use std::{
 
 use collection::{HttpRequest, Method};
 use gpui_kit::TestAppContext;
-use request::{Authentication, ExecutionError};
+use request::{Authentication, ExecutionError, FormBody, MultipartField, RequestExecutor};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, execution::resolve_request};
@@ -76,11 +76,17 @@ async fn sends_with_latest_environment_without_changing_draft_templates(cx: &mut
             let mut body = vec![0; length];
             stream.read_exact(&mut body).await.unwrap();
 
-            assert!(head.starts_with(&format!("POST /{value}?account={value}+%26+eagle ")));
+            let method = if value == "first" { "POST" } else { "PATCH" };
+            assert!(head.starts_with(&format!("{method} /{value}?account={value}+%26+eagle ")));
             assert!(head.contains(&format!("authorization: Bearer {value}-secret\r\n")));
             assert!(head.contains(&format!("x-account: {value}\r\n")));
-            assert!(head.contains("content-type: application/json\r\n"));
-            assert_eq!(body, format!("{{\"account\":\"{value}\"}}").as_bytes());
+            if value == "first" {
+                assert!(head.contains("content-type: application/json\r\n"));
+                assert_eq!(body, format!("{{\"account\":\"{value}\"}}").as_bytes());
+            } else {
+                assert!(head.contains("content-type: application/x-www-form-urlencoded\r\n"));
+                assert_eq!(body, b"second=second+%26+eagle");
+            }
 
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
@@ -104,6 +110,7 @@ async fn sends_with_latest_environment_without_changing_draft_templates(cx: &mut
             authentication: Authentication::Bearer {
                 token: "{{account}}-secret".into(),
             },
+            ..HttpRequest::default()
         };
         draft.environment_path = Some(environment_path.as_path().to_owned());
         draft.prepare(window, cx);
@@ -125,6 +132,19 @@ async fn sends_with_latest_environment_without_changing_draft_templates(cx: &mut
             format!("base_url = \"{url}\"\naccount = \"{value}\"\nheader_name = \"X-Account\"\n"),
         )
         .unwrap();
+
+        if value == "second" {
+            cx.update(|_, cx| {
+                draft.update(cx, |draft, cx| {
+                    draft.request.form = Some(FormBody::UrlEncoded(vec![(
+                        "{{account}}".into(),
+                        "{{account}} & eagle".into(),
+                    )]));
+                    draft.set_method(Method::Patch, cx);
+                })
+            });
+        }
+
         cx.update(|window, cx| draft.update(cx, |draft, cx| draft.send(window, cx)));
         let started = Instant::now();
 
@@ -164,6 +184,15 @@ async fn sends_with_latest_environment_without_changing_draft_templates(cx: &mut
 
     let history = history.borrow();
     assert_eq!(history.len(), 2);
+    assert_eq!(history[0].request.method, Method::Post);
+    assert_eq!(history[1].request.method, Method::Patch);
+    assert_eq!(
+        history[1].request.form,
+        Some(FormBody::UrlEncoded(vec![(
+            "{{account}}".into(),
+            "{{account}} & eagle".into(),
+        )]))
+    );
 
     for entry in history.iter() {
         assert_eq!(entry.request.path, "{{base_url}}/{{account}}");
@@ -247,4 +276,143 @@ async fn missing_variables_prevent_network_and_record_the_attempt(cx: &mut TestA
             token: "{{missing_token}}".into(),
         }
     );
+}
+
+#[test]
+fn patch_multipart_resolves_environment_and_uploads_original_file_bytes() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let environment_path = directory.path().join("environment.toml");
+        let upload_path = directory.path().join("example upload.bin");
+        let upload = b"\0{{keep_file_contents_literal}}\xff";
+        fs::write(&upload_path, upload).unwrap();
+
+        let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/upload", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+            }
+
+            let head = String::from_utf8(head).unwrap();
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            let mut body = vec![0; length];
+            stream.read_exact(&mut body).await.unwrap();
+
+            assert!(head.starts_with("PATCH /upload "));
+            assert!(head.contains("content-type: multipart/form-data; boundary="));
+            assert!(head.contains("authorization: Bearer explicit-token\r\n"));
+            assert!(body.windows(upload.len()).any(|bytes| bytes == upload));
+
+            let text = String::from_utf8_lossy(&body);
+            assert!(text.contains("name=\"account\"\r\n\r\neagle & bird"));
+            assert!(text.contains("name=\"attachment\"; filename=\"example upload.bin\""));
+
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+        environment::Environment {
+            path: environment_path.clone(),
+            entries: std::collections::HashMap::from([
+                ("url".into(), url),
+                ("name".into(), "account".into()),
+                ("value".into(), "eagle & bird".into()),
+                ("file_field".into(), "attachment".into()),
+                ("file_path".into(), upload_path.to_str().unwrap().into()),
+            ]),
+        }
+        .save_file()
+        .unwrap();
+        let template = HttpRequest {
+            method: Method::Patch,
+            path: "{{url}}".into(),
+            headers: vec![("Authorization".into(), "Bearer explicit-token".into())],
+            body: Some(b"{{inactive_raw_body}}".to_vec()),
+            form: Some(FormBody::Multipart(vec![
+                MultipartField::Text {
+                    name: "{{name}}".into(),
+                    value: "{{value}}".into(),
+                },
+                MultipartField::File {
+                    name: "{{file_field}}".into(),
+                    path: "{{file_path}}".into(),
+                },
+            ])),
+            authentication: Authentication::Bearer {
+                token: "{{unused_inherited_token}}".into(),
+            },
+            ..HttpRequest::default()
+        };
+        let resolved = resolve_request(&template, Some(&environment_path)).unwrap();
+        let execution = RequestExecutor::new(&request::RequestPreferences {
+            timeout_ms: 2_000,
+            ..Default::default()
+        })
+        .unwrap()
+        .execute(resolved)
+        .await
+        .unwrap();
+        server.await;
+
+        let request::Response::Http(response) = execution.response;
+        assert_eq!(response.status.as_u16(), 200);
+        assert_eq!(template.path, "{{url}}");
+        assert_eq!(fs::read(&upload_path).unwrap(), upload);
+        assert!(matches!(
+            template.form.unwrap(),
+            FormBody::Multipart(fields)
+                if fields[1] == MultipartField::File {
+                    name: "{{file_field}}".into(),
+                    path: "{{file_path}}".into(),
+                }
+        ));
+    });
+}
+
+#[test]
+fn inactive_bodies_and_form_framing_do_not_require_variables() {
+    for method in [Method::Get, Method::Head] {
+        let template = HttpRequest {
+            method,
+            path: "https://example.com/items".into(),
+            body: Some(b"{{unused_raw}}".to_vec()),
+            form: Some(FormBody::UrlEncoded(vec![(
+                "name".into(),
+                "{{unused_form}}".into(),
+            )])),
+            ..Default::default()
+        };
+        let outgoing = resolve_request(&template, None).unwrap();
+        assert!(outgoing.body.is_none());
+        assert!(outgoing.form.is_none());
+        assert!(template.body.is_some());
+        assert!(template.form.is_some());
+    }
+
+    let template = HttpRequest {
+        method: Method::Post,
+        path: "https://example.com/items".into(),
+        headers: vec![
+            ("Content-Type".into(), "{{stale_type}}".into()),
+            ("Content-Length".into(), "{{stale_length}}".into()),
+        ],
+        form: Some(FormBody::UrlEncoded(vec![("name".into(), "value".into())])),
+        ..Default::default()
+    };
+    assert!(resolve_request(&template, None).unwrap().headers.is_empty());
 }

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use request::{
-    ApiKeyLocation, Authentication, HttpRequest, Method, VariableError, resolve_variables,
+    ApiKeyLocation, Authentication, FormBody, HttpRequest, Method, MultipartField, VariableError,
+    resolve_variables,
 };
 
 fn variables() -> HashMap<String, String> {
@@ -25,6 +26,7 @@ fn resolves_all_request_fields_without_mutating_the_template() {
         authentication: Authentication::Bearer {
             token: "{{token}}".into(),
         },
+        ..HttpRequest::default()
     };
     let resolved = resolve_variables(&template, &variables()).unwrap();
 
@@ -134,4 +136,184 @@ fn keeps_binary_bodies_and_substituted_values_literal() {
 
     assert_eq!(resolved.body, template.body);
     assert_eq!(resolved.headers[0].1, "Bearer {{literal}}");
+}
+
+#[test]
+fn explicit_authorization_skips_unused_basic_and_bearer_variables() {
+    let variables = HashMap::from([("header".into(), "aUtHoRiZaTiOn".into())]);
+
+    for authentication in [
+        Authentication::Basic {
+            username: "{{missing_username}}".into(),
+            password: "{{missing_password}}".into(),
+        },
+        Authentication::Bearer {
+            token: "{{missing_token}}".into(),
+        },
+    ] {
+        let request = HttpRequest {
+            headers: vec![("{{header}}".into(), "Bearer explicit-token".into())],
+            authentication,
+            ..HttpRequest::default()
+        };
+        let resolved = resolve_variables(&request, &variables).unwrap();
+
+        assert_eq!(resolved.headers[0].1, "Bearer explicit-token");
+        assert_eq!(resolved.authentication, request.authentication);
+
+        let active_auth = HttpRequest {
+            headers: Vec::new(),
+            ..request
+        };
+        assert!(matches!(
+            resolve_variables(&active_auth, &variables),
+            Err(VariableError::Undefined { .. })
+        ));
+    }
+}
+
+#[test]
+fn explicit_api_key_headers_and_queries_skip_unused_value_variables() {
+    let variables = HashMap::from([("key".into(), "api_key".into())]);
+
+    for request in [
+        HttpRequest {
+            headers: vec![("API_KEY".into(), "explicit-value".into())],
+            authentication: Authentication::ApiKey {
+                name: "{{key}}".into(),
+                value: "{{missing_token}}".into(),
+                location: ApiKeyLocation::Header,
+            },
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "https://example.test/path?api%5Fkey=explicit-value#fragment".into(),
+            authentication: Authentication::ApiKey {
+                name: "{{key}}".into(),
+                value: "{{missing_token}}".into(),
+                location: ApiKeyLocation::Query,
+            },
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "example.test/path?api_key=explicit-value".into(),
+            authentication: Authentication::ApiKey {
+                name: "{{key}}".into(),
+                value: "{{missing_token}}".into(),
+                location: ApiKeyLocation::Query,
+            },
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            query: Some(vec![("{{key}}".into(), "explicit-value".into())]),
+            authentication: Authentication::ApiKey {
+                name: "{{key}}".into(),
+                value: "{{missing_token}}".into(),
+                location: ApiKeyLocation::Query,
+            },
+            ..HttpRequest::default()
+        },
+    ] {
+        let resolved = resolve_variables(&request, &variables).unwrap();
+        let Authentication::ApiKey { name, value, .. } = resolved.authentication else {
+            panic!("preserve the configured authentication type");
+        };
+
+        assert_eq!(name, "api_key");
+        assert_eq!(value, "{{missing_token}}");
+    }
+
+    for path in [
+        "https://example.test/path?API_KEY=different-case",
+        "https://example.test/path#fragment?api_key=not-a-query",
+    ] {
+        let request = HttpRequest {
+            path: path.into(),
+            authentication: Authentication::ApiKey {
+                name: "{{key}}".into(),
+                value: "{{missing_token}}".into(),
+                location: ApiKeyLocation::Query,
+            },
+            ..HttpRequest::default()
+        };
+
+        assert_eq!(
+            resolve_variables(&request, &variables).unwrap_err(),
+            VariableError::Undefined {
+                name: "missing_token".into(),
+                field: "API key value",
+            }
+        );
+    }
+}
+
+#[test]
+fn resolves_form_fields_and_upload_paths_without_changing_templates() {
+    let variables = HashMap::from([
+        ("name".into(), "user name".into()),
+        ("value".into(), "eagle & bird".into()),
+        ("file_field".into(), "attachment".into()),
+        ("file_path".into(), "/tmp/example upload.bin".into()),
+    ]);
+
+    for (form, expected) in [
+        (
+            FormBody::UrlEncoded(vec![("{{name}}".into(), "{{value}}".into())]),
+            FormBody::UrlEncoded(vec![("user name".into(), "eagle & bird".into())]),
+        ),
+        (
+            FormBody::Multipart(vec![
+                MultipartField::Text {
+                    name: "{{name}}".into(),
+                    value: "{{value}}".into(),
+                },
+                MultipartField::File {
+                    name: "{{file_field}}".into(),
+                    path: "{{file_path}}".into(),
+                },
+            ]),
+            FormBody::Multipart(vec![
+                MultipartField::Text {
+                    name: "user name".into(),
+                    value: "eagle & bird".into(),
+                },
+                MultipartField::File {
+                    name: "attachment".into(),
+                    path: "/tmp/example upload.bin".into(),
+                },
+            ]),
+        ),
+    ] {
+        let template = HttpRequest {
+            method: Method::Patch,
+            form: Some(form.clone()),
+            body: Some(b"{{inactive_raw_body}}".to_vec()),
+            ..HttpRequest::default()
+        };
+        let resolved = resolve_variables(&template, &variables).unwrap();
+
+        assert_eq!(resolved.form, Some(expected));
+        assert_eq!(template.form, Some(form));
+        assert_eq!(resolved.body, template.body);
+    }
+}
+
+#[test]
+fn missing_upload_path_variables_report_the_field_before_opening_files() {
+    let template = HttpRequest {
+        method: Method::Patch,
+        form: Some(FormBody::Multipart(vec![MultipartField::File {
+            name: "attachment".into(),
+            path: "{{missing_file}}".into(),
+        }])),
+        ..HttpRequest::default()
+    };
+
+    assert_eq!(
+        resolve_variables(&template, &HashMap::new()).unwrap_err(),
+        VariableError::Undefined {
+            name: "missing_file".into(),
+            field: "upload file path",
+        }
+    );
 }

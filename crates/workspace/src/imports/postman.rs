@@ -1,7 +1,7 @@
-use request::{ApiKeyLocation, Authentication, HttpRequest};
+use request::{ApiKeyLocation, Authentication, FormBody, HttpRequest, MultipartField};
 use serde_json::Value;
 
-use super::parser::{ImportedRequest, add_content_type, header, method};
+use super::parser::{ImportedRequest, add_content_type, header, method, upload_path};
 
 pub(super) fn parse(input: &str) -> Result<Vec<ImportedRequest>, String> {
     let mut collection: Value = serde_json::from_str(input)
@@ -142,17 +142,18 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
     }
 
     if let Some(query) = value.get("query").and_then(Value::as_array) {
-        // The structured query is authoritative and includes disabled pairs.
-        // Strip its raw copy so execution appends each enabled pair only once.
+        // Postman's structured query retains percent escapes and valueless flags.
+        // Keep static queries in the URL instead of encoding those escapes twice.
         let path = request.path.split('#').next().unwrap_or_default();
         request.path = path.split('?').next().unwrap_or_default().to_owned();
-        request.query = Some(pairs(query)?);
+        read_query(query, request)?;
     }
 
     if let Some(variables) = value.get("variable").and_then(Value::as_array) {
         let variables = pairs(variables)?;
-        request.path = request
-            .path
+        let suffix_start = request.path.find(['?', '#']).unwrap_or(request.path.len());
+        let (path, suffix) = request.path.split_at(suffix_start);
+        let resolved_path = path
             .split('/')
             .map(|segment| {
                 segment
@@ -163,9 +164,112 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
             })
             .collect::<Vec<_>>()
             .join("/");
+        request.path = format!("{resolved_path}{suffix}");
     }
 
     Ok(())
+}
+
+fn read_query(query: &[Value], request: &mut HttpRequest) -> Result<(), String> {
+    let mut encoded = Vec::new();
+    let mut templated = false;
+    let mut has_flags = false;
+
+    for field in query.iter().filter(|field| !disabled(field)) {
+        let name = match field.get("key") {
+            None | Some(Value::Null) => "",
+            Some(Value::String(name)) => name,
+            _ => return Err("Postman query names must be text.".into()),
+        };
+        let value = match field.get("value") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(value)) => Some(value.as_str()),
+            _ => return Err("Postman query values must be text.".into()),
+        };
+
+        templated |= name.contains("{{") || value.is_some_and(|value| value.contains("{{"));
+        has_flags |= value.is_none();
+        let name = encode_query_component(name, true);
+        encoded.push(match value {
+            Some(value) => format!("{name}={}", encode_query_component(value, false)),
+            None => name,
+        });
+    }
+
+    if templated {
+        if has_flags {
+            return Err("Postman templated queries with valueless flags are not supported.".into());
+        }
+
+        // Decode before runtime substitution so values supplied by the active
+        // environment are encoded as query values, including '&' and '='.
+        request.query = Some(
+            encoded
+                .into_iter()
+                .map(|field| {
+                    let (name, value) = field.split_once('=').unwrap_or((&field, ""));
+                    Ok((
+                        decode_query_component(name)?,
+                        decode_query_component(value)?,
+                    ))
+                })
+                .collect::<Result<_, String>>()?,
+        );
+    } else if !encoded.is_empty() {
+        request.path.push('?');
+        request.path.push_str(&encoded.join("&"));
+    }
+
+    Ok(())
+}
+
+fn encode_query_component(value: &str, key: bool) -> String {
+    let mut encoded = String::new();
+
+    for byte in value.bytes() {
+        if byte <= 0x20
+            || byte >= 0x7f
+            || matches!(byte, b'"' | b'#' | b'\'' | b'<' | b'>' | b'&')
+            || (key && byte == b'=')
+        {
+            use std::fmt::Write as _;
+
+            write!(encoded, "%{byte:02X}").unwrap();
+        } else {
+            encoded.push(byte as char);
+        }
+    }
+
+    encoded
+}
+
+fn decode_query_component(value: &str) -> Result<String, String> {
+    let mut decoded = Vec::new();
+    let bytes = value.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) = (
+                (bytes[index + 1] as char).to_digit(16),
+                (bytes[index + 2] as char).to_digit(16),
+            )
+        {
+            decoded.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            decoded.push(if bytes[index] == b'+' {
+                b' '
+            } else {
+                bytes[index]
+            });
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded)
+        .map_err(|_| "Templated Postman query fields must contain UTF-8 text.".into())
 }
 
 fn joined(value: Option<&Value>, separator: &str) -> Result<String, String> {
@@ -214,11 +318,77 @@ fn read_body(body: &Value, request: &mut HttpRequest) -> Result<(), String> {
                 .get("urlencoded")
                 .and_then(Value::as_array)
                 .ok_or("The urlencoded body must contain a field array.")?;
-            let encoded = url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(pairs(values)?)
-                .finish();
-            request.body = Some(encoded.into_bytes());
-            add_content_type(request, "application/x-www-form-urlencoded");
+            request.form = Some(FormBody::UrlEncoded(pairs(values)?));
+        }
+        "formdata" => {
+            let values = body
+                .get("formdata")
+                .and_then(Value::as_array)
+                .ok_or("The multipart body must contain a field array.")?;
+            let mut fields = Vec::new();
+
+            for field in values.iter().filter(|field| !disabled(field)) {
+                let name = field
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .ok_or("A Postman multipart field is missing its name.")?;
+
+                if field
+                    .get("contentType")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+                {
+                    return Err(
+                        "Custom Postman multipart content types are not supported by import."
+                            .into(),
+                    );
+                }
+
+                match field.get("type").and_then(Value::as_str).unwrap_or("text") {
+                    "text" => fields.push(MultipartField::Text {
+                        name: name.into(),
+                        value: field
+                            .get("value")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .into(),
+                    }),
+                    "file" => {
+                        let paths = match field.get("src") {
+                            Some(Value::String(path)) => vec![path.as_str()],
+                            Some(Value::Array(paths)) => paths
+                                .iter()
+                                .map(|path| {
+                                    path.as_str().ok_or("Postman upload paths must be strings.")
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                            _ => {
+                                return Err(
+                                    "A Postman upload is missing its local file path.".into()
+                                );
+                            }
+                        };
+
+                        if paths.is_empty() {
+                            return Err("A Postman upload has no selected files.".into());
+                        }
+
+                        for path in paths {
+                            fields.push(MultipartField::File {
+                                name: name.into(),
+                                path: upload_path(path)?,
+                            });
+                        }
+                    }
+                    kind => {
+                        return Err(format!(
+                            "Unsupported Postman multipart field type {kind:?}."
+                        ));
+                    }
+                }
+            }
+
+            request.form = Some(FormBody::Multipart(fields));
         }
         mode => {
             return Err(format!(

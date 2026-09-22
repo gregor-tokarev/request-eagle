@@ -187,6 +187,7 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> usize {
         let method = draft.request.method.as_str();
+        let dirty = draft.is_dirty();
         let page = cx.new(|_| draft);
         let id = self.next_id;
         let subscription = cx.observe(&page, move |this, page, cx| {
@@ -216,6 +217,7 @@ impl MainView {
 
         let index = self.open_tab(title, page, cx);
         self.tabs[index].method = Some(method);
+        self.tabs[index].dirty = dirty;
         self.tabs[index]._request_subscription = Some(subscription);
         self.tabs[index]._workflow_subscriptions = vec![changed, sent];
         self.save_session(cx);
