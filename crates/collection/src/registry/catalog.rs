@@ -35,11 +35,22 @@ impl CollectionRegistry {
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CollectionRegistryLoadError> {
         let path = path.as_ref();
+        // Capture absolute request and environment paths before they enter recovery or history.
+        // Resolve unnamed roots such as `..` like recovery does, but preserve named symlink roots.
+        let path = if path.file_name().is_none() {
+            fs::canonicalize(path)
+        } else {
+            std::path::absolute(path)
+        }
+        .map_err(|source| CollectionRegistryLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
         let mut registry = Self {
-            directory: Some(path.to_path_buf()),
+            directory: Some(path.clone()),
             ..Self::new()
         };
-        let directory = match fs::read_dir(path) {
+        let directory = match fs::read_dir(&path) {
             Ok(directory) => directory,
             Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(registry),
             Err(source) => {

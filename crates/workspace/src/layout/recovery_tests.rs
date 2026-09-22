@@ -75,6 +75,129 @@ fn parent_component_collection_roots_keep_session_recovery(cx: &mut TestAppConte
     });
 }
 
+#[gpui_kit::test]
+fn recovered_requests_keep_identity_when_relative_root_becomes_absolute(cx: &mut TestAppContext) {
+    use std::{cell::RefCell, rc::Rc};
+
+    use collection::{CollectionRegistry, FileEntry};
+
+    use super::main_view::RequestSaveRequested;
+
+    let fixture = tempfile::tempdir_in(".").unwrap();
+    let relative_root = Path::new(fixture.path().file_name().unwrap()).join("collections");
+    assert!(relative_root.is_relative());
+    let mut registry = CollectionRegistry::from_path(&relative_root).unwrap();
+    let collection = registry.create_collection().unwrap();
+    let path = registry.create_request(&collection).unwrap();
+    let file = FileEntry::from_path(&path).unwrap();
+    let environment = collection.join("environment.toml");
+    fs::write(&environment, "base_url = 'https://example.test'\n").unwrap();
+    let state = super::recovery::collection_state_directory(&relative_root).unwrap();
+    let view = restored_view(&state, cx);
+
+    view.update(cx, |view, cx| {
+        view.close_tab(0, cx);
+        view.collection_paths = vec![collection.clone()];
+        view.open_request(
+            &path,
+            file.id.clone().into(),
+            file.name.clone().into(),
+            "API".into(),
+            &file.request,
+            cx,
+        );
+    });
+    let draft = draft_at(&view, 0, cx);
+    draft.update(cx, |draft, cx| {
+        draft.request.path = "{{base_url}}/edited".into();
+        cx.notify();
+    });
+    let attempt = cx.read(|cx| {
+        let draft = draft.read(cx);
+        crate::history::HistoryEntry::new(
+            draft.name.to_string(),
+            draft.request.clone(),
+            draft.environment_path.clone(),
+        )
+    });
+    view.update(cx, |view, cx| view.record_history(attempt, cx));
+    cx.run_until_parked();
+    drop(draft);
+    drop(view);
+    cx.run_until_parked();
+
+    let absolute_root = std::path::absolute(&relative_root).unwrap();
+    let absolute_state = super::recovery::collection_state_directory(&absolute_root).unwrap();
+    let registry = Rc::new(RefCell::new(
+        CollectionRegistry::from_path(&absolute_root).unwrap(),
+    ));
+    let absolute_collection = registry.borrow().collections()[0].path.clone();
+    let absolute_file =
+        FileEntry::from_path(&absolute_collection.join(path.file_name().unwrap())).unwrap();
+    let restored = restored_view(&absolute_state, cx);
+    restored.update(cx, |view, cx| {
+        view.collection_paths = vec![absolute_collection];
+        view.open_request(
+            &absolute_file.path,
+            absolute_file.id.clone().into(),
+            absolute_file.name.clone().into(),
+            "API".into(),
+            &absolute_file.request,
+            cx,
+        );
+    });
+    let restored_draft = draft_at(&restored, 0, cx);
+    cx.read(|cx| {
+        let view = restored.read(cx);
+        let draft = restored_draft.read(cx);
+        assert_eq!(
+            view.tabs.len(),
+            1,
+            "Sidebar navigation must reuse the recovered tab"
+        );
+        assert_eq!(draft.request.path, "{{base_url}}/edited");
+        assert!(draft.is_dirty());
+        assert!(view.tabs[0].request_path.as_ref().unwrap().is_absolute());
+        assert!(draft.environment_path.as_ref().unwrap().is_absolute());
+        assert_eq!(
+            view.history.entries[0].environment_path,
+            draft.environment_path
+        );
+        let environment =
+            environment::Environment::from_file(draft.environment_path.as_ref().unwrap()).unwrap();
+        let resolved =
+            request::resolve_variables(&view.history.entries[0].request, &environment.entries)
+                .unwrap();
+        assert_eq!(resolved.path, "https://example.test/edited");
+    });
+
+    let results = Rc::new(RefCell::new(Vec::new()));
+    let subscription = cx.update(|cx| {
+        let registry = registry.clone();
+        let results = results.clone();
+        cx.subscribe(&restored, move |_, event: &RequestSaveRequested, _| {
+            results
+                .borrow_mut()
+                .push(registry.borrow_mut().update_request(
+                    &event.path,
+                    &event.request_id,
+                    event.request.clone().into(),
+                ));
+        })
+    });
+    restored.update(cx, |view, cx| view.save_active_request(cx));
+    cx.run_until_parked();
+    assert_eq!(results.borrow().len(), 1);
+    assert!(results.borrow()[0].is_ok(), "{:?}", results.borrow()[0]);
+    let collection::Request::Http(saved) =
+        FileEntry::from_path(&absolute_file.path).unwrap().request;
+    assert_eq!(saved.path, "{{base_url}}/edited");
+    drop(subscription);
+    drop(restored_draft);
+    drop(restored);
+    cx.run_until_parked();
+}
+
 #[cfg(unix)]
 #[test]
 fn collection_state_keeps_non_utf8_fixture_names() {
