@@ -10,7 +10,7 @@ The audit covered settings, keybinding recording, request and response tabs, JSO
 
 Coverage records describe the inspected screens, findings, and limitations: [worker 1](coverage/worker-1.md), [worker 2](coverage/worker-2.md), [worker 3](coverage/worker-3.md), [worker 4](coverage/worker-4.md).
 
-The full local gallery at `target/theme-audit/index.html` also includes the other captured screens. Only the editor pairs are included here to keep the PR manageable.
+The [self-contained HTML comparison](comparison.html) includes all 22 editor pairs with filters and full-size viewing. Download it or open it in an HTML preview; its screenshots and coverage records are embedded. The full local audit at `target/theme-audit/all-screens.html` also includes the other captured screens.
 
 | Theme | Before | After |
 | --- | --- | --- |
