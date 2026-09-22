@@ -192,6 +192,18 @@ impl Layout {
         }
     }
 
+    pub(super) fn restore_workflow(
+        &mut self,
+        directory: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.main_view.update(cx, |view, cx| {
+            view.enable_workflow_storage(directory, cx);
+            view.prepare_request(window, cx);
+        });
+    }
+
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.settings_visible {
             self.previous_focus = window.focused(cx);
@@ -415,9 +427,7 @@ pub fn init(collections: CollectionRegistry, updater: Entity<Updater>, cx: &mut 
         let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
         if let Some(directory) = crate::layout::recovery::state_directory() {
             layout.update(cx, |layout, cx| {
-                layout
-                    .main_view
-                    .update(cx, |view, cx| view.enable_workflow_storage(directory, cx));
+                layout.restore_workflow(directory, window, cx);
             });
         }
         on_toggle_sidebar(&layout, cx);

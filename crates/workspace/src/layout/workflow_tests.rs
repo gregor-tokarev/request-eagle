@@ -442,3 +442,49 @@ token = "{{token}}"
         );
     });
 }
+
+#[gpui_kit::test]
+fn recovered_request_headers_are_ready_on_the_first_frame(cx: &mut TestAppContext) {
+    let state = tempfile::tempdir().unwrap();
+    let request = request::HttpRequest {
+        method: request::Method::Options,
+        path: "https://example.test/items".into(),
+        form: Some(request::FormBody::UrlEncoded(vec![(
+            "name".into(),
+            "value".into(),
+        )])),
+        ..Default::default()
+    };
+    crate::session::SessionStore::new(state.path().join("session.json"))
+        .save(&crate::session::SessionSnapshot {
+            selected: Some(0),
+            tabs: vec![crate::session::RecoveredTab {
+                title: "Recovered".into(),
+                name: "Recovered".into(),
+                collection: None,
+                request_id: None,
+                request_path: None,
+                environment_path: None,
+                request,
+                saved_request: Some(Default::default()),
+            }],
+        })
+        .unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let mut layout = crate::workspace::Layout::new(
+            CollectionRegistry::new(),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        );
+        layout.restore_workflow(state.path().to_path_buf(), window, cx);
+        layout
+    });
+    assert!(cx.debug_bounds("request-section-Headers-count-5").is_some());
+    assert!(cx.debug_bounds("headers-generated-value-4").is_some());
+}
