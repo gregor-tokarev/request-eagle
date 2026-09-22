@@ -6,7 +6,7 @@ use std::{
 
 use environment::Environment;
 use thiserror::Error;
-use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, TableLike, Value};
 use uuid::Uuid;
 
 use crate::{DirEntry, Entry, FileEntry};
@@ -243,8 +243,85 @@ fn merge_item(target: &mut Item, update: &Item) {
     }
 
     match (target, update) {
+        (Item::ArrayOfTables(target), Item::ArrayOfTables(update))
+            if target
+                .iter()
+                .chain(update.iter())
+                .all(|table| multipart_field(table).is_some()) =>
+        {
+            merge_multipart_fields(target, update);
+        }
         (Item::Value(target), Item::Value(update)) => merge_value(target, update),
         (target, update) => *target = update.clone(),
+    }
+}
+
+fn multipart_field(table: &dyn TableLike) -> Option<(&str, &str, &str)> {
+    let kind = table.get("type")?.as_str()?;
+    let name = table.get("name")?.as_str()?;
+    let value = match kind {
+        "text" => table.get("value")?.as_str()?,
+        "file" => table.get("path")?.as_str()?,
+        _ => return None,
+    };
+
+    Some((kind, name, value))
+}
+
+fn merge_multipart_fields(target: &mut ArrayOfTables, update: &ArrayOfTables) {
+    let mut previous: Vec<_> = target.iter().cloned().map(Some).collect();
+    // Match unchanged fields before edited ones, including duplicate names.
+    let mut matched: Vec<_> = update
+        .iter()
+        .map(|field| {
+            let index = previous.iter().position(|current| {
+                current
+                    .as_ref()
+                    .is_some_and(|current| multipart_field(current) == multipart_field(field))
+            })?;
+
+            previous[index].take()
+        })
+        .collect();
+
+    target.clear();
+
+    for (field, matched) in update.iter().zip(&mut matched) {
+        if matched.is_none() {
+            let (kind, name, _) = multipart_field(field).unwrap();
+
+            if let Some(index) = previous.iter().position(|current| {
+                current.as_ref().is_some_and(|current| {
+                    let (current_kind, current_name, _) = multipart_field(current).unwrap();
+                    current_kind == kind && current_name == name
+                })
+            }) {
+                *matched = previous[index].take();
+            }
+        }
+
+        let mut current = matched.take().unwrap_or_else(|| field.clone());
+        merge_table(&mut current, field);
+        // Parsed table positions otherwise override the new field order and can
+        // attach a nested custom table to a different multipart field.
+        clear_table_positions(&mut current);
+        target.push(current);
+    }
+}
+
+fn clear_table_positions(table: &mut Table) {
+    table.set_position(None);
+
+    for (_, item) in table.iter_mut() {
+        match item {
+            Item::Table(table) => clear_table_positions(table),
+            Item::ArrayOfTables(tables) => {
+                for table in tables.iter_mut() {
+                    clear_table_positions(table);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -259,9 +336,9 @@ fn merge_value(target: &mut Value, update: &Value) {
             if target
                 .iter()
                 .chain(update.iter())
-                .all(|value| string_pair(value).is_some())
+                .all(|value| array_row(value).is_some())
             {
-                merge_key_value_rows(target, update);
+                merge_annotated_rows(target, update);
 
                 return;
             }
@@ -296,7 +373,15 @@ fn string_pair(value: &Value) -> Option<(&str, &str)> {
     Some((values.get(0)?.as_str()?, values.get(1)?.as_str()?))
 }
 
-fn merge_key_value_rows(target: &mut Array, update: &Array) {
+fn array_row(value: &Value) -> Option<(&str, &str, &str)> {
+    if let Some((name, value)) = string_pair(value) {
+        return Some(("", name, value));
+    }
+
+    multipart_field(value.as_inline_table()?)
+}
+
+fn merge_annotated_rows(target: &mut Array, update: &Array) {
     let mut rows: Vec<_> = target
         .iter()
         .cloned()
@@ -333,7 +418,7 @@ fn merge_key_value_rows(target: &mut Array, update: &Array) {
         .map(|value| {
             let index = rows.iter().position(|row| {
                 row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current) == string_pair(value))
+                    .is_some_and(|(current, _)| array_row(current) == array_row(value))
             })?;
 
             rows[index].take()
@@ -345,10 +430,12 @@ fn merge_key_value_rows(target: &mut Array, update: &Array) {
 
     for (value, matched) in update.iter().zip(&mut matched) {
         if matched.is_none() {
-            let key = string_pair(value).unwrap().0;
+            let (kind, key, _) = array_row(value).unwrap();
             if let Some(index) = rows.iter().position(|row| {
-                row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current).unwrap().0 == key)
+                row.as_ref().is_some_and(|(current, _)| {
+                    let (current_kind, current_key, _) = array_row(current).unwrap();
+                    current_kind == kind && current_key == key
+                })
             }) {
                 *matched = rows[index].take();
             }
