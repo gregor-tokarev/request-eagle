@@ -8,7 +8,7 @@ use gpui_kit::{
 pub(super) struct ThemePreview {
     pub name: SharedString,
     pub dark: bool,
-    colors: ThemeColor,
+    pub(super) colors: ThemeColor,
 }
 
 impl ThemePreview {
@@ -17,8 +17,10 @@ impl ThemePreview {
             .sorted_themes()
             .into_iter()
             .map(|config| {
+                let config = request_eagle_theme::config(&config.name, cx)
+                    .expect("catalog themes should be registered");
                 let mut theme = Theme::default();
-                theme.apply_config(config);
+                theme.apply_config(&config);
 
                 Self {
                     name: config.name.clone(),
@@ -33,7 +35,7 @@ impl ThemePreview {
         let colors = self.colors;
         let name = self.name.clone();
         let foreground = cx.theme().foreground;
-        let primary = cx.theme().primary;
+        let link = cx.theme().link;
         let font_size = cx.theme().font_size * 0.75;
         let gap = cx.theme().font_size * 0.5;
 
@@ -60,7 +62,7 @@ impl ThemePreview {
                         font_size,
                         &[TextRun {
                             len: "✓".len(),
-                            color: primary,
+                            color: link,
                             ..text_run
                         }],
                         None,
@@ -114,10 +116,10 @@ impl ThemePreview {
 
                     for (index, color) in [
                         colors.primary,
-                        colors.green,
-                        colors.yellow,
-                        colors.red,
-                        colors.blue,
+                        colors.success,
+                        colors.warning,
+                        colors.danger,
+                        colors.info,
                     ]
                     .into_iter()
                     .enumerate()

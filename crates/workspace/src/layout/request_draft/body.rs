@@ -107,6 +107,12 @@ impl RequestDraft {
                             .h_full()
                             .appearance(false)
                             .bordered(false)
+                            .bg(cx
+                                .theme()
+                                .highlight_theme
+                                .style
+                                .editor_background
+                                .unwrap_or_else(|| cx.theme().input_background()))
                             .text_size(px(13.))
                             .aria_label("JSON request body"),
                     ),

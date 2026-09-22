@@ -127,12 +127,12 @@ impl AppearanceSettings {
             .map(|(mode, label, icon)| {
                 Button::new(label)
                     .debug_selector(move || format!("appearance-{label}"))
-                    .outline()
                     .flex_1()
                     .h_12()
                     .icon(icon)
                     .label(label)
                     .when(preferences.mode == mode, |button| button.primary())
+                    .when(preferences.mode != mode, |button| button.outline())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let mut preferences = cx
                             .try_global::<preferences::Preferences>()
@@ -190,7 +190,7 @@ impl AppearanceSettings {
                 .p_2()
                 .rounded_lg()
                 .border_color(if active {
-                    cx.theme().primary
+                    cx.theme().link
                 } else {
                     cx.theme().border
                 })
@@ -338,7 +338,7 @@ impl AppearanceSettings {
                             .text_size(cx.theme().mono_font_size)
                             .child(
                                 div()
-                                    .text_color(cx.theme().primary)
+                                    .text_color(cx.theme().success)
                                     .child("GET /api/requests HTTP/1.1"),
                             )
                             .child("Content-Type: application/json")

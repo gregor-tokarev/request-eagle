@@ -111,7 +111,10 @@ impl CollectionPanel {
                     .pr_2()
                     .gap_1p5()
                     .text_size(px(13.))
-                    .when(selected, |this| this.bg(theme.sidebar_accent))
+                    .when(selected, |this| {
+                        this.bg(theme.tokens.sidebar_accent.background)
+                            .text_color(theme.sidebar_accent_foreground)
+                    })
                     .when(!selected, |this| {
                         this.hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
                     })

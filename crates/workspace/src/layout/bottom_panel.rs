@@ -1,4 +1,4 @@
-use gpui_kit::component::{ActiveTheme as _, Colorize as _, IconNamed, Sizable as _, button::*};
+use gpui_kit::component::{ActiveTheme as _, IconNamed, Sizable as _, button::*};
 use gpui_kit::*;
 
 use crate::actions::{OpenSettings, ToggleLeftSidebar};
@@ -47,13 +47,13 @@ impl Render for BottomPanel {
         div()
             .w_full()
             .border_t_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().status_bar_border)
             .flex()
             .flex_none()
             .items_center()
             .h_8()
             .px_2()
-            .bg(cx.theme().background.darken(0.20))
+            .bg(cx.theme().tokens.status_bar.background)
             .child(
                 div()
                     .flex_none()
