@@ -22,6 +22,59 @@ fn collection_state_is_outside_the_registry_and_distinct_per_fixture() {
     );
 }
 
+#[test]
+fn collection_state_resolves_current_and_parent_directory_roots() {
+    let current = std::env::current_dir().unwrap().canonicalize().unwrap();
+    let parent = current.parent().unwrap();
+
+    for (relative, absolute) in [
+        (Path::new("."), current.as_path()),
+        (Path::new(".."), parent),
+    ] {
+        let state = super::recovery::collection_state_directory(relative).unwrap();
+
+        assert_eq!(
+            Some(&state),
+            super::recovery::collection_state_directory(absolute).as_ref()
+        );
+        assert!(!state.starts_with(absolute));
+    }
+}
+
+#[gpui_kit::test]
+fn parent_component_collection_roots_keep_session_recovery(cx: &mut TestAppContext) {
+    let fixture = tempfile::tempdir().unwrap();
+    let collections = fixture.path().join("collections");
+    let child = collections.join("child");
+    fs::create_dir_all(&child).unwrap();
+    let relative_root = child.join("..");
+    let state = super::recovery::collection_state_directory(&relative_root).unwrap();
+    let view = restored_view(&state, cx);
+    let draft = draft_at(&view, 0, cx);
+
+    draft.update(cx, |draft, cx| {
+        draft.request.path = "https://example.test/recovered-relative-root".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    drop(draft);
+    drop(view);
+    cx.run_until_parked();
+
+    let named_state =
+        super::recovery::collection_state_directory(&collections.canonicalize().unwrap()).unwrap();
+    assert_eq!(state, named_state);
+    let restored = restored_view(&named_state, cx);
+    let restored_draft = draft_at(&restored, 0, cx);
+
+    cx.read(|cx| {
+        assert_eq!(
+            restored_draft.read(cx).request.path,
+            "https://example.test/recovered-relative-root"
+        );
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn collection_state_keeps_non_utf8_fixture_names() {

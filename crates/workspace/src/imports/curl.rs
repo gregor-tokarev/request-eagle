@@ -527,21 +527,41 @@ fn reject_file(value: &str) -> Result<(), String> {
 }
 
 fn encode_data(value: &str) -> Result<String, String> {
-    if let Some((name, value)) = value.split_once('=') {
-        let encoded = url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+    let (name, value) = if let Some(pair) = value.split_once('=') {
+        pair
+    } else {
+        if value.contains('@') {
+            return Err(
+                "Import cannot read cURL --data-urlencode files. Paste name=value instead.".into(),
+            );
+        }
 
-        return Ok(if name.is_empty() {
-            encoded
-        } else {
-            format!("{name}={encoded}")
-        });
+        ("", value)
+    };
+    let mut encoded = String::new();
+
+    if !name.is_empty() {
+        encoded.push_str(name);
+        encoded.push('=');
     }
 
-    if value.contains('@') {
-        return Err(
-            "Import cannot read cURL --data-urlencode files. Paste name=value instead.".into(),
-        );
+    // cURL uses the RFC 3986 unreserved alphabet, with spaces rendered as '+'.
+    // HTML form encoding differs for '~' and '*', even for a raw text body.
+    for byte in value.bytes() {
+        match byte {
+            b' ' => encoded.push('+'),
+            byte if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') => {
+                encoded.push(char::from(byte));
+            }
+            _ => {
+                const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+                encoded.push('%');
+                encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+                encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+            }
+        }
     }
 
-    Ok(url::form_urlencoded::byte_serialize(value.as_bytes()).collect())
+    Ok(encoded)
 }

@@ -111,6 +111,16 @@ pub(crate) fn state_directory() -> Option<PathBuf> {
 }
 
 pub(super) fn collection_state_directory(collections: &Path) -> Option<PathBuf> {
+    // Valid roots such as `.` and `..` have no lexical file name. Resolve only
+    // those roots so named fixture paths retain their existing state location.
+    let resolved;
+    let collections = if collections.file_name().is_none() {
+        resolved = collections.canonicalize().ok()?;
+        resolved.as_path()
+    } else {
+        collections
+    };
+
     let mut name = OsString::from(".");
     name.push(collections.file_name()?);
     name.push(".request-eagle-state");

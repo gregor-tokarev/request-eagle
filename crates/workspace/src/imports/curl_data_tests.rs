@@ -324,3 +324,38 @@ fn curl_shell_preserves_quoted_and_escaped_literal_wildcards() {
     let imported = parse_import("curl 'https://example.test/?q=*'").unwrap();
     assert_eq!(imported[0].request.path, "https://example.test/?q=*");
 }
+
+#[test]
+fn curl_data_urlencode_matches_native_bytes_for_raw_text() {
+    // Captured with native cURL 8.7.1: every printable ASCII punctuation mark,
+    // spaces, and multibyte UTF-8, with an explicit non-form Content-Type.
+    let value = "AZaz09-._~ !\"#$%&'()*+,/:;<=>?@[\\]^`{|} é漢🙂";
+    let encoded = "AZaz09-._~+%21%22%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3C%3D%3E%3F%40%5B%5C%5D%5E%60%7B%7C%7D+%C3%A9%E6%BC%A2%F0%9F%99%82";
+
+    for (argument, expected) in [
+        (format!("={value}"), encoded.to_string()),
+        (
+            format!("encoded%20name[]={value}"),
+            format!("encoded%20name[]={encoded}"),
+        ),
+        (
+            value.replace(['=', '@'], ""),
+            "AZaz09-._~+%21%22%23%24%25%26%27%28%29%2A%2B%2C%2F%3A%3B%3C%3E%3F%5B%5C%5D%5E%60%7B%7C%7D+%C3%A9%E6%BC%A2%F0%9F%99%82".into(),
+        ),
+    ] {
+        let quoted_argument = argument.replace('\'', "'\"'\"'");
+        let imported = parse_import(&format!(
+            "curl https://example.test --data-urlencode '{quoted_argument}' -H 'Content-Type: text/plain'"
+        ))
+        .unwrap();
+        assert_eq!(
+            imported[0].request.body.as_deref(),
+            Some(expected.as_bytes())
+        );
+        assert_eq!(
+            imported[0].request.headers,
+            [("Content-Type".into(), "text/plain".into())]
+        );
+        assert!(imported[0].request.form.is_none());
+    }
+}
