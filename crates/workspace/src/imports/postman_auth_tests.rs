@@ -163,3 +163,101 @@ fn postman_rejects_structured_url_auth_before_raw_or_request_auth_can_hide_it() 
     let source = json!({"item": [{"request": {"url": {"protocol": "http", "host": "example.test", "auth": null}}}]});
     assert!(parse_import(&source.to_string()).is_ok());
 }
+
+#[test]
+fn postman_query_api_key_decodes_literal_name_and_value_before_send_encoding() {
+    for (name, value, decoded_name, decoded_value, encoded) in [
+        ("api_key", "a%2Fb", "api_key", "a/b", "api_key=a%2Fb"),
+        ("api_key", "a+b", "api_key", "a b", "api_key=a+b"),
+        ("api%5Fkey", "%2B", "api_key", "+", "api_key=%2B"),
+        ("api+key", "a%26b", "api key", "a&b", "api+key=a%26b"),
+        ("api_key", "%D0%AF", "api_key", "Я", "api_key=%D0%AF"),
+    ] {
+        let imported =
+            parse_import(&source(api_key(name, value, "query"), json!([])).to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.authentication,
+            Authentication::ApiKey {
+                name: decoded_name.into(),
+                value: decoded_value.into(),
+                location: ApiKeyLocation::Query
+            }
+        );
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair(decoded_name, decoded_value)
+            .finish();
+        assert_eq!(query, encoded);
+    }
+}
+
+#[test]
+fn postman_query_api_key_keeps_templates_and_rejects_unrepresentable_decoding() {
+    let imported = parse_import(
+        &source(
+            api_key("api_key", "prefix%2F{{token+name}}+suffix", "query"),
+            json!([]),
+        )
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::ApiKey {
+            name: "api_key".into(),
+            value: "prefix/{{token+name}} suffix".into(),
+            location: ApiKeyLocation::Query
+        }
+    );
+
+    for (name, value) in [
+        ("api_key", "%FF"),
+        ("%FF", "value"),
+        ("api_key", "%7B%7Btoken%7D%7D"),
+    ] {
+        assert!(
+            parse_import(&source(api_key(name, value, "query"), json!([])).to_string()).is_err()
+        );
+    }
+
+    let imported =
+        parse_import(&source(api_key("X-Key", "a%2Fb+c", "header"), json!([])).to_string())
+            .unwrap();
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::ApiKey {
+            name: "X-Key".into(),
+            value: "a%2Fb+c".into(),
+            location: ApiKeyLocation::Header
+        }
+    );
+}
+
+#[test]
+fn postman_query_api_key_checks_collisions_after_decoding_and_inheritance() {
+    for (name, query) in [
+        ("%6Bey", "key=old"),
+        ("api+key", "api%20key=old"),
+        ("key", "%6Bey=old"),
+    ] {
+        let collection = json!({"auth": api_key(name, "new", "query"), "item": [
+            {"request": format!("https://example.test?{query}")}
+        ]});
+        let error = parse_import(&collection.to_string()).unwrap_err();
+        assert!(error.contains("authentication may replace"), "{error}");
+    }
+
+    let collection = json!({"auth": api_key("key", "%252F", "query"), "item": [
+        {"request": "https://example.test"}, {"item": [{"request": "https://example.test"}]}
+    ]});
+    let imported = parse_import(&collection.to_string()).unwrap();
+    for request in imported {
+        assert_eq!(
+            request.request.authentication,
+            Authentication::ApiKey {
+                name: "key".into(),
+                value: "%2F".into(),
+                location: ApiKeyLocation::Query
+            }
+        );
+    }
+}

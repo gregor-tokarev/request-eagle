@@ -264,3 +264,83 @@ fn postman_rejects_unsupported_explicit_protocols() {
         }
     }
 }
+
+#[test]
+fn postman_structured_target_fields_override_stale_raw_urls() {
+    // Postman SDK 5.3.1 and Runtime 7.56.1 use structured fields exclusively.
+    for raw in [
+        "https://stale.test/wrong?old=1",
+        "http://target.test:9999/wrong",
+        "http://target.test:8080/users?q=stale",
+    ] {
+        let source = json!({"item": [{"request": {"url": {
+            "raw": raw, "protocol": "http", "host": ["target", "test"],
+            "port": "8080", "path": ["users"], "query": [{"key": "q", "value": "live"}]
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.path,
+            "http://target.test:8080/users?q=live"
+        );
+    }
+}
+
+#[test]
+fn postman_structured_urls_never_inherit_missing_path_or_query_from_raw() {
+    for query in [None, Some(json!([]))] {
+        let mut url = json!({"raw": "https://stale.test/wrong?old=1", "host": "target.test"});
+        if let Some(query) = query {
+            url["query"] = query;
+        }
+        let source = json!({"item": [{"request": {"url": url}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.path, "http://target.test/");
+    }
+}
+
+#[test]
+fn postman_structured_host_variables_can_supply_the_protocol() {
+    for (host, variables, expected) in [
+        (
+            "http://example.test:8080",
+            json!([]),
+            "http://example.test:8080/items",
+        ),
+        (
+            "{{base_url}}",
+            json!([{"key": "base_url", "value": "https://example.test"}]),
+            "https://example.test/items",
+        ),
+        ("{{base_url}}", json!([]), "{{base_url}}/items"),
+    ] {
+        let source = json!({"variable": variables, "item": [{"request": {"url": {
+            "raw": "https://stale.test/ignored", "host": [host], "path": ["items"]
+        }}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.path, expected);
+    }
+}
+
+#[test]
+fn postman_accepts_raw_only_convenience_but_rejects_hostless_structured_urls() {
+    let source = json!({"item": [{"request": {"url": {"raw": "https://example.test/items?x=1"}}}]});
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(imported[0].request.path, "https://example.test/items?x=1");
+
+    for partial in [
+        json!({"protocol": "https"}),
+        json!({"host": null}),
+        json!({"host": []}),
+        json!({"path": ["items"]}),
+        json!({"query": [{"key": "x", "value": "1"}]}),
+    ] {
+        let mut url = partial;
+        url["raw"] = json!("https://stale.test/items");
+        let source = json!({"item": [{"request": {"url": url}}]});
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(
+            error.contains("structured Postman URL has no host"),
+            "{error}"
+        );
+    }
+}

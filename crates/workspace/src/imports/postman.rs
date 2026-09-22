@@ -148,14 +148,22 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
 
     request.path = if let Some(raw) = value.as_str() {
         url_with_default_protocol(raw)?
-    } else if let Some(raw) = value.get("raw").and_then(Value::as_str) {
+    } else if let Some(raw) = value.get("raw").and_then(Value::as_str)
+        && !["protocol", "host", "port", "path", "query"]
+            .iter()
+            .any(|field| value.get(field).is_some())
+    {
+        // Accept raw-only objects as a convenience. In a structured URL, raw
+        // is display metadata and must never supply missing target components.
         url_with_default_protocol(raw)?
     } else {
         let protocol = value
             .get("protocol")
             .and_then(Value::as_str)
-            .unwrap_or("http");
-        let host = joined(value.get("host"), ".")?;
+            .filter(|protocol| !protocol.is_empty())
+            .map(|protocol| format!("{protocol}://"))
+            .unwrap_or_default();
+        let host = joined(value.get("host").filter(|host| !host.is_null()), ".")?;
         let path = match value.get("path") {
             // Postman string paths include their leading separator; arrays hold
             // segments, where an empty first segment intentionally means '//'.
@@ -169,10 +177,12 @@ fn read_url(value: &Value, request: &mut HttpRequest) -> Result<(), String> {
             .unwrap_or_default();
 
         if host.is_empty() {
-            return Err("The Postman URL has no host or raw URL.".into());
+            return Err("The structured Postman URL has no host. Supply a host or use a URL string before importing.".into());
         }
 
-        url_with_default_protocol(&format!("{protocol}://{host}{port}/{path}"))?
+        // A base-URL variable in host may supply its own protocol. Infer HTTP
+        // only after assembling the actual structured URL.
+        url_with_default_protocol(&format!("{protocol}{host}{port}/{path}"))?
     };
 
     if request.path.is_empty() {
@@ -332,7 +342,7 @@ fn decode_query_component(value: &str) -> Result<String, String> {
 
     if lower.contains("%7b") || lower.contains("%7d") {
         return Err(
-            "Postman templated queries containing percent-encoded braces are not supported.".into(),
+            "Postman query fields containing percent-encoded braces are not supported in editable query fields.".into(),
         );
     }
 
@@ -361,7 +371,26 @@ fn decode_query_component(value: &str) -> Result<String, String> {
     }
 
     String::from_utf8(decoded)
-        .map_err(|_| "Templated Postman query fields must contain UTF-8 text.".into())
+        .map_err(|_| "Editable Postman query fields must contain UTF-8 text.".into())
+}
+
+fn decode_auth_query_component(value: &str) -> Result<String, String> {
+    let mut decoded = String::new();
+    let mut rest = value;
+
+    while let Some(start) = rest.find("{{") {
+        decoded.push_str(&decode_query_component(&rest[..start])?);
+        let Some(end) = rest[start + 2..].find("}}") else {
+            decoded.push_str(&rest[start..]);
+            return Ok(decoded);
+        };
+        let end = start + 2 + end + 2;
+        decoded.push_str(&rest[start..end]);
+        rest = &rest[end..];
+    }
+
+    decoded.push_str(&decode_query_component(rest)?);
+    Ok(decoded)
 }
 
 fn joined(value: Option<&Value>, separator: &str) -> Result<String, String> {
@@ -656,16 +685,26 @@ fn authentication(
             if name.is_empty() && value.is_empty() {
                 Authentication::None
             } else {
+                let location = match attribute("in").as_str() {
+                    "header" | "" => ApiKeyLocation::Header,
+                    "query" => ApiKeyLocation::Query,
+                    location => return Err(format!("Unsupported API key location {location:?}.")),
+                };
+                let (name, value) = if location == ApiKeyLocation::Query {
+                    // SDK query credentials retain existing escapes and '+'.
+                    // The editor stores decoded fields, then encodes at Send.
+                    (
+                        decode_auth_query_component(&name)?,
+                        decode_auth_query_component(&value)?,
+                    )
+                } else {
+                    (name, value)
+                };
+
                 Authentication::ApiKey {
                     name,
                     value,
-                    location: match attribute("in").as_str() {
-                        "header" | "" => ApiKeyLocation::Header,
-                        "query" => ApiKeyLocation::Query,
-                        location => {
-                            return Err(format!("Unsupported API key location {location:?}."));
-                        }
-                    },
+                    location,
                 }
             }
         }

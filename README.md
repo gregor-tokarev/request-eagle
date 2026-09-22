@@ -36,7 +36,9 @@ Unresolved variables remain available for your collection environment. Use decod
 values for variables in imported queries, for example `a/b` instead of `a%2Fb`.
 Static query escapes and valueless query flags are preserved. Multipart imports
 support text and absolute file paths. Custom part content types and filenames are
-not supported. Form imports reject Content-Type parameters or overrides that
+not supported. Upload MIME types use the app's filename inference, which can
+differ from cURL's defaults when a command omits a part Content-Type.
+Form imports reject Content-Type parameters or overrides that
 Postman or cURL preserves but Request Eagle's form encoder cannot reproduce,
 including custom multipart boundaries and suppressed system Content-Type headers.
 Raw Postman bodies that suppress the system Content-Type also require an enabled

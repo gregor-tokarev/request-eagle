@@ -156,7 +156,8 @@ fn postman_imports_nested_requests_with_query_once_and_disabled_fields_omitted()
         "info": {"name": "API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
         "item": [{"name": "People", "item": [{"name": "Update", "request": {
             "method": "PATCH",
-            "url": {"raw": "https://example.test/users/:id?q=a%20b&skip=1", "query": [
+            "url": {"raw": "https://example.test/users/:id?q=a%20b&skip=1",
+                "protocol": "https", "host": ["example", "test"], "path": ["users", ":id"], "query": [
                 {"key": "q", "value": "a b"},
                 {"key": "q", "value": "c"},
                 {"key": "skip", "value": "1", "disabled": true}
@@ -385,6 +386,7 @@ fn postman_preserves_escaped_queries_plus_signs_and_valueless_flags() {
     let imported = parse_import(
         &json!({"item": [{"request": {"url": {
             "raw": "https://example.test/?old=discarded",
+            "protocol": "https", "host": "example.test",
             "query": [
                 {"key": "q", "value": "a%2Fb+c"},
                 {"key": "a=b", "value": "one&two=three#four"},
@@ -435,7 +437,7 @@ fn postman_preserves_environment_variables_in_form_and_query_until_execution() {
     let imported = parse_import(
         &json!({"item": [{"request": {
             "method": "POST",
-            "url": {"raw": "https://example.test", "query": [
+            "url": {"raw": "https://example.test", "protocol": "https", "host": "example.test", "query": [
                 {"key": "search", "value": "{{term}}"},
                 {"key": "literal", "value": "a%2Fb+c"}
             ]},
@@ -523,7 +525,7 @@ fn postman_limits_total_expanded_data() {
 #[test]
 fn postman_rejects_ambiguous_query_templates_and_unsupported_upload_names() {
     let query = json!({"item": [{"request": {"url": {
-        "raw": "https://example.test", "query": [
+        "raw": "https://example.test", "protocol": "https", "host": "example.test", "query": [
             {"key": "term", "value": "{{term}}"},
             {"key": "literal", "value": "%7B%7Btoken%7D%7D"}
         ]
