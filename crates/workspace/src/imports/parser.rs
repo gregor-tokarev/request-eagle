@@ -20,11 +20,24 @@ pub(crate) fn parse_import(input: &str) -> Result<Vec<ImportedRequest>, String> 
         return Err("Imports must be 16 MiB or smaller.".into());
     }
 
-    if input.starts_with('{') {
-        super::postman::parse(input)
+    let requests = if input.starts_with('{') {
+        super::postman::parse(input)?
     } else {
-        super::curl::parse(input).map(|request| vec![request])
+        vec![super::curl::parse(input)?]
+    };
+
+    if let Some(imported) = requests.iter().find(|imported| {
+        matches!(imported.request.method, Method::Get | Method::Head)
+            && (imported.request.body.is_some() || imported.request.form.is_some())
+    }) {
+        return Err(format!(
+            "{}: {} request bodies are not supported by the editor. Remove the body or choose a body-capable method before importing.",
+            imported.name,
+            imported.request.method.as_str()
+        ));
     }
+
+    Ok(requests)
 }
 
 pub(super) fn method(value: &str) -> Result<Method, String> {

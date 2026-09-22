@@ -27,7 +27,8 @@ The project is in early development. macOS builds are available for Apple Silico
 Use **Import** above the request tabs to paste a cURL command or choose a Postman
 v2 collection JSON file. Import creates a new saved collection, preserves nested
 folders, and opens the requests for editing. Existing collections are not replaced.
-Unsupported options, authentication schemes, and scripts produce an import error.
+Unsupported options, authentication schemes, scripts, and GET/HEAD request bodies
+produce an import error.
 
 Postman collection variables become literal defaults in the imported requests.
 Unresolved variables remain available for your collection environment. Use decoded

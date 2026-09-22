@@ -628,3 +628,15 @@ fn curl_materializes_http_inference_without_using_the_editor_https_default() {
         );
     }
 }
+
+#[test]
+fn import_rejects_bodies_that_the_selected_method_cannot_send() {
+    for source in [
+        "curl -X GET --data-raw 'payload' https://example.test/items",
+        "curl -X HEAD -F 'name=value' https://example.test/items",
+        r#"{"item":[{"name":"GET with body","request":{"method":"GET","url":"https://example.test/items","body":{"mode":"raw","raw":"payload"}}}]}"#,
+    ] {
+        assert!(parse_import(source).is_err(), "{source}");
+    }
+    assert!(parse_import("curl -G -d 'name=value' https://example.test/items").is_ok());
+}
