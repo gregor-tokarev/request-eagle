@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use http_client::http::{HeaderMap, header::HOST, uri::Authority};
-use http_client::{AsyncBody, HttpClient, HttpRequestExt, RedirectPolicy, Request, Url};
+use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
@@ -14,7 +14,7 @@ pub(crate) struct HttpExecutor {
     client: Arc<reqwest_client::ReqwestClient>,
     host_override_client: Option<Arc<reqwest_client::ReqwestClient>>,
     http_version: HttpVersion,
-    redirect_policy: RedirectPolicy,
+    follow_all_redirects: bool,
     max_response_bytes: Option<u64>,
 }
 
@@ -40,11 +40,7 @@ impl HttpExecutor {
             client,
             host_override_client,
             http_version: preferences.http_version,
-            redirect_policy: if preferences.follow_all_redirects {
-                RedirectPolicy::FollowAll
-            } else {
-                RedirectPolicy::NoFollow
-            },
+            follow_all_redirects: preferences.follow_all_redirects,
             max_response_bytes,
         })
     }
@@ -73,8 +69,7 @@ impl HttpExecutor {
 
         let mut builder = Request::builder()
             .method(request.method.as_str())
-            .uri(url.as_str())
-            .follow_redirects(self.redirect_policy.clone());
+            .uri(url.as_str());
 
         let generated = crate::generated_headers(
             request.method,
@@ -89,7 +84,7 @@ impl HttpExecutor {
         }
 
         let mut request = builder
-            .body(request.body.map(AsyncBody::from).unwrap_or_default())
+            .body(request.body)
             .map_err(HttpError::InvalidRequest)?;
 
         let host = validate_host(request.headers())?;
@@ -131,7 +126,9 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
-        let response = client.send(request).await.map_err(HttpError::Transport)?;
+        let response =
+            crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
+                .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         let mut body = Vec::new();

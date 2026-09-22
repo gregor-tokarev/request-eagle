@@ -30,12 +30,14 @@ operation, including the response body, is bounded by the timeout. Dropping its
 future cancels the operation. Response limits count body bytes, including for
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
-HTTP redirects (301, 302, 303, 307, and 308) are followed by default, with the
-transport's limit of 100 redirects to stop loops. Set `follow_all_redirects` to
-`false` to inspect redirect responses directly. Final HTTP statuses, including
-4xx and 5xx, are returned with their headers and body. Headers retain repeated
-and non-UTF-8 values; bodies are not decoded or decompressed. Malformed input, transport failures,
-truncated bodies, timeouts, and oversized responses return typed errors.
+HTTP redirects (301, 302, 303, 307, and 308) are followed by default, with a
+limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
+the same authority and removed when a redirect changes the host or port.
+Set `follow_all_redirects` to `false` to inspect redirect responses directly.
+Final HTTP statuses, including 4xx and 5xx, are returned with their headers and
+body. Headers retain repeated and non-UTF-8 values; bodies are not decoded or
+decompressed. Malformed input, transport failures, truncated bodies, timeouts,
+and oversized responses return typed errors.
 
 URLs must be absolute and already resolved. Collection environment substitution,
 authentication editors, and UI Send actions are outside this module.
