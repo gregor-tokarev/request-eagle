@@ -47,7 +47,7 @@ impl CredentialStore for NativeCredentialStore {
 pub(crate) fn unavailable() -> anyhow::Error {
     if cfg!(target_os = "linux") {
         anyhow!(
-            "Could not access the Secret Service keyring. Start and unlock GNOME Keyring or KWallet, then retry. Credentials were not saved to a plaintext file."
+            "Could not access a Secret Service keyring. Start and unlock your provider (KeePassXC, GNOME Keyring, or KWallet) in this desktop session, then retry. KeePassXC requires Secret Service integration enabled. Credentials were not saved to a plaintext file."
         )
     } else {
         anyhow!(

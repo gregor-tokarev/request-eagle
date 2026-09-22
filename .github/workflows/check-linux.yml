@@ -1,0 +1,76 @@
+name: Check Linux
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - name: Install Arch build and test dependencies
+        run: |
+          pacman --disable-sandbox -Syu --noconfirm --needed rust cmake clang git fontconfig \
+            freetype2 libxcb libxkbcommon-x11 wayland openssl vulkan-headers \
+            vulkan-swrast mesa dbus xorg-server-xvfb xorg-xauth ttf-dejavu keepassxc weston
+
+      - uses: actions/checkout@v7
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arch-${{ hashFiles('Cargo.lock') }}
+          restore-keys: arch-
+
+      - name: Build Linux app and native credential check
+        run: cargo build --locked -p request-eagle -p preferences --all-targets
+
+      - name: Test proxy, preferences, and settings
+        run: cargo test --locked -p preferences -p settings_ui -p request -p theme
+
+      - name: Check storage with KeePassXC and without a provider
+        run: ./scripts/check-linux-keyring.sh
+
+      - name: Open and render the app on Wayland
+        run: |
+          runtime=$(mktemp -d)
+          export XDG_RUNTIME_DIR="$runtime"
+          trap 'rm -rf "$runtime"' EXIT
+
+          # The single-quoted command expands variables in Weston's child shell.
+          # shellcheck disable=SC2016
+          weston --backend=headless --renderer=pixman --fake-seat \
+            --shell=kiosk-shell.so --width=1280 --height=800 --idle-time=0 \
+            --socket=wayland-test --no-config --log="$runtime/weston.log" -- \
+            env WAYLAND_DISPLAY=wayland-test WAYLAND_DEBUG=1 \
+              REQUEST_EAGLE_WINDOW_TITLE='Request Eagle (Arch compatibility)' \
+              REQUEST_EAGLE_COLLECTIONS_DIR="$runtime/collections" \
+              bash -c 'timeout 15s target/debug/request-eagle; test "$?" -eq 124 && touch "$XDG_RUNTIME_DIR/survived"' \
+            >"$runtime/app.log" 2>&1
+
+          if ! test -f "$runtime/survived" || \
+            ! grep -Eq 'wl_surface#[0-9]+\.attach\(wl_buffer' "$runtime/app.log"; then
+            cat "$runtime/weston.log" "$runtime/app.log"
+            exit 1
+          fi
