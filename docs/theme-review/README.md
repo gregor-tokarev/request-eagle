@@ -4,9 +4,9 @@ These native screenshots show the request and response editors for all 11 bundle
 
 Some captures were losslessly converted from JPEG to PNG during the audit. This report preserves the available capture files without further conversion. Their extensions identify the actual JPEG or PNG format.
 
-The baseline source is `c1d3ea1`; the final fixes are at `0fa1770`. Screens affected by the final changes were recaptured. Unchanged screens retain their corrected-build captures.
+The baseline source is `c1d3ea1`; the initial contrast fixes are at `0fa1770`. The follow-up at `8dd51fa` restores Everforest Dark's original string and literal colors and adjusts selection and active-line backgrounds to keep them readable. Screens affected by these changes were recaptured. Unchanged screens retain their corrected-build captures.
 
-The audit covered settings, keybinding recording, request and response tabs, JSON and HTML editors, search and text selection, method menus, response details, collection actions, and error states. Corrections strengthen muted text, method/status/error labels, and syntax colors. Shared controls now use the selected theme; editor selection and backgrounds are consistent with it. Validation completed with 144 tests passing and five benchmarks ignored.
+The audit covered settings, keybinding recording, request and response tabs, JSON and HTML editors, search and text selection, method menus, response details, collection actions, and error states. Corrections strengthen muted text, method/status/error labels, and syntax colors. Shared controls now use the selected theme; editor selection and backgrounds are consistent with it. Initial validation completed with 144 tests passing and five benchmarks ignored. The Everforest Dark follow-up passed all nine theme tests, a normal build, and formatting checks.
 
 Coverage records describe the inspected screens, findings, and limitations: [worker 1](coverage/worker-1.md), [worker 2](coverage/worker-2.md), [worker 3](coverage/worker-3.md), [worker 4](coverage/worker-4.md).
 
