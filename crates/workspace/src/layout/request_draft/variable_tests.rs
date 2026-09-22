@@ -7,10 +7,164 @@ use std::{
 
 use collection::{HttpRequest, Method};
 use gpui_kit::TestAppContext;
-use request::{Authentication, ExecutionError, FormBody, MultipartField, RequestExecutor};
+use request::{
+    ApiKeyLocation, Authentication, ExecutionError, FormBody, MultipartField, RequestExecutor,
+};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, execution::resolve_request};
+
+#[test]
+fn body_content_type_skips_unused_auth_variables_and_sends_the_generated_header() {
+    smol::block_on(async {
+        for (form, content_type) in [
+            (None, "application/json"),
+            (
+                Some(FormBody::UrlEncoded(vec![("name".into(), "value".into())])),
+                "application/x-www-form-urlencoded",
+            ),
+            (
+                Some(FormBody::Multipart(vec![MultipartField::Text {
+                    name: "name".into(),
+                    value: "value".into(),
+                }])),
+                "multipart/form-data; boundary=",
+            ),
+        ] {
+            let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let template = HttpRequest {
+                method: Method::Post,
+                path: format!("http://{}/body", listener.local_addr().unwrap()),
+                body: Some(b"{}".to_vec()),
+                form,
+                authentication: Authentication::ApiKey {
+                    name: "cOnTeNt-TyPe".into(),
+                    value: "{{unused_type}}".into(),
+                    location: ApiKeyLocation::Header,
+                },
+                ..Default::default()
+            };
+            let outgoing = resolve_request(&template, None).unwrap();
+            assert_eq!(outgoing.authentication, template.authentication);
+            assert!(template.headers.is_empty());
+            let server = smol::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut head = Vec::new();
+
+                while !head.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).await.unwrap();
+                    head.push(byte[0]);
+                    assert!(head.len() < 16 * 1024);
+                }
+
+                let head = String::from_utf8(head).unwrap();
+                let headers = head
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .collect::<Vec<_>>();
+                let types = headers
+                    .iter()
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, value)| value.trim())
+                    .collect::<Vec<_>>();
+                assert_eq!(types.len(), 1);
+                assert!(types[0].starts_with(content_type));
+                assert!(!head.contains("{{unused_type}}"));
+                let length = headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                let mut body = vec![0; length];
+                stream.read_exact(&mut body).await.unwrap();
+                assert!(!body.is_empty());
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+            });
+            RequestExecutor::new(&request::RequestPreferences {
+                timeout_ms: 2_000,
+                ..Default::default()
+            })
+            .unwrap()
+            .execute(outgoing)
+            .await
+            .unwrap();
+            server.await;
+        }
+    });
+}
+
+#[test]
+fn raw_body_default_preserves_resolved_explicit_content_type_and_url_templates() {
+    let directory = tempfile::tempdir().unwrap();
+    let environment_path = directory.path().join("environment.toml");
+    fs::write(
+        &environment_path,
+        "base_url = \"http://example.test\"\nheader = \"cOnTeNt-TyPe\"\nmedia = \"text/plain\"\n",
+    )
+    .unwrap();
+    let template = HttpRequest {
+        method: Method::Post,
+        path: "{{base_url}}/body".into(),
+        headers: vec![("{{header}}".into(), "{{media}}".into())],
+        body: Some(b"body".to_vec()),
+        authentication: Authentication::ApiKey {
+            name: "{{header}}".into(),
+            value: "{{unused_type}}".into(),
+            location: ApiKeyLocation::Header,
+        },
+        ..Default::default()
+    };
+    let outgoing = resolve_request(&template, Some(&environment_path)).unwrap();
+
+    assert_eq!(outgoing.path, "http://example.test/body");
+    assert_eq!(
+        outgoing.headers,
+        [("cOnTeNt-TyPe".into(), "text/plain".into())]
+    );
+    assert_eq!(
+        outgoing.authentication,
+        Authentication::ApiKey {
+            name: "cOnTeNt-TyPe".into(),
+            value: "{{unused_type}}".into(),
+            location: ApiKeyLocation::Header,
+        }
+    );
+    assert_eq!(
+        template.headers,
+        [("{{header}}".into(), "{{media}}".into())]
+    );
+}
+
+#[test]
+fn inactive_or_missing_bodies_keep_content_type_auth_variables_required() {
+    for (method, body) in [
+        (Method::Get, Some(b"{}".to_vec())),
+        (Method::Head, Some(b"{}".to_vec())),
+        (Method::Post, None),
+    ] {
+        let template = HttpRequest {
+            method,
+            path: "http://example.test/body".into(),
+            body,
+            authentication: Authentication::ApiKey {
+                name: "Content-Type".into(),
+                value: "{{unused_type}}".into(),
+                location: ApiKeyLocation::Header,
+            },
+            ..Default::default()
+        };
+        let error = resolve_request(&template, None).unwrap_err();
+        assert!(matches!(error, ExecutionError::InvalidVariables(_)));
+        assert!(error.to_string().contains("unused_type"));
+    }
+}
 
 #[test]
 fn reports_variable_and_environment_file_errors_before_execution() {

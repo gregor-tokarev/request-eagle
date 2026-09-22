@@ -92,10 +92,14 @@ pub fn resolve_variables(
             *name = substitute(name, variables, "API key name")?;
 
             let overridden = match location {
-                ApiKeyLocation::Header => resolved
-                    .headers
-                    .iter()
-                    .any(|(key, _)| key.eq_ignore_ascii_case(name)),
+                ApiKeyLocation::Header => {
+                    resolved
+                        .headers
+                        .iter()
+                        .any(|(key, _)| key.eq_ignore_ascii_case(name))
+                        // Form encoding supplies Content-Type before authentication.
+                        || (resolved.form.is_some() && name.eq_ignore_ascii_case("content-type"))
+                }
                 ApiKeyLocation::Query => {
                     let editor_override = resolved
                         .query

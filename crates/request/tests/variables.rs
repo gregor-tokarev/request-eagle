@@ -248,6 +248,120 @@ fn explicit_api_key_headers_and_queries_skip_unused_value_variables() {
 }
 
 #[test]
+fn form_content_type_skips_unused_api_key_value_variables() {
+    let variables = HashMap::from([("header".into(), "content-type".into())]);
+
+    for form in [
+        FormBody::UrlEncoded(vec![("name".into(), "eagle".into())]),
+        FormBody::Multipart(vec![MultipartField::Text {
+            name: "name".into(),
+            value: "eagle".into(),
+        }]),
+    ] {
+        for (name, expected_name) in [
+            ("cOnTeNt-TyPe", "cOnTeNt-TyPe"),
+            ("{{header}}", "content-type"),
+        ] {
+            let template = HttpRequest {
+                method: Method::Post,
+                form: Some(form.clone()),
+                authentication: Authentication::ApiKey {
+                    name: name.into(),
+                    value: "{{unused_type}}".into(),
+                    location: ApiKeyLocation::Header,
+                },
+                ..HttpRequest::default()
+            };
+            let resolved = resolve_variables(&template, &variables).unwrap();
+
+            assert_eq!(
+                resolved.authentication,
+                Authentication::ApiKey {
+                    name: expected_name.into(),
+                    value: "{{unused_type}}".into(),
+                    location: ApiKeyLocation::Header,
+                }
+            );
+            assert_eq!(resolved.form, template.form);
+            assert!(resolved.headers.is_empty());
+            assert_eq!(
+                template.authentication,
+                Authentication::ApiKey {
+                    name: name.into(),
+                    value: "{{unused_type}}".into(),
+                    location: ApiKeyLocation::Header,
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn active_api_keys_still_require_values_when_forms_do_not_override_them() {
+    let forms = [
+        FormBody::UrlEncoded(vec![("name".into(), "eagle".into())]),
+        FormBody::Multipart(vec![MultipartField::Text {
+            name: "name".into(),
+            value: "eagle".into(),
+        }]),
+    ];
+
+    for (form, name, location) in [
+        (None, "Content-Type", ApiKeyLocation::Header),
+        (
+            Some(forms[0].clone()),
+            "Content-Type",
+            ApiKeyLocation::Query,
+        ),
+        (
+            Some(forms[1].clone()),
+            "Content-Type",
+            ApiKeyLocation::Query,
+        ),
+        (Some(forms[0].clone()), "X-Api-Key", ApiKeyLocation::Header),
+        (Some(forms[1].clone()), "X-Api-Key", ApiKeyLocation::Header),
+    ] {
+        let template = HttpRequest {
+            method: Method::Post,
+            form,
+            authentication: Authentication::ApiKey {
+                name: name.into(),
+                value: "{{unused_type}}".into(),
+                location,
+            },
+            ..HttpRequest::default()
+        };
+
+        assert_eq!(
+            resolve_variables(&template, &HashMap::new()).unwrap_err(),
+            VariableError::Undefined {
+                name: "unused_type".into(),
+                field: "API key value",
+            }
+        );
+    }
+
+    let raw_body = HttpRequest {
+        method: Method::Post,
+        body: Some(b"{}".to_vec()),
+        authentication: Authentication::ApiKey {
+            name: "Content-Type".into(),
+            value: "{{unused_type}}".into(),
+            location: ApiKeyLocation::Header,
+        },
+        ..HttpRequest::default()
+    };
+
+    assert_eq!(
+        resolve_variables(&raw_body, &HashMap::new()).unwrap_err(),
+        VariableError::Undefined {
+            name: "unused_type".into(),
+            field: "API key value",
+        }
+    );
+}
+
+#[test]
 fn resolves_form_fields_and_upload_paths_without_changing_templates() {
     let variables = HashMap::from([
         ("name".into(), "user name".into()),

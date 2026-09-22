@@ -144,8 +144,23 @@ pub(super) fn resolve_request(
         });
     }
 
-    let resolved = request::resolve_variables(&template, &variables)
+    // The raw editor supplies JSON Content-Type before authentication on Send.
+    // Include that default while resolving helpers, then let outgoing_request
+    // choose it again after any explicit header-name templates are resolved.
+    let raw_content_type = template.form.is_none() && template.body.is_some();
+
+    if raw_content_type {
+        template
+            .headers
+            .push(("Content-Type".into(), "application/json".into()));
+    }
+
+    let mut resolved = request::resolve_variables(&template, &variables)
         .map_err(|error| ExecutionError::InvalidVariables(error.to_string()))?;
+
+    if raw_content_type {
+        resolved.headers.pop();
+    }
 
     Ok(outgoing_request(&resolved))
 }
