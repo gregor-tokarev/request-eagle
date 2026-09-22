@@ -1,5 +1,5 @@
 use request::{ApiKeyLocation, Authentication, FormBody, HttpRequest, MultipartField};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::parser::{ImportedRequest, add_content_type, header, method, upload_path};
 
@@ -21,10 +21,9 @@ pub(super) fn parse(input: &str) -> Result<Vec<ImportedRequest>, String> {
     reject_scripts(&collection)?;
 
     let auth = authentication(collection.get("auth"), &Authentication::None)?;
-    let content_type_override =
-        super::postman_form_headers::content_type_override(&collection, false);
+    let profile = super::postman_profiles::inherit(&collection, &Map::new());
     let mut result = Vec::new();
-    collect_items(items, &[], &auth, content_type_override, &mut result)?;
+    collect_items(items, &[], &auth, &profile, &mut result)?;
 
     if result.is_empty() {
         return Err("The Postman collection contains no requests.".into());
@@ -37,7 +36,7 @@ fn collect_items(
     items: &[Value],
     folders: &[String],
     inherited_auth: &Authentication,
-    inherited_content_type_override: bool,
+    inherited_profile: &Map<String, Value>,
     result: &mut Vec<ImportedRequest>,
 ) -> Result<(), String> {
     for (item, name) in items
@@ -46,24 +45,15 @@ fn collect_items(
     {
         reject_scripts(item).map_err(|error| format!("{name}: {error}"))?;
         let auth = authentication(item.get("auth"), inherited_auth)?;
-        let content_type_override = super::postman_form_headers::content_type_override(
-            item,
-            inherited_content_type_override,
-        );
+        let profile = super::postman_profiles::inherit(item, inherited_profile);
 
         if let Some(children) = item.get("item").and_then(Value::as_array) {
             let mut child_folders = folders.to_vec();
             child_folders.push(name.to_owned());
-            collect_items(
-                children,
-                &child_folders,
-                &auth,
-                content_type_override,
-                result,
-            )?;
+            collect_items(children, &child_folders, &auth, &profile, result)?;
         } else if let Some(value) = item.get("request") {
-            let request = request(value, &auth, content_type_override)
-                .map_err(|error| format!("{name}: {error}"))?;
+            let request =
+                request(value, &auth, &profile).map_err(|error| format!("{name}: {error}"))?;
             result.push(ImportedRequest {
                 name: name.into(),
                 folders: folders.to_vec(),
@@ -82,14 +72,17 @@ fn collect_items(
 fn request(
     value: &Value,
     inherited_auth: &Authentication,
-    content_type_override: bool,
+    profile: &Map<String, Value>,
 ) -> Result<HttpRequest, String> {
     if let Some(path) = value.as_str() {
-        return Ok(HttpRequest {
+        let request = HttpRequest {
             path: url_with_default_protocol(path)?,
             authentication: inherited_auth.clone(),
             ..Default::default()
-        });
+        };
+        super::postman_profiles::validate(profile, &request, None)?;
+
+        return Ok(request);
     }
 
     if !value.is_object() {
@@ -120,15 +113,28 @@ fn request(
         _ => return Err("Postman headers must be an array or text.".into()),
     }
 
+    let content_type_override = super::postman_profiles::truthy(
+        profile
+            .get("disabledSystemHeaders")
+            .and_then(|headers| headers.get("content-type")),
+    );
+
     if let Some(body) = value.get("body").filter(|body| !body.is_null())
         && !disabled(body)
     {
-        read_body(body, value.get("header"), &mut request)?;
+        read_body(
+            body,
+            value.get("header"),
+            content_type_override,
+            &mut request,
+        )?;
     }
 
     if let Some(form) = &request.form {
         super::postman_form_headers::validate(form, &request.headers, content_type_override)?;
     }
+
+    super::postman_profiles::validate(profile, &request, value.get("header"))?;
 
     Ok(request)
 }
@@ -372,10 +378,15 @@ fn joined(value: Option<&Value>, separator: &str) -> Result<String, String> {
 fn read_body(
     body: &Value,
     source_headers: Option<&Value>,
+    content_type_override: bool,
     request: &mut HttpRequest,
 ) -> Result<(), String> {
     match body.get("mode").and_then(Value::as_str).unwrap_or("raw") {
         "raw" => {
+            if content_type_override {
+                super::postman_form_headers::validate_raw(source_headers, &request.headers)?;
+            }
+
             let raw = match body.get("raw") {
                 None | Some(Value::Null) => "",
                 Some(Value::String(raw)) => raw,

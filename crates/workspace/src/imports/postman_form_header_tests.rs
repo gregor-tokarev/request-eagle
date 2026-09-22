@@ -151,3 +151,84 @@ fn postman_content_type_override_does_not_reject_raw_disabled_or_unchanged_forms
         );
     }
 }
+
+#[test]
+fn postman_raw_bodies_reject_inherited_content_type_suppression_without_an_explicit_header() {
+    let profile = json!({"disabledSystemHeaders": {"content-type": true}});
+
+    for raw in ["hello", ""] {
+        for headers in [
+            json!([]),
+            json!([{"key": "Accept", "value": "application/json"}]),
+            json!([{"key": "Content-Type", "value": "text/plain", "disabled": true}]),
+        ] {
+            let request = json!({
+                "method": "POST", "url": "https://example.test/submit", "header": headers,
+                "body": {"mode": "raw", "raw": raw}
+            });
+
+            for source in [
+                json!({"protocolProfileBehavior": profile, "item": [{"request": request}]}),
+                json!({"item": [{"protocolProfileBehavior": profile, "item": [{"request": request}]}]}),
+                json!({"item": [{"protocolProfileBehavior": profile, "request": request}]}),
+            ] {
+                let error = parse_import(&source.to_string()).unwrap_err();
+                assert!(error.contains("enabled explicit Content-Type"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn postman_raw_body_suppression_keeps_enabled_explicit_headers_and_skips_disabled_bodies() {
+    let profile = json!({"disabledSystemHeaders": {"content-type": true}});
+
+    for value in ["application/custom", ""] {
+        for headers in [
+            json!([{"key": "content-TYPE", "value": value}]),
+            json!(format!("content-TYPE: {value}")),
+        ] {
+            let source = json!({"protocolProfileBehavior": profile, "item": [{"request": {
+                "method": "POST", "url": "https://example.test/submit", "header": headers,
+                "body": {"mode": "raw", "raw": "hello"}
+            }}]});
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert_eq!(
+                imported[0].request.headers,
+                [("content-TYPE".into(), value.into())]
+            );
+        }
+    }
+
+    for body in [
+        json!(null),
+        json!({"mode": "raw", "raw": "hello", "disabled": true}),
+    ] {
+        let source = json!({"protocolProfileBehavior": profile, "item": [{"request": {
+            "method": "POST", "url": "https://example.test/submit", "body": body
+        }}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert!(imported[0].request.body.is_none());
+        assert!(imported[0].request.headers.is_empty());
+    }
+}
+
+#[test]
+fn postman_raw_body_suppression_uses_the_last_enabled_headers_system_marker() {
+    let ordinary = json!({"key": "Content-Type", "value": "application/custom"});
+    let system = json!({"key": "content-type", "value": "text/plain", "system": true});
+    let disabled = json!({"key": "Content-Type", "value": "text/plain", "disabled": true});
+
+    for (headers, accepted) in [
+        (json!([ordinary, system]), false),
+        (json!([system, ordinary]), true),
+        (json!([ordinary, disabled]), true),
+        (json!([system, disabled]), false),
+    ] {
+        let source = json!({"protocolProfileBehavior": {"disabledSystemHeaders": {"content-type": true}}, "item": [{"request": {
+            "method": "POST", "url": "https://example.test/submit", "header": headers,
+            "body": {"mode": "raw", "raw": "hello"}
+        }}]});
+        assert_eq!(parse_import(&source.to_string()).is_ok(), accepted);
+    }
+}

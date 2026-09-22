@@ -4,6 +4,7 @@ mod parser;
 mod postman;
 mod postman_folders;
 mod postman_form_headers;
+mod postman_profiles;
 mod shell;
 mod variables;
 
@@ -13,6 +14,8 @@ mod json_comment_tests;
 mod postman_folder_tests;
 #[cfg(test)]
 mod postman_form_header_tests;
+#[cfg(test)]
+mod postman_profile_tests;
 #[cfg(test)]
 mod postman_review_tests;
 #[cfg(test)]

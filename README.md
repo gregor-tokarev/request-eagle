@@ -39,6 +39,12 @@ support text and absolute file paths. Custom part content types and filenames ar
 not supported. Form imports reject Content-Type parameters or overrides that
 Postman or cURL preserves but Request Eagle's form encoder cannot reproduce,
 including custom multipart boundaries and suppressed system Content-Type headers.
+Raw Postman bodies that suppress the system Content-Type also require an enabled
+explicit Content-Type header before importing.
+Imports also reject unsupported Postman transport overrides, such as per-request
+redirect limits, certificate checks, HTTP versions, TLS restrictions, or
+suppression of headers the client would generate. Imported requests use the
+application's transport preferences.
 
 The **Authentication** tab supports Basic, Bearer, and API key credentials. Use
 `{{name}}` placeholders in request fields and add matching strings to the

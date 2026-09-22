@@ -1,25 +1,6 @@
 use request::FormBody;
 use serde_json::Value;
 
-pub(super) fn content_type_override(item: &Value, inherited: bool) -> bool {
-    let Some(headers) = item
-        .get("protocolProfileBehavior")
-        .and_then(|behavior| behavior.get("disabledSystemHeaders"))
-    else {
-        return inherited;
-    };
-
-    // Postman merges profile properties shallowly, so this entire map replaces
-    // an inherited map. Its content-type flag uses JavaScript truthiness.
-    match headers.get("content-type") {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(value)) => *value,
-        Some(Value::Number(value)) => value.as_f64().is_some_and(|value| value != 0.),
-        Some(Value::String(value)) => !value.is_empty(),
-        Some(Value::Array(_) | Value::Object(_)) => true,
-    }
-}
-
 pub(super) fn validate(
     form: &FormBody,
     headers: &[(String, String)],
@@ -77,6 +58,22 @@ pub(super) fn validate(
         if preserved_override {
             return Err("Postman form imports cannot preserve custom Content-Type parameters or boundaries. Use the bare form Content-Type or a raw body.".into());
         }
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_raw(
+    source_headers: Option<&Value>,
+    headers: &[(String, String)],
+) -> Result<(), String> {
+    // Runtime selects the last enabled header. A header marked as system-owned
+    // causes it to suppress every Content-Type header, including earlier ones.
+    let explicit = super::postman_profiles::last_header(source_headers, headers, "content-type")
+        == Some(false);
+
+    if !explicit {
+        return Err("Postman raw-body imports cannot preserve a disabled system Content-Type without an enabled explicit Content-Type header. Enable the system header or add an explicit Content-Type before importing.".into());
     }
 
     Ok(())
