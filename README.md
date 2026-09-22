@@ -28,10 +28,12 @@ Use **Import** above the request tabs to paste a cURL command or choose a Postma
 v2 or v2.1 collection JSON file. Import creates a new saved collection, preserves nested
 folders, and opens the requests for editing. Existing collections are not replaced.
 Unsupported options, authentication schemes, scripts, and GET/HEAD request bodies
-produce an import error. cURL URL globbing must be expanded to one URL before
+produce an import error. Explicit cURL methods must use canonical uppercase spelling.
+cURL URL globbing must be expanded to one URL before
 import, or disabled with `--globoff` to preserve literal braces and brackets.
 
 Postman collection variables become literal defaults in the imported requests.
+Declared variable types must match their primitive values; coercion is rejected.
 Unresolved variables remain available for your collection environment. Use decoded
 values for variables in imported queries, for example `a/b` instead of `a%2Fb`.
 Static query escapes and valueless query flags are preserved. Multipart imports

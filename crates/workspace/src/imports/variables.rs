@@ -10,7 +10,9 @@ pub(super) fn resolve_collection_defaults(collection: &mut Value) -> Result<(), 
     };
     let mut defaults = BTreeMap::new();
 
-    for variable in variables {
+    // A later enabled definition replaces the whole earlier definition, including
+    // its type. Do not validate a shadowed value that Postman would never use.
+    for variable in variables.iter().rev() {
         if variable.get("disabled").and_then(Value::as_bool) == Some(true) {
             continue;
         }
@@ -19,8 +21,34 @@ pub(super) fn resolve_collection_defaults(collection: &mut Value) -> Result<(), 
             .get("key")
             .and_then(Value::as_str)
             .ok_or("A Postman collection variable has no key.")?;
-        let value = match variable.get("value") {
-            None | Some(Value::Null) => String::new(),
+
+        if defaults.contains_key(key) {
+            continue;
+        }
+
+        let value = variable.get("value");
+        let declared_type = match variable.get("type") {
+            None | Some(Value::Null) => "any",
+            Some(Value::String(name)) => name,
+            _ => return Err(format!("Postman variable {key:?} has an unsupported type.")),
+        };
+        let supported = match declared_type.to_ascii_lowercase().as_str() {
+            "any" => true,
+            "string" => matches!(value, Some(Value::String(_))),
+            "number" => matches!(value, Some(Value::Number(_))),
+            "boolean" => matches!(value, Some(Value::Bool(_))),
+            _ => false,
+        };
+
+        if !supported {
+            return Err(format!(
+                "Postman variable {key:?} uses unsupported type conversion. Use an untyped default or a string, number, or boolean matching its declared type before importing."
+            ));
+        }
+
+        let value = match value {
+            None => String::new(),
+            Some(Value::Null) => "null".into(),
             Some(Value::String(value)) => value.clone(),
             Some(Value::Bool(value)) => value.to_string(),
             Some(Value::Number(value)) => value.to_string(),

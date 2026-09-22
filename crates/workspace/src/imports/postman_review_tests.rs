@@ -419,3 +419,13 @@ fn postman_string_headers_trim_sdk_whitespace_but_array_headers_preserve_values(
         [("X-Key".into(), "\u{0085}credential\u{0085}".into())]
     );
 }
+
+#[test]
+fn postman_method_normalization_remains_separate_from_curl_custom_method_spelling() {
+    for (method, expected) in [("get", "GET"), ("DeLeTe", "DELETE"), ("pAtCh", "PATCH")] {
+        let source =
+            json!({"item": [{"request": {"method": method, "url": "https://example.test"}}]});
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(imported[0].request.method.as_str(), expected);
+    }
+}

@@ -25,5 +25,7 @@ mod postman_profile_tests;
 mod postman_review_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod variable_tests;
 
 pub(crate) use parser::{ImportedRequest, parse_import};

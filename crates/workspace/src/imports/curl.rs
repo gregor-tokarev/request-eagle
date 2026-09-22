@@ -90,7 +90,13 @@ pub(super) fn parse(input: &str) -> Result<ImportedRequest, String> {
         };
 
         match option {
-            "-X" | "--request" => explicit_method = Some(method(value)?),
+            "-X" | "--request" => {
+                if value != value.to_ascii_uppercase() {
+                    return Err("cURL preserves HTTP method spelling, but import supports only canonical uppercase methods. Use GET, POST, PUT, DELETE, PATCH, HEAD, or OPTIONS.".into());
+                }
+
+                explicit_method = Some(method(value)?);
+            }
             "--url" => set_url(&mut request, value)?,
             "-H" | "--header" => {
                 if value.starts_with('@') {

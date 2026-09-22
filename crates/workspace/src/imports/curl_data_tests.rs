@@ -199,3 +199,21 @@ fn curl_header_values_preserve_unicode_whitespace_and_trim_only_leading_http_ows
         }
     }
 }
+
+#[test]
+fn curl_explicit_methods_reject_spellings_that_would_change_on_send() {
+    for method in ["get", "post", "DeLeTe", "pAtCh", "Head", "options"] {
+        for flag in ["-X ", "--request=", "-X"] {
+            let error =
+                parse_import(&format!("curl https://example.test {flag}{method}")).unwrap_err();
+            assert!(error.contains("canonical uppercase methods"), "{error}");
+        }
+    }
+
+    for method in ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"] {
+        let imported = parse_import(&format!("curl https://example.test -X {method}")).unwrap();
+        assert_eq!(imported[0].request.method.as_str(), method);
+    }
+
+    assert!(parse_import("curl https://example.test -X CUSTOM").is_err());
+}

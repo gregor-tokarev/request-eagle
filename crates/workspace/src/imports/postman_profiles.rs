@@ -1,4 +1,4 @@
-use request::{HttpRequest, Method};
+use request::{ApiKeyLocation, Authentication, HttpRequest, Method};
 use serde_json::{Map, Value};
 
 pub(super) fn inherit(item: &Value, inherited: &Map<String, Value>) -> Map<String, Value> {
@@ -111,18 +111,42 @@ fn validate_system_headers(
     request: &HttpRequest,
     source_headers: Option<&Value>,
 ) -> Result<(), String> {
-    let is_disabled = |key| truthy(disabled.and_then(|headers| headers.get(key)));
-    let header = |key| last_header(source_headers, &request.headers, key);
-    let system = |key| header(key) == Some(true);
-    let missing = |key| header(key).is_none();
-
-    for key in [
+    let is_disabled = |key: &str| truthy(disabled.and_then(|headers| headers.get(key)));
+    let api_header = match &request.authentication {
+        Authentication::ApiKey {
+            name,
+            location: ApiKeyLocation::Header,
+            ..
+        } => Some(name.as_str()),
+        _ => None,
+    };
+    let suppressed_system_headers = [
         "content-type",
         "connection",
         "host",
         "accept-encoding",
         "content-length",
-    ] {
+    ];
+
+    if api_header.is_some_and(|name| name.contains("{{"))
+        && suppressed_system_headers.iter().any(|key| is_disabled(key))
+    {
+        return unsupported("disabledSystemHeaders with a variable API-key header name");
+    }
+
+    // Postman signs before applying header suppression. Its API-key helper
+    // replaces the matching source descriptor with a system-owned descriptor.
+    let header = |key| {
+        if api_header.is_some_and(|name| name.eq_ignore_ascii_case(key)) {
+            Some(true)
+        } else {
+            last_header(source_headers, &request.headers, key)
+        }
+    };
+    let system = |key| header(key) == Some(true);
+    let missing = |key| header(key).is_none();
+
+    for key in suppressed_system_headers {
         if is_disabled(key) && system(key) {
             return unsupported(&format!("disabledSystemHeaders.{key}"));
         }

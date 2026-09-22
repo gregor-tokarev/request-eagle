@@ -1,3 +1,4 @@
+use request::{ApiKeyLocation, Authentication};
 use serde_json::{Value, json};
 
 use super::parse_import;
@@ -166,4 +167,194 @@ fn postman_rejects_profile_suppression_that_removes_saved_system_headers() {
     request["header"] = json!([{"key": "Accept", "value": "*/*", "system": true}]);
     let source = collection(json!({"disabledSystemHeaders": {"accept": true}}), request);
     assert!(parse_import(&source.to_string()).is_ok());
+}
+
+#[test]
+fn postman_rejects_suppression_that_removes_api_key_headers() {
+    for (name, key, value) in [
+        ("Host", "host", "custom.example.test"),
+        ("Content-Type", "content-type", "application/custom"),
+        ("cOnTeNt-LeNgTh", "content-length", "0"),
+        ("Accept-Encoding", "accept-encoding", "identity"),
+        ("Connection", "connection", "close"),
+    ] {
+        let mut request = get();
+        request["header"] = json!([]);
+        request["auth"] = json!({"type": "apikey", "apikey": {
+            "key": name, "value": value, "in": "header"
+        }});
+
+        if key == "accept-encoding" {
+            // Range prevents default Accept-Encoding generation, but Postman
+            // still removes the system-owned header injected by the helper.
+            request["header"] = json!([{"key": "Range", "value": "bytes=0-10"}]);
+        }
+
+        let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.to_ascii_lowercase().contains(key), "{name}: {error}");
+    }
+}
+
+#[test]
+fn postman_length_suppression_removes_api_key_transfer_encoding_with_explicit_length() {
+    let request = json!({
+        "method": "POST", "url": "https://example.test/path",
+        "header": [{"key": "Content-Length", "value": "0"}],
+        "auth": {"type": "apikey", "apikey": {
+            "key": "Transfer-Encoding", "value": "chunked", "in": "header"
+        }}
+    });
+    let source = collection(
+        json!({"disabledSystemHeaders": {"content-length": true}}),
+        request,
+    );
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("content-length"), "{error}");
+}
+
+#[test]
+fn postman_checks_suppressed_inherited_api_key_headers_on_string_requests() {
+    let mut source = collection(
+        json!({"disabledSystemHeaders": {"content-length": true}}),
+        json!("https://example.test/path"),
+    );
+    source["auth"] = json!({"type": "apikey", "apikey": {
+        "key": "Content-Length", "value": "0", "in": "header"
+    }});
+
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("content-length"), "{error}");
+
+    source["protocolProfileBehavior"]["disabledSystemHeaders"]["content-length"] = json!(false);
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::ApiKey {
+            name: "Content-Length".into(),
+            value: "0".into(),
+            location: ApiKeyLocation::Header,
+        }
+    );
+}
+
+#[test]
+fn postman_keeps_api_key_headers_that_suppression_does_not_remove() {
+    for (name, key) in [
+        ("Accept", "accept"),
+        ("User-Agent", "user-agent"),
+        ("Cache-Control", "cache-control"),
+        ("Postman-Token", "postman-token"),
+    ] {
+        let mut request = get();
+        request["auth"] = json!({"type": "apikey", "apikey": {
+            "key": name, "value": "custom", "in": "header"
+        }});
+
+        let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.authentication,
+            Authentication::ApiKey {
+                name: name.into(),
+                value: "custom".into(),
+                location: ApiKeyLocation::Header,
+            }
+        );
+    }
+}
+
+#[test]
+fn postman_rejects_variable_api_key_header_names_under_affected_suppression() {
+    for key in [
+        "host",
+        "content-type",
+        "content-length",
+        "accept-encoding",
+        "connection",
+    ] {
+        let mut request = get();
+        request["auth"] = json!({"type": "apikey", "apikey": {
+            "key": "{{header_name}}", "value": "custom", "in": "header"
+        }});
+
+        let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(error.contains("API-key"), "{key}: {error}");
+    }
+}
+
+#[test]
+fn postman_keeps_variable_api_key_names_under_inert_or_ignored_suppression() {
+    for profile in [
+        json!({"disabledSystemHeaders": {"user-agent": true, "cache-control": true,
+            "postman-token": true}}),
+        json!({"disabledSystemHeaders": {"Content-Length": true,
+            "transfer-encoding": true, "unknown": true}}),
+        json!({"disabledSystemHeaders": {"host": false, "content-type": false,
+            "content-length": false, "accept-encoding": false, "connection": false}}),
+    ] {
+        let mut request = get();
+        request["auth"] = json!({"type": "apikey", "apikey": {
+            "key": "{{header_name}}", "value": "custom", "in": "header"
+        }});
+
+        let source = collection(profile, request);
+        let imported = parse_import(&source.to_string()).unwrap();
+        assert_eq!(
+            imported[0].request.authentication,
+            Authentication::ApiKey {
+                name: "{{header_name}}".into(),
+                value: "custom".into(),
+                location: ApiKeyLocation::Header,
+            }
+        );
+    }
+}
+
+#[test]
+fn postman_query_api_keys_do_not_create_suppressed_system_headers() {
+    for key in ["content-type", "content-length", "connection"] {
+        for name in [key, "{{header_name}}"] {
+            let mut request = get();
+            request["auth"] = json!({"type": "apikey", "apikey": {
+                "key": name, "value": "custom", "in": "query"
+            }});
+
+            let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert_eq!(
+                imported[0].request.authentication,
+                Authentication::ApiKey {
+                    name: name.into(),
+                    value: "custom".into(),
+                    location: ApiKeyLocation::Query,
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn postman_range_header_helper_makes_accept_encoding_suppression_inert() {
+    let mut request = get();
+    request["auth"] = json!({"type": "apikey", "apikey": {
+        "key": "Range", "value": "bytes=0-10", "in": "header"
+    }});
+    let profile = json!({"disabledSystemHeaders": {"accept-encoding": true}});
+    let source = collection(profile.clone(), request.clone());
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(
+        imported[0].request.authentication,
+        Authentication::ApiKey {
+            name: "Range".into(),
+            value: "bytes=0-10".into(),
+            location: ApiKeyLocation::Header,
+        }
+    );
+
+    request["auth"]["apikey"]["in"] = json!("query");
+    let source = collection(profile, request);
+    let error = parse_import(&source.to_string()).unwrap_err();
+    assert!(error.contains("accept-encoding"), "{error}");
 }
