@@ -15,9 +15,9 @@ mod history_tests;
 mod main_view_tests;
 
 #[cfg(test)]
-mod save_request_tests;
-#[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod save_request_tests;
 
 #[cfg(test)]
 mod workflow_tests;

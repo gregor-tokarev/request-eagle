@@ -353,6 +353,16 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let root = destination
+            .path
+            .ancestors()
+            .nth(destination.folders.len())
+            .map(Path::to_path_buf);
+        if let Some(root) = &root
+            && !self.collection_paths.contains(root)
+        {
+            self.collection_paths.push(root.clone());
+        }
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
             return;
         };
@@ -364,6 +374,7 @@ impl MainView {
                 draft.name = file.name.clone().into();
                 draft.collection = Some(destination.collection.clone());
                 draft.folders = destination.folders.clone();
+                draft.environment_path = root.as_ref().map(|root| root.join("environment.toml"));
                 cx.notify();
             });
         }

@@ -105,6 +105,10 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
         assert!(!draft.read(cx).is_dirty());
         assert_eq!(draft.read(cx).name, "Create user");
         assert_eq!(
+            draft.read(cx).environment_path,
+            Some(fixture.0.join("API/environment.toml"))
+        );
+        assert_eq!(
             draft.read(cx).folders,
             vec![gpui_kit::SharedString::from("Users")]
         );
