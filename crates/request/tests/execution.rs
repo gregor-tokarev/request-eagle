@@ -1047,7 +1047,7 @@ fn preserves_serialized_request_and_preference_formats() {
     assert_eq!(preferences.http_version, HttpVersion::Http2);
     assert_eq!(preferences.timeout_ms, 250);
     assert_eq!(preferences.max_response_size_mb, 50);
-    assert!(!preferences.ssl_certificate_verification);
+    assert!(preferences.ssl_certificate_verification);
     assert!(preferences.follow_all_redirects);
 
     let preferences: RequestPreferences =

@@ -5,6 +5,12 @@ preferences, and the executor. It does not depend on GPUI application or UI type
 `collection` and `preferences` re-export their original types, so their imports and
 serialized files remain compatible.
 
+TLS certificate verification is enabled by default. New profiles and preference
+files that omit `ssl_certificate_verification` verify server certificates. An
+explicit stored value is preserved, including `false` saved by older versions.
+Existing users can enable verification in Settings > General. Disabling it allows
+untrusted certificates and applies to subsequent requests.
+
 ```rust,no_run
 use request::{HttpRequest, RequestExecutor, RequestPreferences, Response};
 

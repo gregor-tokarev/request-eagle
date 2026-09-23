@@ -212,7 +212,7 @@ impl Render for RequestSettings {
             ))
             .child(request_row(
                 "SSL certificate verification",
-                "",
+                "Verify the server certificate before sending requests. Disabling this allows untrusted certificates.",
                 h_flex().justify_end().child(
                     Switch::new("ssl-certificate-verification")
                         .accessibility_label("SSL certificate verification")

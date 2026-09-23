@@ -20,11 +20,11 @@ fn tls_config() -> rustls::ServerConfig {
 }
 
 #[test]
-fn certificate_verification_can_be_enabled_or_disabled() {
+fn certificate_verification_is_enabled_by_default_and_can_be_overridden() {
     smol::block_on(async {
         let acceptor = TlsAcceptor::from(Arc::new(tls_config()));
 
-        for verify in [true, false] {
+        for verification in [None, Some(true), Some(false)] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let url = format!("https://{}", listener.local_addr().unwrap());
@@ -51,12 +51,16 @@ fn certificate_verification_can_be_enabled_or_disabled() {
                     .unwrap();
                 stream.shutdown().await.unwrap();
             });
-            let executor = RequestExecutor::new(&RequestPreferences {
-                ssl_certificate_verification: verify,
+            let mut preferences = RequestPreferences {
                 timeout_ms: 2_000,
                 ..RequestPreferences::default()
-            })
-            .unwrap();
+            };
+
+            if let Some(verification) = verification {
+                preferences.ssl_certificate_verification = verification;
+            }
+
+            let executor = RequestExecutor::new(&preferences).unwrap();
             let result = executor
                 .execute(HttpRequest {
                     path: url,
@@ -64,9 +68,9 @@ fn certificate_verification_can_be_enabled_or_disabled() {
                 })
                 .await;
 
-            if verify {
+            if verification != Some(false) {
                 let error = result.unwrap_err();
-                println!("\n  Verify TLS = true, self-signed server -> {error}");
+                println!("\n  Verify TLS = {verification:?}, self-signed server -> {error}");
                 assert!(matches!(
                     error,
                     ExecutionError::Http(HttpError::Transport(_))
