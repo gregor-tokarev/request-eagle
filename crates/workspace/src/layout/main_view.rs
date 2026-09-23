@@ -5,7 +5,7 @@ use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::request_draft::RequestDraft;
-use crate::actions::{CloseTab, NewTab};
+use crate::actions::{CloseTab, NewTab, SaveRequest};
 
 const TAB_WIDTH: Pixels = px(176.);
 const TAB_HEIGHT: Pixels = px(28.);
@@ -337,6 +337,7 @@ impl MainView {
                     .small()
                     .primary()
                     .label("Save")
+                    .tooltip_with_action("Save changes and close", &SaveRequest, Some("Workspace"))
                     .on_click(cx.listener(|this, _, _, cx| this.save_active_request(cx))),
             )
             .child(
@@ -344,6 +345,7 @@ impl MainView {
                     .debug_selector(|| "discard-request-changes".into())
                     .small()
                     .label("Discard")
+                    .tooltip_with_action("Discard changes and close", &CloseTab, Some("Workspace"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(index) = this
                             .tabs
