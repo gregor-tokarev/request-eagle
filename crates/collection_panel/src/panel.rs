@@ -116,10 +116,14 @@ impl CollectionPanel {
     ) -> Result<(), collection::CollectionEditError> {
         self.collections
             .update_request(path, expected_id, request)?;
-        let selected = self
-            .selected
-            .map(|index| self.tree.items[index].path.clone());
-        self.rebuild_tree(selected.as_deref(), None, cx);
+        let file = self.collections.file(path).expect("saved request exists");
+
+        if self.tree.request_changed(file) {
+            // Cancel any result computed from the previous search documents.
+            self.rows_task = None;
+            Arc::make_mut(&mut self.tree).update_request(file);
+            self.refresh_rows(false, cx);
+        }
 
         Ok(())
     }

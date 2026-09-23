@@ -11,6 +11,8 @@ mod tree;
 #[cfg(test)]
 mod editing_tests;
 #[cfg(test)]
+mod saving_tests;
+#[cfg(test)]
 mod search_tests;
 #[cfg(test)]
 mod tests;
