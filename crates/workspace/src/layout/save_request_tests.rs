@@ -32,6 +32,7 @@ fn setup<'a>(
 ) -> (Entity<MainView>, &'a mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        cx.set_reduce_motion(true);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
     });
@@ -49,7 +50,16 @@ fn setup<'a>(
     (main.unwrap(), cx)
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    // Mount the dialog, then paint its reduced-motion position before hit testing.
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    });
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    });
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing {selector}"));

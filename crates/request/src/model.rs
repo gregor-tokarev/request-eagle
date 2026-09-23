@@ -46,6 +46,9 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Patch,
+    Head,
+    Options,
     Delete,
 }
 
@@ -55,6 +58,9 @@ impl Method {
             Self::Get => "GET",
             Self::Post => "POST",
             Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Head => "HEAD",
+            Self::Options => "OPTIONS",
             Self::Delete => "DELETE",
         }
     }

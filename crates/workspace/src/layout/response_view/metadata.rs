@@ -18,12 +18,21 @@ impl ResponseView {
         let status = response.status;
         let metrics = response.metrics;
         let body_bytes = response.body.len();
+        let downloaded_body_bytes = metrics.encoded_response_body_bytes.unwrap_or(body_bytes);
         let processing = content.processing;
         let elapsed = content.execution.elapsed + processing;
         let encoded = response
             .headers
-            .get("content-encoding")
-            .is_some_and(|value| !value.as_bytes().eq_ignore_ascii_case(b"identity"));
+            .get_all("content-encoding")
+            .iter()
+            .any(|value| {
+                value.to_str().map_or(true, |value| {
+                    value
+                        .split(',')
+                        .any(|encoding| !encoding.trim().eq_ignore_ascii_case("identity"))
+                })
+            });
+        let decoded = !encoded || metrics.encoded_response_body_bytes.is_some();
         let color = if status.is_success() {
             cx.theme().success
         } else if status.is_redirection() {
@@ -97,14 +106,14 @@ impl ResponseView {
                     .open_delay(Duration::from_millis(250))
                     .p(px(8.))
                     .trigger(div().debug_selector(|| "response-size".into()).cursor_text()
-                        .child(SelectableText::new("response-size-text", size_label(body_bytes + metrics.response_header_bytes)).document_order(2)))
+                        .child(SelectableText::new("response-size-text", size_label(downloaded_body_bytes + metrics.response_header_bytes)).document_order(2)))
                     .content(move |_, _, cx| {
                         panel("response-size-overlay", size_focus.clone(), owner, cx)
                             .w(px(259.))
-                            .child(detail_row("response-total", 0, "Response size", bytes_label(body_bytes + metrics.response_header_bytes)).font_weight(FontWeight::SEMIBOLD))
+                            .child(detail_row("response-total", 0, "Response size", bytes_label(downloaded_body_bytes + metrics.response_header_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("response-headers", 1, "Headers (estimated)", bytes_label(metrics.response_header_bytes)))
-                            .child(detail_row("response-body", 2, "Downloaded body", bytes_label(body_bytes)))
-                            .child(detail_row("response-decoded", 3, "Uncompressed", if encoded { "Not decoded".to_owned() } else { bytes_label(body_bytes) }))
+                            .child(detail_row("response-body", 2, "Downloaded body", bytes_label(downloaded_body_bytes)))
+                            .child(detail_row("response-decoded", 3, "Uncompressed", if decoded { bytes_label(body_bytes) } else { "Not decoded".to_owned() }))
                             .child(div().h(px(1.)).my_1().bg(cx.theme().border))
                             .child(detail_row("request-total", 4, "Request size (known)", bytes_label(metrics.request_header_bytes + metrics.request_body_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("request-headers", 5, "Prepared headers", bytes_label(metrics.request_header_bytes)))

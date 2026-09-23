@@ -17,6 +17,7 @@ mod preferences;
 mod proxy;
 mod redirects;
 mod response;
+mod response_encoding;
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;

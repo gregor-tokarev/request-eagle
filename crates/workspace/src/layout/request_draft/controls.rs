@@ -15,7 +15,8 @@ fn method_color(method: Method, cx: &App) -> Hsla {
     match method {
         Method::Get => cx.theme().success,
         Method::Post => cx.theme().warning,
-        Method::Put => cx.theme().info,
+        Method::Put | Method::Patch => cx.theme().info,
+        Method::Head | Method::Options => cx.theme().muted_foreground,
         Method::Delete => cx.theme().danger,
     }
 }
@@ -141,9 +142,15 @@ impl RequestDraft {
                                     ),
                             )
                             .dropdown_menu(move |mut menu, _, _| {
-                                for option in
-                                    [Method::Get, Method::Post, Method::Put, Method::Delete]
-                                {
+                                for option in [
+                                    Method::Get,
+                                    Method::Post,
+                                    Method::Put,
+                                    Method::Patch,
+                                    Method::Delete,
+                                    Method::Head,
+                                    Method::Options,
+                                ] {
                                     let draft = draft.clone();
                                     menu =
                                         menu.item(
