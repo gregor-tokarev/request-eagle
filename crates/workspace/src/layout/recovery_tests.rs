@@ -113,6 +113,7 @@ fn assert_recovered_root_identity(root: &str, cx: &mut TestAppContext) {
             file.id.clone().into(),
             file.name.clone().into(),
             "API".into(),
+            Vec::new(),
             &file.request,
             cx,
         );
@@ -156,6 +157,7 @@ fn assert_recovered_root_identity(root: &str, cx: &mut TestAppContext) {
             absolute_file.id.clone().into(),
             absolute_file.name.clone().into(),
             "API".into(),
+            Vec::new(),
             &absolute_file.request,
             cx,
         );
@@ -295,6 +297,7 @@ fn recovery_observes_edits_and_restores_saved_and_untitled_requests(cx: &mut Tes
             "original-request-id".into(),
             "Create item".into(),
             "API".into(),
+            Vec::new(),
             &baseline.clone().into(),
             cx,
         );
@@ -355,6 +358,7 @@ fn recovery_observes_edits_and_restores_saved_and_untitled_requests(cx: &mut Tes
             "original-request-id".into(),
             "Create item".into(),
             "API".into(),
+            Vec::new(),
             &baseline.into(),
             cx,
         );
@@ -628,6 +632,7 @@ path = "https://example.test/replacement"
                 replacement.id.clone().into(),
                 replacement.name.clone().into(),
                 "API".into(),
+                Vec::new(),
                 &replacement.request,
                 cx,
             );
@@ -658,4 +663,31 @@ path = "https://example.test/replacement"
             Some("replacement-request-id")
         );
     }
+}
+
+#[gpui_kit::test]
+fn recovered_request_reconstructs_nested_breadcrumbs(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let view = restored_view(directory.path(), cx);
+    view.update(cx, |view, cx| {
+        view.collection_paths = vec!["/collections/API".into()];
+        view.open_request(
+            Path::new("/collections/API/API/Users/request.toml"),
+            "request".into(),
+            "List users".into(),
+            "API".into(),
+            vec!["API".into(), "Users".into()],
+            &HttpRequest::default().into(),
+            cx,
+        );
+    });
+    let snapshot = cx.read(|cx| view.read(cx).session_snapshot(cx));
+    view.update(cx, |view, cx| view.restore_session(snapshot, cx));
+    let draft = draft_at(&view, 1, cx);
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).folders,
+            vec![gpui_kit::SharedString::from("API"), "Users".into()]
+        );
+    });
 }

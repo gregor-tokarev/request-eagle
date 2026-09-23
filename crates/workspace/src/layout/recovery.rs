@@ -187,6 +187,18 @@ impl MainView {
             draft.saved_request = tab.saved_request.unwrap_or_else(|| tab.request.clone());
             draft.request = tab.request;
             draft.environment_path = tab.environment_path;
+            draft.folders = tab
+                .request_path
+                .as_deref()
+                .zip(draft.environment_path.as_deref().and_then(Path::parent))
+                .and_then(|(path, root)| path.strip_prefix(root).ok())
+                .and_then(Path::parent)
+                .map(|path| {
+                    path.iter()
+                        .map(|part| part.to_string_lossy().into_owned().into())
+                        .collect()
+                })
+                .unwrap_or_default();
             let index = self.open_draft(tab.title.into(), draft, cx);
             self.tabs[index].request_path = tab.request_path;
             self.tabs[index].request_id = tab.request_id.map(Into::into);

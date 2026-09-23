@@ -119,6 +119,16 @@ impl MainView {
                         file.id.into(),
                         file.name.into(),
                         collection.into(),
+                        file.path
+                            .strip_prefix(&file.collection_path)
+                            .ok()
+                            .and_then(std::path::Path::parent)
+                            .map(|path| {
+                                path.iter()
+                                    .map(|part| part.to_string_lossy().into_owned().into())
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         &file.request.into(),
                         cx,
                     );
