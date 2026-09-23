@@ -224,6 +224,7 @@ impl Render for RequestFields {
                     !row.key.read(cx).value().is_empty() || !row.value.read(cx).value().is_empty();
 
                 h_flex()
+                    .group("request-field-row")
                     .h(px(32.))
                     .border_t_1()
                     .border_color(cx.theme().border)
@@ -272,17 +273,28 @@ impl Render for RequestFields {
                                 )
                                 .when(column == "description" && populated, |cell| {
                                     cell.child(
-                                        h_flex().absolute().right(px(3.)).top_0().h_full().child(
-                                            Button::new(("remove-row", index))
-                                                .ghost()
-                                                .xsmall()
-                                                .icon(IconName::Close)
-                                                .accessibility_label("Remove row")
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.rows.remove(index);
-                                                    this.emit_change(cx);
-                                                })),
-                                        ),
+                                        h_flex()
+                                            .absolute()
+                                            .right(px(3.))
+                                            .top_0()
+                                            .h_full()
+                                            .invisible()
+                                            .group_hover("request-field-row", |button| {
+                                                button.visible()
+                                            })
+                                            .child(
+                                                Button::new(("remove-row", index))
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .icon(IconName::Close)
+                                                    .accessibility_label("Remove row")
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.rows.remove(index);
+                                                            this.emit_change(cx);
+                                                        },
+                                                    )),
+                                            ),
                                     )
                                 })
                         }),
