@@ -555,3 +555,63 @@ fn second_close_shortcut_discards_only_the_pending_tab(cx: &mut TestAppContext) 
     cx.simulate_keystrokes("secondary-w");
     cx.read(|cx| assert!(tabs.read(cx).tabs.is_empty()));
 }
+
+#[gpui_kit::test]
+fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestAppContext) {
+    let fixture = SavedRequestFixture::new();
+    let nested = fixture.directory.join("API/API/V2/example.toml");
+    fs::create_dir_all(nested.parent().unwrap()).unwrap();
+    fs::rename(&fixture.file, &nested).unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+    });
+    click(cx, "collection-row-3");
+    let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
+    let draft = cx.read(|cx| {
+        tabs.read(cx).tabs[1]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    cx.read(|cx| {
+        assert_eq!(draft.read(cx).collection.as_deref(), Some("API"));
+        assert_eq!(
+            draft.read(cx).folders,
+            vec![gpui_kit::SharedString::from("API"), "V2".into()]
+        );
+    });
+    cx.update(|window, _| window.refresh());
+    let collection = cx.debug_bounds("request-collection").unwrap();
+    let folder = cx.debug_bounds("request-folder-0").unwrap();
+    let nested_folder = cx.debug_bounds("request-folder-1").unwrap();
+    let name = cx.debug_bounds("request-name").unwrap();
+    assert!(collection.right() < folder.left());
+    assert!(folder.right() < nested_folder.left());
+    assert!(nested_folder.right() < name.left());
+
+    let method = cx.debug_bounds("request-method").unwrap();
+    let label = cx.debug_bounds("request-method-label").unwrap();
+    let arrow = cx.debug_bounds("request-method-arrow").unwrap();
+    assert!(label.left() < method.left() + gpui_kit::px(20.));
+    assert!(arrow.right() > method.right() - gpui_kit::px(20.));
+
+    click(cx, "collection-row-1");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("Renamed folder");
+    cx.simulate_keystrokes("enter");
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).folders,
+            vec![gpui_kit::SharedString::from("Renamed folder"), "V2".into()]
+        );
+        assert_eq!(draft.read(cx).name, "Example");
+    });
+}

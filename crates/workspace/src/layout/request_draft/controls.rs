@@ -41,21 +41,49 @@ impl RequestDraft {
                     .child("HTTP"),
             )
             .child(
-                div()
-                    .debug_selector(|| "request-name".into())
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.name.clone()),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "request-collection".into())
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground)
+                h_flex()
+                    .debug_selector(|| "request-breadcrumbs".into())
+                    .min_w_0()
+                    .gap_1()
+                    .text_size(px(13.))
+                    .overflow_hidden()
+                    .when_some(self.collection.clone(), |row, collection| {
+                        row.child(
+                            div()
+                                .debug_selector(|| "request-collection".into())
+                                .flex_none()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(collection),
+                        )
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(px(12.))
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                    })
+                    .children(self.folders.iter().enumerate().map(|(index, folder)| {
+                        h_flex()
+                            .flex_none()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .debug_selector(move || format!("request-folder-{index}"))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(folder.clone()),
+                            )
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size(px(12.))
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                    }))
                     .child(
-                        self.collection
-                            .clone()
-                            .unwrap_or_else(|| "No collection".into()),
+                        div()
+                            .debug_selector(|| "request-name".into())
+                            .min_w_0()
+                            .text_ellipsis()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(self.name.clone()),
                     ),
             )
     }
@@ -92,15 +120,25 @@ impl RequestDraft {
                             .px_3()
                             .accessibility_label(format!("Request method: {}", method.as_str()))
                             .child(
-                                div()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(method_color(method, cx))
-                                    .child(method.as_str()),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronDown)
-                                    .size(px(12.))
-                                    .text_color(cx.theme().muted_foreground),
+                                h_flex()
+                                    .w_full()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .debug_selector(|| "request-method-label".into())
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(method_color(method, cx))
+                                            .child(method.as_str()),
+                                    )
+                                    .child(
+                                        div()
+                                            .debug_selector(|| "request-method-arrow".into())
+                                            .child(
+                                                Icon::new(IconName::ChevronDown)
+                                                    .size(px(12.))
+                                                    .text_color(cx.theme().muted_foreground),
+                                            ),
+                                    ),
                             )
                             .dropdown_menu(move |mut menu, _, _| {
                                 for option in

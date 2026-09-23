@@ -90,6 +90,7 @@ impl MainView {
         request_id: SharedString,
         name: SharedString,
         collection: SharedString,
+        folders: Vec<SharedString>,
         request: &collection::Request,
         cx: &mut Context<Self>,
     ) {
@@ -102,6 +103,7 @@ impl MainView {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
+                    draft.folders = folders;
                     cx.notify();
                 });
             }
@@ -111,7 +113,8 @@ impl MainView {
         }
 
         let collection::Request::Http(request) = request;
-        let draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
+        let mut draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
+        draft.folders = folders;
         let index = self.open_draft(name, draft, cx);
         self.tabs[index].request_path = Some(path.to_path_buf());
         self.tabs[index].request_id = Some(request_id);
@@ -124,6 +127,7 @@ impl MainView {
         request_id: &SharedString,
         name: SharedString,
         collection: SharedString,
+        folders: Vec<SharedString>,
         cx: &mut Context<Self>,
     ) {
         if let Some(tab) = self.tabs.iter_mut().find(|tab| {
@@ -137,6 +141,7 @@ impl MainView {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
+                    draft.folders = folders;
                     cx.notify();
                 });
             }

@@ -18,6 +18,7 @@ pub(in crate::layout) enum RequestSection {
 pub(in crate::layout) struct RequestDraft {
     pub(in crate::layout) name: SharedString,
     pub(in crate::layout) collection: Option<SharedString>,
+    pub(in crate::layout) folders: Vec<SharedString>,
     pub(in crate::layout) request: HttpRequest,
     pub(in crate::layout) saved_request: HttpRequest,
     pub(in crate::layout) url: Option<Entity<InputState>>,
@@ -47,6 +48,7 @@ impl RequestDraft {
         Self {
             name: "Untitled Request".into(),
             collection: None,
+            folders: Vec::new(),
             request: HttpRequest::default(),
             saved_request: HttpRequest::default(),
             url: None,

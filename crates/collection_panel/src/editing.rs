@@ -244,6 +244,17 @@ impl CollectionPanel {
                     },
                     path: item.path.clone(),
                     name: item.label.clone(),
+                    folders: item
+                        .path
+                        .strip_prefix(&collection.path)
+                        .ok()
+                        .and_then(Path::parent)
+                        .map(|path| {
+                            path.iter()
+                                .map(|part| part.to_string_lossy().into_owned().into())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     collection: collection
                         .path
                         .file_name()

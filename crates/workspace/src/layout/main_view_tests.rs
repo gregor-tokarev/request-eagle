@@ -42,7 +42,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
     });
 
     assert!(cx.debug_bounds("request-draft").is_some());
-    assert!(cx.debug_bounds("request-collection").is_some());
+    assert!(cx.debug_bounds("request-collection").is_none());
     assert!(cx.debug_bounds("tab-method-1").is_some());
     cx.read(|cx| {
         let draft = first.read(cx);
@@ -107,6 +107,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
                 "saved".into(),
                 "Saved request".into(),
                 "Collection".into(),
+                Vec::new(),
                 &collection::HttpRequest {
                     method: collection::Method::Post,
                     ..Default::default()
@@ -564,6 +565,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
                 "first".into(),
                 "Same name".into(),
                 "Collection".into(),
+                Vec::new(),
                 &collection::HttpRequest::default().into(),
                 cx,
             );
@@ -572,6 +574,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
                 "second".into(),
                 "Same name".into(),
                 "Collection".into(),
+                Vec::new(),
                 &collection::HttpRequest {
                     method: collection::Method::Post,
                     ..Default::default()
@@ -594,6 +597,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
                 "first".into(),
                 "Renamed request".into(),
                 "Renamed collection".into(),
+                Vec::new(),
                 &collection::HttpRequest {
                     method: collection::Method::Put,
                     ..Default::default()

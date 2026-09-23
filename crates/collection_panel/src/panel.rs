@@ -22,12 +22,14 @@ pub enum CollectionPanelEvent {
         path: PathBuf,
         name: SharedString,
         collection: SharedString,
+        folders: Vec<SharedString>,
     },
     OpenRequest {
         id: SharedString,
         path: PathBuf,
         name: SharedString,
         collection: SharedString,
+        folders: Vec<SharedString>,
         request: Request,
     },
 }

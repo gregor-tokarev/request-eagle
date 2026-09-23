@@ -65,6 +65,7 @@ impl Layout {
                     path,
                     name,
                     collection,
+                    folders,
                 } => {
                     this.main_view.update(cx, |view, cx| {
                         view.relocate_request(
@@ -73,6 +74,7 @@ impl Layout {
                             id,
                             name.clone(),
                             collection.clone(),
+                            folders.clone(),
                             cx,
                         );
                     });
@@ -82,6 +84,7 @@ impl Layout {
                     path,
                     name,
                     collection,
+                    folders,
                     request,
                 } => {
                     this.main_view.update(cx, |view, cx| {
@@ -90,6 +93,7 @@ impl Layout {
                             id.clone(),
                             name.clone(),
                             collection.clone(),
+                            folders.clone(),
                             request,
                             cx,
                         );
