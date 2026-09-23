@@ -9,7 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::draft::{RequestDraft, RequestSection};
-use crate::actions::{SaveRequest, SendRequest};
+use crate::actions::SendRequest;
 
 fn method_color(method: Method, cx: &App) -> Hsla {
     match method {
@@ -57,18 +57,6 @@ impl RequestDraft {
                             .clone()
                             .unwrap_or_else(|| "No collection".into()),
                     ),
-            )
-            .child(div().flex_1())
-            .child(
-                Button::new("save-request")
-                    .debug_selector(|| "save-request".into())
-                    .ghost()
-                    .small()
-                    .label("Save")
-                    .tooltip_with_action("Save request", &SaveRequest, Some("Workspace"))
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(SaveRequest), cx);
-                    }),
             )
     }
 
