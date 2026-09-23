@@ -819,7 +819,10 @@ fn postman_raw_defaults_reject_unresolved_enabled_header_names() {
                 "method": "POST", "url": "https://example.test", "header": headers, "body": body
             }}]});
             let error = parse_import(&source.to_string()).unwrap_err();
-            assert!(error.contains("Unresolved Postman header names"), "{error}");
+            assert!(
+                error.contains("Postman header names must be resolved before importing"),
+                "{error}"
+            );
         }
     }
 }
@@ -847,11 +850,10 @@ fn postman_raw_defaults_keep_literal_and_collection_resolved_content_type_names(
             "method": "POST", "url": "https://example.test",
             "header": [{"key": "{{header_name}}", "value": "application/xml"}], "body": body
         }}]});
-        let imported = parse_import(&source.to_string()).unwrap();
-        assert!(imported[0].request.body.is_none());
-        assert_eq!(
-            imported[0].request.headers,
-            [("{{header_name}}".into(), "application/xml".into())]
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(
+            error.contains("Postman header names must be resolved before importing"),
+            "{error}"
         );
     }
 
@@ -865,4 +867,61 @@ fn postman_raw_defaults_keep_literal_and_collection_resolved_content_type_names(
         imported[0].request.headers,
         [("Content-Type".into(), "application/json".into())]
     );
+}
+
+#[test]
+fn postman_requires_resolved_header_names_even_with_literal_headers_or_no_body() {
+    for headers in [
+        json!([{"key": "{{header_name}}", "value": "application/xml"}]),
+        json!([{"key": "Content-Type", "value": "application/json"},
+            {"key": "{{header_name}}", "value": "application/xml"}]),
+        json!("Content-Type: application/json\n{{header_name}}: application/xml"),
+    ] {
+        for body in [
+            json!(null),
+            json!({"mode": "raw", "raw": "{}", "options": {"raw": {"language": "json"}}}),
+        ] {
+            let source = json!({"item": [{"request": {
+                "method": "POST", "url": "https://example.test", "header": headers, "body": body
+            }}]});
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(
+                error.contains("Postman header names must be resolved before importing"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn postman_resolved_header_names_keep_duplicate_rules_and_templated_values() {
+    for name in ["Content-Type", "X-Custom", "content-type"] {
+        let source = json!({"variable": [{"key": "header_name", "value": name}], "item": [{"request": {
+            "url": "https://example.test", "header": [
+                {"key": "Content-Type", "value": "application/json"},
+                {"key": "{{header_name}}", "value": "{{value}}"},
+                {"key": "{{disabled_name}}", "value": "ignored", "disabled": true}
+            ]
+        }}]});
+
+        if name == "content-type" {
+            let error = parse_import(&source.to_string()).unwrap_err();
+            assert!(error.contains("different capitalization"), "{error}");
+        } else {
+            let imported = parse_import(&source.to_string()).unwrap();
+            assert_eq!(
+                imported[0].request.headers,
+                [
+                    ("Content-Type".into(), "application/json".into()),
+                    (name.into(), "{{value}}".into())
+                ]
+            );
+            let resolved = request::resolve_variables(
+                &imported[0].request,
+                &std::collections::HashMap::from([("value".into(), "application/xml".into())]),
+            )
+            .unwrap();
+            assert_eq!(resolved.headers[1], (name.into(), "application/xml".into()));
+        }
+    }
 }

@@ -77,6 +77,15 @@ fn parent_component_collection_roots_keep_session_recovery(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn recovered_requests_keep_identity_when_relative_root_becomes_absolute(cx: &mut TestAppContext) {
+    assert_recovered_root_identity("collections", cx);
+}
+
+#[gpui_kit::test]
+fn recovered_requests_keep_identity_when_parent_components_are_removed(cx: &mut TestAppContext) {
+    assert_recovered_root_identity("child/../collections", cx);
+}
+
+fn assert_recovered_root_identity(root: &str, cx: &mut TestAppContext) {
     use std::{cell::RefCell, rc::Rc};
 
     use collection::{CollectionRegistry, FileEntry};
@@ -84,7 +93,8 @@ fn recovered_requests_keep_identity_when_relative_root_becomes_absolute(cx: &mut
     use super::main_view::RequestSaveRequested;
 
     let fixture = tempfile::tempdir_in(".").unwrap();
-    let relative_root = Path::new(fixture.path().file_name().unwrap()).join("collections");
+    fs::create_dir(fixture.path().join("child")).unwrap();
+    let relative_root = Path::new(fixture.path().file_name().unwrap()).join(root);
     assert!(relative_root.is_relative());
     let mut registry = CollectionRegistry::from_path(&relative_root).unwrap();
     let collection = registry.create_collection().unwrap();
@@ -126,8 +136,12 @@ fn recovered_requests_keep_identity_when_relative_root_becomes_absolute(cx: &mut
     drop(view);
     cx.run_until_parked();
 
-    let absolute_root = std::path::absolute(&relative_root).unwrap();
+    let absolute_root = std::path::absolute(fixture.path().join("collections")).unwrap();
     let absolute_state = super::recovery::collection_state_directory(&absolute_root).unwrap();
+    assert_eq!(
+        state.canonicalize().unwrap(),
+        absolute_state.canonicalize().unwrap()
+    );
     let registry = Rc::new(RefCell::new(
         CollectionRegistry::from_path(&absolute_root).unwrap(),
     ));

@@ -133,25 +133,6 @@ fn validate_system_headers(
         return unsupported("disabledSystemHeaders with a variable API-key header name");
     }
 
-    // A variable name can become a suppressed header when the request is sent.
-    // Imported header pairs cannot retain the system ownership needed then.
-    if suppresses_system_headers
-        && source_headers
-            .and_then(Value::as_array)
-            .is_some_and(|headers| {
-                headers.iter().any(|header| {
-                    !truthy(header.get("disabled"))
-                        && truthy(header.get("system"))
-                        && header
-                            .get("key")
-                            .and_then(Value::as_str)
-                            .is_some_and(|name| name.contains("{{"))
-                })
-            })
-    {
-        return unsupported("disabledSystemHeaders with a variable system-owned header name");
-    }
-
     // Postman signs before applying header suppression. Its API-key helper
     // replaces the matching source descriptor with a system-owned descriptor.
     let header = |key| {

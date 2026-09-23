@@ -39,6 +39,9 @@ Declared variable types must match their primitive values; coercion is rejected.
 Numeric defaults must be safe integers; use strings to retain other numeric text.
 URL path variables must contain text. Case-variant duplicate headers are rejected
 because Postman gives them different precedence from ordinary duplicate fields.
+Enabled Postman header names must be literal or resolved from collection defaults
+before import; header values can still use environment variables. Native requests
+can template header names in the editor.
 Unresolved variables remain available for your collection environment. Use decoded
 values for variables in imported queries, for example `a/b` instead of `a%2Fb`.
 Static query escapes and valueless query flags are preserved. Multipart imports

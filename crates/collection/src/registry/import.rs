@@ -52,9 +52,11 @@ impl CollectionRegistry {
 
         let directory = self
             .directory
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
         create_private_directory(directory, true)?;
+        // Resolve newly created ancestors before publishing paths to saved requests.
+        *directory = super::catalog::absolute_named_root(directory)?;
         // The registry skips this reserved name until the complete import is renamed.
         let staging = directory.join(format!("{STAGING_PREFIX}{}", Uuid::new_v4()));
         create_private_directory(&staging, false)?;

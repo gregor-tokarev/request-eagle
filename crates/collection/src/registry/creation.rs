@@ -18,9 +18,11 @@ impl CollectionRegistry {
     pub fn create_collection(&mut self) -> Result<PathBuf, CollectionEditError> {
         let directory = self
             .directory
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
-        fs::create_dir_all(directory)?;
+        fs::create_dir_all(&*directory)?;
+        // A previously missing ancestor may now allow a retained `..` to resolve.
+        *directory = super::catalog::absolute_named_root(directory)?;
         let path = create_directory(directory, "New Collection")?;
 
         self.collections.push(Collection {

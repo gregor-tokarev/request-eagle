@@ -378,7 +378,7 @@ fn postman_rejects_variable_system_header_names_under_affected_suppression() {
             let source = collection(json!({"disabledSystemHeaders": {key: true}}), request);
             let error = parse_import(&source.to_string()).unwrap_err();
             assert!(
-                error.contains("variable system-owned header name"),
+                error.contains("Postman header names must be resolved before importing"),
                 "{key}: {error}"
             );
         }
@@ -386,12 +386,11 @@ fn postman_rejects_variable_system_header_names_under_affected_suppression() {
 }
 
 #[test]
-fn postman_keeps_variable_headers_without_active_system_ownership() {
+fn postman_rejects_enabled_variable_header_names_without_system_ownership() {
     for header in [
         json!({"key": "{{header_name}}", "value": "custom"}),
         json!({"key": "{{header_name}}", "value": "custom", "system": false}),
         json!({"key": "{{header_name}}", "value": "custom", "system": null}),
-        json!({"key": "{{header_name}}", "value": "custom", "system": true, "disabled": true}),
     ] {
         let mut request = get();
         request["header"] = json!([
@@ -407,20 +406,44 @@ fn postman_keeps_variable_headers_without_active_system_ownership() {
                 "content-length": true, "accept-encoding": true, "connection": true}}),
             request,
         );
-        let imported = parse_import(&source.to_string()).unwrap();
-        assert_eq!(
-            imported[0]
-                .request
-                .headers
-                .iter()
-                .any(|(name, _)| name == "{{header_name}}"),
-            header.get("disabled").and_then(Value::as_bool) != Some(true)
+        let error = parse_import(&source.to_string()).unwrap_err();
+        assert!(
+            error.contains("Postman header names must be resolved before importing"),
+            "{error}"
         );
     }
 }
 
 #[test]
-fn postman_keeps_variable_system_headers_under_inert_or_ignored_suppression() {
+fn postman_skips_disabled_variable_header_names_under_suppression() {
+    let mut request = get();
+    request["header"] = json!([
+        {"key": "Host", "value": "example.test"},
+        {"key": "Content-Type", "value": "application/custom"},
+        {"key": "Content-Length", "value": "0"},
+        {"key": "Accept-Encoding", "value": "identity"},
+        {"key": "Connection", "value": "close"},
+        {"key": "{{header_name}}", "value": "custom", "disabled": true},
+        {"key": "{{system_header_name}}", "value": "custom", "system": true, "disabled": true}
+    ]);
+    let source = collection(
+        json!({"disabledSystemHeaders": {"host": true, "content-type": true,
+            "content-length": true, "accept-encoding": true, "connection": true}}),
+        request,
+    );
+    let imported = parse_import(&source.to_string()).unwrap();
+    assert_eq!(imported[0].request.headers.len(), 5);
+    assert!(
+        imported[0]
+            .request
+            .headers
+            .iter()
+            .all(|(name, _)| !name.contains("{{"))
+    );
+}
+
+#[test]
+fn postman_rejects_variable_system_headers_even_under_inert_or_ignored_suppression() {
     for profile in [
         json!({"disabledSystemHeaders": {"accept": true, "user-agent": true,
             "cache-control": true, "postman-token": true}}),
@@ -436,13 +459,10 @@ fn postman_keeps_variable_system_headers_under_inert_or_ignored_suppression() {
         ]);
 
         let source = collection(profile, request);
-        let imported = parse_import(&source.to_string()).unwrap();
+        let error = parse_import(&source.to_string()).unwrap_err();
         assert!(
-            imported[0]
-                .request
-                .headers
-                .iter()
-                .any(|(name, _)| name == "{{header_name}}")
+            error.contains("Postman header names must be resolved before importing"),
+            "{error}"
         );
     }
 }

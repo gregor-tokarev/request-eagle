@@ -131,6 +131,10 @@ fn request(
     let mut header_spellings = std::collections::HashMap::new();
 
     for (name, _) in &request.headers {
+        if name.contains("{{") {
+            return Err("Postman header names must be resolved before importing. Define collection defaults or replace the header-name placeholders. Header values may still use environment variables.".into());
+        }
+
         if let Some(previous) = header_spellings.insert(name.to_ascii_lowercase(), name)
             && previous != name
         {
@@ -497,15 +501,6 @@ fn read_body(
                 Some("html") => "text/html",
                 _ => "text/plain",
             };
-
-            if request.headers.iter().any(|(name, _)| name.contains("{{"))
-                && !request
-                    .headers
-                    .iter()
-                    .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-            {
-                return Err("Unresolved Postman header names can change the default Content-Type. Resolve the header names before importing raw bodies.".into());
-            }
 
             add_content_type(request, content_type);
 

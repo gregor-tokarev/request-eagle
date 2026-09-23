@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use environment::{Environment, EnvironmentLoadError};
@@ -40,7 +40,7 @@ impl CollectionRegistry {
         let path = if path.file_name().is_none() {
             fs::canonicalize(path)
         } else {
-            std::path::absolute(path)
+            absolute_named_root(path)
         }
         .map_err(|source| CollectionRegistryLoadError::Read {
             path: path.to_path_buf(),
@@ -142,6 +142,49 @@ impl CollectionRegistry {
     pub fn len(&self) -> usize {
         self.collections.len()
     }
+}
+
+pub(super) fn absolute_named_root(path: &Path) -> io::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    let mut resolved = PathBuf::new();
+
+    for component in absolute.components() {
+        if component != Component::ParentDir {
+            resolved.push(component.as_os_str());
+            continue;
+        }
+
+        let metadata = match fs::symlink_metadata(&resolved) {
+            Ok(metadata) => metadata,
+            // Preserve a missing traversal instead of redirecting it to an existing root.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(absolute),
+            Err(error) => return Err(error),
+        };
+
+        if metadata.file_type().is_symlink() {
+            // Only a traversed link needs resolution. Untouched named aliases remain intact.
+            resolved = match fs::canonicalize(resolved.join("..")) {
+                Ok(parent) => parent,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(absolute),
+                Err(error) => return Err(error),
+            };
+        } else if metadata.is_dir() {
+            // Stat of the directory alone does not verify search access through its `..`.
+            if let Err(error) = fs::metadata(resolved.join("..")) {
+                if error.kind() == io::ErrorKind::NotFound {
+                    return Ok(absolute);
+                }
+
+                return Err(error);
+            }
+
+            resolved.pop();
+        } else {
+            return Err(io::ErrorKind::NotADirectory.into());
+        }
+    }
+
+    Ok(resolved)
 }
 
 fn find_file<'a>(entries: &'a [Entry], path: &Path) -> Option<&'a FileEntry> {

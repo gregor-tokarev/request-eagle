@@ -204,7 +204,7 @@ fn postman_rejects_actual_comments_when_content_type_processing_remains_dynamic(
                 let error = parse_import(&source.to_string()).unwrap_err();
                 assert!(
                     error.contains("dynamic Content-Type")
-                        || error.contains("Unresolved Postman header names"),
+                        || error.contains("Postman header names must be resolved before importing"),
                     "{error}"
                 );
             }
@@ -232,7 +232,7 @@ fn postman_dynamic_content_type_keeps_comment_like_json_strings_and_explicit_lan
         let source = json!({"item": [{"request": {
             "method": "POST", "url": "https://example.test",
             "header": [{"key": "Content-Type", "value": "text/plain"},
-                {"key": "{{header_name}}", "value": "{{ct}}"}],
+                {"key": "{{header_name}}", "value": "{{ct}}", "disabled": true}],
             "body": {"mode": "raw", "raw": commented, "options": {"raw": {"language": language}}}
         }}]});
         let imported = parse_import(&source.to_string()).unwrap();

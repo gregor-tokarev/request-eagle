@@ -22,7 +22,12 @@ fn postman_rejects_active_auth_helpers_that_replace_explicit_authorization() {
         for name in ["Authorization", "authorization", "{{header_name}}"] {
             let source = source(auth.clone(), json!([{"key": name, "value": "old"}]));
             let error = parse_import(&source.to_string()).unwrap_err();
-            assert!(error.contains("authentication may replace"), "{error}");
+            let expected = if name.contains("{{") {
+                "Postman header names must be resolved before importing"
+            } else {
+                "authentication may replace"
+            };
+            assert!(error.contains(expected), "{error}");
         }
     }
 }
