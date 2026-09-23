@@ -10,16 +10,14 @@ use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext,
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
-        Self(
-            std::env::temp_dir().join(format!(
+        Self(std::env::temp_dir().join(format!(
                 "request-eagle-save-modal-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
-            )),
-        )
+            )))
     }
 }
 impl Drop for Fixture {
@@ -87,6 +85,13 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     click(cx, "save-request-name");
     cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("Create user");
+    assert!(cx.debug_bounds("save-destination-1").is_none());
+    click(cx, "save-destination-0");
+    click(cx, "save-destination-1");
+    click(cx, "save-location-0");
+    assert!(cx.debug_bounds("save-destination-1").is_some());
+    click(cx, "save-location-root");
+    click(cx, "save-destination-0");
     click(cx, "save-destination-1");
     click(cx, "confirm-save-request");
     assert!(cx.debug_bounds("save-request-dialog").is_none());
@@ -133,4 +138,33 @@ fn save_and_close_can_create_a_collection_and_does_not_close_on_failure(cx: &mut
             .len(),
         1
     );
+}
+
+#[gpui_kit::test]
+fn picker_navigates_multiple_folder_levels_and_filters_each_level(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.0.join("API/Users/Active")).unwrap();
+    let (_, cx) = setup(&fixture, cx);
+    cx.simulate_keystrokes("secondary-s");
+    click(cx, "save-destination-0");
+    assert!(cx.debug_bounds("save-destination-2").is_none());
+    click(cx, "save-location-filter");
+    cx.simulate_input("missing");
+    assert!(cx.debug_bounds("save-destination-1").is_none());
+    click(cx, "save-location-root");
+    click(cx, "save-destination-0");
+    click(cx, "save-destination-1");
+    click(cx, "save-destination-2");
+    assert!(cx.debug_bounds("save-location-2").is_some());
+    click(cx, "save-request-name");
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("Nested request");
+    click(cx, "confirm-save-request");
+    assert!(
+        fixture
+            .0
+            .join("API/Users/Active/Nested request.toml")
+            .exists()
+    );
+    assert!(!fixture.0.join("API/Users/Nested request.toml").exists());
 }
