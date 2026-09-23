@@ -54,10 +54,14 @@ impl ResponseView {
                     .gap_2()
                     .child(
                         Button::new("response-format")
+                            .debug_selector(|| "response-format".into())
+                            .disabled(content.raw_only)
                             .ghost()
                             .small()
                             .label(if self.pretty { "JSON" } else { "Raw" })
-                            .icon(IconName::ChevronDown)
+                            .when(!content.raw_only, |button| {
+                                button.icon(IconName::ChevronDown)
+                            })
                             .dropdown_menu(move |menu, _, cx| {
                                 let raw_view = view.clone();
                                 let json_view = view.clone();
@@ -95,6 +99,15 @@ impl ResponseView {
                                 _ => "Text",
                             }),
                     )
+                    .when(content.raw_only, |row| {
+                        row.child(
+                            div()
+                                .debug_selector(|| "response-raw-only".into())
+                                .text_size(px(11.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Large response · Raw only"),
+                        )
+                    })
                     .child(div().flex_1())
                     .child(
                         Button::new("response-wrap")
@@ -180,10 +193,7 @@ impl ResponseView {
         self.editor_view = None;
         self.virtual_body = None;
 
-        // Moderate HTML responses often contain script lines just over 16 KiB.
-        // Keep the standard editor's highlighting and input behavior for these;
-        // larger individual lines still incur expensive wrapping/search layouts.
-        if text.len() > 256 * 1024 || text.split('\n').any(|line| line.len() > 32 * 1024) {
+        if !self.pretty {
             self.virtual_body =
                 Some(cx.new(|cx| super::virtual_body::VirtualBody::new(text, self.wrap, cx)));
         } else {
@@ -203,7 +213,7 @@ impl ResponseView {
 
     pub(super) fn set_pretty(&mut self, pretty: bool, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(content) = &self.content {
-            self.pretty = pretty && content.pretty.is_some();
+            self.pretty = pretty && !content.raw_only && content.pretty.is_some();
             let text = if self.pretty {
                 content.pretty.as_ref().unwrap()
             } else {

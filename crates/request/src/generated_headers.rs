@@ -51,9 +51,15 @@ pub fn generated_headers(
         generated.push(("Accept".into(), "*/*".into()));
     }
 
+    // Byte ranges apply to the selected representation. Do not opt range
+    // requests into gzip unless the caller explicitly asks for it.
+    if !has("accept-encoding") && !has("range") {
+        generated.push(("Accept-Encoding".into(), "gzip".into()));
+    }
+
     if !has("content-length")
         && !has("transfer-encoding")
-        && (body_bytes > 0 || matches!(method, Method::Post | Method::Put))
+        && (body_bytes > 0 || matches!(method, Method::Post | Method::Put | Method::Patch))
     {
         generated.push(("Content-Length".into(), body_bytes.to_string()));
     }

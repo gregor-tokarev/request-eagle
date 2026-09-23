@@ -9,7 +9,7 @@ pub enum Entry {
     Directory(DirEntry),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FileEntry {
     #[serde(skip)]
     pub(crate) raw_content: String,
@@ -28,6 +28,12 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub name: String,
     pub entries: Vec<Entry>,
+}
+
+impl FileEntry {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, crate::CollectionLoadError> {
+        crate::collection::load_file(path.as_ref())
+    }
 }
 
 impl Entry {

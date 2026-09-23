@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use collection::{CollectionRegistry, Entry, Method, Request};
+use collection::{CollectionRegistry, Entry, FileEntry, Request};
 use gpui_kit::SharedString;
 
 use super::search::SearchIndex;
@@ -15,6 +15,7 @@ pub(super) enum ItemKind {
     Request(&'static str),
 }
 
+#[derive(Clone)]
 pub(super) struct TreeItem {
     pub label: SharedString,
     pub path: PathBuf,
@@ -31,6 +32,7 @@ impl TreeItem {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct CollectionTree {
     pub items: Vec<TreeItem>,
     pub roots: Vec<usize>,
@@ -69,6 +71,33 @@ impl CollectionTree {
         tree
     }
 
+    pub fn request_changed(&self, file: &FileEntry) -> bool {
+        self.items
+            .iter()
+            .position(|item| item.path == file.path)
+            .is_some_and(|index| {
+                let Request::Http(request) = &file.request;
+                let method = request.method.as_str();
+
+                self.items[index].label.as_ref() != file.name
+                    || self.items[index].kind != ItemKind::Request(method)
+                    || self.search.document(index)
+                        != format!("{method} {} {}", file.name, request.path).to_lowercase()
+            })
+    }
+
+    pub fn update_request(&mut self, file: &FileEntry) {
+        let Some(index) = self.items.iter().position(|item| item.path == file.path) else {
+            return;
+        };
+        let Request::Http(request) = &file.request;
+        let method = request.method.as_str();
+        self.items[index].label = file.name.clone().into();
+        self.items[index].kind = ItemKind::Request(method);
+        self.search
+            .update(index, format!("{method} {} {}", file.name, request.path));
+    }
+
     fn add_entries(&mut self, entries: &[Entry], parent: usize, search_texts: &mut Vec<String>) {
         for entry in entries {
             let index = self.items.len();
@@ -91,12 +120,7 @@ impl CollectionTree {
                 }
                 Entry::File(file) => {
                     let Request::Http(request) = &file.request;
-                    let method = match request.method {
-                        Method::Get => "GET",
-                        Method::Post => "POST",
-                        Method::Put => "PUT",
-                        Method::Delete => "DELETE",
-                    };
+                    let method = request.method.as_str();
 
                     search_texts.push(format!("{method} {} {}", file.name, request.path));
 

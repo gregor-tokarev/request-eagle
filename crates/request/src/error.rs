@@ -52,4 +52,6 @@ pub enum HttpError {
 
     #[error("could not read the HTTP response body: {0}")]
     ReadBody(#[source] io::Error),
+    #[error("could not decode the gzip response body: {0}")]
+    DecodeBody(#[source] io::Error),
 }

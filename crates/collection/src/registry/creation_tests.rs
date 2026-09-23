@@ -92,3 +92,31 @@ fn missing_or_invalid_parents_do_not_change_the_registry() {
     assert!(!collection.exists());
     registry.delete(&collection).unwrap_err();
 }
+
+#[test]
+fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
+    let fixture = Fixture::new();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let parent = registry.create_collection().unwrap();
+    let request = crate::HttpRequest {
+        method: Method::Post,
+        path: "https://example.test/new".into(),
+        body: Some(b"draft body".to_vec()),
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let path = registry
+            .create_request_with(&parent, "../Request/name", request.clone().into())
+            .unwrap();
+        assert_eq!(path.parent(), Some(parent.as_path()));
+        let file = crate::FileEntry::from_path(path).unwrap();
+        let Request::Http(saved) = file.request;
+        assert_eq!(saved, request);
+    }
+    assert!(
+        registry
+            .create_request_with(&parent, "  ", request.into())
+            .is_err()
+    );
+    assert_eq!(registry.collections()[0].entries.len(), 2);
+}

@@ -51,7 +51,7 @@ fn prepares_json_requests_without_mutating_the_draft() {
         .push(("content-type".into(), "application/custom+json".into()));
     assert_eq!(outgoing_request(&original).headers, original.headers);
 
-    for method in [Method::Get, Method::Delete] {
+    for method in [Method::Get, Method::Head] {
         original.method = method;
         assert!(outgoing_request(&original).body.is_none());
         assert!(original.body.is_some());
@@ -96,7 +96,7 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
         )
     });
 
-    for method in [Method::Get, Method::Delete] {
+    for method in [Method::Get, Method::Head] {
         cx.update(|window, cx| {
             draft.update(cx, |draft, cx| {
                 draft.set_method(method, cx);

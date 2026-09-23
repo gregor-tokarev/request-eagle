@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use collection::{CollectionRegistry, MovePlacement, Request};
 use gpui_kit::component::{
@@ -12,10 +16,20 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{editing::RenameEditor, tree::CollectionTree};
 
 pub enum CollectionPanelEvent {
-    OpenRequest {
+    RequestRelocated {
+        id: SharedString,
+        previous_path: PathBuf,
         path: PathBuf,
         name: SharedString,
         collection: SharedString,
+        folders: Vec<SharedString>,
+    },
+    OpenRequest {
+        id: SharedString,
+        path: PathBuf,
+        name: SharedString,
+        collection: SharedString,
+        folders: Vec<SharedString>,
         request: Request,
     },
 }
@@ -92,6 +106,28 @@ impl CollectionPanel {
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
         }
+    }
+
+    /// Save the editor's request and refresh the snapshot used when reopening it.
+    pub fn save_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        request: Request,
+        cx: &mut Context<Self>,
+    ) -> Result<(), collection::CollectionEditError> {
+        self.collections
+            .update_request(path, expected_id, request)?;
+        let file = self.collections.file(path).expect("saved request exists");
+
+        if self.tree.request_changed(file) {
+            // Cancel any result computed from the previous search documents.
+            self.rows_task = None;
+            Arc::make_mut(&mut self.tree).update_request(file);
+            self.refresh_rows(false, cx);
+        }
+
+        Ok(())
     }
 
     pub(super) fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {

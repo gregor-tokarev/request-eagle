@@ -21,7 +21,8 @@ pub struct HttpResponse {
     pub version: Version,
     /// Preserves repeated headers and non-UTF-8 header values.
     pub headers: HeaderMap,
-    /// Raw bytes; no text decoding or automatic decompression is performed.
+    /// Response bytes after decoding supported Content-Encoding values.
+    /// Text encoding is left unchanged and response headers remain as received.
     pub body: Vec<u8>,
     pub metrics: HttpMetrics,
 }
@@ -33,11 +34,14 @@ pub struct HttpMetrics {
     /// Includes connection setup, uploading the request, and waiting for headers.
     /// DNS, TCP, TLS and time to the first byte are not exposed separately.
     pub waiting: Duration,
-    /// Time spent reading the response body after receiving its headers.
+    /// Time spent reading and decompressing the response body after its headers.
     pub download: Duration,
     /// HTTP/1-style field size estimates (`name: value\r\n`), excluding framing
     /// and compression. Request fields added by the transport are not included.
     pub request_header_bytes: usize,
     pub response_header_bytes: usize,
     pub request_body_bytes: usize,
+    /// Original body size when a supported content encoding was decoded.
+    /// Otherwise the downloaded size is the response body's length.
+    pub encoded_response_body_bytes: Option<usize>,
 }

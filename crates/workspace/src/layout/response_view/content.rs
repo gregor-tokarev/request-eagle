@@ -9,6 +9,7 @@ pub(in crate::layout) struct ResponseContent {
     pub(super) execution: Execution,
     pub(super) raw: SharedString,
     pub(super) pretty: Option<SharedString>,
+    pub(super) raw_only: bool,
     pub(super) language: &'static str,
     pub(super) processing: Duration,
     pub(super) headers: Arc<[(SharedString, SharedString)]>,
@@ -27,7 +28,8 @@ impl ResponseContent {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
         let is_json = content_type.contains("json") || raw.trim_start().starts_with(['{', '[']);
-        let pretty = if is_json {
+        let mut raw_only = exceeds_editor_limit(&raw);
+        let mut pretty: Option<SharedString> = if is_json && !raw_only {
             serde_json::from_str::<serde_json::Value>(&raw)
                 .ok()
                 .and_then(|value| serde_json::to_string_pretty(&value).ok())
@@ -35,6 +37,13 @@ impl ResponseContent {
         } else {
             None
         };
+        if pretty
+            .as_ref()
+            .is_some_and(|text| exceeds_editor_limit(text))
+        {
+            raw_only = true;
+            pretty = None;
+        }
         let language = if is_json {
             "json"
         } else if content_type.contains("html") {
@@ -70,6 +79,7 @@ impl ResponseContent {
             execution,
             raw,
             pretty,
+            raw_only,
             language,
             processing: started.elapsed(),
             headers,
@@ -89,4 +99,8 @@ pub(super) fn size_label(bytes: usize) -> String {
         1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.),
         _ => format!("{:.1} MB", bytes as f64 / 1_048_576.),
     }
+}
+
+fn exceeds_editor_limit(text: &str) -> bool {
+    text.len() > 256 * 1024 || text.split('\n').any(|line| line.len() > 32 * 1024)
 }

@@ -14,13 +14,13 @@ pub(in crate::layout) enum RequestSection {
     Body,
 }
 
-pub(in crate::layout) struct MethodChanged(pub Method);
-
 /// An editable request snapshot owned by one tab, independent of the collections registry.
 pub(in crate::layout) struct RequestDraft {
     pub(in crate::layout) name: SharedString,
     pub(in crate::layout) collection: Option<SharedString>,
+    pub(in crate::layout) folders: Vec<SharedString>,
     pub(in crate::layout) request: HttpRequest,
+    pub(in crate::layout) saved_request: HttpRequest,
     pub(in crate::layout) url: Option<Entity<InputState>>,
     pub(in crate::layout) section: RequestSection,
     pub(super) params: Option<Entity<RequestFields>>,
@@ -36,8 +36,6 @@ pub(in crate::layout) struct RequestDraft {
     pub(super) _subscriptions: Vec<Subscription>,
 }
 
-impl EventEmitter<MethodChanged> for RequestDraft {}
-
 impl RequestDraft {
     #[cfg(test)]
     pub(in crate::layout) fn response_for_test(
@@ -50,7 +48,9 @@ impl RequestDraft {
         Self {
             name: "Untitled Request".into(),
             collection: None,
+            folders: Vec::new(),
             request: HttpRequest::default(),
+            saved_request: HttpRequest::default(),
             url: None,
             section: RequestSection::Headers,
             params: None,
@@ -75,9 +75,19 @@ impl RequestDraft {
         Self {
             name,
             collection: Some(collection),
+            saved_request: request.clone(),
             request,
             ..Self::new()
         }
+    }
+
+    pub(in crate::layout) fn is_dirty(&self) -> bool {
+        self.request != self.saved_request
+    }
+
+    pub(in crate::layout) fn mark_saved(&mut self, request: HttpRequest, cx: &mut Context<Self>) {
+        self.saved_request = request;
+        cx.notify();
     }
 
     pub(in crate::layout) fn set_method(&mut self, method: Method, cx: &mut Context<Self>) {
@@ -88,7 +98,6 @@ impl RequestDraft {
             self.section = RequestSection::Headers;
         }
 
-        cx.emit(MethodChanged(method));
         cx.notify();
     }
 

@@ -10,4 +10,4 @@ mod saved_tests;
 #[cfg(test)]
 mod tests;
 
-pub(super) use draft::{MethodChanged, RequestDraft};
+pub(super) use draft::RequestDraft;

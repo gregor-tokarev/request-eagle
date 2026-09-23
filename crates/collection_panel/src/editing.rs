@@ -9,7 +9,10 @@ use gpui_kit::{
     *,
 };
 
-use super::{panel::CollectionPanel, tree::CollectionTree};
+use super::{
+    panel::{CollectionPanel, CollectionPanelEvent},
+    tree::CollectionTree,
+};
 
 pub(super) struct RenameEditor {
     pub path: PathBuf,
@@ -210,5 +213,57 @@ impl CollectionPanel {
             Arc::new(self.tree.visible_rows(&self.collapsed, &self.query))
         };
         self.apply_rows(rows, false, cx);
+
+        if let Some((previous, destination)) = renamed {
+            for item in &self.tree.items {
+                if item.is_branch() {
+                    continue;
+                }
+                let Ok(relative) = item.path.strip_prefix(destination) else {
+                    continue;
+                };
+                let Some(collection) = self
+                    .collections
+                    .collections()
+                    .iter()
+                    .find(|collection| item.path.starts_with(&collection.path))
+                else {
+                    continue;
+                };
+
+                let Some(file) = self.collections.file(&item.path) else {
+                    continue;
+                };
+
+                cx.emit(CollectionPanelEvent::RequestRelocated {
+                    id: file.id.clone().into(),
+                    previous_path: if relative.as_os_str().is_empty() {
+                        previous.to_path_buf()
+                    } else {
+                        previous.join(relative)
+                    },
+                    path: item.path.clone(),
+                    name: item.label.clone(),
+                    folders: item
+                        .path
+                        .strip_prefix(&collection.path)
+                        .ok()
+                        .and_then(Path::parent)
+                        .map(|path| {
+                            path.iter()
+                                .map(|part| part.to_string_lossy().into_owned().into())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    collection: collection
+                        .path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                        .into(),
+                });
+            }
+        }
     }
 }

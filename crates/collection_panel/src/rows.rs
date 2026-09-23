@@ -1,4 +1,4 @@
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, path::Path, rc::Rc};
 
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
@@ -143,7 +143,8 @@ impl CollectionPanel {
                         let color = match method {
                             "GET" => theme.success,
                             "POST" => theme.warning,
-                            "PUT" => theme.info,
+                            "PUT" | "PATCH" => theme.info,
+                            "HEAD" | "OPTIONS" => theme.muted_foreground,
                             _ => theme.danger,
                         };
 
@@ -261,9 +262,21 @@ impl CollectionPanel {
                     }
 
                     cx.emit(CollectionPanelEvent::OpenRequest {
+                        id: file.id.clone().into(),
                         path: item.path.clone(),
                         name: item.label.clone(),
                         collection: this.tree.items[root].label.clone(),
+                        folders: item
+                            .path
+                            .strip_prefix(&this.tree.items[root].path)
+                            .ok()
+                            .and_then(Path::parent)
+                            .map(|path| {
+                                path.iter()
+                                    .map(|part| part.to_string_lossy().into_owned().into())
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         request: file.request.clone(),
                     });
                 }

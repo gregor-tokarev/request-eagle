@@ -194,3 +194,24 @@ fn benchmark_collections(request_count: usize) -> CollectionRegistry {
     fs::remove_dir_all(directory).unwrap();
     collections
 }
+
+#[test]
+fn updated_documents_replace_old_matches_and_can_revert() {
+    let mut index = SearchIndex::new(["GET old", "GET stable", "POST old"].map(str::to_owned));
+    let original = index.clone();
+    index.update(0, "POST 東京\0inside".into());
+    index.update(2, "POST 東京".into());
+
+    assert_eq!(index.matching_rows("GET"), vec![1]);
+    assert!(index.matching_rows("old").is_empty());
+    assert_eq!(index.matching_rows("POST"), vec![0, 2]);
+    assert_eq!(index.matching_rows("東京"), vec![0, 2]);
+    assert_eq!(index.matching_rows("\0inside"), vec![0]);
+    assert!(index.matching_rows("inside\0GET").is_empty());
+    assert!(index.matching_rows("").is_empty());
+    assert_eq!(original.matching_rows("old"), vec![0, 2]);
+
+    index.update(0, "GET old".into());
+    assert_eq!(index.matching_rows("old"), vec![0]);
+    assert_eq!(index.matching_rows("POST"), vec![2]);
+}

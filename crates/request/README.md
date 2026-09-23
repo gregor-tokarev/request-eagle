@@ -30,10 +30,11 @@ println!("{}: {} bytes in {:?}", response.status, response.body.len(), execution
 ```
 
 The executor reuses its HTTP connection pool. Construct a new executor when
-preferences change. HTTP/HTTPS execution supports the existing methods, repeated
-headers and query pairs, binary bodies, and HTTP version selection. The complete
+preferences change. HTTP/HTTPS execution supports GET, POST, PUT, PATCH, DELETE,
+HEAD, and OPTIONS, repeated headers and query pairs, binary bodies, and HTTP
+version selection. The complete
 operation, including the response body, is bounded by the timeout. Dropping its
-future cancels the operation. Response limits count body bytes, including for
+future cancels the operation. Response limits apply to both downloaded and decompressed body bytes, including
 chunked responses; zero disables either limit. The stored size setting uses MiB.
 
 Proxy preferences default to the system/environment proxy. Custom mode supports
@@ -53,9 +54,12 @@ limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
 the same authority and removed when a redirect changes the host or port.
 Set `follow_all_redirects` to `false` to inspect redirect responses directly.
 Final HTTP statuses, including 4xx and 5xx, are returned with their headers and
-body. Headers retain repeated and non-UTF-8 values; bodies are not decoded or
-decompressed. Malformed input, transport failures, truncated bodies, timeouts,
-and oversized responses return typed errors.
+body. Headers retain repeated and non-UTF-8 values. Requests advertise gzip unless
+an explicit Accept-Encoding overrides it or the request contains Range. Complete
+gzip responses are decompressed while their original headers and downloaded byte
+counts are retained. Partial byte-range responses and unsupported content encodings
+remain unchanged. Malformed input, transport failures, corrupt
+gzip streams, truncated bodies, timeouts, and oversized responses return typed errors.
 
 URLs must be absolute and already resolved. Collection environment substitution,
 authentication editors, and UI Send actions are outside this module.

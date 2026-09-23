@@ -6,9 +6,38 @@ use std::{
 use thiserror::Error;
 
 use crate::collection::{load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry};
+use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request};
 
 impl CollectionRegistry {
+    /// Saves a request without replacing its identity or externally edited metadata.
+    pub fn update_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        request: Request,
+    ) -> Result<(), CollectionEditError> {
+        for collection in &mut self.collections {
+            if let Some(Entry::File(file)) = find_entry(&mut collection.entries, path) {
+                if file.id != expected_id {
+                    return Err(CollectionEditError::RequestReplaced);
+                }
+
+                let mut updated = load_file(path)?;
+                if updated.id != expected_id {
+                    return Err(CollectionEditError::RequestReplaced);
+                }
+
+                updated.request = request;
+                save_file(&mut updated)?;
+                *file = updated;
+
+                return Ok(());
+            }
+        }
+
+        Err(CollectionEditError::NotFound)
+    }
+
     /// Request names live in TOML; collection and folder names live on disk.
     pub fn rename(&mut self, path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
         let name = name.trim();
@@ -178,6 +207,8 @@ pub enum CollectionEditError {
     AlreadyExists,
     #[error("This item is no longer in the collection.")]
     NotFound,
+    #[error("This request was replaced by a different request. Your edits have not been saved.")]
+    RequestReplaced,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
     #[error("{0}")]

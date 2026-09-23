@@ -10,7 +10,7 @@ use super::draft::RequestDraft;
 
 impl RequestDraft {
     pub(super) fn supports_body(&self) -> bool {
-        matches!(self.request.method, Method::Post | Method::Put)
+        !matches!(self.request.method, Method::Get | Method::Head)
     }
 
     pub(super) fn body_state(

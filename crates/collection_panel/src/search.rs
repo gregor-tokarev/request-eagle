@@ -1,8 +1,16 @@
+use std::{collections::HashMap, sync::Arc};
+
 use suffix::SuffixTable;
 
 /// A substring index built once with the collection tree. Binary search finds
 /// the matching suffix interval without reading every request's search text.
+#[derive(Clone)]
 pub(super) struct SearchIndex {
+    base: Arc<SearchData>,
+    updates: HashMap<usize, String>,
+}
+
+struct SearchData {
     suffixes: SuffixTable<'static, 'static>,
     rows_by_suffix: Vec<u32>,
     row_ends: Vec<usize>,
@@ -34,12 +42,58 @@ impl SearchIndex {
             .collect();
 
         Self {
-            suffixes,
-            rows_by_suffix,
-            row_ends,
+            base: Arc::new(SearchData {
+                suffixes,
+                rows_by_suffix,
+                row_ends,
+            }),
+            updates: HashMap::new(),
         }
     }
 
+    /// Saved requests override individual documents without rebuilding the suffix table.
+    pub fn update(&mut self, row: usize, document: String) {
+        let document = document.to_lowercase();
+
+        if document == self.base.document(row) {
+            self.updates.remove(&row);
+        } else {
+            self.updates.insert(row, document);
+        }
+    }
+
+    pub fn document(&self, row: usize) -> &str {
+        self.updates
+            .get(&row)
+            .map_or_else(|| self.base.document(row), String::as_str)
+    }
+
+    pub fn matching_rows(&self, query: &str) -> Vec<usize> {
+        let mut rows = self.base.matching_rows(query);
+
+        if self.updates.is_empty() || query.is_empty() {
+            return rows;
+        }
+
+        let query = query.to_lowercase();
+        rows.retain(|row| !self.updates.contains_key(row));
+        rows.extend(
+            self.updates
+                .iter()
+                .filter_map(|(&row, document)| document.contains(&query).then_some(row)),
+        );
+        rows.sort_unstable();
+
+        rows
+    }
+
+    #[cfg(test)]
+    pub fn memory_bytes(&self) -> usize {
+        self.base.memory_bytes() + self.updates.values().map(String::capacity).sum::<usize>()
+    }
+}
+
+impl SearchData {
     /// Returns unique row IDs in tree order. Work after lookup depends on the
     /// number of matching occurrences, rather than the number of tree items.
     pub fn matching_rows(&self, query: &str) -> Vec<usize> {
@@ -97,7 +151,6 @@ impl SearchIndex {
         rows
     }
 
-    #[cfg(test)]
     pub fn document(&self, row: usize) -> &str {
         let start = if row == 0 {
             0

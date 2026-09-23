@@ -7,7 +7,7 @@ pub enum Request {
     Http(HttpRequest),
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: Method,
     /// An absolute HTTP or HTTPS URL when executing the request.
@@ -46,6 +46,9 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Patch,
+    Head,
+    Options,
     Delete,
 }
 
@@ -55,6 +58,9 @@ impl Method {
             Self::Get => "GET",
             Self::Post => "POST",
             Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Head => "HEAD",
+            Self::Options => "OPTIONS",
             Self::Delete => "DELETE",
         }
     }

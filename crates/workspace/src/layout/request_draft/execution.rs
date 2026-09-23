@@ -16,7 +16,7 @@ fn request_url(path: &str) -> String {
 }
 
 pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
-    let supports_body = matches!(request.method, Method::Post | Method::Put);
+    let supports_body = !matches!(request.method, Method::Get | Method::Head);
     let body_bytes = if supports_body {
         request.body.as_ref().map_or(0, Vec::len)
     } else {
@@ -46,7 +46,7 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
     let mut request = request.clone();
     request.path = request_url(&request.path);
 
-    if matches!(request.method, Method::Get | Method::Delete) {
+    if matches!(request.method, Method::Get | Method::Head) {
         request.body = None;
     } else if request.body.is_some()
         && !request
