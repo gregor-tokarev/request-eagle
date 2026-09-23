@@ -301,7 +301,6 @@ fn dirty_close_requires_an_explicit_discard_and_cancel_keeps_edits(cx: &mut Test
     assert!(cx.debug_bounds("tab-dirty-2").is_some());
 
     cx.simulate_keystrokes("secondary-w");
-    cx.simulate_keystrokes("secondary-w");
     assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 2));
     click(cx, "cancel-close-request");
@@ -527,4 +526,32 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
         .request;
     assert_eq!(saved.path, "https://example.com/new-draft");
     cx.read(|cx| assert_eq!(draft.read(cx).request.path, "https://example.com/old-draft"));
+}
+
+#[gpui_kit::test]
+fn second_close_shortcut_discards_only_the_pending_tab(cx: &mut TestAppContext) {
+    let fixture = SavedRequestFixture::new();
+    let (tabs, _, cx) = fixture.open(cx);
+    edit_url(cx, "https://example.com/discard-me");
+    cx.simulate_keystrokes("secondary-w");
+    assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 2));
+
+    // Cancelling starts a fresh confirmation sequence.
+    click(cx, "cancel-close-request");
+    cx.simulate_keystrokes("secondary-w");
+    assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 2));
+    cx.simulate_keystrokes("secondary-w");
+    assert!(cx.debug_bounds("unsaved-request-prompt").is_none());
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
+    assert_eq!(fs::read_to_string(&fixture.file).unwrap(), fixture.original);
+
+    // The next dirty tab must get its own first-press confirmation.
+    edit_url(cx, "https://example.com/other-draft");
+    cx.simulate_keystrokes("secondary-w");
+    assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
+    cx.simulate_keystrokes("secondary-w");
+    cx.read(|cx| assert!(tabs.read(cx).tabs.is_empty()));
 }

@@ -217,7 +217,11 @@ impl MainView {
 
     pub(crate) fn close_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(index) = self.selected {
-            self.close_tab(index, cx);
+            if self.pending_close == Some(self.tabs[index].id) {
+                self.remove_tab(index, cx);
+            } else {
+                self.close_tab(index, cx);
+            }
         }
     }
 
