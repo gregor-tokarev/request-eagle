@@ -519,34 +519,49 @@ impl MainView {
                     .text_ellipsis()
                     .child(tab.title.clone()),
             )
-            .when(tab.dirty, |this| {
-                this.child(
-                    div()
-                        .debug_selector(move || format!("tab-dirty-{id}"))
-                        .flex_none()
-                        .text_color(cx.theme().warning)
-                        .child("•"),
-                )
-            })
             .child(
                 div()
+                    .relative()
                     .flex_none()
-                    .invisible()
-                    .group_hover("page-tab", |this| this.visible())
+                    .size(px(20.))
+                    .when(tab.dirty, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .group_hover("page-tab", |this| this.invisible())
+                                .child(
+                                    div()
+                                        .debug_selector(move || format!("tab-dirty-{id}"))
+                                        .size(px(10.))
+                                        .rounded_full()
+                                        .bg(cx.theme().warning),
+                                ),
+                        )
+                    })
                     .child(
-                        Button::new(("close-tab", id))
-                            .debug_selector(move || format!("close-tab-{id}"))
-                            .ghost()
-                            .xsmall()
-                            .size(px(20.))
-                            .icon(Icon::new(IconName::Close).size(px(12.)))
-                            .accessibility_label(format!("Close {}", tab.title))
-                            .tooltip_with_action("Close tab", &CloseTab, Some("Workspace"))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.close_tab(index, cx);
-                                this.focus(window, cx);
-                            })),
+                        div()
+                            .size_full()
+                            .invisible()
+                            .group_hover("page-tab", |this| this.visible())
+                            .child(
+                                Button::new(("close-tab", id))
+                                    .debug_selector(move || format!("close-tab-{id}"))
+                                    .ghost()
+                                    .xsmall()
+                                    .size(px(20.))
+                                    .icon(Icon::new(IconName::Close).size(px(12.)))
+                                    .accessibility_label(format!("Close {}", tab.title))
+                                    .tooltip_with_action("Close tab", &CloseTab, Some("Workspace"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.close_tab(index, cx);
+                                        this.focus(window, cx);
+                                    })),
+                            ),
                     ),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
