@@ -536,7 +536,7 @@ impl MainView {
                                 .child(
                                     div()
                                         .debug_selector(move || format!("tab-dirty-{id}"))
-                                        .size(px(10.))
+                                        .size(px(8.))
                                         .rounded_full()
                                         .bg(cx.theme().warning),
                                 ),
