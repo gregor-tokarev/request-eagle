@@ -152,13 +152,12 @@ impl Render for RequestFields {
                             .min_w_0()
                             .h_full()
                             .px_2()
-                            .border_r_1()
+                            .when(label != "Description", |cell| cell.border_r_1())
                             .border_color(cx.theme().border)
                             .flex()
                             .items_center()
                             .child(label)
-                    }))
-                    .child(div().w(px(30.)).flex_none()),
+                    })),
             )
             .children(
                 self.generated_headers
@@ -202,7 +201,7 @@ impl Render for RequestFields {
                                             .min_w_0()
                                             .px_2()
                                             .py(px(7.))
-                                            .border_r_1()
+                                            .when(column != "description", |cell| cell.border_r_1())
                                             .border_color(cx.theme().border)
                                             .cursor_text()
                                             .when(column == "description", |view| {
@@ -218,7 +217,6 @@ impl Render for RequestFields {
                                     },
                                 ),
                             )
-                            .child(div().w(px(30.)).flex_none())
                     }),
             )
             .children(self.rows.iter().enumerate().map(|(index, row)| {
@@ -251,33 +249,44 @@ impl Render for RequestFields {
                         ]
                         .map(|(column, input)| {
                             h_flex()
+                                .relative()
                                 .debug_selector(move || format!("{id}-{column}-{index}"))
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
-                                .border_r_1()
+                                .when(column != "description", |cell| cell.border_r_1())
                                 .border_color(cx.theme().border)
                                 .child(
-                                    Input::new(input)
-                                        .small()
-                                        .appearance(false)
-                                        .aria_label(format!("{id} {column} {}", index + 1)),
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .when(column == "description" && populated, |input| {
+                                            input.pr(px(28.))
+                                        })
+                                        .child(
+                                            Input::new(input)
+                                                .small()
+                                                .appearance(false)
+                                                .aria_label(format!("{id} {column} {}", index + 1)),
+                                        ),
                                 )
+                                .when(column == "description" && populated, |cell| {
+                                    cell.child(
+                                        h_flex().absolute().right(px(3.)).top_0().h_full().child(
+                                            Button::new(("remove-row", index))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::Close)
+                                                .accessibility_label("Remove row")
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.rows.remove(index);
+                                                    this.emit_change(cx);
+                                                })),
+                                        ),
+                                    )
+                                })
                         }),
                     )
-                    .child(div().w(px(30.)).flex_none().when(populated, |this| {
-                        this.child(
-                            Button::new(("remove-row", index))
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::Close)
-                                .accessibility_label("Remove row")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.rows.remove(index);
-                                    this.emit_change(cx);
-                                })),
-                        )
-                    }))
             }))
     }
 }
