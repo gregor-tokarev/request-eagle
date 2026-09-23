@@ -39,7 +39,13 @@ pub(crate) struct RequestSaveRequested {
     pub(crate) request: collection::HttpRequest,
 }
 
+pub(crate) struct NewRequestSaveRequested {
+    pub(crate) tab_id: u64,
+    pub(crate) request: collection::HttpRequest,
+}
+
 impl EventEmitter<RequestSaveRequested> for MainView {}
+impl EventEmitter<NewRequestSaveRequested> for MainView {}
 
 impl MainView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
@@ -275,10 +281,11 @@ impl MainView {
         };
         let (Some(path), Some(request_id)) = (tab.request_path.clone(), tab.request_id.clone())
         else {
-            self.save_error = Some(
-                "This tab has no collection file. Create a request in the sidebar to save it."
-                    .into(),
-            );
+            self.save_error = None;
+            cx.emit(NewRequestSaveRequested {
+                tab_id: tab.id,
+                request: draft.read(cx).request.clone(),
+            });
             cx.notify();
             return;
         };
@@ -291,6 +298,42 @@ impl MainView {
             request: draft.read(cx).request.clone(),
         });
         cx.notify();
+    }
+
+    pub(crate) fn attach_saved_request(
+        &mut self,
+        tab_id: u64,
+        file: &collection::FileEntry,
+        destination: &collection_panel::SaveDestination,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return;
+        };
+        tab.request_path = Some(file.path.clone());
+        tab.request_id = Some(file.id.clone().into());
+        tab.title = file.name.clone().into();
+        if let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() {
+            draft.update(cx, |draft, cx| {
+                draft.name = file.name.clone().into();
+                draft.collection = Some(destination.collection.clone());
+                draft.folders = destination.folders.clone();
+                cx.notify();
+            });
+        }
+        let collection::Request::Http(request) = &file.request;
+        self.finish_save(
+            &RequestSaveRequested {
+                tab_id,
+                path: file.path.clone(),
+                request_id: file.id.clone().into(),
+                request: request.clone(),
+            },
+            Ok(()),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn finish_save(

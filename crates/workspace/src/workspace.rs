@@ -30,6 +30,7 @@ pub(super) struct Layout {
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
     _request_save_subscription: Subscription,
+    _new_request_save_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -120,6 +121,14 @@ impl Layout {
             },
         );
 
+        let new_request_save_subscription = cx.subscribe_in(
+            &main_view,
+            window,
+            |this, view, event: &crate::layout::main_view::NewRequestSaveRequested, window, cx| {
+                crate::layout::save_request::open(view, &this.sidebar, event, window, cx);
+            },
+        );
+
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
@@ -133,6 +142,7 @@ impl Layout {
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
             _request_save_subscription: request_save_subscription,
+            _new_request_save_subscription: new_request_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -348,6 +358,7 @@ impl Render for Layout {
             .size_full()
             .text_base()
             .child(workspace)
+            .children(Root::render_dialog_layer(window, cx))
             .into_any_element()
     }
 }

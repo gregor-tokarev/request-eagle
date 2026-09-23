@@ -9,7 +9,7 @@ pub enum Entry {
     Directory(DirEntry),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FileEntry {
     #[serde(skip)]
     pub(crate) raw_content: String,

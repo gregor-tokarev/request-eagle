@@ -5,6 +5,7 @@ mod dragging;
 mod editing;
 mod panel;
 mod rows;
+mod save_request;
 mod search;
 mod tree;
 
@@ -21,3 +22,5 @@ pub use panel::{CollectionPanel, CollectionPanelEvent};
 
 #[cfg(test)]
 mod dragging_tests;
+
+pub use save_request::SaveDestination;

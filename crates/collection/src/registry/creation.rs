@@ -51,6 +51,30 @@ impl CollectionRegistry {
     }
 
     pub fn create_request(&mut self, parent: &Path) -> Result<PathBuf, CollectionEditError> {
+        self.create_request_with(
+            parent,
+            "New Request",
+            Request::Http(HttpRequest {
+                method: Method::Get,
+                path: "/".to_owned(),
+                headers: Vec::new(),
+                body: None,
+                query: None,
+            }),
+        )
+    }
+
+    pub fn create_request_with(
+        &mut self,
+        parent: &Path,
+        name: &str,
+        request: Request,
+    ) -> Result<PathBuf, CollectionEditError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(CollectionEditError::InvalidName);
+        }
+        let base_name = name;
         let entries = self
             .entries_mut(parent)
             .ok_or(CollectionEditError::NotFound)?;
@@ -58,24 +82,19 @@ impl CollectionRegistry {
 
         for number in 1.. {
             let name = if number == 1 {
-                "New Request".to_owned()
+                base_name.to_owned()
             } else {
-                format!("New Request {number}")
+                format!("{base_name} {number}")
             };
-            let path = parent.join(format!("{name}.toml"));
+            let filename = name.replace(['/', '\\', ':'], "-");
+            let path = parent.join(format!("{filename}.toml"));
             let mut entry = FileEntry {
                 path: path.clone(),
                 raw_content: String::new(),
                 id: id.clone(),
                 name,
                 schema_version: 1,
-                request: Request::Http(HttpRequest {
-                    method: Method::Get,
-                    path: "/".to_owned(),
-                    headers: Vec::new(),
-                    body: None,
-                    query: None,
-                }),
+                request: request.clone(),
             };
             let content = toml::to_string_pretty(&entry).map_err(|source| {
                 CollectionSaveError::Serialize {
