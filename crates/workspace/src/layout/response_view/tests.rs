@@ -40,7 +40,7 @@ fn response_formatting_preserves_the_entire_body() {
 }
 
 #[gpui_kit::test]
-fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAppContext) {
+fn large_response_stays_raw_and_retains_search_copy_and_wrapping(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -50,7 +50,8 @@ fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAp
         "{\"name\":\"memory test\"},".repeat(60_000)
     );
     let content = response(raw.as_bytes(), "application/json");
-    let pretty = content.pretty.clone().unwrap();
+    assert!(content.raw_only);
+    assert!(content.pretty.is_none());
     let mut view = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let response = cx.new(|cx| {
@@ -62,10 +63,15 @@ fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAp
         gpui_kit::component::Root::new(response, window, cx)
     });
     let view = view.unwrap();
+    assert!(cx.debug_bounds("response-raw-only").is_some());
+    let format = cx.debug_bounds("response-format").unwrap();
+    cx.simulate_click(format.center(), Modifiers::default());
+    cx.run_until_parked();
+    cx.read(|cx| assert!(!view.read(cx).pretty));
 
     for (is_pretty, expected) in [
         (false, raw.as_str()),
-        (true, pretty.as_ref()),
+        (true, raw.as_str()),
         (false, raw.as_str()),
     ] {
         cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(is_pretty, window, cx)));
@@ -73,6 +79,8 @@ fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAp
         cx.simulate_input("needle ☃ tail");
         cx.read(|cx| {
             let view = view.read(cx);
+            assert!(!view.pretty);
+            assert!(view.editor.is_none());
             assert!(view.wrap);
             let body = view.virtual_body.as_ref().unwrap().read(cx);
             assert!(body.wrap);
@@ -111,7 +119,7 @@ fn full_response_search_copy_and_wrapping_survive_format_changes(cx: &mut TestAp
         })
     });
     cx.read(|cx| {
-        assert!(view.read(cx).virtual_body.is_none());
+        assert!(view.read(cx).virtual_body.is_some());
         assert!(view.read(cx).wrap);
     });
 }
@@ -470,4 +478,68 @@ fn virtual_headers_keep_scrolled_and_wrapped_values_selectable(cx: &mut TestAppC
             expected.as_ref()
         );
     }
+}
+
+#[test]
+fn response_size_limits_lock_raw_for_long_lines_and_pretty_expansion() {
+    let cases = [
+        format!("\"{}\"", "a".repeat(32 * 1024)),
+        format!("[\n{}0]", "0,\n".repeat(70_000)),
+        format!("[\n{}0]", "0,\n".repeat(90_000)),
+    ];
+    for raw in cases {
+        let content = response(raw.as_bytes(), "application/json");
+        assert!(content.raw_only);
+        assert!(content.pretty.is_none());
+        assert_eq!(content.raw.as_ref(), raw);
+    }
+    assert!(!response(&vec![b'a'; 32 * 1024], "text/plain").raw_only);
+    let at_limit = "1234567\n".repeat(32 * 1024);
+    assert!(!response(at_limit.as_bytes(), "text/plain").raw_only);
+}
+
+#[gpui_kit::test]
+fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let raw = "{\"a\":1,\"message\":\"needle\"}";
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = ResponseView::new(cx);
+        view.finish(Ok(response(raw.as_bytes(), "application/json")), window, cx);
+        view
+    });
+    for pretty in [false, true, false] {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(pretty, window, cx)));
+        cx.read(|cx| {
+            let view = view.read(cx);
+            assert_eq!(view.pretty, pretty);
+            assert_eq!(view.editor.is_some(), pretty);
+            assert_eq!(view.virtual_body.is_some(), !pretty);
+            if let Some(body) = &view.virtual_body {
+                assert_eq!(body.read(cx).text.to_string(), raw);
+            }
+        });
+    }
+    let bounds = cx.debug_bounds("response-body").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::default());
+    cx.simulate_keystrokes("secondary-a secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().as_deref(),
+        Some(raw)
+    );
+    cx.simulate_input("overwrite");
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx)
+                .virtual_body
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .text
+                .to_string(),
+            raw
+        )
+    });
 }

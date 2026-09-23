@@ -138,14 +138,13 @@ fn check_scroll_allocations(cx: &mut TestAppContext, body: String) {
 }
 
 #[gpui_kit::test]
-fn moderate_html_keeps_standard_editor_with_bounded_scroll_allocations(cx: &mut TestAppContext) {
+fn moderate_raw_html_uses_plain_viewer_with_bounded_scroll_allocations(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
         cx.set_reduce_motion(true);
     });
-    // About 90 KB, with individual HTML lines between 16 and 32 KiB. This
-    // reproduces the fallback that unnecessarily removed HTML highlighting.
+    // About 90 KB, with individual HTML lines between 16 and 32 KiB.
     let line = format!(
         "{}\n",
         "<p class=\"summary\">HTML response text for selection and searching.</p>".repeat(340)
@@ -172,19 +171,19 @@ fn moderate_html_keeps_standard_editor_with_bounded_scroll_allocations(cx: &mut 
         let response = cx.new(|cx| {
             let mut view = ResponseView::new(cx);
             view.finish(Ok(content), window, cx);
-            assert!(view.virtual_body.is_none());
+            assert!(view.editor.is_none());
             assert!(view.wrap);
-            editor = view.editor.clone();
+            editor = view.virtual_body.clone();
             view
         });
         Root::new(response, window, cx)
     });
-    let editor = editor.expect("moderate HTML should use the standard editor");
+    let editor = editor.expect("Raw HTML should use the plain viewer");
     for width in [1024., 640.] {
         cx.simulate_resize(size(px(width), px(768.)));
         cx.run_until_parked();
         let bounds = cx.debug_bounds("response-body").unwrap();
-        let before = cx.read(|cx| editor.read(cx).scroll_offset());
+        let before = cx.read(|cx| editor.read(cx).scroll);
         let mut maximum = 0;
         for _ in 0..8 {
             let allocated = crate::test_allocator::allocated_by(|| {
@@ -204,12 +203,12 @@ fn moderate_html_keeps_standard_editor_with_bounded_scroll_allocations(cx: &mut 
             });
             maximum = maximum.max(allocated);
         }
-        assert_ne!(cx.read(|cx| editor.read(cx).scroll_offset()), before);
+        assert_ne!(cx.read(|cx| editor.read(cx).scroll), before);
         assert!(
             maximum < 16 * 1024 * 1024,
-            "standard HTML scroll allocated {maximum} bytes at {width}px"
+            "Raw HTML scroll allocated {maximum} bytes at {width}px"
         );
-        eprintln!("Standard moderate HTML {width}px: maximum scroll allocations {maximum} bytes");
+        eprintln!("Raw moderate HTML {width}px: maximum scroll allocations {maximum} bytes");
     }
     let bounds = cx.debug_bounds("response-body").unwrap();
     cx.simulate_click(bounds.center(), Modifiers::default());
@@ -219,5 +218,5 @@ fn moderate_html_keeps_standard_editor_with_bounded_scroll_allocations(cx: &mut 
         Some(body.as_str())
     );
     cx.simulate_input("overwrite");
-    cx.read(|cx| assert_eq!(editor.read(cx).value().as_ref(), body));
+    cx.read(|cx| assert_eq!(editor.read(cx).text.to_string(), body));
 }
