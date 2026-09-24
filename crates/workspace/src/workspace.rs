@@ -242,21 +242,6 @@ pub(super) fn on_toggle_sidebar(layout: &Entity<Layout>, cx: &mut App) {
 
 impl Render for Layout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = self.render_content(window, cx);
-
-        #[cfg(feature = "dev-profiler")]
-        let content = div()
-            .relative()
-            .size_full()
-            .child(content)
-            .child(gpui_fps::fps_monitor(window, cx));
-
-        content
-    }
-}
-
-impl Layout {
-    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Keep the screen entities alive, but only lay out the visible screen.
         // GPUI still requests child layouts beneath display: none containers.
         if self.settings_visible {
@@ -387,16 +372,17 @@ impl Layout {
     }
 }
 
-pub fn init(collections: CollectionRegistry, updater: Entity<Updater>, cx: &mut App) {
+pub fn init(
+    collections: CollectionRegistry,
+    updater: Entity<Updater>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyView {
     crate::actions::init(cx);
 
-    let window_options = crate::window_options::use_window_options(cx);
-    cx.open_window(window_options, move |window, cx| {
-        let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
-        on_toggle_sidebar(&layout, cx);
-        on_open_settings(&layout, window.window_handle(), cx);
+    let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
+    on_toggle_sidebar(&layout, cx);
+    on_open_settings(&layout, window.window_handle(), cx);
 
-        cx.new(|cx| Root::new(layout.clone(), window, cx))
-    })
-    .expect("Failed to open the window");
+    layout.into()
 }

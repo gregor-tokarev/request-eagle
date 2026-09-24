@@ -57,9 +57,10 @@ and rebuilds and restarts the app when source files change. Press Ctrl-C to stop
 Linux runs the native executable directly;
 macOS creates a development app bundle.
 
-The monitor is enabled by the `dev-profiler` feature and appears in both the
-workspace and settings. Click it to collapse or expand it; right-click to switch
-between estimated maximum FPS and actual FPS. Normal builds omit the monitor.
+The application owns the monitor, enabled by `request-eagle/dev-profiler`, and
+keeps it visible across workspace and settings. Click it to collapse or expand it;
+right-click to switch between estimated maximum FPS and actual FPS. Normal builds
+omit the monitor.
 
 On Linux, `make run` and `make dev` use the terminal's `WAYLAND_DISPLAY` or
 `DISPLAY`. If neither is set (for example, in a remote terminal), the launcher
@@ -85,30 +86,31 @@ phases are included in waiting; the client does not expose separate DNS/TCP/TLS
 timings. Header byte counts are text-size estimates, and request counts exclude
 headers added automatically by the transport.
 
-To measure Settings → Keybindings page switches with the frame monitor enabled:
+To measure Settings → Keybindings page switches:
 
 ```sh
 REQUEST_EAGLE_BENCH_PAGE=Keybindings REQUEST_EAGLE_BENCH_TRANSITIONS=1 \
 REQUEST_EAGLE_BENCH_SAMPLES=200 \
-cargo test -p workspace --features dev-profiler --release pages_render_benchmark \
+cargo test -p workspace --release pages_render_benchmark \
   -- --ignored --nocapture --test-threads=1
 ```
 
-This reports CPU draw percentiles at three window sizes. It excludes native window
-integration and GPU presentation; also check the frame monitor in `make dev` when
-assessing the 8.33 ms budget for 120 fps.
+This reports CPU draw percentiles at three window sizes. It excludes the
+application's FPS monitor, native window integration and GPU presentation; also
+check the monitor in `make dev` when assessing the 8.33 ms budget for 120 fps.
 
 To check tab creation, Ctrl+} switching, and horizontal scrolling with 100,
 1,000, and 10,000 open tabs against the 120 fps CPU budget:
 
 ```sh
-cargo test -p workspace --features dev-profiler --release tabs_interaction_benchmark \
+cargo test -p workspace --release tabs_interaction_benchmark \
   -- --ignored --nocapture --test-threads=1
 ```
 
-This includes event dispatch, notifications, the app's Root wrapper, the frame
-monitor, CPU drawing, and element cleanup at the same three window sizes. It
-reports mean, p95, p99, maximum, and the number of frames over 8.33 ms, and fails
+This includes event dispatch, notifications, GPUI's Root wrapper, CPU drawing,
+and element cleanup at the same three window sizes. It excludes the application's
+FPS monitor. It reports mean, p95, p99, maximum, and the number of frames over
+8.33 ms, and fails
 if p99 exceeds that budget. Run serially on an otherwise idle machine. The first
 20 interactions warm up each case; `REQUEST_EAGLE_BENCH_SAMPLES` controls the
 number measured (default 120). Native input, font rendering, GPU work, and display

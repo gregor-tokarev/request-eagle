@@ -4,11 +4,12 @@ version = "0.1.12"
 edition = "2024"
 
 [features]
-dev-profiler = ["workspace/dev-profiler"]
+dev-profiler = ["dep:gpui-fps"]
 
 [dependencies]
 collection = { path = "../collection" }
 preferences = { path = "../preferences" }
+gpui-fps = { version = "=0.6.2", optional = true }
 gpui-kit = { workspace = true, features = ["component", "assets"] }
 keybindings_service = { path = "../keybindings_service" }
 reqwest_client.workspace = true

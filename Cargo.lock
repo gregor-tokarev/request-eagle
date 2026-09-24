@@ -5896,6 +5896,7 @@ name = "request-eagle"
 version = "0.1.12"
 dependencies = [
  "collection",
+ "gpui-fps",
  "gpui-kit",
  "gpui-pre-reqwest-client",
  "keybindings_service",
@@ -8994,7 +8995,6 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "collection_panel",
- "gpui-fps",
  "gpui-kit",
  "keybindings_service",
  "preferences",

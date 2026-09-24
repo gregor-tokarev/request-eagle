@@ -10,9 +10,8 @@ use std::{fs, time::Instant};
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
 // Set REQUEST_EAGLE_BENCH_TRANSITIONS=1 to switch away and back before each draw.
-// Enable workspace/dev-profiler to include the GPUI Kit FPS monitor.
 // Like appearance_render_benchmark, this measures forced CPU draws, including
-// element cleanup, but excludes GPU presentation and the native Root wrapper.
+// element cleanup, but excludes GPU presentation, Root and the application's FPS monitor.
 #[gpui_kit::test]
 #[ignore = "manual full-layout page render benchmark"]
 fn pages_render_benchmark(cx: &mut TestAppContext) {
@@ -181,7 +180,8 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
 }
 
 // Includes event dispatch, effects, Root, drawing and element cleanup. GPU
-// presentation still requires checking the native app. Run without CPU contention.
+// presentation and the application's FPS monitor still require checking the native app.
+// Run without CPU contention.
 #[gpui_kit::test]
 #[ignore = "manual 120 fps tab interaction budget"]
 fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
