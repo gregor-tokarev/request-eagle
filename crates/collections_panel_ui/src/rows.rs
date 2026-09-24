@@ -109,7 +109,7 @@ impl CollectionPanel {
                     .rounded(cx.theme().radius_tokens().md)
                     .pl(rems(0.5 + item.depth as f32))
                     .pr_2()
-                    .gap_2()
+                    .gap_1()
                     .text_sm()
                     .when(selected, |this| {
                         this.bg(theme.tokens.sidebar_accent.background)
@@ -123,8 +123,7 @@ impl CollectionPanel {
                     })
                     .child(if branch {
                         h_flex()
-                            .w_12()
-                            .gap_2()
+                            .gap_1()
                             .flex_none()
                             .text_color(theme.muted_foreground)
                             .child(
@@ -150,7 +149,6 @@ impl CollectionPanel {
                         };
 
                         div()
-                            .w_12()
                             .flex_none()
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
