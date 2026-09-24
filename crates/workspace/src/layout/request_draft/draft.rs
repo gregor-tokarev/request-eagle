@@ -3,6 +3,7 @@ use collection::{HttpRequest, Method};
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
+    scroll::ScrollableElement as _,
     *,
 };
 use gpui_kit::*;
@@ -200,7 +201,7 @@ impl RequestDraft {
             .gap_2()
             .child(
                 h_flex()
-                    .h(px(24.))
+                    .h_6()
                     .gap_2()
                     .text_color(cx.theme().muted_foreground)
                     .child(if is_headers {
@@ -215,7 +216,7 @@ impl RequestDraft {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The first tab can render before it is focused. These panel states do
         // not install window listeners or notify during construction.
         self.response
@@ -240,26 +241,27 @@ impl Render for RequestDraft {
             .px_4()
             .pb_2()
             .gap_2()
-            .text_size(px(13.))
-            .child(address.cached(StyleRefinement::default().w_full().h(px(88.)).flex_none()))
+            .text_sm()
+            .child(address.cached(StyleRefinement::default().w_full().h_20().flex_none()))
             .child(
                 div().flex_1().min_h_0().overflow_hidden().child(
                     v_resizable("request-response-split")
                         .with_state(self.split.as_ref().expect("prepared request split"))
                         .child(
                             resizable_panel()
-                                .size(px(330.))
-                                .size_range(px(110.)..px(1200.))
+                                .size(rems(20.).to_pixels(window.rem_size()))
+                                .size_range(
+                                    rems(14.).to_pixels(window.rem_size())
+                                        ..rems(75.).to_pixels(window.rem_size()),
+                                )
                                 .child(
                                     configuration.cached(StyleRefinement::default().size_full()),
                                 ),
                         )
                         .child(
-                            self.response
-                                .as_ref()
-                                .expect("prepared response")
-                                .clone()
-                                .into_any_element(),
+                            resizable_panel()
+                                .size_range(rems(12.).to_pixels(window.rem_size())..Pixels::MAX)
+                                .child(self.response.as_ref().expect("prepared response").clone()),
                         ),
                 ),
             )
@@ -306,9 +308,10 @@ impl Render for RequestConfiguration {
                     .child(
                         div()
                             .id("request-section-content")
+                            .debug_selector(|| "request-section-content".into())
                             .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
                             .child(content),
                     )
             })

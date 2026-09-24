@@ -214,7 +214,7 @@ impl KeybindingsPage {
                     .size_full()
                     .px_3()
                     .gap_1()
-                    .rounded_lg()
+                    .rounded(cx.theme().radius_tokens().lg)
                     .border_1()
                     .border_color(accent)
                     .bg(accent.opacity(0.08))

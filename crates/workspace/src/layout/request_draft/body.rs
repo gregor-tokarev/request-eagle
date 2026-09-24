@@ -61,14 +61,14 @@ impl RequestDraft {
             .child(
                 h_flex()
                     .flex_none()
-                    .h(px(28.))
+                    .h_7()
                     .gap_2()
                     .child(div().text_color(cx.theme().muted_foreground).child("Raw"))
                     .child(
                         div()
                             .px_2()
                             .py_1()
-                            .rounded(px(4.))
+                            .rounded(cx.theme().radius_tokens().md)
                             .bg(cx.theme().muted)
                             .text_color(cx.theme().info)
                             .child("JSON"),
@@ -113,7 +113,7 @@ impl RequestDraft {
                                 .style
                                 .editor_background
                                 .unwrap_or_else(|| cx.theme().input_background()))
-                            .text_size(px(13.))
+                            .text_sm()
                             .aria_label("JSON request body"),
                     ),
             )

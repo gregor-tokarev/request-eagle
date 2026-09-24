@@ -4,10 +4,10 @@ use gpui_kit::base::input::{self, Rope, RopeExt};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 
-const FONT_SIZE: f32 = 13.;
-const ROW_HEIGHT: f32 = 20.;
-const GUTTER: f32 = 64.;
-const SCROLLBAR: f32 = 12.;
+const FONT_SIZE: Rems = rems(0.875);
+const ROW_HEIGHT: Rems = rems(1.25);
+const GUTTER: Rems = rems(4.);
+const SCROLLBAR: Rems = rems(0.75);
 
 /// A read-only viewport over the complete response. A compact list of byte
 /// offsets indexes wrapped rows; only visible rows become shaped glyph layouts.
@@ -18,6 +18,7 @@ pub(super) struct VirtualBody {
     pub(super) focus: FocusHandle,
     rows: Vec<usize>,
     font: Font,
+    rem_size: Pixels,
     pub(super) wrap: bool,
     layout_width: Option<Pixels>,
     bounds: Bounds<Pixels>,
@@ -49,6 +50,7 @@ impl VirtualBody {
             text,
             rows: vec![0],
             font,
+            rem_size: cx.theme().font_size,
             wrap,
             focus: cx.focus_handle(),
             layout_width: None,
@@ -84,7 +86,7 @@ impl VirtualBody {
     }
 
     fn first_row(&self) -> usize {
-        (self.scroll.y / px(ROW_HEIGHT)).floor() as usize
+        (self.scroll.y / ROW_HEIGHT.to_pixels(self.rem_size)).floor() as usize
     }
 
     pub(super) fn row_range(&self, row: usize) -> Range<usize> {
@@ -100,7 +102,8 @@ impl VirtualBody {
     }
 
     fn max_scroll_y(&self) -> Pixels {
-        (px(self.rows.len() as f32 * ROW_HEIGHT) - self.bounds.size.height).max(px(0.))
+        (ROW_HEIGHT.to_pixels(self.rem_size) * self.rows.len() - self.bounds.size.height)
+            .max(px(0.))
     }
 
     fn clamp_scroll(&mut self) {
@@ -108,17 +111,23 @@ impl VirtualBody {
         self.scroll.x = if self.wrap {
             px(0.)
         } else {
-            self.scroll
-                .x
-                .clamp(px(0.), px(self.max_line_bytes as f32 * FONT_SIZE))
+            self.scroll.x.clamp(
+                px(0.),
+                FONT_SIZE.to_pixels(self.rem_size) * self.max_line_bytes,
+            )
         };
     }
 
     fn prepare(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let width = (bounds.size.width - px(GUTTER + SCROLLBAR)).max(px(FONT_SIZE));
+        let rem_size = window.rem_size();
+        let width = (bounds.size.width - (GUTTER + SCROLLBAR).to_pixels(rem_size))
+            .max(FONT_SIZE.to_pixels(rem_size));
         let font = font(cx.theme().mono_font_family.clone());
-        let changed = self.layout_width != Some(width) || self.font != font;
+        let changed =
+            self.layout_width != Some(width) || self.font != font || self.rem_size != rem_size;
+        // Preserve a source offset before changing the row measurements.
         let anchor = self.row_range(self.first_row()).start;
+        self.rem_size = rem_size;
         self.bounds = bounds;
 
         if changed {
@@ -128,7 +137,7 @@ impl VirtualBody {
             let mut offset = 0;
             let mut wrapper = window
                 .text_system()
-                .line_wrapper(self.font.clone(), px(FONT_SIZE));
+                .line_wrapper(self.font.clone(), FONT_SIZE.to_pixels(self.rem_size));
             for line in self.source.split_inclusive('\n') {
                 let content = line.strip_suffix('\n').unwrap_or(line);
                 let content = content.strip_suffix('\r').unwrap_or(content);
@@ -149,7 +158,7 @@ impl VirtualBody {
                 .rows
                 .partition_point(|start| *start <= anchor)
                 .saturating_sub(1);
-            self.scroll.y = px(row as f32 * ROW_HEIGHT);
+            self.scroll.y = ROW_HEIGHT.to_pixels(self.rem_size) * row;
         }
 
         if let Some(offset) = self.reveal.take() {
@@ -158,26 +167,28 @@ impl VirtualBody {
                 .rows
                 .partition_point(|start| *start <= offset)
                 .saturating_sub(1);
-            self.scroll.y = px(row as f32 * ROW_HEIGHT) - bounds.size.height / 2.;
+            self.scroll.y = ROW_HEIGHT.to_pixels(self.rem_size) * row - bounds.size.height / 2.;
             if !self.wrap {
                 let prefix = &self.source[self.text.line_start_offset(position.row)..offset];
                 let cell = window
                     .text_system()
                     .advance(
                         window.text_system().resolve_font(&self.font),
-                        px(FONT_SIZE),
+                        FONT_SIZE.to_pixels(self.rem_size),
                         'm',
                     )
                     .map(|size| size.width)
-                    .unwrap_or(px(8.));
+                    .unwrap_or(rems(0.5).to_pixels(self.rem_size));
                 self.scroll.x = (cell * prefix.chars().count() as f32 - width / 2.).max(px(0.));
             }
         }
         self.clamp_scroll();
         self.painted.clear();
         let start = self.first_row();
-        let end = (start + (bounds.size.height / px(ROW_HEIGHT)).ceil() as usize + 1)
-            .min(self.rows.len());
+        let end = (start
+            + (bounds.size.height / ROW_HEIGHT.to_pixels(self.rem_size)).ceil() as usize
+            + 1)
+        .min(self.rows.len());
 
         for row in start..end {
             let mut range = self.row_range(row);
@@ -187,7 +198,7 @@ impl VirtualBody {
                 let text = &self.source[range.clone()];
                 let mut wrapper = window
                     .text_system()
-                    .line_wrapper(self.font.clone(), px(FONT_SIZE));
+                    .line_wrapper(self.font.clone(), FONT_SIZE.to_pixels(self.rem_size));
                 let left = if self.scroll.x > px(0.) {
                     wrapper
                         .should_truncate_line(text, self.scroll.x, "", TruncateFrom::End)
@@ -207,15 +218,18 @@ impl VirtualBody {
                 color: cx.theme().foreground,
                 ..Default::default()
             };
-            let line = window
-                .text_system()
-                .shape_line(text, px(FONT_SIZE), &[run.clone()], None);
+            let line = window.text_system().shape_line(
+                text,
+                FONT_SIZE.to_pixels(self.rem_size),
+                &[run.clone()],
+                None,
+            );
             let position = self.text.offset_to_point(range.start);
             let number = if position.column == 0 {
                 let number: SharedString = (position.row + 1).to_string().into();
                 Some(window.text_system().shape_line(
                     number.clone(),
-                    px(FONT_SIZE),
+                    FONT_SIZE.to_pixels(self.rem_size),
                     &[TextRun {
                         len: number.len(),
                         color: cx.theme().muted_foreground,
@@ -231,17 +245,18 @@ impl VirtualBody {
                 line,
                 number,
                 origin: point(
-                    bounds.left() + px(GUTTER),
-                    bounds.top() + px(row as f32 * ROW_HEIGHT) - self.scroll.y,
+                    bounds.left() + GUTTER.to_pixels(self.rem_size),
+                    bounds.top() + ROW_HEIGHT.to_pixels(self.rem_size) * row - self.scroll.y,
                 ),
             });
         }
     }
 
     fn scrollbar_thumb(&self) -> Bounds<Pixels> {
-        let total = px(self.rows.len() as f32 * ROW_HEIGHT).max(self.bounds.size.height);
+        let total =
+            (ROW_HEIGHT.to_pixels(self.rem_size) * self.rows.len()).max(self.bounds.size.height);
         let height = (self.bounds.size.height * (self.bounds.size.height / total))
-            .max(px(24.))
+            .max(rems(1.5).to_pixels(self.rem_size))
             .min(self.bounds.size.height);
         let travel = self.bounds.size.height - height;
         let y = if self.max_scroll_y() > px(0.) {
@@ -250,8 +265,11 @@ impl VirtualBody {
             px(0.)
         };
         Bounds::new(
-            point(self.bounds.right() - px(8.), self.bounds.top() + y),
-            size(px(5.), height),
+            point(
+                self.bounds.right() - rems(0.5).to_pixels(self.rem_size),
+                self.bounds.top() + y,
+            ),
+            size(rems(0.25).to_pixels(self.rem_size), height),
         )
     }
 
@@ -270,14 +288,14 @@ impl VirtualBody {
                         window.paint_quad(fill(
                             Bounds::new(
                                 row.origin + point(left, px(0.)),
-                                size(right - left, px(ROW_HEIGHT)),
+                                size(right - left, ROW_HEIGHT.to_pixels(self.rem_size)),
                             ),
                             cx.theme().selection,
                         ));
                     }
                     let _ = row.line.paint(
                         row.origin,
-                        px(ROW_HEIGHT),
+                        ROW_HEIGHT.to_pixels(self.rem_size),
                         TextAlign::Left,
                         None,
                         window,
@@ -285,11 +303,18 @@ impl VirtualBody {
                     );
                     if let Some(number) = &row.number {
                         let origin = point(
-                            self.bounds.left() + px(GUTTER - 14.) - number.width(),
+                            self.bounds.left() + (GUTTER - rems(1.)).to_pixels(self.rem_size)
+                                - number.width(),
                             row.origin.y,
                         );
-                        let _ =
-                            number.paint(origin, px(ROW_HEIGHT), TextAlign::Left, None, window, cx);
+                        let _ = number.paint(
+                            origin,
+                            ROW_HEIGHT.to_pixels(self.rem_size),
+                            TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        );
                     }
                 }
                 if self.max_scroll_y() > px(0.) {
@@ -304,7 +329,8 @@ impl VirtualBody {
 
     fn offset_at(&self, position: Point<Pixels>) -> usize {
         let Some(row) = self.painted.iter().min_by_key(|row| {
-            ((row.origin.y + px(ROW_HEIGHT / 2.) - position.y).abs() / px(1.)) as usize
+            ((row.origin.y + ROW_HEIGHT.to_pixels(self.rem_size) / 2. - position.y).abs() / px(1.))
+                as usize
         }) else {
             return 0;
         };
@@ -327,7 +353,7 @@ impl VirtualBody {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
-        if event.position.x >= self.bounds.right() - px(SCROLLBAR) {
+        if event.position.x >= self.bounds.right() - SCROLLBAR.to_pixels(self.rem_size) {
             self.dragging_scrollbar = true;
             self.scroll_to_pointer(event.position);
         } else {
@@ -350,10 +376,10 @@ impl VirtualBody {
         } else if self.dragging {
             self.select_to(self.offset_at(event.position));
             if event.position.y < self.bounds.top() {
-                self.scroll.y -= px(ROW_HEIGHT);
+                self.scroll.y -= ROW_HEIGHT.to_pixels(self.rem_size);
             }
             if event.position.y > self.bounds.bottom() {
-                self.scroll.y += px(ROW_HEIGHT);
+                self.scroll.y += ROW_HEIGHT.to_pixels(self.rem_size);
             }
             self.clamp_scroll();
         }
@@ -388,7 +414,7 @@ impl Render for VirtualBody {
                 .editor_background
                 .unwrap_or_else(|| cx.theme().input_background()))
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
-                let delta = event.delta.pixel_delta(px(ROW_HEIGHT));
+                let delta = event.delta.pixel_delta(ROW_HEIGHT.to_pixels(this.rem_size));
                 this.scroll.y -= delta.y;
                 this.scroll.x -= delta.x;
                 this.clamp_scroll();

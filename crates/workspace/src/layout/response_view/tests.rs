@@ -645,3 +645,155 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
         )
     });
 }
+
+#[gpui_kit::test]
+fn response_zoom_reflows_visible_rows_and_preserves_selection(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let source =
+        "A long response line with enough words to wrap at every tested size. ".repeat(400);
+    let selected = source.len() / 2..source.len() / 2 + 20;
+    let mut body = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view =
+            cx.new(|cx| super::virtual_body::VirtualBody::new(source.clone().into(), true, cx));
+        body = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let body = body.unwrap();
+    cx.simulate_resize(gpui_kit::size(px(640.), px(480.)));
+
+    for theme in ["Default Light", "Default Dark"] {
+        let mut previous_row_count = usize::MAX;
+
+        for font_size in [12., 16., 24.] {
+            cx.update(|window, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                gpui_kit::component::Theme::global_mut(cx).font_size = px(font_size);
+                body.update(cx, |body, cx| body.select_match(Some(selected.clone()), cx));
+                let focus = body.read(cx).focus.clone();
+                window.focus(&focus, cx);
+                window.refresh();
+            });
+            cx.run_until_parked();
+
+            let viewport = cx.debug_bounds("response-virtual-text").unwrap();
+            cx.read(|cx| {
+                let body = body.read(cx);
+                assert_eq!(body.selection, selected);
+                assert!(
+                    body.painted
+                        .iter()
+                        .any(|row| row.range.contains(&selected.start))
+                );
+                assert!(
+                    body.painted
+                        .iter()
+                        .all(|row| row.line.width <= viewport.size.width)
+                );
+                assert!(
+                    body.painted.len() < previous_row_count,
+                    "larger rows must reduce the visible row count"
+                );
+                previous_row_count = body.painted.len();
+            });
+
+            cx.simulate_keystrokes("secondary-c");
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(&source[selected.clone()])
+            );
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn minimum_workspace_keeps_request_fields_and_response_visible_at_each_zoom(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{InputEvent as _, ScrollDelta, ScrollWheelEvent, TouchPhase};
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+
+    let mut layout = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            crate::workspace::Layout::new(
+                collection::CollectionRegistry::new(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        layout = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let response_view = cx.read(|cx| {
+        layout.as_ref().unwrap().read(cx).main_view.read(cx).tabs[0]
+            .page
+            .clone()
+            .downcast::<crate::layout::request_draft::RequestDraft>()
+            .ok()
+            .unwrap()
+            .read(cx)
+            .response_for_test()
+    });
+    cx.update(|window, cx| {
+        response_view.update(cx, |view, cx| {
+            view.finish(
+                Ok(response(b"A readable response", "text/plain")),
+                window,
+                cx,
+            );
+        });
+    });
+
+    for font_size in [12., 16., 24.] {
+        cx.update(|window, cx| {
+            gpui_kit::component::Theme::global_mut(cx).font_size = px(font_size);
+            window.refresh();
+        });
+        cx.simulate_resize(gpui_kit::size(px(40. * font_size), px(40. * font_size)));
+        cx.run_until_parked();
+
+        // Generated headers may overflow the request pane at its minimum.
+        // Scrolling that pane must expose its editable row without moving the response.
+        let request = cx.debug_bounds("request-section-content").unwrap();
+        cx.update(|window, cx| {
+            window.dispatch_event(
+                ScrollWheelEvent {
+                    position: request.center(),
+                    delta: ScrollDelta::Pixels(point(px(0.), px(-500.))),
+                    modifiers: Modifiers::default(),
+                    touch_phase: TouchPhase::Moved,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        let body = cx.debug_bounds("response-body").unwrap();
+        let field = cx.debug_bounds("headers-key-0").unwrap();
+        let response_tab = cx.debug_bounds("response-section-Body").unwrap();
+        assert!(
+            body.size.height >= px(3. * font_size),
+            "response body at {font_size} px: {body:?}"
+        );
+        assert!(
+            field.bottom() <= response_tab.top(),
+            "editable header should be above the response at {font_size} px: {field:?}, {response_tab:?}"
+        );
+        assert!(
+            body.bottom() <= px(38. * font_size),
+            "response must clear the status bar"
+        );
+    }
+}

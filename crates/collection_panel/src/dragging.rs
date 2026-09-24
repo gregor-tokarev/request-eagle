@@ -17,10 +17,10 @@ impl Render for DraggedItem {
         div()
             .px_3()
             .py_1()
-            .rounded_md()
+            .rounded(cx.theme().radius_tokens().md)
             .bg(cx.theme().sidebar_accent)
             .text_color(cx.theme().sidebar_foreground)
-            .text_size(px(13.))
+            .text_sm()
             .child(self.label.clone())
     }
 }
@@ -65,9 +65,9 @@ impl CollectionPanel {
         let placement = if item.kind == ItemKind::Collection {
             MovePlacement::Inside
         } else if item.is_branch() {
-            if y < px(7.) {
+            if y < bounds.size.height / 4. {
                 MovePlacement::Before
-            } else if y > bounds.size.height - px(7.) {
+            } else if y > bounds.size.height * 0.75 {
                 MovePlacement::After
             } else {
                 MovePlacement::Inside

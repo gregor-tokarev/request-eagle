@@ -2,7 +2,7 @@ use collection::Method;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::Input,
+    input::{Input, InputGroup, InputGroupAddon},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -25,20 +25,21 @@ impl RequestDraft {
     pub(super) fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         h_flex()
             .flex_none()
-            .h(px(40.))
+            .h_10()
             .gap_3()
             .child(
                 v_flex()
                     .flex_none()
-                    .size(px(28.))
+                    .h_8()
+                    .px_2()
                     .justify_center()
                     .items_center()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .rounded(px(7.))
-                    .text_color(cx.theme().info)
-                    .text_size(px(8.))
-                    .font_weight(FontWeight::BOLD)
+                    .rounded(cx.theme().radius_tokens().md)
+                    .text_color(cx.theme().muted_foreground)
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
                     .child("HTTP"),
             )
             .child(
@@ -46,7 +47,7 @@ impl RequestDraft {
                     .debug_selector(|| "request-breadcrumbs".into())
                     .min_w_0()
                     .gap_1()
-                    .text_size(px(13.))
+                    .text_sm()
                     .overflow_hidden()
                     .when_some(self.collection.clone(), |row, collection| {
                         row.child(
@@ -58,7 +59,7 @@ impl RequestDraft {
                         )
                         .child(
                             Icon::new(IconName::ChevronRight)
-                                .size(px(12.))
+                                .size_3()
                                 .text_color(cx.theme().muted_foreground),
                         )
                     })
@@ -74,7 +75,7 @@ impl RequestDraft {
                             )
                             .child(
                                 Icon::new(IconName::ChevronRight)
-                                    .size(px(12.))
+                                    .size_3()
                                     .text_color(cx.theme().muted_foreground),
                             )
                     }))
@@ -98,98 +99,93 @@ impl RequestDraft {
         let method = self.request.method;
         let draft = cx.entity().downgrade();
         let sending = self.task.is_some();
+        let method_button = Button::new("request-method")
+            .debug_selector(|| "request-method".into())
+            .ghost()
+            .small()
+            .w_24()
+            .rounded(cx.theme().radius_tokens().sm)
+            .justify_between()
+            .px_3()
+            .accessibility_label(format!("Request method: {}", method.as_str()))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .child(
+                        div()
+                            .debug_selector(|| "request-method-label".into())
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(method_color(method, cx))
+                            .child(method.as_str()),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "request-method-arrow".into())
+                            .child(
+                                Icon::new(IconName::ChevronDown)
+                                    .size_3()
+                                    .text_color(cx.theme().muted_foreground),
+                            ),
+                    ),
+            )
+            .dropdown_menu(move |mut menu, _, _| {
+                for option in [
+                    Method::Get,
+                    Method::Post,
+                    Method::Put,
+                    Method::Patch,
+                    Method::Delete,
+                    Method::Head,
+                    Method::Options,
+                ] {
+                    let draft = draft.clone();
+                    menu = menu.item(
+                        PopupMenuItem::element(move |_, cx| {
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(method_color(option, cx))
+                                .child(option.as_str())
+                        })
+                        .checked(option == method)
+                        .on_click(move |_, window, cx| {
+                            let _ = draft.update(cx, |draft, cx| {
+                                draft.set_method(option, cx);
+                                draft.prepare(window, cx);
+                            });
+                        }),
+                    );
+                }
+
+                menu
+            });
 
         h_flex()
             .flex_none()
             .gap_2()
             .child(
-                h_flex()
+                div()
                     .debug_selector(|| "request-url-bar".into())
                     .flex_1()
                     .min_w_0()
-                    .h(px(40.))
-                    .border_1()
-                    .border_color(cx.theme().input)
-                    .rounded(px(7.))
                     .child(
-                        Button::new("request-method")
-                            .debug_selector(|| "request-method".into())
-                            .ghost()
-                            .h(px(38.))
-                            .w(px(110.))
-                            .justify_between()
-                            .px_3()
-                            .accessibility_label(format!("Request method: {}", method.as_str()))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .debug_selector(|| "request-method-label".into())
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(method_color(method, cx))
-                                            .child(method.as_str()),
-                                    )
-                                    .child(
-                                        div()
-                                            .debug_selector(|| "request-method-arrow".into())
-                                            .child(
-                                                Icon::new(IconName::ChevronDown)
-                                                    .size(px(12.))
-                                                    .text_color(cx.theme().muted_foreground),
-                                            ),
-                                    ),
-                            )
-                            .dropdown_menu(move |mut menu, _, _| {
-                                for option in [
-                                    Method::Get,
-                                    Method::Post,
-                                    Method::Put,
-                                    Method::Patch,
-                                    Method::Delete,
-                                    Method::Head,
-                                    Method::Options,
-                                ] {
-                                    let draft = draft.clone();
-                                    menu =
-                                        menu.item(
-                                            PopupMenuItem::element(move |_, cx| {
-                                                div()
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(method_color(option, cx))
-                                                    .child(option.as_str())
-                                            })
-                                            .checked(option == method)
-                                            .on_click(move |_, window, cx| {
-                                                let _ = draft.update(cx, |draft, cx| {
-                                                    draft.set_method(option, cx);
-                                                    draft.prepare(window, cx);
-                                                });
-                                            }),
-                                        );
-                                }
-
-                                menu
-                            }),
-                    )
-                    .child(div().w(px(1.)).h(px(24.)).bg(cx.theme().border))
-                    .child(
-                        div()
-                            .debug_selector(|| "request-url".into())
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&url).appearance(false).aria_label("Request URL")),
+                        div().debug_selector(|| "request-url".into()).child(
+                            InputGroup::new("request-url-group")
+                                .input(Input::new(&url).aria_label("Request URL"))
+                                .addon(
+                                    InputGroupAddon::new("request-method-addon")
+                                        .p_1()
+                                        .child(method_button),
+                                ),
+                        ),
                     ),
             )
             .child(
                 Button::new("send-request")
                     .debug_selector(|| "send-request".into())
                     .primary()
-                    .h(px(40.))
-                    .w(px(84.))
+                    .min_w_20()
                     .flex_none()
-                    .rounded(px(7.))
                     .label(if sending { "Cancel" } else { "Send" })
                     .accessibility_label(if sending {
                         "Cancel request"
@@ -241,10 +237,10 @@ impl RequestDraft {
                         .disabled(section.is_none())
                         .accessibility_label(label)
                         .flex_none()
-                        .h(px(30.))
+                        .h_8()
                         .px_2()
                         .gap_1()
-                        .rounded(px(4.))
+                        .rounded(cx.theme().radius_tokens().md)
                         .text_color(cx.theme().muted_foreground)
                         .when(selected, |this| {
                             this.bg(cx.theme().muted).text_color(cx.theme().foreground)
@@ -259,7 +255,7 @@ impl RequestDraft {
                                     .debug_selector(move || {
                                         format!("request-section-{label}-count-{count}")
                                     })
-                                    .text_size(px(11.))
+                                    .text_xs()
                                     .child(count.to_string()),
                             )
                         })

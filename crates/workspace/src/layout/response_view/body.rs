@@ -25,7 +25,7 @@ impl Render for ResponseBodyEditor {
                 .style
                 .editor_background
                 .unwrap_or_else(|| cx.theme().input_background()))
-            .text_size(px(13.))
+            .text_sm()
             .aria_label("Response body")
     }
 }
@@ -50,7 +50,7 @@ impl ResponseView {
             .child(
                 h_flex()
                     .flex_none()
-                    .h(px(30.))
+                    .h_8()
                     .gap_2()
                     .child(
                         Button::new("response-format")
@@ -91,7 +91,7 @@ impl ResponseView {
                     )
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(match content.language {
                                 "json" => "JSON",
@@ -103,7 +103,7 @@ impl ResponseView {
                         row.child(
                             div()
                                 .debug_selector(|| "response-raw-only".into())
-                                .text_size(px(11.))
+                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Large response · Raw only"),
                         )

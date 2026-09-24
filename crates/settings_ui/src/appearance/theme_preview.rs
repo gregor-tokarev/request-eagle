@@ -1,7 +1,7 @@
 use gpui_kit::component::{ActiveTheme as _, Theme, ThemeColor, ThemeRegistry};
 use gpui_kit::{
-    App, Bounds, ContentMask, IntoElement, SharedString, Styled as _, TextAlign, TextRun, canvas,
-    fill, point, px, size,
+    App, Bounds, ContentMask, IntoElement, Pixels, SharedString, Styled as _, TextAlign, TextRun,
+    canvas, fill, point, px, size,
 };
 
 /// Resolved once for the bundled catalog, independent of the active app theme.
@@ -9,6 +9,7 @@ pub(super) struct ThemePreview {
     pub name: SharedString,
     pub dark: bool,
     pub(super) colors: ThemeColor,
+    radius: Pixels,
 }
 
 impl ThemePreview {
@@ -26,6 +27,7 @@ impl ThemePreview {
                     name: config.name.clone(),
                     dark: config.mode.is_dark(),
                     colors: theme.colors,
+                    radius: theme.radius_tokens().sm,
                 }
             })
             .collect()
@@ -38,8 +40,15 @@ impl ThemePreview {
         let link = cx.theme().link;
         let font_size = cx.theme().font_size * 0.75;
         let gap = cx.theme().font_size * 0.5;
+        let preview_height = cx.theme().font_size * 5.;
+        let inset = cx.theme().font_size * 0.25;
+        // The card has an 8 px (0.5 rem) inset; its preview follows the inner corner.
+        let frame_radius = (cx.theme().radius_tokens().lg - gap).max(Pixels::ZERO);
+        let inner_radius = (frame_radius - inset).max(Pixels::ZERO);
+        // These miniature controls visualize the previewed theme, not the active palette.
+        let mark_radius = self.radius * 0.5;
 
-        // The button owns focus and accessibility. Paint the fixed-size card
+        // The button owns focus and accessibility. Paint the miniature card
         // in one element so scrolling does not lay out its individual shapes.
         canvas(
             move |_, window, _| {
@@ -72,10 +81,13 @@ impl ThemePreview {
                 (label, check)
             },
             move |card_bounds, (label, check), window, cx| {
-                let bounds = Bounds::new(card_bounds.origin, size(card_bounds.size.width, px(76.)));
+                let bounds = Bounds::new(
+                    card_bounds.origin,
+                    size(card_bounds.size.width, preview_height),
+                );
                 window.paint_quad(gpui_kit::quad(
                     bounds,
-                    px(4.),
+                    frame_radius,
                     colors.background,
                     px(1.),
                     colors.border,
@@ -85,13 +97,15 @@ impl ThemePreview {
                 window.paint_quad(
                     fill(
                         Bounds::new(
-                            bounds.origin
-                                + point(bounds.size.width * 0.01, bounds.size.height * 0.02),
-                            size(bounds.size.width * 0.22, bounds.size.height * 0.96),
+                            bounds.origin + point(inset, inset),
+                            size(
+                                bounds.size.width * 0.22 - inset,
+                                bounds.size.height - inset * 2.,
+                            ),
                         ),
                         colors.sidebar,
                     )
-                    .corner_radii(px(3.)),
+                    .corner_radii(inner_radius),
                 );
 
                 // These marks do not overlap. One paint layer avoids inserting
@@ -103,7 +117,8 @@ impl ThemePreview {
                             size(bounds.size.width * width, bounds.size.height * height),
                         );
 
-                        window.paint_quad(fill(rectangle, color).corner_radii(px(radius)));
+                        window
+                            .paint_quad(fill(rectangle, color).corner_radii(mark_radius * radius));
                     };
 
                     rectangle(0.05, 0.13, 0.13, 0.05, 1., colors.primary);
@@ -127,16 +142,16 @@ impl ThemePreview {
                         let swatch = Bounds::new(
                             bounds.origin
                                 + point(
-                                    bounds.size.width * 0.28 + px(index as f32 * 11.),
+                                    bounds.size.width * 0.28 + gap * 1.5 * index as f32,
                                     bounds.size.height * 0.73,
                                 ),
-                            size(px(7.), px(7.)),
+                            size(gap, gap),
                         );
-                        window.paint_quad(fill(swatch, color).corner_radii(px(3.5)));
+                        window.paint_quad(fill(swatch, color).corner_radii(gap / 2.));
                     }
                 });
 
-                let label_origin = card_bounds.origin + point(px(0.), px(76.) + gap);
+                let label_origin = card_bounds.origin + point(px(0.), preview_height + gap);
                 let label_width =
                     card_bounds.size.width - if selected { font_size * 1.5 } else { px(0.) };
 
@@ -158,6 +173,6 @@ impl ThemePreview {
             },
         )
         .w_full()
-        .h(px(76.) + gap + font_size)
+        .h(preview_height + gap + font_size)
     }
 }

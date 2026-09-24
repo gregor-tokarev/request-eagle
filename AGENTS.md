@@ -4,6 +4,8 @@ You've might work in worktree with other agents in parallel, so if you want to t
 
 # Code quality
 
+For interface changes, follow [the application design guidelines](docs/design-guidelines.md).
+
 Keep complexity justified. Start with the simplest model that meets the
 current requirements. Introduce a concept or abstraction when it solves a
 concrete problem in the code. Avoid speculative flexibility.

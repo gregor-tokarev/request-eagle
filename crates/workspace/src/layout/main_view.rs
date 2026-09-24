@@ -7,8 +7,9 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::request_draft::RequestDraft;
 use crate::actions::{CloseTab, NewTab, SaveRequest};
 
-const TAB_WIDTH: Pixels = px(176.);
-const TAB_HEIGHT: Pixels = px(28.);
+// Rendering and virtualization share the same relative geometry at every zoom.
+const TAB_WIDTH: Rems = rems(12.);
+const TAB_HEIGHT: Rems = rems(2.);
 
 pub(super) struct PageTab {
     pub(super) id: u64,
@@ -442,8 +443,10 @@ impl MainView {
 
     fn tab_strip(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let gap = window.rem_size() * 0.25;
-        let stride = TAB_WIDTH + gap;
-        let content_width = TAB_WIDTH * self.tabs.len() + gap * self.tabs.len().saturating_sub(1);
+        let tab_width = TAB_WIDTH.to_pixels(window.rem_size());
+        let tab_height = TAB_HEIGHT.to_pixels(window.rem_size());
+        let stride = tab_width + gap;
+        let content_width = tab_width * self.tabs.len() + gap * self.tabs.len().saturating_sub(1);
 
         Tabs::new("page-tabs")
             .min_w_0()
@@ -463,9 +466,9 @@ impl MainView {
 
                         if let Some(index) = this.scroll_to_tab.take() {
                             let tab_left = stride * index;
-                            let tab_right = tab_left + TAB_WIDTH;
+                            let tab_right = tab_left + tab_width;
 
-                            if tab_left < left || TAB_WIDTH > viewport.size.width {
+                            if tab_left < left || tab_width > viewport.size.width {
                                 left = tab_left;
                             } else if tab_right > left + viewport.size.width {
                                 left = tab_right - viewport.size.width;
@@ -485,8 +488,8 @@ impl MainView {
                             let mut tab = this.tab(index, &this.tabs[index], cx).into_any_element();
                             tab.layout_as_root(
                                 size(
-                                    AvailableSpace::Definite(TAB_WIDTH),
-                                    AvailableSpace::Definite(TAB_HEIGHT),
+                                    AvailableSpace::Definite(tab_width),
+                                    AvailableSpace::Definite(tab_height),
                                 ),
                                 window,
                                 cx,
@@ -534,8 +537,8 @@ impl MainView {
             .h(TAB_HEIGHT)
             .px_2()
             .gap_2()
-            .rounded(px(5.))
-            .text_size(px(12.))
+            .rounded(cx.theme().radius_tokens().md)
+            .text_xs()
             .text_color(cx.theme().tab_foreground)
             .when(selected, |this| {
                 this.bg(cx.theme().tokens.tab_active.background)
@@ -560,7 +563,7 @@ impl MainView {
                     div()
                         .debug_selector(move || format!("tab-method-{id}"))
                         .flex_none()
-                        .text_size(px(9.))
+                        .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(color)
                         .child(method),
@@ -577,7 +580,7 @@ impl MainView {
                 div()
                     .relative()
                     .flex_none()
-                    .size(px(20.))
+                    .size_5()
                     .when(tab.dirty, |this| {
                         this.child(
                             div()
@@ -590,8 +593,8 @@ impl MainView {
                                 .child(
                                     div()
                                         .debug_selector(move || format!("tab-dirty-{id}"))
-                                        .size(px(8.))
-                                        .rounded_full()
+                                        .size_2()
+                                        .rounded(cx.theme().radius_full())
                                         .bg(cx.theme().warning),
                                 ),
                         )
@@ -606,8 +609,8 @@ impl MainView {
                                     .debug_selector(move || format!("close-tab-{id}"))
                                     .ghost()
                                     .xsmall()
-                                    .size(px(20.))
-                                    .icon(Icon::new(IconName::Close).size(px(12.)))
+                                    .size_5()
+                                    .icon(Icon::new(IconName::Close).size_3())
                                     .accessibility_label(format!("Close {}", tab.title))
                                     .tooltip_with_action("Close tab", &CloseTab, Some("Workspace"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -638,7 +641,7 @@ impl Render for MainView {
                 h_flex()
                     .debug_selector(|| "main-tab-bar".into())
                     .flex_none()
-                    .h(px(38.))
+                    .h_10()
                     .px_1()
                     .gap_1()
                     .bg(cx.theme().tab_bar)

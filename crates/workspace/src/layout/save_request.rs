@@ -54,10 +54,10 @@ pub(crate) fn open(
         }
     });
     let name = dialog.read(cx).name.clone();
-    window.open_dialog(cx, move |modal, _, _| {
+    window.open_dialog(cx, move |modal, window, _| {
         modal
             .title("Save request")
-            .w(px(560.))
+            .w(rems(35.).to_pixels(window.rem_size()))
             .overlay_closable(false)
             .child(dialog.clone())
     });
@@ -199,7 +199,7 @@ impl Render for SaveRequestDialog {
                     .gap_1()
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child("Request name"),
                     )
@@ -217,7 +217,7 @@ impl Render for SaveRequestDialog {
                             .gap_1()
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child("Save to"),
                             )
@@ -227,7 +227,7 @@ impl Render for SaveRequestDialog {
                         v_flex()
                             .border_1()
                             .border_color(cx.theme().border)
-                            .rounded_md()
+                            .rounded(cx.theme().radius_tokens().md)
                             .child(
                                 div()
                                     .debug_selector(|| "save-location-filter".into())
@@ -239,7 +239,7 @@ impl Render for SaveRequestDialog {
                             .child(
                                 v_flex()
                                     .id("save-destinations")
-                                    .h(px(240.))
+                                    .h(rems(15.))
                                     .overflow_y_scroll()
                                     .when(visible.is_empty(), |list| {
                                         list.child(
@@ -306,7 +306,6 @@ impl Render for SaveRequestDialog {
                         Button::new("save-new-collection")
                             .debug_selector(|| "save-new-collection".into())
                             .ghost()
-                            .small()
                             .text_color(cx.theme().muted_foreground)
                             .child(div().underline().child("New collection"))
                             .accessibility_label("New collection")
@@ -340,7 +339,6 @@ impl Render for SaveRequestDialog {
                         Button::new("confirm-save-request")
                             .debug_selector(|| "confirm-save-request".into())
                             .primary()
-                            .small()
                             .label("Save")
                             .disabled(!valid_name || self.selected.is_none())
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
@@ -348,7 +346,6 @@ impl Render for SaveRequestDialog {
                     .child(
                         Button::new("cancel-save-request")
                             .debug_selector(|| "cancel-save-request".into())
-                            .small()
                             .label("Cancel")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),

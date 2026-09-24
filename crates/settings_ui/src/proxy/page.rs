@@ -276,14 +276,14 @@ impl ProxySettings {
             .gap_2()
             .flex_wrap()
             .child(
-                div().w(px(96.)).child(
+                div().w_24().child(
                     Select::new(&self.protocol)
                         .accessibility_label("Proxy protocol")
                         .w_full(),
                 ),
             )
             .child(
-                div().flex_1().min_w(px(104.)).child(
+                div().flex_1().min_w(rems(6.5)).child(
                     Input::new(&self.host)
                         .aria_label("Proxy host")
                         .on_paste(move |clipboard, window, cx| {
@@ -295,7 +295,7 @@ impl ProxySettings {
             )
             .child(
                 div()
-                    .w(px(80.))
+                    .w_20()
                     .child(Input::new(&self.port).aria_label("Proxy port").w_full()),
             );
 
@@ -340,7 +340,7 @@ impl ProxySettings {
                         .child(
                             v_flex()
                                 .flex_1()
-                                .min_w(px(180.))
+                                .min_w(rems(11.25))
                                 .gap_2()
                                 .child("Username")
                                 .child(Input::new(&self.username).aria_label("Proxy username").w_full()),
@@ -348,7 +348,7 @@ impl ProxySettings {
                         .child(
                             v_flex()
                                 .flex_1()
-                                .min_w(px(180.))
+                                .min_w(rems(11.25))
                                 .gap_2()
                                 .child("Password")
                                 .child(
@@ -404,7 +404,7 @@ fn row(
         .child(
             v_flex()
                 .flex_1()
-                .min_w(px(200.))
+                .min_w(rems(12.5))
                 .gap_1()
                 .child(div().font_weight(FontWeight::MEDIUM).child(title))
                 .child(
@@ -418,7 +418,7 @@ fn row(
 
 impl Render for ProxySettings {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let connection = div().w(px(190.)).flex_shrink_0().child(
+        let connection = div().w(rems(11.875)).flex_shrink_0().child(
             Select::new(&self.mode)
                 .accessibility_label("Proxy connection")
                 .w_full(),
@@ -426,14 +426,14 @@ impl Render for ProxySettings {
 
         v_flex()
             .w_full()
-            .max_w(px(880.))
+            .max_w(crate::geometry::PAGE_WIDTH)
             .gap_6()
             .child(
                 v_flex()
                     .gap_3()
                     .child(
                         div()
-                            .text_size(rems(1.625))
+                            .text_xl()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("Proxy"),
                     )

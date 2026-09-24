@@ -14,8 +14,10 @@ impl Render for TopPanel {
             .flex()
             .flex_none()
             .items_center()
+            // Match native title-bar chrome; it does not scale with content zoom.
             .h(px(34.))
             .pl_20()
-            .child("top panel")
+            .text_sm()
+            .child("Request Eagle")
     }
 }

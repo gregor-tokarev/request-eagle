@@ -155,7 +155,7 @@ fn request_row(
         .child(
             v_flex()
                 .flex_1()
-                .min_w(px(220.))
+                .min_w(rems(13.75))
                 .gap_1()
                 .child(div().font_weight(FontWeight::MEDIUM).child(title))
                 .when(!description.is_empty(), |this| {
@@ -167,7 +167,7 @@ fn request_row(
                     )
                 }),
         )
-        .child(div().w(px(160.)).flex_shrink_0().child(control))
+        .child(div().w_40().flex_shrink_0().child(control))
 }
 
 impl Render for RequestSettings {

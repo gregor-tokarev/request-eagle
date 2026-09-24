@@ -1,4 +1,5 @@
-use gpui_kit::{App, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, px};
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::{App, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, px, rems};
 
 pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
     let display = cx.primary_display();
@@ -14,6 +15,7 @@ pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
                     .into(),
             ),
             appears_transparent: true,
+            // Native window chrome uses platform pixels.
             traffic_light_position: Some(point(px(9.0), px(9.0))),
         }),
         window_bounds,
@@ -22,8 +24,10 @@ pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
         kind: WindowKind::Normal,
         display_id,
         window_min_size: Some(gpui_kit::Size {
-            width: px(360.0),
-            height: px(240.0),
+            // The platform API needs pixels; reserve room for both work panes
+            // using the interface scale selected when the window opens.
+            width: rems(40.).to_pixels(cx.theme().font_size),
+            height: rems(40.).to_pixels(cx.theme().font_size),
         }),
         ..Default::default()
     }
