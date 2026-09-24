@@ -21,6 +21,65 @@ fn response(body: &[u8], content_type: &str) -> ResponseContent {
     })
 }
 
+#[gpui_kit::test]
+fn search_shortcut_preserves_response_search(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(
+            collection::CollectionRegistry::new(),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        )
+    });
+    let view = cx.read(|cx| {
+        layout.read(cx).main_view.read(cx).tabs[0]
+            .page
+            .clone()
+            .downcast::<crate::layout::request_draft::RequestDraft>()
+            .ok()
+            .unwrap()
+            .read(cx)
+            .response_for_test()
+    });
+
+    // Neither the response's own focus nor a nested search input should
+    // activate the workspace's sidebar search binding.
+    for body in ["needle".to_owned(), "needle\n".repeat(200_000)] {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.finish(Ok(response(body.as_bytes(), "text/plain")), window, cx);
+                window.focus(&view.focus, cx);
+            });
+        });
+        cx.simulate_keystrokes("secondary-f");
+        cx.update(|window, cx| assert!(view.read(cx).focus.contains_focused(window, cx)));
+
+        let bounds = cx.debug_bounds("response-body").unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.simulate_keystrokes("secondary-f");
+        cx.simulate_input("needle");
+        cx.simulate_keystrokes("secondary-f");
+        cx.update(|window, cx| assert!(view.read(cx).focus.contains_focused(window, cx)));
+        cx.read(|cx| {
+            let view = view.read(cx);
+
+            if let Some(editor) = &view.editor {
+                assert!(editor.read(cx).search_session().open);
+                assert_eq!(editor.read(cx).search_session().query, "needle");
+            } else {
+                let search = view.body_search.as_ref().unwrap();
+                assert_eq!(search.input.read(cx).value(), "needle");
+                assert!(!search.matcher.is_empty());
+            }
+        });
+    }
+}
+
 #[test]
 fn response_formatting_preserves_the_entire_body() {
     let json = response(b"{\"a\":1}", "application/json");

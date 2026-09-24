@@ -4,6 +4,7 @@ actions!(
     workspace,
     [
         ToggleLeftSidebar,
+        FocusSidebarSearch,
         OpenSettings,
         OpenGeneralSettings,
         SendRequest,
@@ -171,6 +172,18 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default sidebar keybinding should be valid");
+
+    keybindings_service::register(
+        FocusSidebarSearch,
+        "Search collections",
+        "Focus the sidebar search when focus is outside the response.",
+        "Workspace",
+        Some("secondary-f"),
+        // Match input contexts too, while preserving response editor search.
+        Some("(Workspace || (Workspace > Input)) && !Response"),
+        cx,
+    )
+    .expect("default sidebar search keybinding should be valid");
 
     keybindings_service::register(
         OpenSettings,

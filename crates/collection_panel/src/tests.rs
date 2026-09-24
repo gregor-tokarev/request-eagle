@@ -312,6 +312,23 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
+
+    for query in ["no-such-request", "/posts/7"] {
+        cx.update(|window, cx| sidebar.update(cx, |sidebar, cx| sidebar.focus_search(window, cx)));
+        cx.simulate_input(query);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let sidebar = sidebar.read(cx);
+
+            assert!(sidebar.focus_handle(cx).is_focused(window));
+            assert!(sidebar.search.read(cx).value().is_empty());
+            assert!(sidebar.query.is_empty());
+            assert_eq!(sidebar.visible.len(), sidebar.tree.items.len());
+        });
+    }
 }
 
 #[gpui_kit::test]
