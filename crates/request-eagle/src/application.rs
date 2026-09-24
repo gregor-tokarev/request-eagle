@@ -1,4 +1,4 @@
-use gpui_kit::*;
+use gpui_kit::{component::Root, *};
 use std::sync::Arc;
 
 use crate::{actions, assets, menu};
@@ -65,16 +65,29 @@ fn open_workspace(cx: &mut App) {
     }
     .expect("Failed to load collections");
 
-    workspace::init(collections, updater, cx);
+    let window_options = crate::window_options::use_window_options(cx);
+    cx.open_window(window_options, move |window, cx| {
+        let workspace = workspace::init(collections, updater, window, cx);
+        let view = cx.new(|_| ApplicationView { workspace });
 
-    #[cfg(feature = "dev-profiler")]
-    for window in cx.windows() {
-        window
-            .update(cx, |_, window, _| {
-                window.set_debug_frame_overlay_mode(DebugFrameOverlayMode::Full);
-            })
-            .expect("Failed to enable the development frame monitor");
-    }
+        cx.new(|cx| Root::new(view, window, cx))
+    })
+    .expect("Failed to open the window");
 
     menu::init(cx);
+}
+
+struct ApplicationView {
+    workspace: AnyView,
+}
+
+impl Render for ApplicationView {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let view = div().relative().size_full().child(self.workspace.clone());
+
+        #[cfg(feature = "dev-profiler")]
+        let view = view.child(gpui_fps::fps_monitor(_window, _cx));
+
+        view
+    }
 }
