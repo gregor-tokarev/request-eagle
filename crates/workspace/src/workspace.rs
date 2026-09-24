@@ -379,16 +379,17 @@ impl Render for Layout {
     }
 }
 
-pub fn init(collections: CollectionRegistry, updater: Entity<Updater>, cx: &mut App) {
+pub fn init(
+    collections: CollectionRegistry,
+    updater: Entity<Updater>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyView {
     crate::actions::init(cx);
 
-    let window_options = crate::window_options::use_window_options(cx);
-    cx.open_window(window_options, move |window, cx| {
-        let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
-        on_toggle_sidebar(&layout, cx);
-        on_open_settings(&layout, window.window_handle(), cx);
+    let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
+    on_toggle_sidebar(&layout, cx);
+    on_open_settings(&layout, window.window_handle(), cx);
 
-        cx.new(|cx| Root::new(layout.clone(), window, cx))
-    })
-    .expect("Failed to open the window");
+    layout.into()
 }

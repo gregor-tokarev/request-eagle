@@ -2,7 +2,6 @@
 
 mod actions;
 mod layout;
-mod window_options;
 mod workspace;
 
 #[cfg(test)]
