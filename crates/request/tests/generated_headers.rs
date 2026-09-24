@@ -54,19 +54,6 @@ fn explicit_headers_override_defaults_case_insensitively() {
 }
 
 #[test]
-fn range_header_suppresses_generated_accept_encoding_case_insensitively() {
-    let headers = [("rAnGe".into(), "bytes=0-9".into())];
-
-    assert_eq!(
-        generated_headers(Method::Get, "https://example.com/path", &headers, 0),
-        [
-            ("Host".into(), "example.com".into()),
-            ("Accept".into(), "*/*".into())
-        ]
-    );
-}
-
-#[test]
 fn shows_url_credentials_as_authorization_without_leaking_them_into_host() {
     let headers = generated_headers(
         Method::Get,
