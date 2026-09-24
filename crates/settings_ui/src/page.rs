@@ -97,9 +97,8 @@ impl Settings {
         .map(|page| {
             Button::new(page.title())
                 .ghost()
-                .h(px(32.))
                 .px_2()
-                .rounded_md()
+                .rounded(cx.theme().radius_tokens().md)
                 .text_color(cx.theme().muted_foreground)
                 .selected(self.page == page)
                 .when(self.page == page, |this| {
@@ -111,7 +110,7 @@ impl Settings {
                     div()
                         .min_w_0()
                         .text_ellipsis()
-                        .text_size(rems(0.8125))
+                        .text_sm()
                         .line_height(relative(1.))
                         .child(page.title()),
                 )
@@ -128,7 +127,7 @@ impl Settings {
             .w_full()
             .h_full()
             .bg(cx.theme().background)
-            .pt(px(48.))
+            .pt_8()
             .px_2()
             .pb_2()
             .children(
@@ -140,10 +139,9 @@ impl Settings {
             .child(
                 Button::new("settings-back")
                     .ghost()
-                    .h(px(32.))
                     .w_full()
                     .px_2()
-                    .rounded_md()
+                    .rounded(cx.theme().radius_tokens().md)
                     .text_color(cx.theme().muted_foreground)
                     .icon(Icon::new(IconName::ArrowLeft).size_4())
                     .accessibility_label("Back to workspace")
@@ -151,7 +149,7 @@ impl Settings {
                         div()
                             .min_w_0()
                             .text_ellipsis()
-                            .text_size(rems(0.8125))
+                            .text_sm()
                             .line_height(relative(1.))
                             .child("Back to workspace"),
                     )
@@ -163,7 +161,7 @@ impl Settings {
 
 impl Render for Settings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let narrow = window.viewport_size().width < px(680.);
+        let narrow = crate::geometry::is_narrow(window);
 
         let content = v_flex()
             .flex_1()
@@ -203,8 +201,8 @@ impl Render for Settings {
                     .flex_1()
                     .min_h_0()
                     .justify_center()
-                    .px(if narrow { px(20.) } else { px(48.) })
-                    .py(if narrow { px(24.) } else { px(48.) })
+                    .px(crate::geometry::page_inset(window))
+                    .py(crate::geometry::page_inset(window))
                     .child(self.keybindings.clone())
                     .into_any_element()
             } else {
@@ -216,8 +214,8 @@ impl Render for Settings {
                     .child(
                         v_flex()
                             .items_center()
-                            .px(if narrow { px(20.) } else { px(48.) })
-                            .py(if narrow { px(24.) } else { px(48.) })
+                            .px(crate::geometry::page_inset(window))
+                            .py(crate::geometry::page_inset(window))
                             .child(if self.page == SettingsPage::Proxy {
                                 self.proxy.clone().into_any_element()
                             } else {
@@ -245,16 +243,24 @@ impl Render for Settings {
                 h_resizable("settings-panels")
                     .child(
                         resizable_panel()
-                            .size(px(232.))
+                            .size(rems(15.).to_pixels(window.rem_size()))
                             .size_range(
-                                px(220.)..px(400.).min(window.viewport_size().width - px(448.)),
+                                crate::geometry::SIDEBAR_MIN.to_pixels(window.rem_size())
+                                    ..rems(25.).to_pixels(window.rem_size()).min(
+                                        window.viewport_size().width
+                                            - crate::geometry::CONTENT_MIN
+                                                .to_pixels(window.rem_size()),
+                                    ),
                             )
                             .flex_none()
                             .child(self.render_sidebar(cx)),
                     )
                     .child(
                         resizable_panel()
-                            .size_range(px(448.)..Pixels::MAX)
+                            .size_range(
+                                crate::geometry::CONTENT_MIN.to_pixels(window.rem_size())
+                                    ..Pixels::MAX,
+                            )
                             .child(content),
                     )
                     .into_any_element()

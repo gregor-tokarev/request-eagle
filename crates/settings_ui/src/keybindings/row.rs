@@ -25,7 +25,7 @@ pub(super) fn row_button(
         .accessibility_label(label)
         .size_6()
         .flex_none()
-        .rounded(theme.radius)
+        .rounded(theme.radius_tokens().sm)
         .cursor_default()
         .text_color(if disabled {
             theme.muted_foreground.opacity(0.5)
@@ -61,7 +61,7 @@ impl Render for CommandRow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.page
             .update(cx, |page, cx| {
-                page.render_command(&self.command, window.viewport_size().width < px(680.), cx)
+                page.render_command(&self.command, crate::geometry::is_narrow(window), cx)
                     .into_any_element()
             })
             .unwrap_or_else(|_| div().into_any_element())

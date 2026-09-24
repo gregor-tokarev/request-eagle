@@ -131,7 +131,17 @@ fn catalog_virtualizes_rows_and_reflows_on_resize(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("theme-Solarized Dark").is_some());
 
-    for (width, expected_columns) in [(360., 1), (1024., 4)] {
+    for (width, font_size, expected_columns) in [
+        (360., 16., 1),
+        (1024., 16., 4),
+        (1024., 24., 3),
+        (1024., 12., 4),
+    ] {
+        cx.update(|window, cx| {
+            gpui_kit::component::Theme::global_mut(cx).font_size = gpui_kit::px(font_size);
+            window.set_rem_size(gpui_kit::px(font_size));
+            window.refresh();
+        });
         cx.simulate_resize(gpui_kit::size(gpui_kit::px(width), gpui_kit::px(768.)));
         cx.run_until_parked();
         cx.read(|cx| assert_eq!(page.read(cx).columns, expected_columns));

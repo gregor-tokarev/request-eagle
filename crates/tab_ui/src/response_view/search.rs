@@ -130,7 +130,7 @@ impl ResponseView {
                         this.update_body_search(window, cx);
                     })),
             )
-            .child(div().text_size(px(11.)).child(search.matcher.label()))
+            .child(div().text_xs().child(search.matcher.label()))
             .child(
                 Button::new("response-search-previous")
                     .ghost()

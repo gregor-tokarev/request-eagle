@@ -270,8 +270,11 @@ impl Render for Layout {
             .sizes()
             .first()
             .copied()
-            .unwrap_or(px(300.))
-            .clamp(px(220.), px(480.));
+            .unwrap_or(rems(19.).to_pixels(window.rem_size()))
+            .clamp(
+                rems(14.).to_pixels(window.rem_size()),
+                rems(30.).to_pixels(window.rem_size()),
+            );
 
         let workspace = v_flex()
             .size_full()
@@ -332,6 +335,7 @@ impl Render for Layout {
             .on_action(cx.listener(|this, _: &SelectLastTab, window, cx| {
                 this.update_tabs(window, cx, MainView::select_last_tab);
             }))
+            // Keep the cached frame aligned with the native title-bar inset.
             .child(
                 self.top_panel
                     .clone()
@@ -346,8 +350,11 @@ impl Render for Layout {
                                 .visible(sidebar_progress > 0.0)
                                 .flex_none()
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
-                                .size(px(300.))
-                                .size_range(px(220.)..px(480.))
+                                .size(rems(19.).to_pixels(window.rem_size()))
+                                .size_range(
+                                    rems(14.).to_pixels(window.rem_size())
+                                        ..rems(30.).to_pixels(window.rem_size()),
+                                )
                                 .child(
                                     self.sidebar
                                         .clone()

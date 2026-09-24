@@ -14,7 +14,7 @@ mod request_shortcut_tests;
 #[cfg(test)]
 mod request_tab_tests;
 #[cfg(test)]
-mod response_search_tests;
+mod response_tests;
 
 #[cfg(test)]
 mod response_performance;

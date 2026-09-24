@@ -52,14 +52,14 @@ impl CollectionPanel {
                 .id(("collection-row", index))
                 .debug_selector(move || format!("collection-row-{index}"))
                 .track_focus(&self.delete_focus)
-                .h(px(30.))
+                .h_8()
                 .w_full()
                 .px_2()
                 .child(
                     h_flex()
                         .debug_selector(|| "sidebar-delete-prompt".into())
                         .size_full()
-                        .rounded_md()
+                        .rounded(cx.theme().radius_tokens().md)
                         .px_2()
                         .gap_1()
                         .bg(theme.sidebar_accent)
@@ -67,13 +67,13 @@ impl CollectionPanel {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .text_size(px(12.))
+                                .text_xs()
                                 .child(format!("{delete_label}?")),
                         )
                         .child(
                             Button::new("confirm-sidebar-delete")
                                 .debug_selector(|| "confirm-sidebar-delete".into())
-                                .label("Yes")
+                                .label("Delete")
                                 .tooltip("Confirm deletion (Enter)")
                                 .xsmall()
                                 .danger()
@@ -84,7 +84,7 @@ impl CollectionPanel {
                         .child(
                             Button::new("cancel-sidebar-delete")
                                 .debug_selector(|| "cancel-sidebar-delete".into())
-                                .label("No")
+                                .label("Cancel")
                                 .tooltip("Cancel deletion (Escape)")
                                 .xsmall()
                                 .ghost()
@@ -100,17 +100,17 @@ impl CollectionPanel {
             .relative()
             .id(("collection-row", index))
             .debug_selector(move || format!("collection-row-{index}"))
-            .h(px(30.))
+            .h_8()
             .w_full()
             .px_2()
             .child(
                 h_flex()
                     .size_full()
-                    .rounded_md()
-                    .pl(px(6. + item.depth as f32 * 14.))
+                    .rounded(cx.theme().radius_tokens().md)
+                    .pl(rems(0.5 + item.depth as f32))
                     .pr_2()
-                    .gap_1p5()
-                    .text_size(px(13.))
+                    .gap_2()
+                    .text_sm()
                     .when(selected, |this| {
                         this.bg(theme.tokens.sidebar_accent.background)
                             .text_color(theme.sidebar_accent_foreground)
@@ -123,7 +123,8 @@ impl CollectionPanel {
                     })
                     .child(if branch {
                         h_flex()
-                            .gap_1p5()
+                            .w_12()
+                            .gap_2()
                             .flex_none()
                             .text_color(theme.muted_foreground)
                             .child(
@@ -132,9 +133,9 @@ impl CollectionPanel {
                                 } else {
                                     IconName::ChevronRight
                                 })
-                                .size(px(12.)),
+                                .size_3(),
                             )
-                            .child(Icon::new(IconName::Folder).size(px(14.)))
+                            .child(Icon::new(IconName::Folder).size(rems(0.875)))
                             .into_any_element()
                     } else {
                         let ItemKind::Request(method) = item.kind else {
@@ -149,9 +150,10 @@ impl CollectionPanel {
                         };
 
                         div()
+                            .w_12()
                             .flex_none()
-                            .text_size(px(9.))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(color)
                             .child(method)
                             .into_any_element()
@@ -182,7 +184,7 @@ impl CollectionPanel {
                         this.child(
                             div()
                                 .flex_none()
-                                .text_size(px(10.))
+                                .text_xs()
                                 .text_color(theme.muted_foreground)
                                 .child(item.request_count.to_string()),
                         )
@@ -199,7 +201,7 @@ impl CollectionPanel {
                             .absolute()
                             .left_2()
                             .right_2()
-                            .h(px(2.))
+                            .h(rems(0.125))
                             .bg(theme.info)
                             .when(drop_position == Some(MovePlacement::Before), |this| {
                                 this.top_0()

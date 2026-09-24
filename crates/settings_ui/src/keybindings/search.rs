@@ -66,8 +66,8 @@ impl KeybindingsPage {
                     .min_w_0()
                     .input_h(Size::Medium)
                     .input_px(Size::Medium)
-                    .gap(px(6.))
-                    .rounded(cx.theme().radius)
+                    .gap_2()
+                    .rounded(cx.theme().radius_tokens().md)
                     .border_1()
                     .border_color(if focused {
                         cx.theme().ring

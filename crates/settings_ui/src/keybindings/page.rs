@@ -105,13 +105,13 @@ impl KeybindingsPage {
             None => command.binding_error.as_ref(),
         };
 
-        let shortcut_width = if compact { px(176.) } else { px(216.) };
+        let shortcut_width = if compact { rems(11.) } else { rems(13.5) };
 
         div()
             .debug_selector(move || format!("keybinding-row-{id}"))
             .relative()
             .w_full()
-            .h(px(56.))
+            .h(rems(3.5))
             .flex_none()
             .border_b_1()
             .border_color(cx.theme().border)
@@ -119,7 +119,7 @@ impl KeybindingsPage {
                 v_flex()
                     .absolute()
                     .left_0()
-                    .right(shortcut_width + px(104.))
+                    .right(shortcut_width + rems(6.5))
                     .top_0()
                     .bottom_0()
                     .justify_center()
@@ -152,7 +152,7 @@ impl KeybindingsPage {
                 div()
                     .debug_selector(move || format!("shortcut-slot-{id}"))
                     .absolute()
-                    .right(px(92.))
+                    .right(rems(5.75))
                     .top_0()
                     .bottom_0()
                     .w(shortcut_width)
@@ -189,7 +189,7 @@ impl KeybindingsPage {
                     .right_0()
                     .top_0()
                     .bottom_0()
-                    .w(px(80.))
+                    .w_20()
                     .flex_none()
                     .justify_end()
                     .child(match recording {
@@ -270,14 +270,14 @@ impl KeybindingsPage {
         // GPUI invalidates cached views when their bounds/text style change or
         // the window refreshes. Theme application already refreshes all windows.
         row.clone()
-            .cached(StyleRefinement::default().w_full().h(px(56.)).flex_none())
+            .cached(StyleRefinement::default().w_full().h(rems(3.5)).flex_none())
             .into_any_element()
     }
 }
 
 impl Render for KeybindingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = window.viewport_size().width < px(680.);
+        let compact = crate::geometry::is_narrow(window);
 
         let mut commands = keybindings::commands(cx);
         commands.sort_by_key(|command| command.label);
@@ -299,7 +299,7 @@ impl Render for KeybindingsPage {
             .w_full()
             .h_full()
             .min_h_0()
-            .max_w(px(880.))
+            .max_w(crate::geometry::PAGE_WIDTH)
             .gap_6()
             .child(
                 h_flex()
@@ -312,7 +312,7 @@ impl Render for KeybindingsPage {
                             .gap_2()
                             .child(
                                 div()
-                                    .text_size(rems(1.625))
+                                    .text_xl()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Keybindings"),
                             )

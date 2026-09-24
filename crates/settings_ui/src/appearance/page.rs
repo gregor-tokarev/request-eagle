@@ -128,11 +128,10 @@ impl AppearanceSettings {
                 Button::new(label)
                     .debug_selector(move || format!("appearance-{label}"))
                     .flex_1()
-                    .h_12()
                     .icon(icon)
                     .label(label)
-                    .when(preferences.mode == mode, |button| button.primary())
-                    .when(preferences.mode != mode, |button| button.outline())
+                    .outline()
+                    .selected(preferences.mode == mode)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let mut preferences = cx
                             .try_global::<preferences::Preferences>()
@@ -181,14 +180,14 @@ impl AppearanceSettings {
                     move || format!("theme-{name}")
                 })
                 .border_1()
-                .cursor_pointer()
+                .cursor_default()
                 .bg(cx.theme().background)
                 .hover(|style| style.bg(cx.theme().muted))
                 .focus_visible(|style| style.border_color(cx.theme().ring))
-                .w(px(190.))
+                .w(crate::geometry::THEME_CARD_WIDTH)
                 .h_auto()
                 .p_2()
-                .rounded_lg()
+                .rounded(cx.theme().radius_tokens().lg)
                 .border_color(if active {
                     cx.theme().link
                 } else {
@@ -279,11 +278,11 @@ impl AppearanceSettings {
 
         v_flex()
             .w_full()
-            .max_w(px(880.))
+            .max_w(crate::geometry::PAGE_WIDTH)
             .gap_6()
             .child(
                 div()
-                    .text_size(rems(1.625))
+                    .text_xl()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("Appearance"),
             )
@@ -317,10 +316,10 @@ impl AppearanceSettings {
                                 ),
                             )
                             .child(
-                                div().w(px(260.)).child(
+                                div().w(rems(16.25)).child(
                                     Select::new(&self.font)
                                         .accessibility_label("Editor font")
-                                        .menu_width(px(300.)),
+                                        .menu_width(rems(19.).to_pixels(cx.theme().font_size)),
                                 ),
                             ),
                     )
@@ -328,13 +327,13 @@ impl AppearanceSettings {
                         v_flex()
                             .p_4()
                             .gap_1()
-                            .rounded_lg()
+                            .rounded(cx.theme().radius_tokens().lg)
                             .border_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().muted)
                             .overflow_hidden()
                             .font_family(cx.theme().mono_font_family.clone())
-                            .text_size(cx.theme().mono_font_size)
+                            .text_sm()
                             .child(
                                 div()
                                     .text_color(cx.theme().success)
@@ -372,7 +371,7 @@ impl AppearanceSettings {
                                     )
                                     .child(
                                         div()
-                                            .min_w(px(48.))
+                                            .min_w_12()
                                             .text_center()
                                             .child(format!("{font_size:.0} px")),
                                     )
@@ -419,7 +418,10 @@ impl AppearanceSettings {
 
     fn update_rows(&mut self, width: Pixels, font_size: Pixels) {
         let gap = font_size * 0.75;
-        let columns = ((width + gap) / (px(190.) + gap)).floor().max(1.) as usize;
+        let columns = ((width + gap)
+            / (crate::geometry::THEME_CARD_WIDTH.to_pixels(font_size) + gap))
+            .floor()
+            .max(1.) as usize;
 
         if self.columns == columns && self.layout_font_size == font_size {
             return;
@@ -485,15 +487,20 @@ impl AppearanceSettings {
         v_flex()
             .w_full()
             .items_center()
-            .child(div().w_full().max_w(px(880.)).pb_3().child(content))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(crate::geometry::PAGE_WIDTH)
+                    .pb_3()
+                    .child(content),
+            )
             .into_any_element()
     }
 }
 
 impl Render for AppearanceSettings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let narrow = window.viewport_size().width < px(680.);
-        let padding = if narrow { px(20.) } else { px(48.) };
+        let padding = crate::geometry::page_inset(window).to_pixels(window.rem_size());
         let font_size = cx.theme().font_size;
         let weak = cx.entity().downgrade();
         let row_view = cx.entity().downgrade();
@@ -503,7 +510,11 @@ impl Render for AppearanceSettings {
             .relative()
             .on_prepaint(move |bounds, _, cx| {
                 let _ = weak.update(cx, |this, _| {
-                    this.update_rows((bounds.size.width - padding * 2.).min(px(880.)), font_size);
+                    this.update_rows(
+                        (bounds.size.width - padding * 2.)
+                            .min(crate::geometry::PAGE_WIDTH.to_pixels(font_size)),
+                        font_size,
+                    );
                 });
             })
             .child(
@@ -514,7 +525,7 @@ impl Render for AppearanceSettings {
                 })
                 .size_full()
                 .px(padding)
-                .py(if narrow { px(24.) } else { px(48.) }),
+                .py(crate::geometry::page_inset(window)),
             )
             .child(scroll::Scrollbar::vertical(&self.list))
     }

@@ -594,3 +594,68 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
         )
     });
 }
+
+#[gpui_kit::test]
+fn response_zoom_reflows_visible_rows_and_preserves_selection(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let source =
+        "A long response line with enough words to wrap at every tested size. ".repeat(400);
+    let selected = source.len() / 2..source.len() / 2 + 20;
+    let mut body = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view =
+            cx.new(|cx| super::virtual_body::VirtualBody::new(source.clone().into(), true, cx));
+        body = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let body = body.unwrap();
+    cx.simulate_resize(gpui_kit::size(px(640.), px(480.)));
+
+    for theme in ["Default Light", "Default Dark"] {
+        let mut previous_row_count = usize::MAX;
+
+        for font_size in [12., 16., 24.] {
+            cx.update(|window, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                gpui_kit::component::Theme::global_mut(cx).font_size = px(font_size);
+                body.update(cx, |body, cx| body.select_match(Some(selected.clone()), cx));
+                let focus = body.read(cx).focus.clone();
+                window.focus(&focus, cx);
+                window.refresh();
+            });
+            cx.run_until_parked();
+
+            let viewport = cx.debug_bounds("response-virtual-text").unwrap();
+            cx.read(|cx| {
+                let body = body.read(cx);
+                assert_eq!(body.selection, selected);
+                assert!(
+                    body.painted
+                        .iter()
+                        .any(|row| row.range.contains(&selected.start))
+                );
+                assert!(
+                    body.painted
+                        .iter()
+                        .all(|row| row.line.width <= viewport.size.width)
+                );
+                assert!(
+                    body.painted.len() < previous_row_count,
+                    "larger rows must reduce the visible row count"
+                );
+                previous_row_count = body.painted.len();
+            });
+
+            cx.simulate_keystrokes("secondary-c");
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(&source[selected.clone()])
+            );
+        }
+    }
+}

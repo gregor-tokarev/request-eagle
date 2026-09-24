@@ -3,6 +3,7 @@
 mod actions;
 mod appearance;
 mod general;
+mod geometry;
 mod keybindings;
 mod page;
 mod proxy;

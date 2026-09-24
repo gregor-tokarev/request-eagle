@@ -116,7 +116,7 @@ impl ResponseView {
         h_flex()
             .flex_none()
             .min_w_0()
-            .min_h(px(44.))
+            .min_h_11()
             .gap_3()
             .flex_wrap()
             .child(
@@ -136,17 +136,17 @@ impl ResponseView {
                             Tab::new(label)
                                 .debug_selector(move || format!("response-section-{label}"))
                                 .selected(self.section == section)
-                                .h(px(30.))
+                                .h_8()
                                 .px_2()
                                 .gap_2()
-                                .rounded(px(4.))
+                                .rounded(cx.theme().radius_tokens().md)
                                 .text_color(cx.theme().muted_foreground)
                                 .when(self.section == section, |tab| {
                                     tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
                                 })
                                 .child(label)
                                 .when(count > 0, |tab| {
-                                    tab.child(div().text_size(px(11.)).child(count.to_string()))
+                                    tab.child(div().text_xs().child(count.to_string()))
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.section = section;
@@ -183,7 +183,7 @@ impl Render for ResponseView {
                     cx.theme().muted_foreground
                 })
                 .when(self.loading, |view| {
-                    view.child(Icon::new(IconName::Loader).size(px(20.)).with_animation(
+                    view.child(Icon::new(IconName::Loader).size_5().with_animation(
                         "response-loading",
                         Animation::new(std::time::Duration::from_secs(1)).repeat(),
                         |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),

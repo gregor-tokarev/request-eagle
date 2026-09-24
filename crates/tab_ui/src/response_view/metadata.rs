@@ -50,7 +50,7 @@ impl ResponseView {
         h_flex()
             .debug_selector(|| "response-metadata".into())
             .gap_2()
-            .text_size(px(12.))
+            .text_xs()
             .text_color(cx.theme().muted_foreground)
             .child(
                 HoverCard::new("response-status-details")
@@ -60,17 +60,17 @@ impl ResponseView {
                     }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
-                    .p(px(8.))
+                    .p_2()
                     .trigger(div()
                         .debug_selector(|| "response-status".into())
-                        .px_2().py_1().rounded(px(5.))
+                        .px_2().py_1().rounded(cx.theme().radius_tokens().md)
                         .bg(color.opacity(0.15)).text_color(color)
                         .font_weight(FontWeight::SEMIBOLD).cursor_text()
                         .child(SelectableText::new("response-status-text", status.to_string())))
                     .content(move |_, _, cx| {
                         panel("response-status-overlay", focus.clone(), owner, cx)
-                            .w(px(238.))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(12.))
+                            .w_64()
+                            .child(div().font_weight(FontWeight::SEMIBOLD).text_xs()
                                 .child(SelectableText::new("status-title", status.to_string())))
                             .child(SelectableText::new("status-description", status_description(status)).document_order(1))
                             .text_selection_scope(TextSelectionScopeId::default())
@@ -85,12 +85,12 @@ impl ResponseView {
                     }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
-                    .p(px(8.))
+                    .p_2()
                     .trigger(div().debug_selector(|| "response-time".into()).cursor_text()
                         .child(SelectableText::new("response-time-text", duration_label(elapsed)).document_order(1)))
                     .content(move |_, _, cx| {
                         panel("response-time-overlay", time_focus.clone(), owner, cx)
-                            .w(px(406.))
+                            .w(rems(28.))
                             .child(timing_details(metrics, processing, elapsed, cx))
                             .text_selection_scope(TextSelectionScopeId::default())
                     }),
@@ -104,12 +104,12 @@ impl ResponseView {
                     }))
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
-                    .p(px(8.))
+                    .p_2()
                     .trigger(div().debug_selector(|| "response-size".into()).cursor_text()
                         .child(SelectableText::new("response-size-text", size_label(downloaded_body_bytes + metrics.response_header_bytes)).document_order(2)))
                     .content(move |_, _, cx| {
                         panel("response-size-overlay", size_focus.clone(), owner, cx)
-                            .w(px(259.))
+                            .w_72()
                             .child(detail_row("response-total", 0, "Response size", bytes_label(downloaded_body_bytes + metrics.response_header_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("response-headers", 1, "Headers (estimated)", bytes_label(metrics.response_header_bytes)))
                             .child(detail_row("response-body", 2, "Downloaded body", bytes_label(downloaded_body_bytes)))
@@ -118,7 +118,7 @@ impl ResponseView {
                             .child(detail_row("request-total", 4, "Request size (known)", bytes_label(metrics.request_header_bytes + metrics.request_body_bytes)).font_weight(FontWeight::SEMIBOLD))
                             .child(detail_row("request-headers", 5, "Prepared headers", bytes_label(metrics.request_header_bytes)))
                             .child(detail_row("request-body", 6, "Body", bytes_label(metrics.request_body_bytes)))
-                            .child(div().pt(px(4.)).text_size(px(10.)).text_color(cx.theme().muted_foreground)
+                            .child(div().pt_1().text_xs().text_color(cx.theme().muted_foreground)
                                 .child(SelectableText::new("size-note", "Header sizes estimate prepared name: value text, excluding transport framing, HTTP/2 pseudo-headers and header compression.").document_order(14)))
                             .text_selection_scope(TextSelectionScopeId::default())
                     }),
@@ -131,9 +131,8 @@ impl ResponseView {
 fn panel(id: &'static str, focus: FocusHandle, owner: EntityId, cx: &App) -> Div {
     v_flex()
         .debug_selector(move || id.to_owned())
-        .gap(px(6.))
-        .p(px(8.))
-        .text_size(px(11.))
+        .gap_2()
+        .text_xs()
         .text_color(cx.theme().foreground)
         .capture_any_mouse_down(move |event: &MouseDownEvent, window, cx| {
             if event.button == MouseButton::Left {
@@ -151,7 +150,7 @@ fn panel(id: &'static str, focus: FocusHandle, owner: EntityId, cx: &App) -> Div
 fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) -> Div {
     h_flex()
         .debug_selector(move || format!("detail-{id}"))
-        .gap(px(8.))
+        .gap_2()
         .child(
             div()
                 .flex_1()

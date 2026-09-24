@@ -344,18 +344,18 @@ impl Render for CollectionPanel {
             .child(
                 h_flex()
                     .flex_none()
-                    .h(px(30.))
+                    .h_8()
                     .px_4()
                     .gap_2()
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("COLLECTIONS"),
                     )
                     .child(
                         div()
-                            .text_size(px(10.))
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(self.tree.roots.len().to_string()),
                     )
@@ -377,7 +377,7 @@ impl Render for CollectionPanel {
                     div()
                         .px_3()
                         .py_2()
-                        .text_size(px(12.))
+                        .text_xs()
                         .text_color(cx.theme().danger)
                         .child(error),
                 )
@@ -396,7 +396,7 @@ impl Render for CollectionPanel {
                         v_flex()
                             .p_4()
                             .gap_1()
-                            .text_size(px(12.))
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if self.tree.items.is_empty() {
                                 "No collections yet"

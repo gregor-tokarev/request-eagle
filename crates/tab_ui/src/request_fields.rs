@@ -143,9 +143,9 @@ impl Render for RequestFields {
             .border_color(cx.theme().border)
             .child(
                 h_flex()
-                    .h(px(30.))
+                    .h_8()
                     .text_color(cx.theme().muted_foreground)
-                    .child(div().w(px(36.)).flex_none())
+                    .child(div().w_9().flex_none())
                     .children(["Key", "Value", "Description"].map(|label| {
                         div()
                             .flex_1()
@@ -166,7 +166,7 @@ impl Render for RequestFields {
                     .map(|(index, (name, value))| {
                         h_flex()
                             .debug_selector(move || format!("headers-generated-row-{index}"))
-                            .min_h(px(32.))
+                            .min_h_8()
                             .border_t_1()
                             .border_color(cx.theme().border)
                             .capture_any_mouse_down(cx.listener(
@@ -182,7 +182,7 @@ impl Render for RequestFields {
                                     cx.notify();
                                 }
                             }))
-                            .child(div().w(px(36.)).flex_none())
+                            .child(div().w_9().flex_none())
                             .children(
                                 [
                                     ("key", name.clone()),
@@ -200,7 +200,7 @@ impl Render for RequestFields {
                                             .flex_1()
                                             .min_w_0()
                                             .px_2()
-                                            .py(px(7.))
+                                            .py_1()
                                             .when(column != "description", |cell| cell.border_r_1())
                                             .border_color(cx.theme().border)
                                             .cursor_text()
@@ -225,10 +225,10 @@ impl Render for RequestFields {
 
                 h_flex()
                     .group("request-field-row")
-                    .h(px(32.))
+                    .h_8()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .child(div().w(px(36.)).flex_none().flex().justify_center().when(
+                    .child(div().w_9().flex_none().flex().justify_center().when(
                         populated,
                         |this| {
                             this.child(
@@ -262,7 +262,7 @@ impl Render for RequestFields {
                                         .flex_1()
                                         .min_w_0()
                                         .when(column == "description" && populated, |input| {
-                                            input.pr(px(28.))
+                                            input.pr_7()
                                         })
                                         .child(
                                             Input::new(input)
@@ -273,28 +273,17 @@ impl Render for RequestFields {
                                 )
                                 .when(column == "description" && populated, |cell| {
                                     cell.child(
-                                        h_flex()
-                                            .absolute()
-                                            .right(px(3.))
-                                            .top_0()
-                                            .h_full()
-                                            .invisible()
-                                            .group_hover("request-field-row", |button| {
-                                                button.visible()
-                                            })
-                                            .child(
-                                                Button::new(("remove-row", index))
-                                                    .ghost()
-                                                    .xsmall()
-                                                    .icon(IconName::Close)
-                                                    .accessibility_label("Remove row")
-                                                    .on_click(cx.listener(
-                                                        move |this, _, _, cx| {
-                                                            this.rows.remove(index);
-                                                            this.emit_change(cx);
-                                                        },
-                                                    )),
-                                            ),
+                                        h_flex().absolute().right_1().top_0().h_full().child(
+                                            Button::new(("remove-row", index))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::Close)
+                                                .accessibility_label("Remove row")
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.rows.remove(index);
+                                                    this.emit_change(cx);
+                                                })),
+                                        ),
                                     )
                                 })
                         }),

@@ -476,7 +476,13 @@ fn thousands_of_tabs_keep_selection_visible_and_offscreen_tabs_unrendered(cx: &m
         assert!(unseen.read(cx).url_input().is_none());
     });
 
-    for (width, height) in [(1024., 768.), (3440., 1410.), (1440., 900.)] {
+    for (width, height, font_size) in [(1024., 768., 12.), (3440., 1410., 16.), (1440., 900., 24.)]
+    {
+        cx.update(|window, cx| {
+            gpui_kit::component::Theme::global_mut(cx).font_size = px(font_size);
+            window.set_rem_size(px(font_size));
+            window.refresh();
+        });
         cx.simulate_resize(size(px(width), px(height)));
 
         for (shortcut, selected, visible, hidden) in [
