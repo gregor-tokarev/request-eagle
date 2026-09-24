@@ -276,6 +276,15 @@ impl Render for Layout {
         let workspace = v_flex()
             .size_full()
             .key_context("Workspace")
+            .on_action(cx.listener(|this, _: &FocusSidebarSearch, window, cx| {
+                this.sidebar_visible.update(cx, |visible, cx| {
+                    *visible = true;
+                    cx.notify();
+                });
+
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.main_view
                     .update(cx, |view, cx| view.send_request(window, cx));

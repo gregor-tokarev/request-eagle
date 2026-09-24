@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use gpui_kit::{
-    AppContext, Context, Entity, InputEvent as _, InteractiveElement, IntoElement, Modifiers,
-    ParentElement, Render, ScrollDelta, ScrollWheelEvent, Styled, TestAppContext, TouchPhase,
-    VisualTestContext, Window, div, point, px, size,
+    AppContext, Context, Entity, Focusable, InputEvent as _, InteractiveElement, IntoElement,
+    Modifiers, ParentElement, Render, ScrollDelta, ScrollWheelEvent, Styled, TestAppContext,
+    TouchPhase, VisualTestContext, Window, div, point, px, size,
 };
 
 use super::main_view::MainView;
@@ -25,6 +25,82 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext
             cx,
         )
     })
+}
+
+#[gpui_kit::test]
+fn search_shortcut_focuses_sidebar_from_tree_and_request_inputs(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let draft = cx.read(|cx| {
+        layout.read(cx).main_view.read(cx).tabs[0]
+            .page
+            .clone()
+            .downcast::<RequestDraft>()
+            .ok()
+            .unwrap()
+    });
+    cx.update(|window, cx| {
+        cx.set_reduce_motion(true);
+        draft.update(cx, |draft, cx| {
+            draft.set_method(collection::Method::Post, cx);
+            draft.prepare(window, cx);
+        });
+    });
+
+    let body_tab = cx.debug_bounds("request-section-Body").unwrap();
+    cx.simulate_click(body_tab.center(), Modifiers::default());
+
+    let search = cx.debug_bounds("collections-search").unwrap();
+    cx.simulate_click(search.center(), Modifiers::default());
+    let search_focus = cx.update(|window, cx| window.focused(cx).unwrap());
+    cx.simulate_input("old query");
+
+    cx.update(|window, cx| {
+        window.focus(&layout.read(cx).sidebar.focus_handle(cx), cx);
+    });
+    cx.simulate_keystrokes("secondary-f");
+    cx.update(|window, _| assert!(search_focus.is_focused(window)));
+
+    for selector in ["request-url", "request-body", "collections-search"] {
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.simulate_keystrokes("secondary-f");
+        cx.update(|window, _| assert!(search_focus.is_focused(window), "{selector}"));
+    }
+
+    // Repeated search selects the existing query for replacement.
+    cx.simulate_input("new query");
+    cx.simulate_keystrokes("secondary-a secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().as_deref(),
+        Some("new query")
+    );
+
+    cx.update(|window, cx| {
+        window.focus(&draft.read(cx).url.as_ref().unwrap().focus_handle(cx), cx);
+        layout.update(cx, |layout, cx| layout.toggle_sidebar(cx));
+    });
+    cx.read(|cx| assert!(!*layout.read(cx).sidebar_visible.read(cx)));
+
+    cx.simulate_keystrokes("secondary-f");
+    cx.update(|window, cx| {
+        assert!(*layout.read(cx).sidebar_visible.read(cx));
+        assert!(search_focus.is_focused(window));
+    });
+
+    // Escape leaves search even when the filter has no results.
+    cx.simulate_keystrokes("escape");
+    cx.update(|window, cx| {
+        assert!(!search_focus.is_focused(window));
+        assert!(layout.read(cx).sidebar.focus_handle(cx).is_focused(window));
+    });
+
+    cx.simulate_keystrokes("secondary-f end");
+    cx.simulate_input("fresh query");
+    cx.simulate_keystrokes("secondary-a secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().as_deref(),
+        Some("fresh query")
+    );
 }
 
 #[gpui_kit::test]

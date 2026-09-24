@@ -108,6 +108,13 @@ impl CollectionPanel {
         }
     }
 
+    pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| {
+            search.select_all(window, cx);
+            search.focus(window, cx);
+        });
+    }
+
     /// Save the editor's request and refresh the snapshot used when reopening it.
     pub fn save_request(
         &mut self,
@@ -277,7 +284,19 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.visible.is_empty() || event.keystroke.modifiers != Modifiers::default() {
+        if event.keystroke.modifiers != Modifiers::default() {
+            return;
+        }
+
+        if event.keystroke.key == "escape" {
+            self.search
+                .update(cx, |search, cx| search.clean(window, cx));
+            window.focus(&self.focus, cx);
+            cx.stop_propagation();
+            return;
+        }
+
+        if self.visible.is_empty() {
             return;
         }
 
@@ -310,9 +329,10 @@ impl Render for CollectionPanel {
             .border_color(cx.theme().sidebar_border)
             .child(
                 div()
+                    .debug_selector(|| "collections-search".into())
                     .flex_none()
                     .p_2()
-                    // Input actions consume arrow keys, so transfer focus in capture phase.
+                    // Input actions consume these keys, so transfer focus in capture phase.
                     .capture_key_down(cx.listener(Self::on_search_key_down))
                     .child(
                         Input::new(&self.search)

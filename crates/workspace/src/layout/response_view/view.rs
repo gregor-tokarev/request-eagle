@@ -195,6 +195,7 @@ impl Render for ResponseView {
 
         v_flex()
             .debug_selector(|| "response-panel".into())
+            .key_context("Response")
             .track_focus(&self.focus)
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
                 if event.button == MouseButton::Left {
