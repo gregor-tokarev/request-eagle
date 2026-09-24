@@ -7,6 +7,7 @@ edition = "2024"
 test-support = []
 
 [dependencies]
+aho-corasick = "1"
 collection = { path = "../collection" }
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html"] }
 preferences = { path = "../preferences" }

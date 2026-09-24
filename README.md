@@ -136,10 +136,10 @@ limit the displayed text. Smaller responses keep the standard syntax editor.
 
 The custom viewport uses GPUI's line-breaking helper to index row starts as byte
 offsets. It shapes and paints only visible rows, including when the response is
-one long minified line. Search uses GPUI's matcher over the entire response and
-highlights the current match. Raw/JSON switching, selection, copying and the
-wrapping toggle remain available. No dependency patches or vendored crates are
-required.
+one long minified line. Search scans the existing response string directly and
+highlights the current match. It reuses match offsets across keystrokes.
+Raw/JSON switching, selection, copying and the wrapping toggle remain available.
+No dependency patches or vendored crates are required.
 
 The normal test suite checks full-body search beyond 1 MiB and allocation traffic
 while scrolling responses over 10 MiB at two window widths:

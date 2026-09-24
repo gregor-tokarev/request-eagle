@@ -14,7 +14,7 @@ impl ResponseView {
             search.query.to_string()
         } else {
             let search = self.body_search.as_ref().expect("response search is open");
-            assert!(!search.matcher.is_empty());
+            assert!(!search.matches.is_empty());
             search.input.read(cx).value().to_string()
         }
     }

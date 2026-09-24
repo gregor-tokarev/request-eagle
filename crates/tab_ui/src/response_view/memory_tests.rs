@@ -117,7 +117,7 @@ fn check_scroll_allocations(cx: &mut TestAppContext, body: String) {
                 .body_search
                 .as_ref()
                 .unwrap()
-                .matcher
+                .matches
                 .len()
                 > 100_000
         )

@@ -14,7 +14,7 @@ const SCROLLBAR: Rems = rems(0.75);
 /// In particular, a one-line JSON response never becomes one giant ShapedLine.
 pub(super) struct VirtualBody {
     pub(super) text: Rope,
-    source: SharedString,
+    pub(super) source: SharedString,
     pub(super) focus: FocusHandle,
     rows: Vec<usize>,
     font: Font,
