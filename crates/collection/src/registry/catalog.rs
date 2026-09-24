@@ -110,7 +110,6 @@ impl CollectionRegistry {
         &self.collections
     }
 
-    /// Returns an already loaded request without reading its file on the UI thread.
     pub fn file(&self, path: &Path) -> Option<&FileEntry> {
         self.collections.iter().find_map(|collection| {
             path.starts_with(&collection.path)

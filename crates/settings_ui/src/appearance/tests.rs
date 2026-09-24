@@ -7,6 +7,7 @@ use std::time::Instant;
 fn appearance_render_benchmark(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
 
@@ -67,6 +68,7 @@ fn appearance_render_benchmark(cx: &mut TestAppContext) {
 fn preview_swatches_match_the_applied_default_palettes(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
 
@@ -110,6 +112,7 @@ fn preview_swatches_match_the_applied_default_palettes(cx: &mut TestAppContext) 
 fn catalog_virtualizes_rows_and_reflows_on_resize(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
 
@@ -137,16 +140,26 @@ fn catalog_virtualizes_rows_and_reflows_on_resize(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn every_theme_card_links_both_variants_and_switches_modes(cx: &mut TestAppContext) {
+fn theme_cards_preserve_the_other_mode_choice(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
 
     let (page, cx) = cx.add_window_view(AppearanceSettings::new);
 
-    for &(light, dark) in request_eagle_theme::THEME_PAIRS {
-        for name in [light, dark] {
+    let mut expected = preferences::AppearancePreferences::default();
+
+    let themes = cx.read(|cx| request_eagle_theme::themes(cx).to_vec());
+
+    for dark_mode in [false, true] {
+        for theme in themes
+            .iter()
+            .filter(|theme| theme.mode.is_dark() == dark_mode)
+        {
+            let name = theme.name.as_ref();
+
             cx.update(|_, cx| {
                 page.update(cx, |page, cx| {
                     let row = page
@@ -175,10 +188,16 @@ fn every_theme_card_links_both_variants_and_switches_modes(cx: &mut TestAppConte
             cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
             cx.run_until_parked();
 
+            if !dark_mode {
+                expected.light_theme = name.into();
+            } else {
+                expected.dark_theme = name.into();
+            }
+
             cx.read(|cx| {
                 let preferences = &cx.global::<preferences::Preferences>().appearance;
-                assert_eq!(preferences.light_theme, light, "{name}");
-                assert_eq!(preferences.dark_theme, dark, "{name}");
+                assert_eq!(preferences.light_theme, expected.light_theme, "{name}");
+                assert_eq!(preferences.dark_theme, expected.dark_theme, "{name}");
             });
 
             cx.update(|_, cx| {
@@ -189,7 +208,10 @@ fn every_theme_card_links_both_variants_and_switches_modes(cx: &mut TestAppConte
             });
             cx.run_until_parked();
 
-            for (selector, expected) in [("appearance-Light", light), ("appearance-Dark", dark)] {
+            for (selector, expected) in [
+                ("appearance-Light", expected.light_theme.as_str()),
+                ("appearance-Dark", expected.dark_theme.as_str()),
+            ] {
                 let bounds = cx.debug_bounds(selector).unwrap();
                 cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
                 cx.run_until_parked();
@@ -212,8 +234,14 @@ fn every_theme_card_links_both_variants_and_switches_modes(cx: &mut TestAppConte
                 );
 
                 for (appearance, expected) in [
-                    (gpui_kit::WindowAppearance::Light, light),
-                    (gpui_kit::WindowAppearance::Dark, dark),
+                    (
+                        gpui_kit::WindowAppearance::Light,
+                        expected.light_theme.as_str(),
+                    ),
+                    (
+                        gpui_kit::WindowAppearance::Dark,
+                        expected.dark_theme.as_str(),
+                    ),
                 ] {
                     request_eagle_theme::apply_preferences(appearance, cx);
                     assert_eq!(
@@ -230,6 +258,7 @@ fn every_theme_card_links_both_variants_and_switches_modes(cx: &mut TestAppConte
 fn keyboard_can_reach_offscreen_themes(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
     let (page, cx) = cx.add_window_view(AppearanceSettings::new);

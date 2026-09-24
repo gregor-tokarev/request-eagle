@@ -4,8 +4,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{main_view::MainView, request_draft::RequestDraft};
+use super::main_view::MainView;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, component::Root};
+use tab_ui::RequestDraft;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -33,6 +34,7 @@ fn setup<'a>(
     cx.update(|cx| {
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
     });
@@ -76,7 +78,7 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     let draft = cx.read(|cx| {
         main.read(cx).tabs[0]
             .page
-            .clone()
+            .view()
             .downcast::<RequestDraft>()
             .ok()
             .unwrap()
@@ -110,7 +112,10 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     let collection::Request::Http(saved) = file.request;
     cx.read(|cx| {
         assert_eq!(main.read(cx).tabs.len(), 1);
-        assert_eq!(main.read(cx).tabs[0].page.entity_id(), draft.entity_id());
+        assert_eq!(
+            main.read(cx).tabs[0].page.view().entity_id(),
+            draft.entity_id()
+        );
         assert_eq!(draft.read(cx).request, saved);
         assert!(!draft.read(cx).is_dirty());
         assert_eq!(draft.read(cx).name, "Create user");

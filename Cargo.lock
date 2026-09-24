@@ -1086,7 +1086,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "collection_panel"
+name = "collections_panel_ui"
 version = "0.1.0"
 dependencies = [
  "collection",
@@ -7047,6 +7047,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tab_ui"
+version = "0.1.0"
+dependencies = [
+ "collection",
+ "gpui-kit",
+ "preferences",
+ "request",
+ "serde_json",
+ "smol",
+ "theme",
+]
+
+[[package]]
 name = "taffy"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7687,6 +7700,7 @@ name = "updater"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "rustix",
  "semver",
  "serde",
  "serde_json",
@@ -8994,7 +9008,7 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "collection",
- "collection_panel",
+ "collections_panel_ui",
  "gpui-kit",
  "keybindings_service",
  "preferences",
@@ -9002,6 +9016,7 @@ dependencies = [
  "serde_json",
  "settings_ui",
  "smol",
+ "tab_ui",
  "theme",
  "updater",
 ]

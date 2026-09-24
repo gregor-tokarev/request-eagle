@@ -7,6 +7,7 @@ use std::{
 };
 
 use gpui_kit::http_client::{AsyncBody, HttpClient};
+use rustix::fs::{Access, AtFlags, CWD, accessat};
 use sha2::{Digest, Sha256};
 use smol::{
     fs::File,
@@ -47,7 +48,14 @@ pub(super) async fn download_and_prepare_update(
         .parent()
         .ok_or_else(|| "The installed app has no parent directory.".to_string())?;
 
-    if !is_directory_writable(install_dir) {
+    if accessat(
+        CWD,
+        install_dir,
+        Access::WRITE_OK | Access::EXEC_OK,
+        AtFlags::EACCESS,
+    )
+    .is_err()
+    {
         return Err(format!(
             "{} is not writable. Move Request Eagle to a folder owned by your user and try again.",
             install_dir.display()
@@ -295,12 +303,4 @@ pub(super) fn current_app_bundle() -> Result<PathBuf, String> {
     }
 
     Ok(app.to_path_buf())
-}
-
-fn is_directory_writable(directory: &Path) -> bool {
-    let probe = directory.join(format!(".request-eagle-write-test-{}", std::process::id()));
-    let writable = fs::write(&probe, []).is_ok();
-    let _ = fs::remove_file(&probe);
-
-    writable
 }

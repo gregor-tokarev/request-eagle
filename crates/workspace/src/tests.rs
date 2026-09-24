@@ -9,6 +9,7 @@ use settings_ui::CloseSettings;
 fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
         // Overrides saved before CloseSettings moved crates must still resolve.
@@ -69,6 +70,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 fn toggle_sidebar_action(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         cx.set_reduce_motion(true);
         crate::actions::init(cx);
@@ -145,6 +147,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
 fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
     });
 

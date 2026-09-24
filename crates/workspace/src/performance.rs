@@ -24,6 +24,7 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
 
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
         cx.set_reduce_motion(true);
@@ -195,6 +196,7 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
 
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
         cx.set_reduce_motion(true);

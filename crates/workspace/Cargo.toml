@@ -5,16 +5,18 @@ edition = "2024"
 
 [dependencies]
 collection = { path = "../collection" }
-collection_panel = { path = "../collection_panel" }
+collections_panel_ui = { path = "../collections_panel_ui" }
 settings_ui = { path = "../settings_ui" }
-gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html"] }
+tab_ui = { path = "../tab_ui" }
+gpui-kit = { workspace = true, features = ["component"] }
 preferences = { path = "../preferences" }
-request = { path = "../request" }
-serde_json = "1"
 keybindings_service = { path = "../keybindings_service" }
 updater = { path = "../updater" }
 request_eagle_theme = { package = "theme", path = "../theme" }
 
 [dev-dependencies]
+request = { path = "../request" }
+serde_json = "1"
+tab_ui = { path = "../tab_ui", features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }
 smol = "2"

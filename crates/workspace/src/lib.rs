@@ -7,8 +7,6 @@ mod workspace;
 #[cfg(test)]
 mod performance;
 #[cfg(test)]
-mod test_allocator;
-#[cfg(test)]
 mod tests;
 
 pub use actions::{OpenGeneralSettings, OpenSettings};

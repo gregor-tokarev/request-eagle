@@ -30,3 +30,11 @@ Judge this by responsibility, not just the number of child modules: a wrapper
 that repeats its parent's role and exports is redundant even when the parent
 also contains supporting types. Keep the core implementation and its tests at
 the parent level; reserve nested modules for distinct responsibilities.
+
+# Language
+
+**Tab**: An open page in the workspace. Tabs can show a collection or a request; a tab is not necessarily an HTTP request.
+
+**Request draft**: The editable, unsaved state of a request in one tab. Changing a draft does not change the saved request until it is saved.
+
+**Response**: The result received from executing a request. Its presentation depends on the request protocol.

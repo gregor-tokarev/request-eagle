@@ -4,8 +4,8 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::request_draft::RequestDraft;
 use crate::actions::{CloseTab, NewTab, SaveRequest};
+use tab_ui::{RequestDraft, TabBadge, TabBadgeTone, TabPage, TabView};
 
 const TAB_WIDTH: Pixels = px(176.);
 const TAB_HEIGHT: Pixels = px(28.);
@@ -15,10 +15,10 @@ pub(super) struct PageTab {
     pub(super) title: SharedString,
     pub(super) request_path: Option<PathBuf>,
     pub(super) request_id: Option<SharedString>,
-    pub(super) method: Option<&'static str>,
+    pub(super) badge: Option<TabBadge>,
     dirty: bool,
-    pub(super) page: AnyView,
-    _request_subscription: Option<Subscription>,
+    pub(super) page: TabView,
+    _subscription: Subscription,
 }
 
 pub(crate) struct MainView {
@@ -66,21 +66,35 @@ impl MainView {
     }
 
     /// Each tab owns its page entity, preserving page state when switching tabs.
-    pub(crate) fn open_tab(
+    pub(crate) fn open_tab<T: TabPage>(
         &mut self,
         title: impl Into<SharedString>,
-        page: impl Into<AnyView>,
+        page: Entity<T>,
         cx: &mut Context<Self>,
     ) -> usize {
+        let id = self.next_id;
+        let state = page.read(cx).tab_state();
+        let subscription = cx.observe(&page, move |this, page, cx| {
+            let state = page.read(cx).tab_state();
+
+            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id)
+                && (tab.badge != state.badge || tab.dirty != state.dirty)
+            {
+                tab.badge = state.badge;
+                tab.dirty = state.dirty;
+                cx.notify();
+            }
+        });
+
         self.tabs.push(PageTab {
-            id: self.next_id,
+            id,
             title: title.into(),
             request_path: None,
             request_id: None,
-            method: None,
-            dirty: false,
-            page: page.into(),
-            _request_subscription: None,
+            badge: state.badge,
+            dirty: state.dirty,
+            page: TabView::new(page),
+            _subscription: subscription,
         });
         self.next_id += 1;
 
@@ -105,7 +119,7 @@ impl MainView {
                 && tab.request_id.as_ref() == Some(&request_id)
         }) {
             self.tabs[index].title = name.clone();
-            if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>() {
+            if let Ok(draft) = self.tabs[index].page.view().downcast::<RequestDraft>() {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
@@ -143,7 +157,7 @@ impl MainView {
             tab.request_path = Some(path.to_path_buf());
             tab.title = name.clone();
 
-            if let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() {
+            if let Ok(draft) = tab.page.view().downcast::<RequestDraft>() {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
@@ -166,28 +180,8 @@ impl MainView {
         draft: RequestDraft,
         cx: &mut Context<Self>,
     ) -> usize {
-        let method = draft.request.method.as_str();
         let page = cx.new(|_| draft);
-        let id = self.next_id;
-        let subscription = cx.observe(&page, move |this, page, cx| {
-            let draft = page.read(cx);
-            let method = Some(draft.request.method.as_str());
-            let dirty = draft.is_dirty();
-
-            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id)
-                && (tab.method != method || tab.dirty != dirty)
-            {
-                tab.method = method;
-                tab.dirty = dirty;
-                cx.notify();
-            }
-        });
-
-        let index = self.open_tab(title, page, cx);
-        self.tabs[index].method = Some(method);
-        self.tabs[index]._request_subscription = Some(subscription);
-
-        index
+        self.open_tab(title, page, cx)
     }
 
     /// Select by zero-based position. Missing positions leave selection unchanged.
@@ -241,9 +235,7 @@ impl MainView {
             return;
         }
 
-        if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
-            && draft.read(cx).is_dirty()
-        {
+        if self.tabs[index].page.state(cx).dirty {
             self.select_tab(index, cx);
             self.pending_close = Some(self.tabs[index].id);
             cx.notify();
@@ -276,7 +268,7 @@ impl MainView {
         let Some(tab) = self.selected.and_then(|index| self.tabs.get(index)) else {
             return;
         };
-        let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() else {
+        let Ok(draft) = tab.page.view().downcast::<RequestDraft>() else {
             return;
         };
         let (Some(path), Some(request_id)) = (tab.request_path.clone(), tab.request_id.clone())
@@ -304,7 +296,7 @@ impl MainView {
         &mut self,
         tab_id: u64,
         file: &collection::FileEntry,
-        destination: &collection_panel::SaveDestination,
+        destination: &collections_panel_ui::SaveDestination,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -314,7 +306,7 @@ impl MainView {
         tab.request_path = Some(file.path.clone());
         tab.request_id = Some(file.id.clone().into());
         tab.title = file.name.clone().into();
-        if let Ok(draft) = tab.page.clone().downcast::<RequestDraft>() {
+        if let Ok(draft) = tab.page.view().downcast::<RequestDraft>() {
             draft.update(cx, |draft, cx| {
                 draft.name = file.name.clone().into();
                 draft.collection = Some(destination.collection.clone());
@@ -349,7 +341,7 @@ impl MainView {
 
         match result {
             Ok(()) => {
-                if let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>() {
+                if let Ok(draft) = self.tabs[index].page.view().downcast::<RequestDraft>() {
                     draft.update(cx, |draft, cx| draft.mark_saved(event.request.clone(), cx));
                     self.tabs[index].dirty = draft.read(cx).is_dirty();
                 }
@@ -377,7 +369,7 @@ impl MainView {
             .child(
                 div()
                     .flex_1()
-                    .child("Save changes before closing this request?"),
+                    .child("Save changes before closing this tab?"),
             )
             .child(
                 Button::new("save-and-close-request")
@@ -420,23 +412,19 @@ impl MainView {
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
-        self.prepare_request(window, cx);
+        self.prepare_active_tab(window, cx);
         window.focus(&self.focus, cx);
     }
 
-    pub(crate) fn prepare_request(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.selected
-            && let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
-        {
-            draft.update(cx, |draft, cx| draft.prepare(window, cx));
+    pub(crate) fn prepare_active_tab(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.selected {
+            self.tabs[index].page.prepare(window, cx);
         }
     }
 
     pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.selected
-            && let Ok(draft) = self.tabs[index].page.clone().downcast::<RequestDraft>()
-        {
-            draft.update(cx, |draft, cx| draft.send(window, cx));
+        if let Some(index) = self.selected {
+            self.tabs[index].page.send(window, cx);
         }
     }
 
@@ -548,12 +536,12 @@ impl MainView {
                     this.bg(cx.theme().muted)
                 }
             })
-            .when_some(tab.method, |this, method| {
-                let color = match method {
-                    "GET" => cx.theme().success,
-                    "POST" => cx.theme().warning,
-                    "PUT" => cx.theme().info,
-                    _ => cx.theme().danger,
+            .when_some(tab.badge, |this, badge| {
+                let color = match badge.tone {
+                    TabBadgeTone::Success => cx.theme().success,
+                    TabBadgeTone::Warning => cx.theme().warning,
+                    TabBadgeTone::Info => cx.theme().info,
+                    TabBadgeTone::Danger => cx.theme().danger,
                 };
 
                 this.child(
@@ -563,7 +551,7 @@ impl MainView {
                         .text_size(px(9.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(color)
-                        .child(method),
+                        .child(badge.label),
                 )
             })
             .child(
@@ -692,17 +680,8 @@ impl Render for MainView {
                         },
                     ))
                     .when_some(self.selected, |this, index| {
-                        this.aria_label(self.tabs[index].title.clone()).child(
-                            match self.tabs[index].page.clone().downcast::<RequestDraft>() {
-                                // Request editors cache their expensive children separately.
-                                // A cached parent forces all nested caches to redraw whenever
-                                // a response selection changes in GPUI.
-                                Ok(page) => page.into_any_element(),
-                                Err(page) => page
-                                    .cached(StyleRefinement::default().size_full())
-                                    .into_any_element(),
-                            },
-                        )
+                        this.aria_label(self.tabs[index].title.clone())
+                            .child(self.tabs[index].page.render())
                     }),
             )
     }
