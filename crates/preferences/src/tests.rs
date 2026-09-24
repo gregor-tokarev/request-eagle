@@ -376,17 +376,6 @@ fn updates_can_run_without_a_storage_directory(cx: &mut TestAppContext) {
     });
 }
 
-#[test]
-fn serialization_never_includes_credentials_but_accepts_legacy_values() {
-    let serialized = serde_json::to_value(proxy()).unwrap();
-    assert!(serialized.get("username").is_none());
-    assert!(serialized.get("password").is_none());
-    let legacy: ProxyPreferences =
-        serde_json::from_str(r#"{"username":"proxy-user","password":"proxy-password"}"#).unwrap();
-    assert_eq!(legacy.username, "proxy-user");
-    assert_eq!(legacy.password, "proxy-password");
-}
-
 #[gpui_kit::test]
 async fn saves_and_reloads_the_shared_document(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();

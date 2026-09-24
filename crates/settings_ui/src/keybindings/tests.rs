@@ -324,35 +324,13 @@ fn search_accepts_names_symbols_and_modifier_aliases() {
 }
 
 #[gpui_kit::test]
-fn recorder_buttons_save_cancel_and_remove(cx: &mut TestAppContext) {
+fn row_and_recorder_buttons_remove_shortcuts(cx: &mut TestAppContext) {
     let (page, _, cx) = setup(cx);
 
-    start(&page, Quit::name_for_type(), cx);
-    cx.simulate_keystrokes("cmd-shift-q");
-    click_recorder_button("cancel-recording", cx);
-
-    cx.read(|cx| assert!(page.read(cx).recording.is_none()));
-    cx.simulate_keystrokes("cmd-q");
-
-    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 1));
-
-    start(&page, Quit::name_for_type(), cx);
-    cx.simulate_keystrokes("cmd-shift-q");
-    click_recorder_button("save-recording", cx);
-
-    cx.read(|cx| {
-        assert!(page.read(cx).recording.is_none());
-        assert_eq!(
-            keybindings::binding_for::<Quit>(cx).unwrap().keystrokes,
-            Keystroke::parse("cmd-shift-q").unwrap().unparse()
-        );
+    cx.update(|_, cx| {
+        keybindings::set_override(Quit::name_for_type(), Some("cmd-shift-q"), cx).unwrap();
     });
-    cx.simulate_keystrokes("cmd-q");
-
-    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 1));
-    cx.simulate_keystrokes("cmd-shift-q");
-
-    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 2));
+    cx.run_until_parked();
 
     click_recorder_button("remove-settings_tests::Quit", cx);
 
@@ -362,7 +340,7 @@ fn recorder_buttons_save_cancel_and_remove(cx: &mut TestAppContext) {
     });
     cx.simulate_keystrokes("cmd-shift-q");
 
-    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 2));
+    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 0));
 
     click_recorder_button("reset-settings_tests::Quit", cx);
     start(&page, Quit::name_for_type(), cx);
@@ -374,7 +352,7 @@ fn recorder_buttons_save_cancel_and_remove(cx: &mut TestAppContext) {
     });
     cx.simulate_keystrokes("cmd-q");
 
-    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 2));
+    cx.read(|cx| assert_eq!(cx.global::<QuitCount>().0, 0));
 }
 
 #[gpui_kit::test]

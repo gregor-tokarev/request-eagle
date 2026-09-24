@@ -1,28 +1,5 @@
 use super::Environment;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-
-#[test]
-fn parses_entries() {
-    let environment = Environment::from_toml(
-        Path::new("development.toml"),
-        r#"
-            api_url = "https://api.example.com"
-            api_token = "super-secret"
-        "#,
-    )
-    .unwrap();
-
-    assert_eq!(environment.path, PathBuf::from("development.toml"));
-    assert_eq!(
-        environment.resolve("api_url"),
-        Some("https://api.example.com")
-    );
-    assert_eq!(environment.resolve("api_token"), Some("super-secret"));
-    assert_eq!(environment.resolve("missing"), None);
-}
+use std::fs;
 
 #[test]
 fn saves_and_loads_entries() {

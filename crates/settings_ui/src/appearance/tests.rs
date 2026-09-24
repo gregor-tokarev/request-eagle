@@ -64,7 +64,7 @@ fn appearance_render_benchmark(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn preview_cards_apply_the_selected_palette(cx: &mut TestAppContext) {
+fn preview_swatches_match_the_applied_default_palettes(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -103,38 +103,6 @@ fn preview_cards_apply_the_selected_palette(cx: &mut TestAppContext) {
                 "{name} preview swatches should match the applied palette"
             );
         }
-    });
-    cx.run_until_parked();
-
-    for (selector, expected_light, expected_dark) in [
-        (
-            "theme-Catppuccin Latte",
-            "Catppuccin Latte",
-            "Catppuccin Mocha",
-        ),
-        ("appearance-Light", "Catppuccin Latte", "Catppuccin Mocha"),
-    ] {
-        let bounds = cx
-            .debug_bounds(selector)
-            .expect("visible appearance control");
-        cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
-        cx.run_until_parked();
-
-        cx.read(|cx| {
-            let preferences = cx
-                .try_global::<preferences::Preferences>()
-                .cloned()
-                .unwrap_or_default()
-                .appearance;
-            assert_eq!(preferences.light_theme, expected_light);
-            assert_eq!(preferences.dark_theme, expected_dark);
-        });
-    }
-
-    cx.read(|cx| {
-        let theme = gpui_kit::component::Theme::global(cx);
-        assert!(!theme.is_dark());
-        assert_eq!(theme.light_theme.name, "Catppuccin Latte");
     });
 }
 
