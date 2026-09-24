@@ -1,4 +1,4 @@
-use gpui_kit::component::{ActiveTheme as _, Theme, ThemeColor, ThemeRegistry};
+use gpui_kit::component::{ActiveTheme as _, Theme, ThemeColor};
 use gpui_kit::{
     App, Bounds, ContentMask, IntoElement, Pixels, SharedString, Styled as _, TextAlign, TextRun,
     canvas, fill, point, px, size,
@@ -14,14 +14,11 @@ pub(super) struct ThemePreview {
 
 impl ThemePreview {
     pub fn catalog(cx: &App) -> Vec<Self> {
-        ThemeRegistry::global(cx)
-            .sorted_themes()
-            .into_iter()
+        request_eagle_theme::themes(cx)
+            .iter()
             .map(|config| {
-                let config = request_eagle_theme::config(&config.name, cx)
-                    .expect("catalog themes should be registered");
                 let mut theme = Theme::default();
-                theme.apply_config(&config);
+                theme.apply_config(config);
 
                 Self {
                     name: config.name.clone(),

@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::actions::*;
 use crate::layout::{bottom_panel::BottomPanel, main_view::MainView, top_panel::TopPanel};
 use collection::CollectionRegistry;
-use collection_panel::{CollectionPanel, CollectionPanelEvent};
+use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
@@ -98,7 +98,7 @@ impl Layout {
                             request,
                             cx,
                         );
-                        view.prepare_request(window, cx);
+                        view.prepare_active_tab(window, cx);
                     });
                 }
             });

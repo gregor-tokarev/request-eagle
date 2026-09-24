@@ -1,5 +1,7 @@
 use gpui_kit::{Action, App, actions};
 
+pub use tab_ui::SendRequest;
+
 actions!(
     workspace,
     [
@@ -7,7 +9,6 @@ actions!(
         FocusSidebarSearch,
         OpenSettings,
         OpenGeneralSettings,
-        SendRequest,
         SaveRequest,
         NewTab,
         CloseTab,

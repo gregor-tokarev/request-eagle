@@ -28,23 +28,25 @@ pub fn run() {
 
         keybindings_service::init(cx);
 
-        if let Some(home) = std::env::home_dir()
-            && let Err(error) = keybindings_service::load_overrides(
-                home.join(".request-eagle/keybindings.json"),
-                cx,
-            )
+        let Some(home) = std::env::home_dir() else {
+            eprintln!("Failed to load preferences: could not locate the home directory.");
+            cx.quit();
+            return;
+        };
+
+        if let Err(error) =
+            keybindings_service::load_overrides(home.join(".request-eagle/keybindings.json"), cx)
         {
             eprintln!("Failed to load key bindings: {error}");
         }
 
-        let preferences =
-            std::env::home_dir().map(|home| preferences::load(home.join(".request-eagle"), cx));
+        let preferences = preferences::load(home.join(".request-eagle"), cx);
 
         cx.spawn(async move |cx| {
-            if let Some(load) = preferences
-                && let Err(error) = load.await
-            {
+            if let Err(error) = preferences.await {
                 eprintln!("Failed to load preferences: {error:#}");
+                cx.update(|cx| cx.quit());
+                return;
             }
 
             cx.update(open_workspace);

@@ -145,7 +145,7 @@ The normal test suite checks full-body search beyond 1 MiB and allocation traffi
 while scrolling responses over 10 MiB at two window widths:
 
 ```sh
-cargo test -p workspace --release response_view -- --nocapture
+cargo test -p tab_ui --release response_view -- --nocapture
 ```
 
 The allocation tests count Rust allocation traffic, not retained or GPU memory.
@@ -157,7 +157,7 @@ text. Large responses currently use plain text without syntax coloring.
 For standard-editor HTML measurements, save the decoded HTTP body locally and run:
 
 ```sh
-REQUEST_EAGLE_HTML_FIXTURE=/tmp/page.html cargo test -p workspace --release \
+REQUEST_EAGLE_HTML_FIXTURE=/tmp/page.html cargo test -p tab_ui --release \
   standard_html_editor_benchmark -- --ignored --nocapture --test-threads=1
 ```
 

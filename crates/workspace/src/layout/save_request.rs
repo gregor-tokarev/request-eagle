@@ -1,4 +1,4 @@
-use collection_panel::{CollectionPanel, SaveDestination};
+use collections_panel_ui::{CollectionPanel, SaveDestination};
 use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},

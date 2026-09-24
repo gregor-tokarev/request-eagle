@@ -201,12 +201,11 @@ impl AppearanceSettings {
                         .unwrap_or_default()
                         .appearance;
 
-                    let Some((light, dark)) = request_eagle_theme::theme_pair(&name) else {
-                        return;
-                    };
-
-                    preferences.light_theme = light.into();
-                    preferences.dark_theme = dark.into();
+                    if dark {
+                        preferences.dark_theme = name.to_string();
+                    } else {
+                        preferences.light_theme = name.to_string();
+                    }
 
                     this.save(preferences, cx);
                 }))
@@ -296,7 +295,7 @@ impl AppearanceSettings {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("System follows your device's light or dark appearance. Selecting a theme also selects its matching light or dark variant."),
+                            .child("System follows your device's light or dark appearance. Choose light and dark themes independently."),
                     ),
             )
             .child(

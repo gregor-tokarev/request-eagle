@@ -10,6 +10,7 @@ fn valid_edits_save_automatically_and_invalid_edits_keep_previous_settings(
 ) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         preferences::update(cx, |preferences| {
             preferences.request.proxy.mode = ProxyMode::Custom;
@@ -70,6 +71,7 @@ fn valid_edits_save_automatically_and_invalid_edits_keep_previous_settings(
 fn an_invalid_custom_proxy_can_be_disabled(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         preferences::update(cx, |preferences| {
             preferences.request.proxy.mode = ProxyMode::Custom
@@ -98,6 +100,7 @@ async fn switching_modes_never_persists_rejected_host_credentials(cx: &mut TestA
     let directory = tempfile::tempdir().unwrap();
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         preferences::load(directory.path(), cx)
     })
@@ -175,6 +178,7 @@ async fn switching_modes_never_persists_rejected_host_credentials(cx: &mut TestA
 fn pasting_proxy_urls_fills_and_saves_all_fields_together(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         preferences::update(cx, |preferences| {
             preferences.request.proxy.mode = ProxyMode::Custom;
@@ -276,6 +280,7 @@ fn pasting_proxy_urls_fills_and_saves_all_fields_together(cx: &mut TestAppContex
 fn invalid_url_pastes_leave_existing_fields_unchanged(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         request_eagle_theme::init(cx);
         preferences::update(cx, |preferences| {
             preferences.request.proxy.mode = ProxyMode::Custom;
