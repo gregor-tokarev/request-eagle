@@ -4,7 +4,7 @@ version = "0.1.12"
 edition = "2024"
 
 [features]
-dev-profiler = ["gpui-kit/profiler"]
+dev-profiler = ["workspace/dev-profiler"]
 
 [dependencies]
 collection = { path = "../collection" }

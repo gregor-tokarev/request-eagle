@@ -242,6 +242,21 @@ pub(super) fn on_toggle_sidebar(layout: &Entity<Layout>, cx: &mut App) {
 
 impl Render for Layout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = self.render_content(window, cx);
+
+        #[cfg(feature = "dev-profiler")]
+        let content = div()
+            .relative()
+            .size_full()
+            .child(content)
+            .child(gpui_fps::fps_monitor(window, cx));
+
+        content
+    }
+}
+
+impl Layout {
+    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Keep the screen entities alive, but only lay out the visible screen.
         // GPUI still requests child layouts beneath display: none containers.
         if self.settings_visible {

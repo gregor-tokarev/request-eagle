@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-dev-profiler = ["gpui-kit/profiler"]
+dev-profiler = ["dep:gpui-fps"]
 
 [dependencies]
 collection = { path = "../collection" }
 collection_panel = { path = "../collection_panel" }
 settings_ui = { path = "../settings_ui" }
+gpui-fps = { version = "=0.6.2", optional = true }
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html"] }
 preferences = { path = "../preferences" }
 request = { path = "../request" }

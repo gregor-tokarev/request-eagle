@@ -52,9 +52,14 @@ make run
 ```
 
 For development on macOS or Linux, use `make dev`. It builds in release mode
-with GPUI's frame monitor and rebuilds and restarts the app when source files
-change. Press Ctrl-C to stop. Linux runs the native executable directly;
+with the [GPUI Kit FPS monitor](https://gpui-kit.com/versions/main/docs/fps/)
+and rebuilds and restarts the app when source files change. Press Ctrl-C to stop.
+Linux runs the native executable directly;
 macOS creates a development app bundle.
+
+The monitor is enabled by the `dev-profiler` feature and appears in both the
+workspace and settings. Click it to collapse or expand it; right-click to switch
+between estimated maximum FPS and actual FPS. Normal builds omit the monitor.
 
 On Linux, `make run` and `make dev` use the terminal's `WAYLAND_DISPLAY` or
 `DISPLAY`. If neither is set (for example, in a remote terminal), the launcher
@@ -84,7 +89,7 @@ To measure Settings → Keybindings page switches with the frame monitor enabled
 
 ```sh
 REQUEST_EAGLE_BENCH_PAGE=Keybindings REQUEST_EAGLE_BENCH_TRANSITIONS=1 \
-REQUEST_EAGLE_BENCH_OVERLAY=1 REQUEST_EAGLE_BENCH_SAMPLES=200 \
+REQUEST_EAGLE_BENCH_SAMPLES=200 \
 cargo test -p workspace --features dev-profiler --release pages_render_benchmark \
   -- --ignored --nocapture --test-threads=1
 ```

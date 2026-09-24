@@ -57,7 +57,7 @@ shutdown() {
 trap shutdown INT TERM
 trap stop_app EXIT
 
-echo "Watching Cargo and application files. Release build with GPUI frame monitor. Press Ctrl-C to stop."
+echo "Watching Cargo and application files. Release build with GPUI Kit FPS monitor. Press Ctrl-C to stop."
 
 LAST_SNAPSHOT=""
 while true; do

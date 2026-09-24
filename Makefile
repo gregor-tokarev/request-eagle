@@ -37,7 +37,7 @@ run: build
 	./scripts/run.sh "$(BUILD_DIR)/request-eagle"
 endif
 
-# Rebuild an optimized app with GPUI's frame monitor whenever files change.
+# Rebuild an optimized app with the GPUI Kit FPS monitor whenever files change.
 dev:
 	+@./scripts/dev.sh
 

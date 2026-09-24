@@ -10,7 +10,7 @@ use std::{fs, time::Instant};
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
 // Set REQUEST_EAGLE_BENCH_TRANSITIONS=1 to switch away and back before each draw.
-// Enable workspace/dev-profiler and REQUEST_EAGLE_BENCH_OVERLAY=1 to include the monitor.
+// Enable workspace/dev-profiler to include the GPUI Kit FPS monitor.
 // Like appearance_render_benchmark, this measures forced CPU draws, including
 // element cleanup, but excludes GPU presentation and the native Root wrapper.
 #[gpui_kit::test]
@@ -52,13 +52,6 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
         let (layout, cx) = cx.add_window_view(|window, cx| {
             Layout::new(collections, updater::init("1.2.3", cx), window, cx)
         });
-
-        #[cfg(feature = "dev-profiler")]
-        if std::env::var_os("REQUEST_EAGLE_BENCH_OVERLAY").is_some() {
-            cx.update(|window, _| {
-                window.set_debug_frame_overlay_mode(gpui_kit::DebugFrameOverlayMode::Full);
-            });
-        }
 
         if let Some(page) = page {
             cx.update(|window, cx| {
@@ -223,11 +216,6 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
             Root::new(view, window, cx)
         });
         let layout = layout.unwrap();
-
-        #[cfg(feature = "dev-profiler")]
-        cx.update(|window, _| {
-            window.set_debug_frame_overlay_mode(gpui_kit::DebugFrameOverlayMode::Full);
-        });
 
         cx.update(|_, cx| {
             layout.read(cx).main_view.clone().update(cx, |view, cx| {

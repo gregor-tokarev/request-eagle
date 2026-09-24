@@ -67,14 +67,5 @@ fn open_workspace(cx: &mut App) {
 
     workspace::init(collections, updater, cx);
 
-    #[cfg(feature = "dev-profiler")]
-    for window in cx.windows() {
-        window
-            .update(cx, |_, window, _| {
-                window.set_debug_frame_overlay_mode(DebugFrameOverlayMode::Full);
-            })
-            .expect("Failed to enable the development frame monitor");
-    }
-
     menu::init(cx);
 }
