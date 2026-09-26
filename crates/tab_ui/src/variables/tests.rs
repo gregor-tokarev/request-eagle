@@ -73,14 +73,15 @@ fn renaming_environment_variables_removes_the_old_name_and_rejects_collisions() 
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("environment.toml");
     std::fs::write(&path, "old = 'value'\nother = 'keep'").unwrap();
-    let entries =
-        super::environment_file::save_entry(&path, Some("old"), "new", Some("value")).unwrap();
+    let entries = super::environment_file::save_entry(&path, Some("old"), "new", None).unwrap();
     assert!(!entries.contains_key("old"));
     assert_eq!(entries["new"], "value");
     let source = std::fs::read_to_string(&path).unwrap();
     assert!(
         super::environment_file::save_entry(&path, Some("new"), "other", Some("value")).is_err()
     );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    assert!(super::environment_file::save_entry(&path, Some("removed"), "restored", None).is_err());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
 }
 
@@ -233,7 +234,10 @@ impl gpui_kit::Render for DialogHost {
 async fn unchanged_editors_preserve_external_updates_after_selection_and_save(
     cx: &mut TestAppContext,
 ) {
-    use gpui_kit::{AppContext as _, Modifiers, VisualTestContext, component::Root};
+    use gpui_kit::{
+        AppContext as _, Modifiers, VisualTestContext,
+        component::{Root, WindowExt as _},
+    };
 
     cx.executor().allow_parking();
     let directory = tempfile::tempdir().unwrap();
@@ -304,6 +308,38 @@ async fn unchanged_editors_preserve_external_updates_after_selection_and_save(
             .unwrap()
             .resolve("value"),
         Some("external after save")
+    );
+
+    click(cx, "variable-manager-entry-0");
+    std::fs::write(&path, "value = 'external before rename'").unwrap();
+    click(cx, "variable-name-field");
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("renamed");
+    click(cx, "save-variable");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| store.read(cx).saving) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    let saved = environment::Environment::from_file(&path).unwrap();
+    assert_eq!(saved.resolve("value"), None);
+    assert_eq!(saved.resolve("renamed"), Some("external before rename"));
+    click(cx, "variable-value-field");
+    cx.update(|window, cx| {
+        let focused = window.focused_input(cx).unwrap();
+        assert_eq!(
+            focused.as_input().unwrap().read(cx).value(),
+            "external before rename"
+        );
+    });
+    std::fs::write(&path, "renamed = 'external after rename'").unwrap();
+    click(cx, "save-variable");
+    assert_eq!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .resolve("renamed"),
+        Some("external after rename")
     );
 }
 

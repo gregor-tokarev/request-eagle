@@ -111,7 +111,7 @@ external updates. Secret edits are serialized across app processes by an empty
 Environment edits use an empty lock file beside their target and refresh all
 collections sharing that target. Renaming a selected variable removes the old
 name and rejects an existing destination name; update request references to the
-new name as needed.
+new name as needed. If only the name changes, the latest stored value moves with it.
 
 Response header and cookie names and values support text selection and copying.
 Hover over status, response time, or size for selectable details. Timings include

@@ -259,12 +259,7 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
         let renamed = format!("variable-renamed-{}", uuid::Uuid::new_v4());
         let values = cx
             .update(|cx| {
-                preferences::update_request_secret(
-                    Some(peer.clone()),
-                    renamed.clone(),
-                    Some("external update".into()),
-                    cx,
-                )
+                preferences::update_request_secret(Some(peer.clone()), renamed.clone(), None, cx)
             })
             .await?;
         ensure!(!values.contains_key(&peer));

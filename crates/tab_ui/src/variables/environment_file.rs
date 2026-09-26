@@ -50,25 +50,30 @@ pub(super) fn save_entry(
         })
         .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-    if let Some(value) = value {
-        if let Some(previous) = previous_name.filter(|previous| *previous != name) {
-            anyhow::ensure!(
-                !entries.contains_key(name),
-                "A variable with that name already exists."
-            );
-            if let Some(item) = document.remove(previous) {
-                document[name] = item;
-            }
-            entries.remove(previous);
+    let mut value = value.map(str::to_owned);
+    if let Some(previous) = previous_name.filter(|previous| *previous != name) {
+        anyhow::ensure!(
+            !entries.contains_key(name),
+            "A variable with that name already exists."
+        );
+        let current = entries
+            .remove(previous)
+            .context("The selected variable was removed. Reload its source and retry.")?;
+        if let Some(item) = document.remove(previous) {
+            document[name] = item;
         }
-        if entries.get(name).map(String::as_str) != Some(value) {
-            let mut replacement = Value::from(value);
+        // A rename without an edited value moves the latest stored value.
+        value = Some(value.unwrap_or(current));
+    }
+    if let Some(value) = value {
+        if entries.get(name) != Some(&value) {
+            let mut replacement = Value::from(value.clone());
             if let Some(previous) = document.get(name).and_then(Item::as_value) {
                 *replacement.decor_mut() = previous.decor().clone();
             }
             document[name] = Item::Value(replacement);
         }
-        entries.insert(name.to_owned(), value.to_owned());
+        entries.insert(name.to_owned(), value);
     } else {
         document.remove(name);
         entries.remove(name);

@@ -4,6 +4,7 @@ use anyhow::Result;
 use gpui_kit::{App, Task};
 
 /// Apply one edit to the current keyring contents, rather than a UI snapshot.
+/// A changed name with no value override moves the latest stored value.
 pub fn update_request_secret(
     previous_name: Option<String>,
     name: String,
@@ -31,14 +32,18 @@ pub fn update_request_secret(
         // The file contains no secret data; closing it releases the OS lock.
         let _lock = lock.await?;
         let mut values = cx.update(|cx| read_request_secrets(cx)).await?;
+        let mut value = value;
+        if let Some(previous) = previous_name.filter(|previous| previous != &name) {
+            anyhow::ensure!(
+                !values.contains_key(&name),
+                "A variable with that name already exists."
+            );
+            let current = values.remove(&previous).ok_or_else(|| {
+                anyhow::anyhow!("The selected variable was removed. Reload its source and retry.")
+            })?;
+            value = Some(value.unwrap_or(current));
+        }
         if let Some(value) = value {
-            if let Some(previous) = previous_name.filter(|previous| previous != &name) {
-                anyhow::ensure!(
-                    !values.contains_key(&name),
-                    "A variable with that name already exists."
-                );
-                values.remove(&previous);
-            }
             values.insert(name, value);
         } else {
             values.remove(&name);

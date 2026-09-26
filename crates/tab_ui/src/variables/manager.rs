@@ -20,17 +20,37 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
     let manager = cx.new(|cx| {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Variable name"));
         let value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
-        let mut subscriptions =
-            vec![cx.observe(&store, |this: &mut VariableManager, store, cx| {
+        let mut subscriptions = vec![cx.observe_in(
+            &store,
+            window,
+            |this: &mut VariableManager, store, window, cx| {
                 let store = store.read(cx);
                 if !store.saving
                     && let Some(entry) = this.pending_entry.take()
                     && store.save_error.is_none()
                 {
-                    this.selected_entry = Some(entry);
+                    let saved_value = if this.secret {
+                        store.secrets.get(&entry.0)
+                    } else {
+                        store
+                            .environments
+                            .get(&this.scope.read(cx).path)
+                            .and_then(|values| values.get(&entry.0))
+                    }
+                    .cloned()
+                    .unwrap_or_else(|| entry.1.clone());
+                    let editor_unchanged = this.name.read(cx).value().trim() == entry.0
+                        && this.value.read(cx).value() == entry.1;
+                    if editor_unchanged {
+                        this.value.update(cx, |input, cx| {
+                            input.set_value(saved_value.clone(), window, cx)
+                        });
+                    }
+                    this.selected_entry = Some((entry.0, saved_value));
                 }
                 cx.notify();
-            })];
+            },
+        )];
         for input in [&name, &value] {
             subscriptions.push(cx.subscribe(input, |_, _, _: &InputEvent, cx| cx.notify()));
         }
@@ -124,8 +144,21 @@ impl VariableManager {
         }
         self.pending_entry = Some((name.clone(), value.clone()));
         let previous_name = self.selected_entry.as_ref().map(|(name, _)| name.clone());
+        let rename_only =
+            self.selected_entry
+                .as_ref()
+                .is_some_and(|(selected_name, selected_value)| {
+                    selected_name != &name && selected_value == &value
+                });
         self.store.update(cx, |store, cx| {
-            store.save_entry(scope, self.secret, previous_name, name, Some(value), cx)
+            store.save_entry(
+                scope,
+                self.secret,
+                previous_name,
+                name,
+                (!rename_only).then_some(value),
+                cx,
+            )
         });
         self.error = None;
         cx.notify();
@@ -281,12 +314,14 @@ impl Render for VariableManager {
                 div()
                     .flex_1()
                     .min_w_0()
+                    .debug_selector(|| "variable-name-field".into())
                     .child(Input::new(&self.name).aria_label("Variable name")),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .debug_selector(|| "variable-value-field".into())
                     .child(Input::new(&self.value).aria_label(if self.secret {
                         "Secret value"
                     } else {
