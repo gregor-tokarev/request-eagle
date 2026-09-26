@@ -124,6 +124,7 @@ impl MainView {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
+                    draft.set_variable_environment(path, folders.len(), cx);
                     draft.folders = folders;
                     cx.notify();
                 });
@@ -135,6 +136,7 @@ impl MainView {
 
         let collection::Request::Http(request) = request;
         let mut draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
+        draft.set_variable_environment(path, folders.len(), cx);
         draft.folders = folders;
         let index = self.open_draft(name, draft, cx);
         self.tabs[index].request_path = Some(path.to_path_buf());
@@ -162,6 +164,7 @@ impl MainView {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
+                    draft.set_variable_environment(path, folders.len(), cx);
                     draft.folders = folders;
                     cx.notify();
                 });
@@ -311,6 +314,7 @@ impl MainView {
             draft.update(cx, |draft, cx| {
                 draft.name = file.name.clone().into();
                 draft.collection = Some(destination.collection.clone());
+                draft.set_variable_environment(&file.path, destination.folders.len(), cx);
                 draft.folders = destination.folders.clone();
                 cx.notify();
             });

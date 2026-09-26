@@ -56,6 +56,7 @@ pub fn run() {
 }
 
 fn open_workspace(cx: &mut App) {
+    tab_ui::load_variables(cx);
     request_eagle_theme::init(cx);
 
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);

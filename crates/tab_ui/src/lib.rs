@@ -7,6 +7,8 @@ mod page;
 mod request_draft;
 mod request_fields;
 mod response_view;
+mod variable_input;
+mod variables;
 
 #[cfg(test)]
 mod test_allocator;
@@ -16,3 +18,4 @@ pub mod test_support;
 pub use actions::SendRequest;
 pub use page::{TabBadge, TabBadgeTone, TabPage, TabState, TabView};
 pub use request_draft::RequestDraft;
+pub use variables::load_variables;

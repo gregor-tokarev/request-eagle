@@ -50,6 +50,7 @@ if [[ ${1:-} == --session ]]; then
     xdotool search --onlyvisible --name . getwindowname %@ >&2 || true
     exit "$status"
   fi
+  timeout 60s cargo test --locked -p preferences --test native_keyring -- --request-secrets
   exit
 fi
 

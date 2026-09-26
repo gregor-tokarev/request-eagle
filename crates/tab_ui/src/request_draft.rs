@@ -7,6 +7,8 @@ mod execution;
 mod header_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod variable_tests;
 
 pub use draft::RequestDraft;
 

@@ -39,6 +39,18 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.push(("Content-Type".into(), "application/json".into()));
     }
 
+    for (name, value) in &mut headers {
+        if (name == "Host" && request.path.contains("{{"))
+            || (name == "Content-Length"
+                && request
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| body.windows(2).any(|bytes| bytes == b"{{")))
+        {
+            *value = "Resolved on Send".into();
+        }
+    }
+
     headers
 }
 
@@ -82,7 +94,47 @@ impl RequestDraft {
         let response = self.response.as_ref().unwrap().clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let request = outgoing_request(&self.request);
+        let scope = self.variables(cx);
+        let store = crate::variables::VariableStore::global(cx);
+        let store = store.read(cx);
+        let values = store.values(&scope.read(cx).path);
+        let mut template = self.request.clone();
+        if matches!(template.method, Method::Get | Method::Head) {
+            template.body = None;
+        }
+        let request = values.and_then(|values| {
+            if template.path.contains("{{vault:")
+                || template
+                    .headers
+                    .iter()
+                    .chain(template.query.iter().flatten())
+                    .any(|(key, value)| key.contains("{{vault:") || value.contains("{{vault:"))
+                || template
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| String::from_utf8_lossy(body).contains("{{vault:"))
+            {
+                if store.loading {
+                    return Err("Secrets are still loading. Try sending again in a moment.".into());
+                }
+                if let Some(error) = &store.secret_error {
+                    return Err(error.clone());
+                }
+            }
+            template
+                .resolve_variables(&values)
+                .map(|request| outgoing_request(&request))
+                .map_err(|error| error.to_string())
+        });
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                response.update(cx, |response, cx| {
+                    response.finish(Err(request::ExecutionError::Variables(error)), window, cx)
+                });
+                return;
+            }
+        };
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
