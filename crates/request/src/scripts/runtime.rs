@@ -202,12 +202,7 @@ fn run(
                         });
                     }
                 })?;
-                // Keep the bundle's module wrapper private; expose only expect.
-                let expect: Function = cx.eval(concat!(
-                    "(function () { const module = {exports: {}}; const exports = module.exports;\n",
-                    include_str!("vendor/chai.min.js"),
-                    "\nreturn module.exports.expect; })()",
-                ))?;
+                let expect: Function = cx.eval(include_str!("assertions.js"))?;
                 let dynamic = Function::new(cx.clone(), |name: String| dynamic_variable(&name))?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
                 let export: Function = setup.call((input.to_string(), log, test, expect, dynamic))?;

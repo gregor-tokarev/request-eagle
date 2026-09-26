@@ -27,7 +27,7 @@ fn pre(source: &str) -> (HttpRequest, super::variables::Variables, Vec<ScriptRep
 }
 
 #[test]
-fn common_chai_assertions_support_real_chaining_and_nested_values() {
+fn common_assertions_support_chaining_and_nested_values() {
     let (_, _, reports) = pre(r#"
         pm.test('allowed status', () => pm.expect(201).to.be.oneOf([200, 201, 202]));
         pm.test('keys', () => pm.expect({id: 1, name: 'Eagle'}).to.have.all.keys('id', 'name'));
