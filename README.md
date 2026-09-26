@@ -13,3 +13,5 @@ Video SHA-256: 4948237ddd6cb419b0ef1c897a409bb315ad1657222fb9451e0a361f1cc7d0aa
 Follow-up validation on source bf2431d4aa22cdd08676e1943bfe28e1b061ff2a: 246 workspace tests passed. Six environment-writer processes preserved all edits; environment/keyring rename tests reject destination collisions and remove old names; shared-file cache tests refresh both scopes. Native UI checks renamed environment variables (native-rename.png) and sent a request using a renamed secret. The core walkthrough remains recorded from d5ff4d8.
 
 Latest validation on 0a2c03a91913e227319ca4991f7b5ba93e2f991a: all 246 workspace tests and the native keyring harness pass. Rename-only saves now move the current stored value, preserving external updates; the rendered manager test also verifies the editor refresh and a subsequent unchanged Save.
+
+Validation on 3c68acaf916899f68e71484b8f268814ebf1c250: 247 workspace tests passed. Added exact TOML representation checks for renames, missing-target alias invalidation/recovery, and selected-entry removal. The native-remove.png screenshot shows the cleared form after removal; the native app then successfully created another variable.
