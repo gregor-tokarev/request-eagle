@@ -9,3 +9,5 @@ Validation: 247 workspace tests passed; 6 benchmarks ignored. Native keyring che
 Supplemental screenshots captured during review revisions show symlinked environment edits and excluded URL fragments (native-edge-cases.png), literal brace escapes (native-secret-escape.png), variable renaming (native-rename.png), and the cleared editor after removal (native-remove.png). The final removal workflow also successfully created another variable afterward.
 
 Video SHA-256: b5013f4da7cafb7781b24754a9b6f883437cec9f89ab2c5ed9da3611ed28ce1c
+
+Follow-up validation on 843b50777665e70a5854b82c4e5bbf4b934ae12c: all 247 workspace tests pass. Native QA blocked a save with the environment lock, typed the next variable, then saved it and verified both entries survived (native-pending-edit.png). A secret-name conflict left editing available (native-conflict-error.png), and the original secret still authenticated a request without a keyring retry (native-conflict-response.png).
