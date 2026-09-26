@@ -9,3 +9,5 @@ Automated verification: 243 workspace tests passed; 6 benchmarks ignored. Native
 Additional native screenshots: native-edge-cases.png shows symlinked environment edits and URL fragments excluded from execution (source 76956d2); native-secret-escape.png shows literal braces surviving JSON transmission. Native testing on the video source also verified that an unchanged editor preserves a token rotated by another process, and Reload secrets picks up an external update.
 
 Video SHA-256: 4948237ddd6cb419b0ef1c897a409bb315ad1657222fb9451e0a361f1cc7d0aa
+
+Follow-up validation on source bf2431d4aa22cdd08676e1943bfe28e1b061ff2a: 246 workspace tests passed. Six environment-writer processes preserved all edits; environment/keyring rename tests reject destination collisions and remove old names; shared-file cache tests refresh both scopes. Native UI checks renamed environment variables (native-rename.png) and sent a request using a renamed secret. The core walkthrough remains recorded from d5ff4d8.
