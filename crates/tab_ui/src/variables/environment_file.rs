@@ -8,6 +8,13 @@ pub(super) fn save_entry(
     name: &str,
     value: Option<&str>,
 ) -> anyhow::Result<HashMap<String, String>> {
+    let target = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Some(fs::canonicalize(path)?),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let path = target.as_deref().unwrap_or(path);
     let source = match fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),

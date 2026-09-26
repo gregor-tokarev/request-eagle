@@ -35,3 +35,55 @@ fn resolves_every_request_field_in_a_snapshot() {
         *id
     );
 }
+#[test]
+fn url_fragments_do_not_resolve_or_validate_unsent_references() {
+    let values = environment::VariableValues {
+        environment: [
+            ("host".into(), "example.com".into()),
+            ("base_url".into(), "https://example.com/path#local".into()),
+            ("fragment".into(), "#local".into()),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    for (path, expected) in [
+        ("https://example.com/#{{missing}}", "https://example.com/"),
+        ("https://{{host}}/#{{unclosed", "https://example.com/"),
+        ("{{base_url}}/{{missing}}", "https://example.com/path"),
+        (
+            "https://{{host}}/{{fragment}}/{{unclosed",
+            "https://example.com/",
+        ),
+    ] {
+        let request = request::HttpRequest {
+            path: path.into(),
+            ..Default::default()
+        };
+        assert_eq!(request.resolve_variables(&values).unwrap().path, expected);
+        assert_eq!(request.path, path, "retain the fragment in the draft");
+    }
+
+    for path in [
+        "https://{{missing}}/#ignored",
+        "https://example.com/%23{{missing}}",
+        "https://{{unclosed#fragment}}",
+    ] {
+        let request = request::HttpRequest {
+            path: path.into(),
+            ..Default::default()
+        };
+        assert!(
+            request.resolve_variables(&values).is_err(),
+            "{path} requires a value before the fragment"
+        );
+    }
+    let request = request::HttpRequest {
+        path: "https://example.com/".into(),
+        headers: vec![("X-Value".into(), "#{{host}}".into())],
+        body: Some(b"#{{host}}".to_vec()),
+        ..Default::default()
+    };
+    let resolved = request.resolve_variables(&values).unwrap();
+    assert_eq!(resolved.headers[0].1, "#example.com");
+    assert_eq!(resolved.body.as_deref(), Some(b"#example.com".as_slice()));
+}

@@ -38,6 +38,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
 #[test]
 fn templated_url_credentials_preview_authorization_as_unresolved() {
     for (path, expected) in [
+        ("{{scheme}}://user:pass@example.com", "Resolved on Send"),
         ("{{base_url}}/users", "Resolved on Send"),
         ("https://{{authority}}/users", "Resolved on Send"),
         (
@@ -80,6 +81,15 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
                 .all(|(name, _)| name != "Authorization")
         );
     }
+    let request = request::HttpRequest {
+        path: "{{scheme}}://example.com".into(),
+        ..Default::default()
+    };
+    assert!(
+        super::execution::generated_headers(&request)
+            .iter()
+            .all(|(name, _)| name != "Authorization")
+    );
 }
 
 #[test]

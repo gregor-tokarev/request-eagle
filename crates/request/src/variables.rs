@@ -7,7 +7,7 @@ impl HttpRequest {
     pub fn resolve_variables(&self, values: &VariableValues) -> Result<Self, VariableError> {
         let mut resolver = VariableResolver::new(values);
         let mut request = self.clone();
-        request.path = resolver.resolve(&request.path)?;
+        request.path = resolve_url(&request.path, &mut resolver)?;
 
         for (key, value) in request
             .headers
@@ -26,4 +26,28 @@ impl HttpRequest {
 
         Ok(request)
     }
+}
+
+fn resolve_url(text: &str, resolver: &mut VariableResolver<'_>) -> Result<String, VariableError> {
+    let mut remaining = text.split('#').next().unwrap_or_default();
+    let mut resolved = String::new();
+
+    while let Some(start) = remaining.find("{{") {
+        resolved.push_str(&remaining[..start]);
+        let end = remaining[start + 2..]
+            .find("}}")
+            .map(|end| start + 2 + end + 2)
+            .ok_or(VariableError::Unclosed)?;
+        let value = resolver.resolve(&remaining[start..end])?;
+        // A whole-URL variable can introduce a fragment too. No later reference
+        // in this URL is transmitted, so do not resolve or validate it.
+        if let Some((before_fragment, _)) = value.split_once('#') {
+            resolved.push_str(before_fragment);
+            return Ok(resolved);
+        }
+        resolved.push_str(&value);
+        remaining = &remaining[end..];
+    }
+    resolved.push_str(remaining);
+    Ok(resolved)
 }

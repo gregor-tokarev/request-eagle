@@ -4,6 +4,55 @@ use gpui_kit::TestAppContext;
 
 use super::VariableStore;
 
+#[cfg(unix)]
+#[test]
+fn environment_saves_update_symlink_targets_and_preserve_links() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("shared.toml");
+    let link = directory.path().join("environment.toml");
+    std::fs::write(&target, "# shared\nbase = 'old'\nkeep = 'value'\n").unwrap();
+    symlink("shared.toml", &link).unwrap();
+
+    super::environment_file::save_entry(&link, "base", Some("updated")).unwrap();
+    assert_eq!(
+        std::fs::read_link(&link).unwrap(),
+        std::path::Path::new("shared.toml")
+    );
+    assert_eq!(
+        environment::Environment::from_file(&target)
+            .unwrap()
+            .resolve("base"),
+        Some("updated")
+    );
+    super::environment_file::save_entry(&link, "keep", None).unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        environment::Environment::from_file(&target)
+            .unwrap()
+            .resolve("keep"),
+        None
+    );
+
+    std::fs::remove_file(&target).unwrap();
+    assert!(
+        super::environment_file::save_entry(&link, "base", Some("must not replace the link"))
+            .is_err()
+    );
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
 #[test]
 fn environment_edits_preserve_comments_order_and_unrelated_formatting() {
     let directory = tempfile::tempdir().unwrap();
