@@ -124,6 +124,7 @@ impl Render for VariableManager {
                 .children(
                     [(false, "Environment"), (true, "Secrets")].map(|(secret, label)| {
                         Button::new(label)
+                            .debug_selector(move || format!("variable-source-{label}"))
                             .label(label)
                             .small()
                             .when(self.secret == secret, |button| button.primary())
@@ -164,12 +165,18 @@ impl Render for VariableManager {
                     .gap_2()
                     .child(
                         Button::new(("edit-variable", index))
+                            .debug_selector(move || format!("variable-manager-entry-{index}"))
                             .ghost()
                             .flex_1()
                             .child(div().w_full().text_left().child(name))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let value = if this.secret {
-                                    String::new()
+                                    this.store
+                                        .read(cx)
+                                        .secrets
+                                        .get(&selected_name)
+                                        .cloned()
+                                        .unwrap_or_default()
                                 } else {
                                     this.store
                                         .read(cx)

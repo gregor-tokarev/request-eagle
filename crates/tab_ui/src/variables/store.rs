@@ -81,9 +81,6 @@ impl VariableStore {
     }
 
     pub fn reload_environment(&mut self, scope: &Option<PathBuf>, cx: &mut Context<Self>) {
-        if self.saving {
-            return;
-        }
         self.environments.remove(scope);
         self.environment_errors.remove(scope);
         self.ensure_environment(scope, cx);

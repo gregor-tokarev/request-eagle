@@ -74,6 +74,35 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
     request
 }
 
+pub(super) fn resolve_request(
+    request: &HttpRequest,
+    mut values: environment::VariableValues,
+    secret_error: Option<&str>,
+) -> Result<HttpRequest, String> {
+    let mut template = request.clone();
+    if matches!(template.method, Method::Get | Method::Head) {
+        template.body = None;
+    }
+
+    // Let the resolver parse names, including whitespace, in every request field.
+    // Never use cached secrets while their store is loading or unavailable.
+    if secret_error.is_some() {
+        values.secrets.clear();
+    }
+    template
+        .resolve_variables(&values)
+        .map(|request| outgoing_request(&request))
+        .map_err(|error| {
+            if let environment::VariableError::Unknown(name) = &error
+                && name.starts_with("vault:")
+                && let Some(message) = secret_error
+            {
+                return message.to_owned();
+            }
+            error.to_string()
+        })
+}
+
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
         self.generated_headers = generated_headers(&self.request);
@@ -97,35 +126,14 @@ impl RequestDraft {
         let scope = self.variables(cx);
         let store = crate::variables::VariableStore::global(cx);
         let store = store.read(cx);
-        let values = store.values(&scope.read(cx).path);
-        let mut template = self.request.clone();
-        if matches!(template.method, Method::Get | Method::Head) {
-            template.body = None;
-        }
-        let request = values.and_then(|values| {
-            if template.path.contains("{{vault:")
-                || template
-                    .headers
-                    .iter()
-                    .chain(template.query.iter().flatten())
-                    .any(|(key, value)| key.contains("{{vault:") || value.contains("{{vault:"))
-                || template
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| String::from_utf8_lossy(body).contains("{{vault:"))
-            {
-                if store.loading {
-                    return Err("Secrets are still loading. Try sending again in a moment.".into());
-                }
-                if let Some(error) = &store.secret_error {
-                    return Err(error.clone());
-                }
-            }
-            template
-                .resolve_variables(&values)
-                .map(|request| outgoing_request(&request))
-                .map_err(|error| error.to_string())
-        });
+        let secret_error = if store.loading {
+            Some("Secrets are still loading. Try sending again in a moment.")
+        } else {
+            store.secret_error.as_deref()
+        };
+        let request = store
+            .values(&scope.read(cx).path)
+            .and_then(|values| resolve_request(&self.request, values, secret_error));
         let request = match request {
             Ok(request) => request,
             Err(error) => {

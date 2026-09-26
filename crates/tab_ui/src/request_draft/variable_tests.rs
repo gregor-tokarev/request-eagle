@@ -215,3 +215,93 @@ fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request
         });
     });
 }
+
+#[gpui_kit::test]
+fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let a = directory.path().join("A");
+    let b = directory.path().join("B");
+    std::fs::create_dir(&a).unwrap();
+    std::fs::write(a.join("environment.toml"), "base_url = 'original'").unwrap();
+    let (draft, cx) = setup(cx);
+
+    cx.update(|_, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_variable_environment(&a.join("request.toml"), 0, cx);
+            std::fs::rename(&a, &b).unwrap();
+            draft.set_variable_environment(&b.join("request.toml"), 0, cx);
+            std::fs::write(b.join("environment.toml"), "base_url = 'updated'").unwrap();
+            std::fs::rename(&b, &a).unwrap();
+            draft.set_variable_environment(&a.join("request.toml"), 0, cx);
+
+            let path = draft.variables(cx).read(cx).path.clone();
+            assert_eq!(
+                VariableStore::global(cx)
+                    .read(cx)
+                    .values(&path)
+                    .unwrap()
+                    .environment["base_url"],
+                "updated"
+            );
+
+            // Reopening a request must also refresh a reused path before preparation.
+            std::fs::write(a.join("environment.toml"), "base_url = 'reopened'").unwrap();
+            let mut reopened = RequestDraft::new();
+            reopened.set_variable_environment(&a.join("request.toml"), 0, cx);
+            assert!(reopened.variable_scope.is_none());
+            assert_eq!(
+                VariableStore::global(cx)
+                    .read(cx)
+                    .values(&path)
+                    .unwrap()
+                    .environment["base_url"],
+                "reopened"
+            );
+        })
+    });
+}
+
+#[test]
+fn spaced_vault_references_report_keyring_status_in_every_request_field() {
+    use super::execution::resolve_request;
+    use environment::VariableValues;
+    use request::HttpRequest;
+
+    let values = VariableValues {
+        secrets: [("token".into(), "cached-secret".into())].into(),
+        ..Default::default()
+    };
+    for field in 0..6 {
+        let mut request = HttpRequest {
+            method: Method::Post,
+            path: "http://example.com".into(),
+            ..Default::default()
+        };
+        let token = "{{ vault:token }}".to_owned();
+        match field {
+            0 => request.path.push_str(&format!("/{token}")),
+            1 => request.headers.push((token, "value".into())),
+            2 => request.headers.push(("Authorization".into(), token)),
+            3 => request.query = Some(vec![(token, "value".into())]),
+            4 => request.query = Some(vec![("token".into(), token)]),
+            _ => request.body = Some(token.into_bytes()),
+        }
+        assert!(resolve_request(&request, values.clone(), None).is_ok());
+        for error in ["Secrets are still loading", "Unlock your keyring"] {
+            assert_eq!(
+                resolve_request(&request, values.clone(), Some(error)).unwrap_err(),
+                error
+            );
+        }
+    }
+
+    let request = HttpRequest {
+        path: "http://example.com".into(),
+        body: Some(b"{{ vault:token }}".to_vec()),
+        ..Default::default()
+    };
+    assert!(
+        resolve_request(&request, values, Some("Keyring unavailable")).is_ok(),
+        "GET excludes the body before resolution"
+    );
+}

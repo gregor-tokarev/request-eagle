@@ -106,10 +106,18 @@ impl RequestDraft {
         folder_depth: usize,
         cx: &mut App,
     ) {
-        self.variable_path = request_path
+        let path = request_path
             .ancestors()
             .nth(folder_depth + 1)
             .map(|path| path.join("environment.toml"));
+
+        if self.variable_path != path {
+            // A collection can move back to a previously used path. Reload the
+            // destination even for a new tab, whose scope is still unprepared.
+            VariableStore::global(cx).update(cx, |store, cx| store.reload_environment(&path, cx));
+        }
+        self.variable_path = path;
+
         if let Some(scope) = &self.variable_scope {
             scope.update(cx, |scope, cx| {
                 scope.path = self.variable_path.clone();

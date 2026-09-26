@@ -4,6 +4,70 @@ use gpui_kit::TestAppContext;
 
 use super::VariableStore;
 
+struct DialogHost;
+
+impl gpui_kit::Render for DialogHost {
+    fn render(
+        &mut self,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{ParentElement as _, Styled as _};
+        gpui_kit::div()
+            .size_full()
+            .children(gpui_kit::component::Root::render_dialog_layer(window, cx))
+    }
+}
+
+#[gpui_kit::test]
+fn selecting_an_existing_secret_preserves_its_value_in_a_masked_editor(cx: &mut TestAppContext) {
+    use gpui_kit::{
+        AppContext as _, Modifiers,
+        component::{Root, WindowExt as _},
+    };
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        cx.set_reduce_motion(true);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+        VariableStore::global(cx).update(cx, |store, _| {
+            store.environments.insert(None, Default::default());
+            store
+                .secrets
+                .insert("token".into(), "keep-existing-value".into());
+        });
+    });
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let host = cx.new(|_| DialogHost);
+        Root::new(host, window, cx)
+    });
+    cx.update(|window, cx| {
+        let scope = cx.new(|_| super::VariableScope { path: None });
+        super::open_manager(scope, window, cx);
+    });
+    for selector in ["variable-source-Secrets", "variable-manager-entry-0"] {
+        cx.run_until_parked();
+        // Mount the dialog before measuring its reduced-motion position.
+        for _ in 0..2 {
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+        }
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("missing {selector}"));
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    }
+    cx.update(|window, cx| {
+        let focused = window.focused_input(cx).unwrap();
+        let input = focused.as_input().unwrap().read(cx);
+        assert_eq!(input.value(), "keep-existing-value");
+        assert!(input.presentation().is_masked());
+    });
+}
+
 #[gpui_kit::test]
 async fn environment_edits_persist_and_failed_saves_preserve_existing_values(
     cx: &mut TestAppContext,
