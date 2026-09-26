@@ -13,6 +13,7 @@ pub(crate) enum RequestSection {
     Params,
     Headers,
     Body,
+    Scripts,
 }
 
 /// An editable HTTP request snapshot owned by one tab, independent of collection storage.
@@ -28,6 +29,8 @@ pub struct RequestDraft {
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) script_editors: [Option<Entity<EditorState>>; 2],
+    pub(super) script_phase: request::ScriptPhase,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
@@ -64,6 +67,8 @@ impl RequestDraft {
             headers: None,
             generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
+            script_editors: [None, None],
+            script_phase: request::ScriptPhase::PreRequest,
             response: None,
             split: None,
             task: None,
@@ -111,6 +116,8 @@ impl RequestDraft {
 
         if self.section == RequestSection::Body {
             self.body_state(window, cx);
+        } else if self.section == RequestSection::Scripts {
+            self.script_state(window, cx);
         } else {
             self.fields_state(window, cx);
         }
@@ -298,6 +305,7 @@ impl Render for RequestConfiguration {
                 let content = match draft.section {
                     RequestSection::Headers | RequestSection::Params => draft.fields(window, cx),
                     RequestSection::Body => draft.body(window, cx),
+                    RequestSection::Scripts => draft.scripts(window, cx),
                 };
 
                 v_flex()

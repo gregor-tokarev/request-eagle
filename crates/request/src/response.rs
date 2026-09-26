@@ -8,6 +8,8 @@ pub struct Execution {
     pub response: Response,
     /// Time from dispatch until the complete response has been read.
     pub elapsed: Duration,
+    /// Results from request-level scripts, in execution order.
+    pub scripts: Vec<crate::ScriptReport>,
 }
 
 #[derive(Debug)]

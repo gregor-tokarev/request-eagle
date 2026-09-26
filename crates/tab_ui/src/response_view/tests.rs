@@ -10,6 +10,7 @@ fn response(body: &[u8], content_type: &str) -> ResponseContent {
     headers.insert("content-type", content_type.parse().unwrap());
 
     ResponseContent::new(Execution {
+        scripts: Vec::new(),
         elapsed: Duration::from_millis(239),
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,

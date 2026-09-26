@@ -154,6 +154,7 @@ request_custom = 'keep the request metadata'
     )
     .unwrap();
     let updated = HttpRequest {
+        scripts: Default::default(),
         method: Method::Post,
         path: "https://example.com/v2/users".into(),
         headers: vec![("Accept".into(), "application/json".into())],

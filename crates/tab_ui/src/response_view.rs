@@ -2,6 +2,7 @@ mod body;
 mod content;
 mod headers;
 mod metadata;
+mod scripts;
 mod search;
 mod timing;
 mod view;

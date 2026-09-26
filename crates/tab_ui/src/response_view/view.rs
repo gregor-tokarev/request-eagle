@@ -11,6 +11,8 @@ enum Section {
     Body,
     Cookies,
     Headers,
+    Tests,
+    Console,
 }
 
 pub struct ResponseView {
@@ -21,6 +23,7 @@ pub struct ResponseView {
     pub(super) message: SharedString,
     pub(super) loading: bool,
     error: bool,
+    pub(super) scripts: Vec<request::ScriptReport>,
     section: Section,
     pub(super) pretty: bool,
     pub(super) wrap: bool,
@@ -42,6 +45,7 @@ impl ResponseView {
             message: "Send a request to see the response".into(),
             loading: false,
             error: false,
+            scripts: Vec::new(),
             section: Section::Body,
             pretty: false,
             wrap: true,
@@ -56,6 +60,7 @@ impl ResponseView {
 
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
         self.content = None;
+        self.scripts.clear();
         self.editor = None;
         self.editor_view = None;
         self.body_search = None;
@@ -81,9 +86,16 @@ impl ResponseView {
         self.loading = false;
         self.body_search = None;
         self.virtual_body = None;
+        self.scripts.clear();
 
         match result {
             Ok(content) => {
+                self.scripts = content.execution.scripts.clone();
+                if self.scripts.iter().any(|report| {
+                    report.error.is_some() || report.tests.iter().any(|test| test.error.is_some())
+                }) {
+                    self.section = Section::Tests;
+                }
                 self.headers_list.reset(content.headers.len());
                 self.cookies_list.reset(content.cookies.len());
                 self.pretty = content.pretty.is_some();
@@ -93,6 +105,13 @@ impl ResponseView {
                 self.error = false;
             }
             Err(error) => {
+                if let ExecutionError::Script { report, .. } = &error {
+                    self.scripts = vec![(**report).clone()];
+                    self.section = Section::Tests;
+                }
+                if let ExecutionError::ScriptedRequest { reports, .. } = &error {
+                    self.scripts = reports.clone();
+                }
                 self.content = None;
                 self.editor = None;
                 self.editor_view = None;
@@ -130,6 +149,16 @@ impl ResponseView {
                             (Section::Body, "Body", 0),
                             (Section::Cookies, "Cookies", cookies),
                             (Section::Headers, "Headers", headers),
+                            (
+                                Section::Tests,
+                                "Test Results",
+                                self.scripts.iter().map(|report| report.tests.len()).sum(),
+                            ),
+                            (
+                                Section::Console,
+                                "Console",
+                                self.scripts.iter().map(|report| report.logs.len()).sum(),
+                            ),
                         ]
                         .into_iter()
                         .map(|(section, label, count)| {
@@ -162,11 +191,22 @@ impl ResponseView {
 
 impl Render for ResponseView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = if self.content.is_some() {
+        let content = if self.section == Section::Tests
+            && !self.loading
+            && (self.content.is_some() || !self.scripts.is_empty())
+        {
+            self.script_results(false, cx)
+        } else if self.section == Section::Console
+            && !self.loading
+            && (self.content.is_some() || !self.scripts.is_empty())
+        {
+            self.script_results(true, cx)
+        } else if self.content.is_some() {
             match self.section {
                 Section::Body => self.body(cx),
                 Section::Headers => self.headers(false, cx),
                 Section::Cookies => self.headers(true, cx),
+                Section::Tests | Section::Console => unreachable!(),
             }
         } else {
             v_flex()
@@ -217,7 +257,22 @@ impl Render for ResponseView {
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().border)
-            .when(self.content.is_some(), |view| view.child(self.toolbar(cx)))
+            .when(self.content.is_some() || !self.scripts.is_empty(), |view| {
+                view.child(self.toolbar(cx))
+            })
+            .when(
+                self.error
+                    && !self.scripts.is_empty()
+                    && self.scripts.iter().all(|report| report.error.is_none()),
+                |view| {
+                    view.child(
+                        div()
+                            .px_2()
+                            .text_color(cx.theme().danger)
+                            .child(self.message.clone()),
+                    )
+                },
+            )
             .child(content)
             // Root owns the active scope. While a hover card is open, exclude
             // the response behind it from that scope; the card opts back in.

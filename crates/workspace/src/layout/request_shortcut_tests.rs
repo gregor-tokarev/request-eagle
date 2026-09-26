@@ -17,9 +17,9 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
     cx.executor().allow_parking();
     let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/shortcut", listener.local_addr().unwrap());
-    let (sent, received) = smol::channel::bounded(3);
+    let (sent, received) = smol::channel::bounded(4);
     let server = smol::spawn(async move {
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut head = Vec::new();
             while !head.ends_with(b"\r\n\r\n") {
@@ -83,9 +83,23 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
     cx.simulate_click(body.center(), Modifiers::default());
     cx.simulate_input("{\"hello\":true}");
 
-    for selector in ["request-url", "request-body", "response-body"] {
+    for selector in [
+        "request-url",
+        "request-body",
+        "response-body",
+        "script-editor",
+    ] {
+        if selector == "script-editor" {
+            let tab = element_bounds(cx, "request-section-Scripts").unwrap();
+            cx.simulate_click(tab.center(), Modifiers::default());
+        }
         let bounds = element_bounds(cx, selector).unwrap();
         cx.simulate_click(bounds.center(), Modifiers::default());
+        if selector == "script-editor" {
+            // Keep a valid script with the completion menu open when sending.
+            cx.simulate_input("pm.variables.c");
+            cx.run_until_parked();
+        }
         cx.simulate_keystrokes("secondary-enter");
         let started = std::time::Instant::now();
         while cx.read(|cx| active.read(cx).is_sending()) {
@@ -110,6 +124,12 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             );
             assert!(!first.read(cx).is_sending());
             assert!(first.read(cx).request.path.is_empty());
+            if selector == "script-editor" {
+                assert_eq!(
+                    active.read(cx).request.scripts.pre_request,
+                    "pm.variables.c"
+                );
+            }
         });
     }
     server.await;

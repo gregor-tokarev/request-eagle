@@ -33,19 +33,37 @@ impl RequestExecutor {
         let executor = self.clone();
 
         async move {
-            let started_at = Instant::now();
+            let cancellation = crate::scripts::Cancellation::new();
             let run = async {
-                let response = match request {
-                    Request::Http(request) => Response::Http(executor.http.execute(request).await?),
-                };
+                match request {
+                    Request::Http(request) => {
+                        let (request, variables, scripts) =
+                            crate::scripts::pre_request(request, cancellation.0.clone()).await?;
+                        let sent_at = Instant::now();
+                        let post_request = (!request.scripts.post_response.trim().is_empty())
+                            .then(|| request.clone());
+                        let response = executor.http.execute(request).await.map_err(|error| {
+                            if scripts.is_empty() {
+                                error
+                            } else {
+                                ExecutionError::ScriptedRequest {
+                                    source: Box::new(error),
+                                    reports: scripts.clone(),
+                                }
+                            }
+                        })?;
+                        let execution = Execution {
+                            response: Response::Http(response),
+                            elapsed: sent_at.elapsed(),
+                            scripts,
+                        };
 
-                Ok(Execution {
-                    response,
-                    elapsed: started_at.elapsed(),
-                })
+                        Ok((post_request, variables, execution))
+                    }
+                }
             };
 
-            match executor.timeout {
+            let (post_request, variables, execution) = match executor.timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;
@@ -55,6 +73,19 @@ impl RequestExecutor {
                     .await
                 }
                 None => run.await,
+            }?;
+
+            // Once the response is complete, its script uses the separate script
+            // deadline. A request timeout must not discard a received response.
+            match post_request {
+                Some(request) => Ok(crate::scripts::post_response(
+                    request,
+                    variables,
+                    execution,
+                    cancellation.0.clone(),
+                )
+                .await),
+                None => Ok(execution),
             }
         }
     }

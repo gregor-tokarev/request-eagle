@@ -30,6 +30,7 @@ fn standard_html_editor_benchmark(cx: &mut TestAppContext) {
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "text/html".parse().unwrap());
     let content = ResponseContent::new(Execution {
+        scripts: Vec::new(),
         elapsed: Duration::from_millis(1),
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,
