@@ -1,7 +1,7 @@
 # Request variables walkthrough
 
-This recording uses a disposable collection, a private OS keyring, synthetic credentials, and a localhost echo server.
+Recorded from application commit e31872a, with a disposable collection, private OS keyring, synthetic credentials, and localhost echo server.
 
-It demonstrates environment/secret management, URL/query/header/body completion, generated values, unresolved-variable errors, successful HTTP execution, and saving placeholders.
+Shows environment management, preserving an unchanged secret in its masked editor, URL/query/header/body completion, generated values, unresolved-variable errors, successful execution, and saving placeholders.
 
-[Watch the 73-second recording](request-variables.mp4)
+[Watch the 65-second recording](request-variables.mp4)
