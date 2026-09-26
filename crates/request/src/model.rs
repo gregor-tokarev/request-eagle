@@ -19,6 +19,8 @@ pub struct HttpRequest {
     pub body: Option<Vec<u8>>,
     #[serde(default)]
     pub query: Option<Vec<(String, String)>>,
+    #[serde(default, skip_serializing_if = "crate::RequestScripts::is_empty")]
+    pub scripts: crate::RequestScripts,
 }
 
 impl From<HttpRequest> for Request {

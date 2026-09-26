@@ -18,6 +18,9 @@ mod proxy;
 mod redirects;
 mod response;
 mod response_encoding;
+mod scripts;
+
+pub use scripts::{RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;

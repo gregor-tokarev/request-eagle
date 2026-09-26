@@ -34,6 +34,7 @@ fn check_scroll_allocations(cx: &mut TestAppContext, body: String) {
     let expected = body.len();
     assert!(expected > 10 * 1024 * 1024);
     let content = ResponseContent::new(Execution {
+        scripts: Vec::new(),
         elapsed: Duration::from_millis(1),
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,
@@ -159,6 +160,7 @@ fn moderate_raw_html_uses_plain_viewer_with_bounded_scroll_allocations(cx: &mut 
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "text/html".parse().unwrap());
     let content = ResponseContent::new(Execution {
+        scripts: Vec::new(),
         elapsed: Duration::from_millis(1),
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,

@@ -18,6 +18,7 @@ request collections in local, readable files.
 - Requests stored as TOML, ready to keep in version control.
 - Collections and nested folders to organize your APIs.
 - Search across request names, methods, and URLs.
+- [Request scripts](docs/scripting.md) with pre-request logic, response tests and console output.
 - Light and dark themes with customizable keyboard shortcuts.
 
 The project is in early development. macOS builds are available for Apple Silicon.

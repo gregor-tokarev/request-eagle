@@ -9,7 +9,7 @@ test-support = []
 [dependencies]
 aho-corasick = "1"
 collection = { path = "../collection" }
-gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html"] }
+gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html", "tree-sitter-javascript"] }
 preferences = { path = "../preferences" }
 request = { path = "../request" }
 serde_json = "1"

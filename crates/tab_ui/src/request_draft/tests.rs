@@ -8,7 +8,7 @@ use super::{RequestDraft, draft::RequestSection, execution::outgoing_request};
 
 // Debug selectors are collected only during layout, not replayed from cached
 // controls. Refresh before querying geometry; interactions still use real input.
-fn element_bounds(
+pub(super) fn element_bounds(
     cx: &mut VisualTestContext,
     selector: &'static str,
 ) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
@@ -16,7 +16,7 @@ fn element_bounds(
     cx.debug_bounds(selector)
 }
 
-fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
+pub(super) fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         preferences::init(cx);
@@ -38,6 +38,11 @@ fn prepares_json_requests_without_mutating_the_draft() {
         body: Some(b"{\"hello\":true}".to_vec()),
         ..HttpRequest::default()
     };
+    let templated = HttpRequest {
+        path: "{{baseUrl}}/echo".into(),
+        ..Default::default()
+    };
+    assert_eq!(outgoing_request(&templated).path, "{{baseUrl}}/echo");
     let outgoing = outgoing_request(&original);
     assert_eq!(outgoing.path, "https://ifconfig.me/ip");
     assert_eq!(

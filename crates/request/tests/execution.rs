@@ -102,6 +102,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
                 ("X-Tag".into(), "two".into()),
             ],
             body: Some(vec![0, 255, 42]),
+            scripts: Default::default(),
             query: Some(vec![
                 ("tag".into(), "a & b".into()),
                 ("tag".into(), "c+d".into()),
@@ -1069,4 +1070,37 @@ fn preserves_serialized_request_and_preference_formats() {
         serde_json::to_value(&preferences).unwrap()["follow_all_redirects"],
         false
     );
+}
+
+#[test]
+fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
+    smol::block_on(async {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"success\":true}";
+        let (url, server) = serve(response.to_vec()).await;
+        let draft = HttpRequest {
+            method: Method::Post,
+            path: format!("{url}/{{{{resource}}}}"),
+            body: Some(br#"{"name":"{{name}}"}"#.to_vec()),
+            scripts: request::RequestScripts {
+                pre_request: "pm.variables.set('resource', 'echo'); pm.variables.set('name', 'Eagle'); pm.request.headers.upsert({key: 'X-Script', value: 'ran'});".into(),
+                post_response: "pm.test('status', () => pm.response.to.have.status(200)); pm.test('json', () => pm.expect(pm.response.json()).to.have.property('success', true)); pm.test('vars', () => pm.expect(pm.variables.get('name')).to.equal('Eagle'));".into(),
+            },
+            ..Default::default()
+        };
+        let execution = executor().execute(&draft).await.unwrap();
+        let received = server.await;
+        assert!(received.head.starts_with("POST /echo HTTP/1.1"));
+        assert!(received.head.to_lowercase().contains("x-script: ran"));
+        assert_eq!(received.body, br#"{"name":"Eagle"}"#);
+        assert_eq!(execution.scripts.len(), 2);
+        assert_eq!(execution.scripts[1].tests.len(), 3);
+        assert!(
+            execution.scripts[1]
+                .tests
+                .iter()
+                .all(|test| test.error.is_none())
+        );
+        assert!(draft.path.ends_with("{{resource}}"));
+        assert!(draft.headers.is_empty());
+    });
 }

@@ -210,6 +210,7 @@ impl RequestDraft {
             ("Params", Some(RequestSection::Params)),
             ("Headers", Some(RequestSection::Headers)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
+            ("Scripts", Some(RequestSection::Scripts)),
         ];
 
         h_flex().flex_none().gap_2().min_w_0().child(
@@ -227,6 +228,10 @@ impl RequestDraft {
                         }
                         Some(RequestSection::Headers) => {
                             self.request.headers.len() + self.generated_headers.len()
+                        }
+                        Some(RequestSection::Scripts) => {
+                            usize::from(!self.request.scripts.pre_request.is_empty())
+                                + usize::from(!self.request.scripts.post_response.is_empty())
                         }
                         _ => 0,
                     };

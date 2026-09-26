@@ -120,3 +120,42 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
     );
     assert_eq!(registry.collections()[0].entries.len(), 2);
 }
+
+#[test]
+fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
+    let fixture = Fixture::new();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let collection = registry.create_collection().unwrap();
+    let path = registry.create_request(&collection).unwrap();
+    let original = crate::FileEntry::from_path(&path).unwrap();
+    let Request::Http(mut request) = original.request;
+    assert!(request.scripts.is_empty());
+    request.scripts.pre_request = "pm.variables.set('token', 'abc');\nconsole.log('ready');".into();
+    request.scripts.post_response = "pm.test('ok', () => pm.response.to.have.status(200));".into();
+    registry
+        .update_request(&path, &original.id, Request::Http(request.clone()))
+        .unwrap();
+    let reloaded = crate::FileEntry::from_path(&path).unwrap();
+    let Request::Http(saved) = reloaded.request;
+    assert_eq!(saved.scripts, request.scripts);
+    assert_eq!(reloaded.name, original.name);
+
+    // Clear only one phase, then both. Stale TOML fields must not reappear.
+    request.scripts.pre_request.clear();
+    registry
+        .update_request(&path, &original.id, Request::Http(request.clone()))
+        .unwrap();
+    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request;
+    assert_eq!(saved.scripts, request.scripts);
+    request.scripts.post_response.clear();
+    registry
+        .update_request(&path, &original.id, Request::Http(request))
+        .unwrap();
+    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request;
+    assert!(saved.scripts.is_empty());
+    assert!(
+        !fs::read_to_string(path)
+            .unwrap()
+            .contains("[request.scripts]")
+    );
+}

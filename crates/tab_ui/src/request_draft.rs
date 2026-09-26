@@ -2,6 +2,10 @@ mod body;
 mod controls;
 mod draft;
 mod execution;
+mod scripts;
+
+#[cfg(test)]
+mod script_tests;
 
 #[cfg(test)]
 mod header_tests;

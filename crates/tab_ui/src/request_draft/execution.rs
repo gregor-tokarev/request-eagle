@@ -8,7 +8,7 @@ use super::draft::RequestDraft;
 fn request_url(path: &str) -> String {
     let path = path.trim();
 
-    if !path.is_empty() && !path.contains("://") {
+    if !path.is_empty() && !path.contains("://") && !path.starts_with("{{") {
         format!("https://{path}")
     } else {
         path.to_owned()
