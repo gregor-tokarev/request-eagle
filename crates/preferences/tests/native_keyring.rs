@@ -40,7 +40,7 @@ fn main() {
     gpui_kit::application().run(move |cx: &mut App| {
         cx.spawn(async move |cx| {
             let check = if let Some((name, value)) = secret_worker {
-                cx.update(|cx| preferences::update_request_secret(name, value, cx))
+                cx.update(|cx| preferences::update_request_secret(None, name, value, cx))
                     .await
                     .map(|_| ())
             } else if request_secrets {
@@ -150,6 +150,7 @@ async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
     );
     ensure!(
         cx.update(|cx| preferences::update_request_secret(
+            None,
             "test".into(),
             Some("synthetic".into()),
             cx
@@ -198,6 +199,7 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
         let values = cx
             .update(|cx| {
                 preferences::update_request_secret(
+                    None,
                     name.clone(),
                     Some("synthetic-request-secret".into()),
                     cx,
@@ -217,7 +219,7 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
         cx.update(|cx| preferences::write_request_secrets(&external, cx))
             .await?;
         let remaining = cx
-            .update(|cx| preferences::update_request_secret(name.clone(), None, cx))
+            .update(|cx| preferences::update_request_secret(None, name.clone(), None, cx))
             .await?;
         ensure!(!remaining.contains_key(&name));
         ensure!(remaining.get(&peer).map(String::as_str) == Some("external update"));
@@ -254,6 +256,34 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
                 "A concurrent secret edit was lost"
             );
         }
+        let renamed = format!("variable-renamed-{}", uuid::Uuid::new_v4());
+        let values = cx
+            .update(|cx| {
+                preferences::update_request_secret(
+                    Some(peer.clone()),
+                    renamed.clone(),
+                    Some("external update".into()),
+                    cx,
+                )
+            })
+            .await?;
+        ensure!(!values.contains_key(&peer));
+        ensure!(values.get(&renamed).map(String::as_str) == Some("external update"));
+        ensure!(
+            cx.update(|cx| preferences::update_request_secret(
+                Some(renamed.clone()),
+                concurrent_names[0].clone(),
+                Some("must not replace".into()),
+                cx
+            ))
+            .await
+            .is_err()
+        );
+        ensure!(
+            cx.update(|cx| preferences::read_request_secrets(cx))
+                .await?
+                == values
+        );
         Ok(())
     }
     .await;

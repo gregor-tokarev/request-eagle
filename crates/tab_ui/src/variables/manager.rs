@@ -123,8 +123,9 @@ impl VariableManager {
             return;
         }
         self.pending_entry = Some((name.clone(), value.clone()));
+        let previous_name = self.selected_entry.as_ref().map(|(name, _)| name.clone());
         self.store.update(cx, |store, cx| {
-            store.save_entry(scope, self.secret, name, Some(value), cx)
+            store.save_entry(scope, self.secret, previous_name, name, Some(value), cx)
         });
         self.error = None;
         cx.notify();
@@ -265,6 +266,7 @@ impl Render for VariableManager {
                                     store.save_entry(
                                         scope,
                                         this.secret,
+                                        None,
                                         delete_name.clone(),
                                         None,
                                         cx,

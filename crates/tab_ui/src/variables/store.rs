@@ -82,9 +82,28 @@ impl VariableStore {
 
     pub fn reload_environment(&mut self, scope: &Option<PathBuf>, cx: &mut Context<Self>) {
         self.save_error = None;
-        self.environments.remove(scope);
-        self.environment_errors.remove(scope);
-        self.ensure_environment(scope, cx);
+        let target = Self::environment_path(scope).and_then(|path| path.canonicalize().ok());
+        let mut scopes = vec![scope.clone()];
+        if let Some(target) = target {
+            for alias in self
+                .environments
+                .keys()
+                .chain(self.environment_errors.keys())
+            {
+                if !scopes.contains(alias)
+                    && Self::environment_path(alias)
+                        .and_then(|path| path.canonicalize().ok())
+                        .is_some_and(|path| path == target)
+                {
+                    scopes.push(alias.clone());
+                }
+            }
+        }
+        for scope in scopes {
+            self.environments.remove(&scope);
+            self.environment_errors.remove(&scope);
+            self.ensure_environment(&scope, cx);
+        }
     }
 
     pub fn load_secrets(&mut self, cx: &mut Context<Self>) {
@@ -118,6 +137,7 @@ impl VariableStore {
         &mut self,
         scope: Option<PathBuf>,
         secret: bool,
+        previous_name: Option<String>,
         name: String,
         value: Option<String>,
         cx: &mut Context<Self>,
@@ -128,13 +148,18 @@ impl VariableStore {
         self.saving = true;
         self.save_error = None;
         let task = if secret {
-            preferences::update_request_secret(name, value, cx)
+            preferences::update_request_secret(previous_name, name, value, cx)
         } else {
             let path = Self::environment_path(&scope);
             cx.background_executor().spawn(async move {
                 let path =
                     path.ok_or_else(|| anyhow::anyhow!("Could not locate the environment file."))?;
-                super::environment_file::save_entry(&path, &name, value.as_deref())
+                super::environment_file::save_entry(
+                    &path,
+                    previous_name.as_deref(),
+                    &name,
+                    value.as_deref(),
+                )
             })
         };
         self.save_task = Some(cx.spawn(async move |this, cx| {
@@ -145,10 +170,7 @@ impl VariableStore {
                     Ok(values) if secret => {
                         this.secrets = values;
                     }
-                    Ok(values) => {
-                        this.environments.insert(scope.clone(), values);
-                        this.environment_errors.remove(&scope);
-                    }
+                    Ok(_) => this.reload_environment(&scope, cx),
                     Err(error) => {
                         if secret {
                             this.secret_error = Some(error.to_string());

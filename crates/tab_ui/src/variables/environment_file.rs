@@ -5,6 +5,7 @@ use toml_edit::{DocumentMut, Item, Value};
 
 pub(super) fn save_entry(
     path: &Path,
+    previous_name: Option<&str>,
     name: &str,
     value: Option<&str>,
 ) -> anyhow::Result<HashMap<String, String>> {
@@ -15,6 +16,24 @@ pub(super) fn save_entry(
         Err(error) => return Err(error.into()),
     };
     let path = target.as_deref().unwrap_or(path);
+    let parent = path
+        .parent()
+        .context("The environment file needs a parent directory.")?;
+    fs::create_dir_all(parent)?;
+    let mut lock_name = std::ffi::OsString::from(".");
+    lock_name.push(
+        path.file_name()
+            .context("The environment file needs a name.")?,
+    );
+    lock_name.push(".lock");
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(parent.join(lock_name))?;
+    lock.lock()?;
+
     let source = match fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -32,6 +51,16 @@ pub(super) fn save_entry(
         .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
     if let Some(value) = value {
+        if let Some(previous) = previous_name.filter(|previous| *previous != name) {
+            anyhow::ensure!(
+                !entries.contains_key(name),
+                "A variable with that name already exists."
+            );
+            if let Some(item) = document.remove(previous) {
+                document[name] = item;
+            }
+            entries.remove(previous);
+        }
         if entries.get(name).map(String::as_str) != Some(value) {
             let mut replacement = Value::from(value);
             if let Some(previous) = document.get(name).and_then(Item::as_value) {
@@ -45,10 +74,6 @@ pub(super) fn save_entry(
         entries.remove(name);
     }
 
-    let parent = path
-        .parent()
-        .context("The environment file needs a parent directory.")?;
-    fs::create_dir_all(parent)?;
     let permissions = match fs::metadata(path) {
         Ok(metadata) => {
             anyhow::ensure!(
@@ -66,6 +91,15 @@ pub(super) fn save_entry(
         temporary.as_file().set_permissions(permissions)?;
     }
     temporary.as_file().sync_all()?;
+    let current = match fs::read_to_string(path) {
+        Ok(current) => current,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        current == source,
+        "The environment file changed while saving. Reload it and retry."
+    );
     temporary.persist(path)?;
     Ok(entries)
 }

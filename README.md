@@ -108,6 +108,10 @@ their values. Disabled rows, URL fragments, and bodies excluded by GET/HEAD are
 not resolved. Untouched variable editors reload their source on Save, preserving
 external updates. Secret edits are serialized across app processes by an empty
 `~/.request-eagle/request-secrets.lock` file.
+Environment edits use an empty lock file beside their target and refresh all
+collections sharing that target. Renaming a selected variable removes the old
+name and rejects an existing destination name; update request references to the
+new name as needed.
 
 Response header and cookie names and values support text selection and copying.
 Hover over status, response time, or size for selectable details. Timings include

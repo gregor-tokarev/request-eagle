@@ -5,6 +5,7 @@ use gpui_kit::{App, Task};
 
 /// Apply one edit to the current keyring contents, rather than a UI snapshot.
 pub fn update_request_secret(
+    previous_name: Option<String>,
     name: String,
     value: Option<String>,
     cx: &mut App,
@@ -31,6 +32,13 @@ pub fn update_request_secret(
         let _lock = lock.await?;
         let mut values = cx.update(|cx| read_request_secrets(cx)).await?;
         if let Some(value) = value {
+            if let Some(previous) = previous_name.filter(|previous| previous != &name) {
+                anyhow::ensure!(
+                    !values.contains_key(&name),
+                    "A variable with that name already exists."
+                );
+                values.remove(&previous);
+            }
             values.insert(name, value);
         } else {
             values.remove(&name);
