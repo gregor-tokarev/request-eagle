@@ -27,28 +27,27 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
                 let store = store.read(cx);
                 let saving = store.saving;
                 let save_succeeded = store.save_error.is_none();
-                if !saving
-                    && let Some(entry) = this.pending_entry.take()
-                    && save_succeeded
-                {
-                    let saved_value = if this.secret {
-                        store.secrets.get(&entry.0)
-                    } else {
-                        store
-                            .environments
-                            .get(&this.scope.read(cx).path)
-                            .and_then(|values| values.get(&entry.0))
-                    }
-                    .cloned()
-                    .unwrap_or_else(|| entry.1.clone());
+                if !saving && let Some(entry) = this.pending_entry.take() {
                     let editor_unchanged = this.name.read(cx).value().trim() == entry.0
                         && this.value.read(cx).value() == entry.1;
-                    if editor_unchanged {
+                    if !editor_unchanged {
+                        this.selected_entry = None;
+                    } else if save_succeeded {
+                        let saved_value = if this.secret {
+                            store.secrets.get(&entry.0)
+                        } else {
+                            store
+                                .environments
+                                .get(&this.scope.read(cx).path)
+                                .and_then(|values| values.get(&entry.0))
+                        }
+                        .cloned()
+                        .unwrap_or_else(|| entry.1.clone());
                         this.value.update(cx, |input, cx| {
                             input.set_value(saved_value.clone(), window, cx)
                         });
+                        this.selected_entry = Some((entry.0, saved_value));
                     }
-                    this.selected_entry = Some((entry.0, saved_value));
                 }
                 if !saving
                     && let Some(name) = this.pending_removal.take()

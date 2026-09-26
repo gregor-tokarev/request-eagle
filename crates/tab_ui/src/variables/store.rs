@@ -181,7 +181,10 @@ impl VariableStore {
                     Ok(_) => this.reload_environment(&scope, cx),
                     Err(error) => {
                         if secret {
-                            this.secret_error = Some(error.to_string());
+                            // An edit conflict or write failure does not imply that
+                            // reading other secrets is unavailable. Refresh the
+                            // source; only a failed read sets secret_error.
+                            this.load_secrets(cx);
                         } else {
                             this.reload_environment(&scope, cx);
                         }
