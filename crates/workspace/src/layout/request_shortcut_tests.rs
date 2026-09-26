@@ -95,6 +95,11 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
         }
         let bounds = element_bounds(cx, selector).unwrap();
         cx.simulate_click(bounds.center(), Modifiers::default());
+        if selector == "script-editor" {
+            // Keep a valid script with the completion menu open when sending.
+            cx.simulate_input("pm.variables.c");
+            cx.run_until_parked();
+        }
         cx.simulate_keystrokes("secondary-enter");
         let started = std::time::Instant::now();
         while cx.read(|cx| active.read(cx).is_sending()) {
@@ -119,6 +124,12 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             );
             assert!(!first.read(cx).is_sending());
             assert!(first.read(cx).request.path.is_empty());
+            if selector == "script-editor" {
+                assert_eq!(
+                    active.read(cx).request.scripts.pre_request,
+                    "pm.variables.c"
+                );
+            }
         });
     }
     server.await;

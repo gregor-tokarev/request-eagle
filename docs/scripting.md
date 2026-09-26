@@ -3,7 +3,18 @@
 Open an individual HTTP request, select **Scripts**, and choose **Pre-request**
 or **Post-response**. Each phase has its own JavaScript editor. **Snippets** inserts
 an example into the selected phase. **Send** (or the configured send shortcut)
-runs the scripts. Saving the request also saves both scripts; editing them marks
+runs the scripts.
+
+The editor suggests supported methods and properties as you type, including
+`pm.variables.`, `pm.request.headers.`, `pm.response.`, `pm.expect(...).to.be.`,
+`console.` and `JSON.`. The menu shows method parameters. Use Up/Down to choose,
+Enter or a click to insert the name, and Escape to dismiss. Type the arguments
+after accepting a method. Response APIs are suggested only in Post-response;
+comments and string literals do not open the menu. This completes the known
+scripting API rather than inferring types for arbitrary JavaScript variables.
+[Watch the close-up autocomplete demo](demos/script-autocomplete.mp4).
+
+Saving the request also saves both scripts; editing them marks
 the tab as an unsaved request draft. Collections and folders have no script editor.
 
 Pre-request scripts run before URL validation and HTTP dispatch. They can edit

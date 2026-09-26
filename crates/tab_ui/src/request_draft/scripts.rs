@@ -1,14 +1,18 @@
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::{Editor, EditorState, InputEvent},
+    input::{Editor, EditorState, Enter, Escape, InputEvent, MoveDown, MoveUp},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ScriptPhase;
+use std::rc::Rc;
 
-use super::RequestDraft;
+use super::{
+    RequestDraft,
+    script_completions::{ScriptCompletions, capture_completion_action},
+};
 
 const PRE_SNIPPETS: &[(&str, &str)] = &[
     ("Set a variable", "pm.variables.set(\"name\", \"value\");"),
@@ -67,7 +71,7 @@ impl RequestDraft {
             &self.request.scripts.post_response
         };
         let editor = cx.new(|cx| {
-            EditorState::new(window, cx)
+            let mut editor = EditorState::new(window, cx)
                 .language("javascript")
                 .line_number(true)
                 .soft_wrap(true)
@@ -76,7 +80,9 @@ impl RequestDraft {
                 } else {
                     "// Write tests to run after the response"
                 })
-                .default_value(value.clone())
+                .default_value(value.clone());
+            editor.lsp_mut().completion_provider = Some(Rc::new(ScriptCompletions(phase)));
+            editor
         });
         self._subscriptions.push(cx.subscribe(
             &editor,
@@ -181,6 +187,10 @@ impl RequestDraft {
                     .child(
                         div()
                             .debug_selector(|| "script-editor".into())
+                            .capture_action(capture_completion_action::<Enter>(&editor))
+                            .capture_action(capture_completion_action::<Escape>(&editor))
+                            .capture_action(capture_completion_action::<MoveUp>(&editor))
+                            .capture_action(capture_completion_action::<MoveDown>(&editor))
                             .flex_1()
                             .min_h_0()
                             .child(

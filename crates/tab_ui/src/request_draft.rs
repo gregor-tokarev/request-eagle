@@ -2,8 +2,11 @@ mod body;
 mod controls;
 mod draft;
 mod execution;
+mod script_completions;
 mod scripts;
 
+#[cfg(test)]
+mod script_completion_tests;
 #[cfg(test)]
 mod script_tests;
 
