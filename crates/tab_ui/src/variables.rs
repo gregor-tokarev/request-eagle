@@ -1,3 +1,4 @@
+mod environment_file;
 mod manager;
 mod store;
 #[cfg(test)]

@@ -4,6 +4,31 @@ use gpui_kit::TestAppContext;
 
 use super::VariableStore;
 
+#[test]
+fn environment_edits_preserve_comments_order_and_unrelated_formatting() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("environment.toml");
+    let original = "# Shared config\n\"base.url\"  =  'old' # server\n\n# Keep this note\nuntouched = '''literal value'''\nremove = 'temporary'\n# End of file\n";
+    std::fs::write(&path, original).unwrap();
+
+    super::environment_file::save_entry(&path, "base.url", Some("old")).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    let entries = super::environment_file::save_entry(&path, "base.url", Some("new")).unwrap();
+    assert_eq!(entries["base.url"], "new");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original.replace("'old'", "\"new\"")
+    );
+
+    super::environment_file::save_entry(&path, "remove", None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original
+            .replace("'old'", "\"new\"")
+            .replace("remove = 'temporary'\n", "")
+    );
+}
+
 struct DialogHost;
 
 impl gpui_kit::Render for DialogHost {

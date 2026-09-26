@@ -1,0 +1,64 @@
+use std::{collections::HashMap, fs, io::Write as _, path::Path};
+
+use anyhow::Context as _;
+use toml_edit::{DocumentMut, Item, Value};
+
+pub(super) fn save_entry(
+    path: &Path,
+    name: &str,
+    value: Option<&str>,
+) -> anyhow::Result<HashMap<String, String>> {
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let mut document = source.parse::<DocumentMut>()?;
+    let mut entries = document
+        .iter()
+        .map(|(name, item)| {
+            let value = item
+                .as_str()
+                .with_context(|| format!("Environment variable {name} must be a string."))?;
+            Ok((name.to_owned(), value.to_owned()))
+        })
+        .collect::<anyhow::Result<HashMap<_, _>>>()?;
+
+    if let Some(value) = value {
+        if entries.get(name).map(String::as_str) != Some(value) {
+            let mut replacement = Value::from(value);
+            if let Some(previous) = document.get(name).and_then(Item::as_value) {
+                *replacement.decor_mut() = previous.decor().clone();
+            }
+            document[name] = Item::Value(replacement);
+        }
+        entries.insert(name.to_owned(), value.to_owned());
+    } else {
+        document.remove(name);
+        entries.remove(name);
+    }
+
+    let parent = path
+        .parent()
+        .context("The environment file needs a parent directory.")?;
+    fs::create_dir_all(parent)?;
+    let permissions = match fs::metadata(path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                !metadata.permissions().readonly(),
+                "The environment file is read-only."
+            );
+            Some(metadata.permissions())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(document.to_string().as_bytes())?;
+    if let Some(permissions) = permissions {
+        temporary.as_file().set_permissions(permissions)?;
+    }
+    temporary.as_file().sync_all()?;
+    temporary.persist(path)?;
+    Ok(entries)
+}

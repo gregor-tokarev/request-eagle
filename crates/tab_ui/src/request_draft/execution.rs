@@ -22,12 +22,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     } else {
         0
     };
-    let mut headers = request::generated_headers(
-        request.method,
-        &request_url(&request.path),
-        &request.headers,
-        body_bytes,
-    );
+    let url = request_url(&request.path);
+    let templated_credentials = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
+        .and_then(|authority| authority.rsplit_once('@'))
+        .is_some_and(|(credentials, _)| credentials.contains("{{"));
+    let mut headers =
+        request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
     if supports_body
         && request.body.is_some()
@@ -49,8 +51,19 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.insert(0, ("Host".into(), "Resolved on Send".into()));
     }
 
+    if templated_credentials
+        && !headers.iter().any(|(name, _)| name == "Authorization")
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+    {
+        headers.push(("Authorization".into(), "Resolved on Send".into()));
+    }
+
     for (name, value) in &mut headers {
         if (name == "Host" && value.contains("{{"))
+            || (name == "Authorization" && templated_credentials)
             || (name == "Content-Length"
                 && request
                     .body
@@ -87,6 +100,7 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
 pub(super) fn resolve_request(
     request: &HttpRequest,
     mut values: environment::VariableValues,
+    environment_error: Option<&str>,
     secret_error: Option<&str>,
 ) -> Result<HttpRequest, String> {
     let mut template = request.clone();
@@ -95,7 +109,10 @@ pub(super) fn resolve_request(
     }
 
     // Let the resolver parse names, including whitespace, in every request field.
-    // Never use cached secrets while their store is loading or unavailable.
+    // Never use cached values while their source is unavailable.
+    if environment_error.is_some() {
+        values.environment.clear();
+    }
     if secret_error.is_some() {
         values.secrets.clear();
     }
@@ -103,11 +120,17 @@ pub(super) fn resolve_request(
         .resolve_variables(&values)
         .map(|request| outgoing_request(&request))
         .map_err(|error| {
-            if let environment::VariableError::Unknown(name) = &error
-                && name.starts_with("vault:")
-                && let Some(message) = secret_error
-            {
-                return message.to_owned();
+            if let environment::VariableError::Unknown(name) = &error {
+                let source_error = if name.starts_with("vault:") {
+                    secret_error
+                } else if name.starts_with('$') {
+                    None
+                } else {
+                    environment_error
+                };
+                if let Some(message) = source_error {
+                    return message.to_owned();
+                }
             }
             error.to_string()
         })
@@ -141,9 +164,11 @@ impl RequestDraft {
         } else {
             store.secret_error.as_deref()
         };
-        let request = store
-            .values(&scope.read(cx).path)
-            .and_then(|values| resolve_request(&self.request, values, secret_error));
+        let scope = &scope.read(cx).path;
+        let environment_error = store.environment_errors.get(scope).map(String::as_str);
+        let request = store.values(scope).and_then(|values| {
+            resolve_request(&self.request, values, environment_error, secret_error)
+        });
         let request = match request {
             Ok(request) => request,
             Err(error) => {

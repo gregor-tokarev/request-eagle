@@ -4,6 +4,51 @@ use request::Method;
 use super::{RequestDraft, draft::RequestSection};
 
 #[test]
+fn templated_url_credentials_preview_authorization_as_unresolved() {
+    for (path, expected) in [
+        (
+            "https://{{user}}:{{vault:password}}@example.com",
+            "Resolved on Send",
+        ),
+        (
+            "https://user:{{vault:password}}@example.com",
+            "Resolved on Send",
+        ),
+        (
+            "https://{{user}}:pass@{{host}}:{{port}}",
+            "Resolved on Send",
+        ),
+        (
+            "https://user:pass@example.com/{{path}}",
+            "Basic dXNlcjpwYXNz",
+        ),
+    ] {
+        let mut request = request::HttpRequest {
+            path: path.into(),
+            ..Default::default()
+        };
+        let headers = super::execution::generated_headers(&request);
+        assert_eq!(
+            headers
+                .iter()
+                .find(|(name, _)| name == "Authorization")
+                .map(|(_, value)| value.as_str()),
+            Some(expected),
+            "{path}"
+        );
+
+        request
+            .headers
+            .push(("AUTHORIZATION".into(), "Bearer explicit".into()));
+        assert!(
+            super::execution::generated_headers(&request)
+                .iter()
+                .all(|(name, _)| name != "Authorization")
+        );
+    }
+}
+
+#[test]
 fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
     for (path, expected) in [
         ("{{base_url}}/users", "Resolved on Send"),

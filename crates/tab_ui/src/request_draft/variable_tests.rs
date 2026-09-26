@@ -217,6 +217,101 @@ fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request
 }
 
 #[gpui_kit::test]
+async fn unavailable_environment_only_blocks_requests_using_environment_variables(
+    cx: &mut TestAppContext,
+) {
+    use smol::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use std::time::{Duration, Instant};
+
+    cx.executor().allow_parking();
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = smol::spawn(async move {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+            }
+            assert!(!String::from_utf8(head).unwrap().contains("{{"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        }
+    });
+    let (draft, cx) = setup(cx);
+    cx.update(|_, cx| {
+        let store = VariableStore::global(cx);
+        store.update(cx, |store, _| {
+            store
+                .environment_errors
+                .insert(None, "Invalid environment file".into());
+        });
+    });
+    for path in ["literal", "{{$guid}}", "{{vault:token}}"] {
+        cx.update(|window, cx| {
+            draft.update(cx, |draft, cx| {
+                draft.request.path = format!("http://{address}/{path}");
+                draft.send(window, cx);
+                assert!(
+                    draft.task.is_some(),
+                    "{path} does not need the environment file"
+                );
+            });
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while cx.read(|cx| draft.read(cx).task.is_some()) {
+            assert!(Instant::now() < deadline);
+            smol::Timer::after(Duration::from_millis(10)).await;
+            cx.run_until_parked();
+        }
+    }
+    server.await;
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.request.path = "{{base_url}}".into();
+            draft.send(window, cx);
+            assert!(
+                draft.task.is_none(),
+                "do not send with cached environment values after a file error"
+            );
+        });
+    });
+}
+
+#[test]
+fn environment_errors_are_reported_only_for_environment_references() {
+    use super::execution::resolve_request;
+    let values = environment::VariableValues {
+        environment: [("base_url".into(), "https://cached.example".into())].into(),
+        ..Default::default()
+    };
+    let mut request = request::HttpRequest {
+        path: "{{ base_url }}".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve_request(
+            &request,
+            values.clone(),
+            Some("Invalid environment file"),
+            None
+        )
+        .unwrap_err(),
+        "Invalid environment file"
+    );
+    request.path = "http://example.com/{{$unsupported}}".into();
+    assert!(
+        resolve_request(&request, values, Some("Invalid environment file"), None)
+            .unwrap_err()
+            .contains("Unknown variable")
+    );
+}
+
+#[gpui_kit::test]
 fn pending_variable_saves_block_sends_with_cached_values(cx: &mut TestAppContext) {
     let (draft, cx) = setup(cx);
     cx.update(|window, cx| {
@@ -311,10 +406,10 @@ fn spaced_vault_references_report_keyring_status_in_every_request_field() {
             4 => request.query = Some(vec![("token".into(), token)]),
             _ => request.body = Some(token.into_bytes()),
         }
-        assert!(resolve_request(&request, values.clone(), None).is_ok());
+        assert!(resolve_request(&request, values.clone(), None, None).is_ok());
         for error in ["Secrets are still loading", "Unlock your keyring"] {
             assert_eq!(
-                resolve_request(&request, values.clone(), Some(error)).unwrap_err(),
+                resolve_request(&request, values.clone(), None, Some(error)).unwrap_err(),
                 error
             );
         }
@@ -326,7 +421,7 @@ fn spaced_vault_references_report_keyring_status_in_every_request_field() {
         ..Default::default()
     };
     assert!(
-        resolve_request(&request, values, Some("Keyring unavailable")).is_ok(),
+        resolve_request(&request, values, None, Some("Keyring unavailable")).is_ok(),
         "GET excludes the body before resolution"
     );
 }

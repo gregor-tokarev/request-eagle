@@ -74,10 +74,6 @@ impl VariableStore {
             return Err("Variables are still saving. Try sending again in a moment.".into());
         }
 
-        if let Some(error) = self.environment_errors.get(scope) {
-            return Err(error.clone());
-        }
-
         Ok(VariableValues {
             environment: self.environments.get(scope).cloned().unwrap_or_default(),
             secrets: self.secrets.clone(),
@@ -143,46 +139,7 @@ impl VariableStore {
             cx.background_executor().spawn(async move {
                 let path =
                     path.ok_or_else(|| anyhow::anyhow!("Could not locate the environment file."))?;
-                let mut entries = match Environment::from_file(&path) {
-                    Ok(environment) => environment.entries,
-                    Err(environment::EnvironmentLoadError::Read { source, .. })
-                        if source.kind() == std::io::ErrorKind::NotFound =>
-                    {
-                        HashMap::new()
-                    }
-                    Err(error) => return Err(error.into()),
-                };
-                if let Some(value) = value {
-                    entries.insert(name, value);
-                } else {
-                    entries.remove(&name);
-                }
-
-                let parent = path.parent().unwrap();
-                std::fs::create_dir_all(parent)?;
-                let permissions = match std::fs::metadata(&path) {
-                    Ok(metadata) => {
-                        anyhow::ensure!(
-                            !metadata.permissions().readonly(),
-                            "The environment file is read-only."
-                        );
-                        Some(metadata.permissions())
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(error) => return Err(error.into()),
-                };
-                let temporary = tempfile::NamedTempFile::new_in(parent)?;
-                Environment {
-                    path: temporary.path().into(),
-                    entries: entries.clone(),
-                }
-                .save_file()?;
-                if let Some(permissions) = permissions {
-                    temporary.as_file().set_permissions(permissions)?;
-                }
-                temporary.as_file().sync_all()?;
-                temporary.persist(path)?;
-                Ok(entries)
+                super::environment_file::save_entry(&path, &name, value.as_deref())
             })
         };
         self.save_task = Some(cx.spawn(async move |this, cx| {
