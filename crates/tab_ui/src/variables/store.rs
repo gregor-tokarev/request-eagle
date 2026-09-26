@@ -70,6 +70,10 @@ impl VariableStore {
     }
 
     pub fn values(&self, scope: &Option<PathBuf>) -> Result<VariableValues, String> {
+        if self.saving {
+            return Err("Variables are still saving. Try sending again in a moment.".into());
+        }
+
         if let Some(error) = self.environment_errors.get(scope) {
             return Err(error.clone());
         }
@@ -123,27 +127,37 @@ impl VariableStore {
         if self.saving || (secret && (self.loading || self.secret_error.is_some())) {
             return;
         }
-        let mut values = if secret {
-            self.secrets.clone()
-        } else {
-            self.environments.get(&scope).cloned().unwrap_or_default()
-        };
-        if let Some(value) = value {
-            values.insert(name, value);
-        } else {
-            values.remove(&name);
-        }
-
         self.saving = true;
         self.save_error = None;
         let task = if secret {
-            preferences::write_request_secrets(&values, cx)
+            let mut values = self.secrets.clone();
+            if let Some(value) = value {
+                values.insert(name, value);
+            } else {
+                values.remove(&name);
+            }
+            let task = preferences::write_request_secrets(&values, cx);
+            cx.spawn(async move |_, _| task.await.map(|()| values))
         } else {
             let path = Self::environment_path(&scope);
-            let entries = values.clone();
             cx.background_executor().spawn(async move {
                 let path =
                     path.ok_or_else(|| anyhow::anyhow!("Could not locate the environment file."))?;
+                let mut entries = match Environment::from_file(&path) {
+                    Ok(environment) => environment.entries,
+                    Err(environment::EnvironmentLoadError::Read { source, .. })
+                        if source.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        HashMap::new()
+                    }
+                    Err(error) => return Err(error.into()),
+                };
+                if let Some(value) = value {
+                    entries.insert(name, value);
+                } else {
+                    entries.remove(&name);
+                }
+
                 let parent = path.parent().unwrap();
                 std::fs::create_dir_all(parent)?;
                 let permissions = match std::fs::metadata(&path) {
@@ -160,7 +174,7 @@ impl VariableStore {
                 let temporary = tempfile::NamedTempFile::new_in(parent)?;
                 Environment {
                     path: temporary.path().into(),
-                    entries,
+                    entries: entries.clone(),
                 }
                 .save_file()?;
                 if let Some(permissions) = permissions {
@@ -168,7 +182,7 @@ impl VariableStore {
                 }
                 temporary.as_file().sync_all()?;
                 temporary.persist(path)?;
-                Ok(())
+                Ok(entries)
             })
         };
         self.save_task = Some(cx.spawn(async move |this, cx| {
@@ -176,10 +190,10 @@ impl VariableStore {
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
                 match result {
-                    Ok(()) if secret => {
+                    Ok(values) if secret => {
                         this.secrets = values;
                     }
-                    Ok(()) => {
+                    Ok(values) => {
                         this.environments.insert(scope.clone(), values);
                         this.environment_errors.remove(&scope);
                     }

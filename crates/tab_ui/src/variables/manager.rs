@@ -31,11 +31,14 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
         }
     });
     let name = manager.read(cx).name.clone();
+    let store = manager.read(cx).store.clone();
     window.open_dialog(cx, move |dialog, window, _| {
+        let store = store.clone();
         dialog
             .title("Variables")
             .w(rems(34.).to_pixels(window.rem_size()))
             .overlay_closable(false)
+            .on_cancel(move |_, _, cx| !store.read(cx).saving)
             .child(manager.clone())
     });
     name.update(cx, |input, cx| input.focus(window, cx));
@@ -267,8 +270,14 @@ impl Render for VariableManager {
             )
             .child(
                 Button::new("close-variables")
+                    .debug_selector(|| "close-variables".into())
                     .label("Done")
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if !this.store.read(cx).saving {
+                            window.close_dialog(cx);
+                        }
+                    })),
             );
         let generated = GENERATED_VARIABLES
             .iter()

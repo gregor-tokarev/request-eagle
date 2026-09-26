@@ -3,6 +3,33 @@ use request::Method;
 
 use super::{RequestDraft, draft::RequestSection};
 
+#[test]
+fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
+    for (path, expected) in [
+        ("{{base_url}}/users", "Resolved on Send"),
+        ("https://{{host}}/users", "Resolved on Send"),
+        ("https://example.com:{{port}}/users", "Resolved on Send"),
+        ("https://example.com/{{path}}", "example.com"),
+        ("example.com:8443/?q={{query}}", "example.com:8443"),
+    ] {
+        let mut request = request::HttpRequest {
+            path: path.into(),
+            ..Default::default()
+        };
+        let headers = super::execution::generated_headers(&request);
+        assert_eq!(headers[0], ("Host".into(), expected.into()), "{path}");
+
+        request
+            .headers
+            .push(("hOsT".into(), "override.example".into()));
+        assert!(
+            super::execution::generated_headers(&request)
+                .iter()
+                .all(|(name, _)| name != "Host")
+        );
+    }
+}
+
 #[gpui_kit::test]
 fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut TestAppContext) {
     cx.update(|cx| {

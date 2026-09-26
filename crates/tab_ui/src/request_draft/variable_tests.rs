@@ -217,6 +217,31 @@ fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request
 }
 
 #[gpui_kit::test]
+fn pending_variable_saves_block_sends_with_cached_values(cx: &mut TestAppContext) {
+    let (draft, cx) = setup(cx);
+    cx.update(|window, cx| {
+        let store = VariableStore::global(cx);
+        store.update(cx, |store, _| store.saving = true);
+        assert!(
+            store
+                .read(cx)
+                .values(&None)
+                .err()
+                .unwrap()
+                .contains("still saving")
+        );
+        draft.update(cx, |draft, cx| {
+            draft.request.path = "http://127.0.0.1:1/{{vault:token}}".into();
+            draft.send(window, cx);
+            assert!(
+                draft.task.is_none(),
+                "a pending edit must block HTTP dispatch"
+            );
+        });
+    });
+}
+
+#[gpui_kit::test]
 fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let a = directory.path().join("A");

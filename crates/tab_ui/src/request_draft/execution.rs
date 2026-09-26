@@ -39,8 +39,18 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.push(("Content-Type".into(), "application/json".into()));
     }
 
+    if request.path.contains("{{")
+        && !headers.iter().any(|(name, _)| name == "Host")
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        headers.insert(0, ("Host".into(), "Resolved on Send".into()));
+    }
+
     for (name, value) in &mut headers {
-        if (name == "Host" && request.path.contains("{{"))
+        if (name == "Host" && value.contains("{{"))
             || (name == "Content-Length"
                 && request
                     .body
