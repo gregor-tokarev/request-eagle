@@ -13,6 +13,10 @@ use super::{VariableScope, VariableStore};
 
 pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx: &mut App) {
     let store = VariableStore::global(cx);
+    store.update(cx, |store, cx| {
+        store.save_error = None;
+        cx.notify();
+    });
     let manager = cx.new(|cx| {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Variable name"));
         let value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
@@ -58,6 +62,10 @@ impl VariableManager {
     fn select_source(&mut self, secret: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.secret = secret;
         self.error = None;
+        self.store.update(cx, |store, cx| {
+            store.save_error = None;
+            cx.notify();
+        });
         self.name
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.value.update(cx, |input, cx| {
@@ -129,7 +137,7 @@ impl Render for VariableManager {
                         Button::new(label)
                             .debug_selector(move || format!("variable-source-{label}"))
                             .label(label)
-                            .small()
+                            .disabled(busy)
                             .when(self.secret == secret, |button| button.primary())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.select_source(secret, window, cx)
@@ -210,7 +218,6 @@ impl Render for VariableManager {
                     .child(
                         Button::new(("delete-variable", index))
                             .ghost()
-                            .small()
                             .label("Remove")
                             .disabled(busy || unavailable)
                             .on_click(cx.listener(move |this, _, _, cx| {

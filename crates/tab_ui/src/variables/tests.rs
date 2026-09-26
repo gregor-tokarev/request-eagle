@@ -45,7 +45,7 @@ impl gpui_kit::Render for DialogHost {
 }
 
 #[gpui_kit::test]
-fn selecting_an_existing_secret_preserves_its_value_in_a_masked_editor(cx: &mut TestAppContext) {
+fn selecting_a_secret_clears_stale_errors_and_preserves_its_masked_value(cx: &mut TestAppContext) {
     use gpui_kit::{
         AppContext as _, Modifiers,
         component::{Root, WindowExt as _},
@@ -57,6 +57,7 @@ fn selecting_an_existing_secret_preserves_its_value_in_a_masked_editor(cx: &mut 
         preferences::init(cx);
         request_eagle_theme::init(cx);
         VariableStore::global(cx).update(cx, |store, _| {
+            store.save_error = Some("Failure from another collection".into());
             store.environments.insert(None, Default::default());
             store
                 .secrets
@@ -70,6 +71,11 @@ fn selecting_an_existing_secret_preserves_its_value_in_a_masked_editor(cx: &mut 
     cx.update(|window, cx| {
         let scope = cx.new(|_| super::VariableScope { path: None });
         super::open_manager(scope, window, cx);
+        let store = VariableStore::global(cx);
+        assert!(store.read(cx).save_error.is_none());
+        store.update(cx, |store, _| {
+            store.save_error = Some("Failure from the environment editor".into());
+        });
     });
     for selector in ["variable-source-Secrets", "variable-manager-entry-0"] {
         cx.run_until_parked();
@@ -84,6 +90,9 @@ fn selecting_an_existing_secret_preserves_its_value_in_a_masked_editor(cx: &mut 
             .debug_bounds(selector)
             .unwrap_or_else(|| panic!("missing {selector}"));
         cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.update(|_, cx| {
+            assert!(VariableStore::global(cx).read(cx).save_error.is_none());
+        });
     }
     cx.update(|window, cx| {
         let focused = window.focused_input(cx).unwrap();
@@ -277,8 +286,24 @@ async fn environment_edits_persist_and_failed_saves_preserve_existing_values(
     cx.read(|cx| {
         assert!(store.read(cx).save_error.is_some());
         assert_eq!(
-            store.read(cx).values(&Some(path)).unwrap().environment["base_url"],
+            store
+                .read(cx)
+                .values(&Some(path.clone()))
+                .unwrap()
+                .environment["base_url"],
             "https://example.com"
         );
+    });
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, "base_url = 'https://fixed.example'").unwrap();
+    cx.update(|cx| {
+        store.update(cx, |store, cx| {
+            store.reload_environment(&Some(path.clone()), cx);
+            assert!(store.save_error.is_none());
+            assert_eq!(
+                store.values(&Some(path)).unwrap().environment["base_url"],
+                "https://fixed.example"
+            );
+        });
     });
 }

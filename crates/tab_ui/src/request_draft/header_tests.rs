@@ -4,6 +4,38 @@ use request::Method;
 use super::{RequestDraft, draft::RequestSection};
 
 #[test]
+fn templated_header_names_defer_potentially_overridden_defaults() {
+    let request = request::HttpRequest {
+        path: "http://example.com".into(),
+        method: Method::Post,
+        headers: vec![("{{header_name}}".into(), "virtual.example".into())],
+        body: Some(b"{}".to_vec()),
+        ..Default::default()
+    };
+    let preview = super::execution::generated_headers(&request);
+    assert!(preview.iter().all(|(_, value)| value == "Resolved on Send"));
+
+    for name in [
+        "Host",
+        "Accept",
+        "Accept-Encoding",
+        "Content-Length",
+        "Content-Type",
+    ] {
+        let values = environment::VariableValues {
+            environment: [("header_name".into(), name.into())].into(),
+            ..Default::default()
+        };
+        let resolved = request.resolve_variables(&values).unwrap();
+        assert!(
+            super::execution::generated_headers(&resolved)
+                .iter()
+                .all(|(generated, _)| generated != name)
+        );
+    }
+}
+
+#[test]
 fn templated_url_credentials_preview_authorization_as_unresolved() {
     for (path, expected) in [
         (

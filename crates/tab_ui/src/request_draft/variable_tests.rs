@@ -50,6 +50,40 @@ fn popup(cx: &mut VisualTestContext) -> bool {
 }
 
 #[gpui_kit::test]
+fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut TestAppContext) {
+    let (_, cx) = setup(cx);
+    cx.update(|_, cx| {
+        VariableStore::global(cx).update(cx, |store, cx| {
+            let environment = store.environments.get_mut(&None).unwrap();
+            for name in ["$guid", "$unsupported", "vault:token", "vault:missing"] {
+                environment.insert(name.into(), "must not be suggested as environment".into());
+            }
+            cx.notify();
+        });
+    });
+    click(cx, "request-url");
+    for (name, available) in [
+        ("$guid", true),
+        ("$unsupported", false),
+        ("vault:token", true),
+        ("vault:missing", false),
+    ] {
+        cx.simulate_keystrokes("secondary-a");
+        cx.simulate_input(&format!("{{{{{name}"));
+        assert!(popup(cx));
+        assert_eq!(
+            cx.debug_bounds("variable-suggestion-0").is_some(),
+            available,
+            "{name}"
+        );
+        assert!(
+            cx.debug_bounds("variable-suggestion-1").is_none(),
+            "{name} must not have a duplicate Environment suggestion"
+        );
+    }
+}
+
+#[gpui_kit::test]
 fn variable_completion_filters_accepts_dismisses_and_supports_undo(cx: &mut TestAppContext) {
     let (draft, cx) = setup(cx);
     click(cx, "request-url");

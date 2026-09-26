@@ -149,11 +149,15 @@ impl VariableInput {
             let store = self.store.read(cx);
             let path = &self.scope.read(cx).path;
             if let Some(values) = store.environments.get(path) {
-                self.suggestions
-                    .extend(values.keys().map(|name| Suggestion {
-                        name: name.clone(),
-                        source: "Environment",
-                    }));
+                self.suggestions.extend(
+                    values
+                        .keys()
+                        .filter(|name| !name.starts_with('$') && !name.starts_with("vault:"))
+                        .map(|name| Suggestion {
+                            name: name.clone(),
+                            source: "Environment",
+                        }),
+                );
             }
             self.suggestions
                 .extend(store.secrets.keys().map(|name| Suggestion {

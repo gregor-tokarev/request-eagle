@@ -81,6 +81,7 @@ impl VariableStore {
     }
 
     pub fn reload_environment(&mut self, scope: &Option<PathBuf>, cx: &mut Context<Self>) {
+        self.save_error = None;
         self.environments.remove(scope);
         self.environment_errors.remove(scope);
         self.ensure_environment(scope, cx);
@@ -92,6 +93,7 @@ impl VariableStore {
         }
 
         self.loading = true;
+        self.save_error = None;
         let task = preferences::read_request_secrets(cx);
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
