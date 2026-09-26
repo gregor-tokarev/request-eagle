@@ -37,6 +37,16 @@ Variables last for one execution and are shared with its post-response script.
 Unresolved placeholders remain unchanged. Substitution is a single pass; query
 parameter values are URL-encoded by the HTTP client after substitution.
 
+Common dynamic variables also work in request URLs, query parameters, headers,
+and UTF-8 bodies, including when no script is present: `{{$guid}}`,
+`{{$randomUUID}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`, and `{{$randomInt}}`.
+In scripts, use `pm.variables.replaceIn("{{$guid}}")`. UUIDs are version 4,
+timestamps are Unix seconds or UTC ISO timestamps, and random integers are in
+the inclusive range 0–1000. Each occurrence is generated separately. Store a
+generated value with `pm.variables.set` to reuse the same value throughout a run.
+A local variable with the same name takes precedence; unknown placeholders stay
+unchanged. Dynamic values use the same 32 MiB expansion limit as script variables.
+
 ```javascript
 // Post-response
 pm.test("Status code is 200", function () {
@@ -51,21 +61,57 @@ console.log(pm.response.json());
 [Watch the native app walkthrough](demos/request-scripts.mp4). It shows editing both
 phases, inserting a snippet, sending, inspecting tests and logs, correcting a
 failing assertion, and reopening the saved request.
+[Watch the common API example](demos/common-script-api.mp4) for a generated
+request ID, allowed status codes, JSON keys, nested values, and response shortcuts.
 
 ## Supported API
 
-This is a small Postman-style API, not a complete Postman sandbox implementation.
+This focuses on individual-request preparation and response testing. It supports
+local variables, generated request data, request edits, JSON/text/header checks,
+and Chai assertions. It is not a complete Postman sandbox implementation.
 
 - `pm.variables`: `get`, `set`, `has`, `unset`, `clear`, `toObject`, `replaceIn`.
 - `pm.request`: writable `method` and string `url`; `headers.get/has/add/upsert/remove/toJSON`;
   `body.raw` and `body.update(string)`.
 - `pm.response`: `code`, `status`, `responseTime` in milliseconds, `text()`, `json()`,
-  `headers.get/has/toJSON`, `to.have.status(code)`, `to.have.header(name, value?)`.
+  `headers.get/has/toJSON`.
+- Response shortcuts: `to.have.status(codeOrReason)` accepts a numeric code or
+  status text such as `"Created"`; `to.have.header(name, value?)` checks a header.
+  `to.have.body()` checks for a nonempty body, or accepts exact text, a regular
+  expression, or a JSON object. `to.have.jsonBody(path?, value?)` checks JSON
+  validity, a nested property, or its expected value.
+  `to.be.ok/success/error/clientError/serverError/json` checks 200, 2xx, 4xx/5xx,
+  4xx, 5xx, or valid JSON, respectively. These shortcuts are a fixed subset;
+  use `pm.expect` for chained and negated assertions.
 - `pm.test(name, callback)` and `pm.expect(value, message?)`.
-- Assertions: `equal/equals/eq`, `eql` or `deep.equal` for JSON values, `include`,
-  `property`, `a/an`, `above`, `below`, `least`, `most`, `lengthOf`, `match`,
-  `true`, `false`, `null`, `undefined`, `ok`, `empty`, and `not`.
+- `pm.expect` uses the bundled Chai 4.5.0 assertion library. Common completions
+  include `oneOf`, `keys`, `members`, `nested.property`, `deep.include`,
+  `equal/equals/eq`, `eql`, `a/an`, `within`, `closeTo`, `above/below`,
+  `least/most`, `length/lengthOf`, `match`, `exist`, `empty`, and `not`.
+  Chained modifiers such as `any/all`, `own`, `ordered`, `include`, and `deep`
+  follow Chai semantics. The rest of Chai's built-in `expect` API is available;
+  autocomplete highlights the common methods.
 - `console.log/info/warn/error/debug`.
+
+For example:
+
+```javascript
+pm.test("Expected status and JSON shape", () => {
+    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);
+    const data = pm.response.json();
+    pm.expect(data).to.include.all.keys("id", "name");
+    pm.expect(data).to.have.nested.property("user.roles").that.includes("admin");
+});
+```
+
+Persistent environment/global/collection variables need an environment workflow
+and are deferred; `pm.variables` remains local to one execution. The request URL
+is currently a string, rather than Postman's SDK `Url` object. Cookies, request
+chaining, JSON Schema validation, `pm.test.skip`, and Postman-specific Chai
+plugins are not included. The supported surface is based on
+[Postman's common script examples](https://learning.postman.com/docs/tests-and-scripts/write-scripts/test-examples/)
+and [Chai's assertion reference](https://www.chaijs.com/api/bdd/), without a claim
+of full compatibility for imported scripts.
 
 Scripts are synchronous. Async callbacks, promises, timers, `pm.sendRequest`,
 external packages, persistent environment/global/collection variables, and host

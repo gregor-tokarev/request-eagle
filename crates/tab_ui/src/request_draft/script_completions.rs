@@ -173,9 +173,20 @@ fn receiver(node: Node<'_>, source: &str, depth: usize) -> Option<String> {
             let name = &source[property.byte_range()];
 
             if object == "pm.expect()"
-                && members("pm.expect()")
-                    .iter()
-                    .any(|(member, detail)| *member == name && !detail.starts_with('('))
+                && members("pm.expect()").iter().any(|(member, detail)| {
+                    *member == name
+                        && (!detail.starts_with('(')
+                            || matches!(
+                                name,
+                                "a" | "an"
+                                    | "include"
+                                    | "includes"
+                                    | "contain"
+                                    | "contains"
+                                    | "length"
+                                    | "lengthOf"
+                            ))
+                })
             {
                 Some(object)
             } else {
@@ -185,6 +196,7 @@ fn receiver(node: Node<'_>, source: &str, depth: usize) -> Option<String> {
         "call_expression" => {
             let function = receiver(node.child_by_field_name("function")?, source, depth + 1)?;
             if function == "pm.expect"
+                || function == "pm.expect()"
                 || function.strip_prefix("pm.expect().").is_some_and(|name| {
                     members("pm.expect()")
                         .iter()
@@ -252,8 +264,24 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("to", "Response assertions"),
         ],
         "pm.response.headers" => &[("get", "(name)"), ("has", "(name)"), ("toJSON", "()")],
-        "pm.response.to" => &[("have", "Response assertions")],
-        "pm.response.to.have" => &[("status", "(code)"), ("header", "(name, value?)")],
+        "pm.response.to" => &[
+            ("have", "Response assertions"),
+            ("be", "Response assertions"),
+        ],
+        "pm.response.to.have" => &[
+            ("status", "(codeOrReason)"),
+            ("header", "(name, value?)"),
+            ("body", "(textOrObjectOrPattern?)"),
+            ("jsonBody", "(path?, value?)"),
+        ],
+        "pm.response.to.be" => &[
+            ("ok", "Status 200"),
+            ("success", "Status 2xx"),
+            ("error", "Status 4xx or 5xx"),
+            ("clientError", "Status 4xx"),
+            ("serverError", "Status 5xx"),
+            ("json", "Valid JSON body"),
+        ],
         "pm.expect()" => &[
             ("to", "Chain"),
             ("be", "Chain"),
@@ -270,18 +298,36 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("same", "Chain"),
             ("not", "Negate"),
             ("deep", "Deep comparison"),
+            ("nested", "Nested property path"),
+            ("own", "Own properties"),
+            ("any", "Any key"),
+            ("all", "All keys"),
+            ("ordered", "Ordered members"),
             ("equal", "(expected)"),
             ("equals", "(expected)"),
             ("eq", "(expected)"),
             ("eql", "(expected)"),
             ("include", "(expected)"),
+            ("includes", "(expected)"),
+            ("contain", "(expected)"),
+            ("contains", "(expected)"),
             ("property", "(name, expected?)"),
+            ("keys", "(...names)"),
+            ("members", "(expected)"),
+            ("oneOf", "(values)"),
             ("a", "(type)"),
             ("an", "(type)"),
             ("above", "(minimum)"),
             ("below", "(maximum)"),
             ("least", "(minimum)"),
             ("most", "(maximum)"),
+            ("within", "(minimum, maximum)"),
+            ("closeTo", "(expected, delta)"),
+            ("greaterThan", "(minimum)"),
+            ("lessThan", "(maximum)"),
+            ("gte", "(minimum)"),
+            ("lte", "(maximum)"),
+            ("length", "(length)"),
             ("lengthOf", "(length)"),
             ("match", "(pattern)"),
             ("true", "Boolean assertion"),
@@ -290,6 +336,10 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("undefined", "Undefined assertion"),
             ("ok", "Truthy assertion"),
             ("empty", "Empty assertion"),
+            ("exist", "Not null or undefined"),
+            ("exists", "Not null or undefined"),
+            ("NaN", "Not-a-number assertion"),
+            ("finite", "Finite number"),
         ],
         "console" => &[
             ("log", "(...values)"),

@@ -1,10 +1,10 @@
-(function (source, log, test) {
+(function (source, log, test, expect, dynamic) {
     "use strict";
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
     const variables = Object.assign(Object.create(null), input.variables);
     const format = value => typeof value === "string" ? value : (stringify(value) ?? String(value));
-    const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => variables[key] ?? match);
+    const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => variables[key] ?? dynamic(key) ?? match);
 
     function headers(pairs) {
         return {
@@ -19,56 +19,6 @@
             upsert(header) { this.remove(header.key); this.add(header); },
             toJSON() { return pairs.map(([key, value]) => ({key, value})); },
         };
-    }
-
-    function deepEqual(a, b) {
-        if (a === b) return true;
-        if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-        if (Array.isArray(a) !== Array.isArray(b)) return false;
-        const keys = Object.keys(a);
-        return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && deepEqual(a[key], b[key]));
-    }
-
-    function expect(actual, message) {
-        let negate = false;
-        let deep = false;
-        const chain = new Proxy({}, {
-            get(target, key, receiver) {
-                if (key === "then") return undefined;
-                if (!Reflect.has(target, key)) throw new Error(`Unsupported assertion: ${String(key)}`);
-                return Reflect.get(target, key, receiver);
-            },
-        });
-        function check(ok, description) {
-            if (negate ? ok : !ok) throw new Error(message || `Expected ${format(actual)} ${negate ? "not " : ""}${description}`);
-            negate = false;
-            return chain;
-        }
-        for (const key of ["to", "be", "been", "is", "that", "which", "and", "has", "have", "with", "at", "of", "same"]) {
-            Object.defineProperty(chain, key, {get: () => chain});
-        }
-        Object.defineProperty(chain, "not", {get() { negate = !negate; return chain; }});
-        Object.defineProperty(chain, "deep", {get() { deep = true; return chain; }});
-        chain.equal = chain.equals = chain.eq = expected => check(deep ? deepEqual(actual, expected) : actual === expected, `to equal ${format(expected)}`);
-        chain.eql = expected => check(deepEqual(actual, expected), `to deeply equal ${format(expected)}`);
-        chain.include = expected => check(typeof actual === "string" || Array.isArray(actual) ? actual.includes(expected) : !!actual && Object.keys(expected).every(key => deepEqual(actual[key], expected[key])), `to include ${format(expected)}`);
-        chain.property = function (key, expected) {
-            const exists = actual != null && Object.hasOwn(Object(actual), key);
-            const result = check(exists && (arguments.length < 2 || deepEqual(actual[key], expected)), `to have property ${key}`);
-            if (exists) actual = actual[key];
-            return result;
-        };
-        chain.a = chain.an = type => check((Array.isArray(actual) ? "array" : actual === null ? "null" : typeof actual) === type, `to be ${type}`);
-        chain.above = expected => check(actual > expected, `to be above ${expected}`);
-        chain.below = expected => check(actual < expected, `to be below ${expected}`);
-        chain.least = expected => check(actual >= expected, `to be at least ${expected}`);
-        chain.most = expected => check(actual <= expected, `to be at most ${expected}`);
-        chain.lengthOf = expected => check(actual?.length === expected, `to have length ${expected}`);
-        chain.match = pattern => check(pattern.test(actual), `to match ${pattern}`);
-        for (const [key, predicate] of Object.entries({true: v => v === true, false: v => v === false, null: v => v === null, undefined: v => v === undefined, ok: v => !!v, empty: v => v != null && (typeof v === "object" ? Object.keys(v).length === 0 : v.length === 0)})) {
-            Object.defineProperty(chain, key, {get: () => check(predicate(actual), `to be ${key}`)});
-        }
-        return chain;
     }
 
     const request = {
@@ -110,13 +60,42 @@
             text: () => response.body,
             json: () => JSON.parse(response.body),
             to: {have: {
-                status(code) { expect(response.code).to.equal(code); },
+                status(codeOrReason) {
+                    const actual = typeof codeOrReason === "number" ? response.code : response.status;
+                    expect(actual).to.equal(codeOrReason);
+                },
+                body(content) {
+                    if (arguments.length === 0) expect(response.body).not.to.be.empty;
+                    else if (content instanceof RegExp) expect(response.body).to.match(content);
+                    else if (content !== null && typeof content === "object" && !Array.isArray(content)) expect(pm.response.json()).to.deep.equal(content);
+                    else expect(response.body).to.equal(content);
+                },
+                jsonBody(path, value) {
+                    const data = pm.response.json();
+                    if (arguments.length === 1) expect(data).to.have.nested.property(path);
+                    else if (arguments.length > 1) expect(data).to.have.deep.nested.property(path, value);
+                },
                 header(name, value) {
                     expect(pm.response.headers.has(name)).to.be.true;
                     if (value !== undefined) expect(pm.response.headers.get(name)).to.equal(value);
                 },
             }},
         };
+
+        pm.response.to.be = new Proxy({}, {
+            get(_, name) {
+                switch (name) {
+                    case "then": return undefined;
+                    case "ok": expect(response.code).to.equal(200); break;
+                    case "success": expect(response.code).to.be.within(200, 299); break;
+                    case "error": expect(response.code).to.be.within(400, 599); break;
+                    case "clientError": expect(response.code).to.be.within(400, 499); break;
+                    case "serverError": expect(response.code).to.be.within(500, 599); break;
+                    case "json": pm.response.json(); break;
+                    default: throw new Error(`Unsupported response assertion: ${String(name)}`);
+                }
+            },
+        });
     }
     globalThis.pm = pm;
     globalThis.console = Object.fromEntries(["log", "info", "warn", "error", "debug"].map(level => [level, (...values) => log(level, values.map(format).join(" "))]));

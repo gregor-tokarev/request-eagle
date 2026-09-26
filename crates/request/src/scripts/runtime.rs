@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -11,7 +10,10 @@ use rquickjs::{Context, Function, Runtime, Value};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
+use super::{
+    ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
+    variables::{Variables, dynamic_variable, expand_request, has_dynamic_placeholders},
+};
 use crate::{Execution, ExecutionError, HttpRequest, Method, Response};
 
 const TIME_LIMIT: Duration = Duration::from_secs(2);
@@ -33,8 +35,6 @@ impl Drop for Cancellation {
     }
 }
 
-pub(crate) type Variables = BTreeMap<String, String>;
-
 #[derive(Deserialize)]
 struct ScriptOutput {
     method: Method,
@@ -49,62 +49,49 @@ pub(crate) async fn pre_request(
     mut request: HttpRequest,
     cancelled: Arc<AtomicBool>,
 ) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
-    if request.scripts.pre_request.trim().is_empty() {
+    let has_script = !request.scripts.pre_request.trim().is_empty();
+    if !has_script && !has_dynamic_placeholders(&request) {
         return Ok((request, Variables::new(), Vec::new()));
     }
 
     smol::unblock(move || {
-        let input = input(&request, &Variables::new());
-        let (output, mut report) = run(
-            &request.scripts.pre_request,
-            ScriptPhase::PreRequest,
-            input,
-            cancelled,
-        );
+        let mut report = ScriptReport {
+            phase: ScriptPhase::PreRequest,
+            tests: Vec::new(),
+            logs: Vec::new(),
+            error: None,
+        };
+        let mut variables = Variables::new();
 
-        if let Some(message) = &report.error {
-            return Err(ExecutionError::Script {
-                message: message.clone(),
-                report: Box::new(report),
-            });
-        }
+        if has_script {
+            let input = input(&request, &variables);
+            let (output, script_report) = run(
+                &request.scripts.pre_request,
+                ScriptPhase::PreRequest,
+                input,
+                cancelled,
+            );
+            report = script_report;
 
-        let output = output.expect("successful script output");
-        request.method = output.method;
-        request.path = output.url;
-        request.headers = output.headers;
-
-        if output.body_changed {
-            request.body = output.body.map(String::into_bytes);
-        }
-
-        // Expansion happens in Rust, so share a byte budget across all fields.
-        // Otherwise a small JS variable could expand a template into gigabytes.
-        let mut budget = MEMORY_LIMIT;
-        let resolved = (|| -> Result<(), String> {
-            request.path = replace_variables(&request.path, &output.variables, &mut budget)?;
-
-            for (key, value) in request
-                .headers
-                .iter_mut()
-                .chain(request.query.iter_mut().flatten())
-            {
-                *key = replace_variables(key, &output.variables, &mut budget)?;
-                *value = replace_variables(value, &output.variables, &mut budget)?;
+            if let Some(message) = &report.error {
+                return Err(ExecutionError::Script {
+                    message: message.clone(),
+                    report: Box::new(report),
+                });
             }
 
-            // Preserve binary bodies unless the script explicitly edits them.
-            if let Some(body) = &request.body
-                && let Ok(text) = std::str::from_utf8(body)
-            {
-                request.body =
-                    Some(replace_variables(text, &output.variables, &mut budget)?.into_bytes());
+            let output = output.expect("successful script output");
+            request.method = output.method;
+            request.path = output.url;
+            request.headers = output.headers;
+            variables = output.variables;
+
+            if output.body_changed {
+                request.body = output.body.map(String::into_bytes);
             }
+        }
 
-            Ok(())
-        })();
-
-        if let Err(message) = resolved {
+        if let Err(message) = expand_request(&mut request, &variables) {
             report.error = Some(message.clone());
             return Err(ExecutionError::Script {
                 message,
@@ -112,7 +99,8 @@ pub(crate) async fn pre_request(
             });
         }
 
-        Ok((request, output.variables, vec![report]))
+        let reports = if has_script { vec![report] } else { Vec::new() };
+        Ok((request, variables, reports))
     })
     .await
 }
@@ -214,8 +202,15 @@ fn run(
                         });
                     }
                 })?;
+                // Keep the bundle's module wrapper private; expose only expect.
+                let expect: Function = cx.eval(concat!(
+                    "(function () { const module = {exports: {}}; const exports = module.exports;\n",
+                    include_str!("vendor/chai.js"),
+                    "\nreturn module.exports.expect; })()",
+                ))?;
+                let dynamic = Function::new(cx.clone(), |name: String| dynamic_variable(&name))?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
-                let export: Function = setup.call((input.to_string(), log, test))?;
+                let export: Function = setup.call((input.to_string(), log, test, expect, dynamic))?;
                 let value: Value = cx.eval(source)?;
 
                 if value.is_promise() {
@@ -256,37 +251,4 @@ fn run(
             (None, report)
         }
     }
-}
-
-fn replace_variables(
-    text: &str,
-    variables: &Variables,
-    budget: &mut usize,
-) -> Result<String, String> {
-    let mut result = String::new();
-    let mut append = |text: &str| -> Result<(), String> {
-        *budget = budget
-            .checked_sub(text.len())
-            .ok_or("Expanded request exceeds the 32 MiB script output limit")?;
-        result.push_str(text);
-        Ok(())
-    };
-    let mut rest = text;
-
-    while let Some(start) = rest.find("{{") {
-        append(&rest[..start])?;
-        rest = &rest[start..];
-        let Some(end) = rest.find("}}") else { break };
-        let name = &rest[2..end];
-        append(
-            variables
-                .get(name)
-                .map(String::as_str)
-                .unwrap_or(&rest[..end + 2]),
-        )?;
-        rest = &rest[end + 2..];
-    }
-
-    append(rest)?;
-    Ok(result)
 }

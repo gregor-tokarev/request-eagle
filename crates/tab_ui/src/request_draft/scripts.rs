@@ -17,6 +17,10 @@ use super::{
 const PRE_SNIPPETS: &[(&str, &str)] = &[
     ("Set a variable", "pm.variables.set(\"name\", \"value\");"),
     (
+        "Generate a request ID",
+        "pm.variables.set(\"requestId\", pm.variables.replaceIn(\"{{$guid}}\"));\npm.request.headers.upsert({key: \"X-Request-Id\", value: pm.variables.get(\"requestId\")});",
+    ),
+    (
         "Set a request header",
         "pm.request.headers.upsert({\n    key: \"X-Request-Id\",\n    value: String(Date.now())\n});",
     ),
@@ -33,6 +37,18 @@ const POST_SNIPPETS: &[(&str, &str)] = &[
     (
         "Check a JSON value",
         "pm.test(\"Response has the expected value\", function () {\n    const data = pm.response.json();\n    pm.expect(data).to.have.property(\"success\", true);\n});",
+    ),
+    (
+        "Status is one of the expected codes",
+        "pm.test(\"Status is expected\", function () {\n    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);\n});",
+    ),
+    (
+        "Check a nested JSON property",
+        "pm.test(\"Response has a user ID\", function () {\n    pm.expect(pm.response.json()).to.have.nested.property(\"data.user.id\");\n});",
+    ),
+    (
+        "Check required JSON keys",
+        "pm.test(\"Response has the required keys\", function () {\n    pm.expect(pm.response.json()).to.include.all.keys(\"id\", \"name\");\n});",
     ),
     (
         "Response time is below 1 second",

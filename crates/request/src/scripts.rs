@@ -1,6 +1,9 @@
 mod model;
 mod runtime;
+mod variables;
 
+#[cfg(test)]
+mod api_tests;
 #[cfg(test)]
 mod tests;
 

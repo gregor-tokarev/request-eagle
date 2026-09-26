@@ -39,12 +39,17 @@ fn suggests_only_supported_members_for_the_current_phase() {
     );
     assert_eq!(
         labels("pm.response.to.have.|", ScriptPhase::PostResponse),
-        ["status", "header"]
+        ["status", "header", "body", "jsonBody"]
     );
     assert!(labels("pm.environment.|", ScriptPhase::PreRequest).is_empty());
     assert!(labels("other.pm.response.|", ScriptPhase::PostResponse).is_empty());
     assert!(labels("pm.response.json().|", ScriptPhase::PostResponse).is_empty());
     assert!(labels("assertion.|", ScriptPhase::PostResponse).is_empty());
+    assert_eq!(
+        labels("pm.response.to.be.s|", ScriptPhase::PostResponse),
+        ["success", "serverError"]
+    );
+    assert!(labels("pm.response.to.be.|", ScriptPhase::PreRequest).is_empty());
 }
 
 #[test]
@@ -87,6 +92,8 @@ fn completes_assertions_with_nested_arguments_and_multiline_chains() {
         "pm.expect([1]).to.have.property('length').and.b|",
         "pm.expect(true).to.be.true.and.b|",
         "pm.expect(true)\n    .to\n    .be\n    .b|",
+        "pm.expect([1, 2]).to.have.lengthOf.b|",
+        "pm.expect('hello').to.be.a('string').and.b|",
     ] {
         assert!(
             labels(source, ScriptPhase::PostResponse).contains(&"below".into()),
@@ -100,6 +107,25 @@ fn completes_assertions_with_nested_arguments_and_multiline_chains() {
     assert_eq!(
         labels("pm.response?.j|", ScriptPhase::PostResponse),
         ["json"]
+    );
+    assert_eq!(
+        labels("pm.expect(201).to.be.one|", ScriptPhase::PostResponse),
+        ["oneOf"]
+    );
+    assert_eq!(
+        labels("pm.expect({}).to.include.k|", ScriptPhase::PostResponse),
+        ["keys"]
+    );
+    assert_eq!(
+        labels(
+            "pm.expect([]).to.deep.include.m|",
+            ScriptPhase::PostResponse
+        ),
+        ["members", "most", "match"]
+    );
+    assert_eq!(
+        labels("pm.expect({}).to.have.nested.p|", ScriptPhase::PostResponse),
+        ["property"]
     );
 }
 
