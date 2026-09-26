@@ -12,12 +12,23 @@ use std::{
 };
 
 fn main() {
+    let arguments: Vec<_> = std::env::args().collect();
+    let secret_worker = arguments
+        .iter()
+        .position(|argument| argument == "--secret-worker")
+        .map(|index| {
+            (
+                arguments[index + 1].clone(),
+                arguments.get(index + 2).cloned(),
+            )
+        });
     let unavailable = std::env::args().any(|argument| argument == "--unavailable");
     let request_secrets = std::env::args().any(|argument| argument == "--request-secrets");
 
     // Ordinary cargo test runs must not open the user's native credential store.
     if !unavailable
         && !request_secrets
+        && secret_worker.is_none()
         && !std::env::args().any(|argument| argument == "--round-trip")
     {
         println!("Native keyring checks skipped; run scripts/check-linux-keyring.sh on Linux.");
@@ -28,7 +39,11 @@ fn main() {
     let result = passed.clone();
     gpui_kit::application().run(move |cx: &mut App| {
         cx.spawn(async move |cx| {
-            let check = if request_secrets {
+            let check = if let Some((name, value)) = secret_worker {
+                cx.update(|cx| preferences::update_request_secret(name, value, cx))
+                    .await
+                    .map(|_| ())
+            } else if request_secrets {
                 request_secret_round_trip(cx).await
             } else if unavailable {
                 missing_provider(cx).await
@@ -171,6 +186,9 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
         .await?;
     let name = format!("variable-test-{}", uuid::Uuid::new_v4());
     let peer = format!("variable-peer-{}", uuid::Uuid::new_v4());
+    let concurrent_names: Vec<_> = (0..4)
+        .map(|_| format!("variable-concurrent-{}", uuid::Uuid::new_v4()))
+        .collect();
     let check: Result<()> = async {
         // Simulate another process changing the keyring after our initial snapshot.
         let mut external = original.clone();
@@ -208,6 +226,34 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
                 .await?
                 == remaining
         );
+        let children: Vec<_> = concurrent_names
+            .iter()
+            .map(|name| {
+                std::process::Command::new(std::env::current_exe()?)
+                    .args(["--secret-worker", name, "concurrent value"])
+                    .spawn()
+            })
+            .collect::<std::io::Result<_>>()?;
+        cx.background_executor()
+            .spawn(async move {
+                for mut child in children {
+                    ensure!(
+                        child.wait()?.success(),
+                        "A concurrent keyring worker failed"
+                    );
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+            .await?;
+        let after_concurrent = cx
+            .update(|cx| preferences::read_request_secrets(cx))
+            .await?;
+        for name in &concurrent_names {
+            ensure!(
+                after_concurrent.get(name).map(String::as_str) == Some("concurrent value"),
+                "A concurrent secret edit was lost"
+            );
+        }
         Ok(())
     }
     .await;

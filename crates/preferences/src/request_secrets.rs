@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::OpenOptions};
 
 use anyhow::Result;
 use gpui_kit::{App, Task};
@@ -9,9 +9,27 @@ pub fn update_request_secret(
     value: Option<String>,
     cx: &mut App,
 ) -> Task<Result<HashMap<String, String>>> {
-    let read = read_request_secrets(cx);
+    let lock = cx.background_executor().spawn(async {
+        let directory = std::env::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not locate the request secret lock directory."))?
+            .join(".request-eagle");
+        std::fs::create_dir_all(&directory)?;
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(false).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let file = options.open(directory.join("request-secrets.lock"))?;
+        file.lock()?;
+        Ok::<_, anyhow::Error>(file)
+    });
     cx.spawn(async move |cx| {
-        let mut values = read.await?;
+        // Keep the per-user lock through the entire keyring read and replacement.
+        // The file contains no secret data; closing it releases the OS lock.
+        let _lock = lock.await?;
+        let mut values = cx.update(|cx| read_request_secrets(cx)).await?;
         if let Some(value) = value {
             values.insert(name, value);
         } else {

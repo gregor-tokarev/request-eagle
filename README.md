@@ -90,17 +90,24 @@ Open **Variables** next to the request sections to add, update, or remove values
   `~/.request-eagle/environment.toml`. **Reload file** picks up external edits.
 - `{{vault:name}}` reads an app-wide secret from macOS Keychain or the Linux
   Secret Service keyring. Suggestions show secret names only. Secrets are never
-  saved in request or environment files; **Retry keyring** retries unavailable storage.
+  saved in request or environment files. **Reload secrets** picks up changes made
+  by another app process; **Retry keyring** retries unavailable storage.
 - `{{$guid}}`, `{{$isoTimestamp}}`, `{{$timestamp}}`, `{{$randomInt}}`,
   `{{$randomBoolean}}`, `{{$randomAlphaNumeric}}`, and `{{$randomEmail}}` generate
   values when sending. Repeated occurrences of a generated name share one value
   per send; the next send generates fresh values.
+- `{{!name}}` sends the literal text `{{name}}`, without looking up a variable.
+  For example, `{"template":"Hello {{!customer}}"}` sends a Mustache template
+  unchanged as `{"template":"Hello {{customer}}"}`.
 
 Send resolves a copy of the request, leaving the request draft and saved file
 unchanged. Unknown or unclosed variables stop execution with an error. Values
 are substituted literally, without recursive expansion or automatic JSON
 escaping; quote string placeholders in JSON and escape special characters in
-their values. Disabled rows and bodies excluded by GET/HEAD are not resolved.
+their values. Disabled rows, URL fragments, and bodies excluded by GET/HEAD are
+not resolved. Untouched variable editors reload their source on Save, preserving
+external updates. Secret edits are serialized across app processes by an empty
+`~/.request-eagle/request-secrets.lock` file.
 
 Response header and cookie names and values support text selection and copying.
 Hover over status, response time, or size for selectable details. Timings include

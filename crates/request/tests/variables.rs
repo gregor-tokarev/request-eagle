@@ -2,6 +2,35 @@ use environment::VariableValues;
 use request::{HttpRequest, Method};
 
 #[test]
+fn escaped_references_remain_literal_in_every_request_field() {
+    let values = VariableValues {
+        environment: [("customer".into(), "must not replace".into())].into(),
+        ..Default::default()
+    };
+    let draft = HttpRequest {
+        method: Method::Post,
+        path: "https://example.com/{{!customer}}".into(),
+        headers: vec![("X-{{!customer}}".into(), "{{!vault:missing}}".into())],
+        query: Some(vec![("{{!customer}}".into(), "{{!$guid}}".into())]),
+        body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
+    };
+    let resolved = draft.resolve_variables(&values).unwrap();
+    assert_eq!(resolved.path, "https://example.com/{{customer}}");
+    assert_eq!(
+        resolved.headers[0],
+        ("X-{{customer}}".into(), "{{vault:missing}}".into())
+    );
+    assert_eq!(
+        resolved.query.unwrap()[0],
+        ("{{customer}}".into(), "{{$guid}}".into())
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&resolved.body.unwrap()).unwrap()["template"],
+        "Hello {{customer}}"
+    );
+}
+
+#[test]
 fn resolves_every_request_field_in_a_snapshot() {
     let values = VariableValues {
         environment: [

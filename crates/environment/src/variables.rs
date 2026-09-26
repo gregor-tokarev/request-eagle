@@ -60,8 +60,14 @@ impl<'a> VariableResolver<'a> {
             result.push_str(&remaining[..start]);
             remaining = &remaining[start + 2..];
             let end = remaining.find("}}").ok_or(VariableError::Unclosed)?;
-            let name = remaining[..end].trim();
-            result.push_str(&self.value(name)?);
+            if let Some(literal) = remaining[..end].strip_prefix('!') {
+                result.push_str("{{");
+                result.push_str(literal);
+                result.push_str("}}");
+            } else {
+                let name = remaining[..end].trim();
+                result.push_str(&self.value(name)?);
+            }
             remaining = &remaining[end + 2..];
         }
 

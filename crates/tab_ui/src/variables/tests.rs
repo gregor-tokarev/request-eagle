@@ -94,6 +94,84 @@ impl gpui_kit::Render for DialogHost {
 }
 
 #[gpui_kit::test]
+async fn unchanged_editors_preserve_external_updates_after_selection_and_save(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{AppContext as _, Modifiers, VisualTestContext, component::Root};
+
+    cx.executor().allow_parking();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("environment.toml");
+    std::fs::write(&path, "value = 'original'").unwrap();
+    let store = cx.update(|cx| {
+        gpui_kit::init(cx);
+        cx.set_reduce_motion(true);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+        let store = VariableStore::global(cx);
+        store.update(cx, |store, cx| {
+            store.ensure_environment(&Some(path.clone()), cx)
+        });
+        store
+    });
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let host = cx.new(|_| DialogHost);
+        Root::new(host, window, cx)
+    });
+    cx.update(|window, cx| {
+        let scope = cx.new(|_| super::VariableScope {
+            path: Some(path.clone()),
+        });
+        super::open_manager(scope, window, cx);
+    });
+    let click = |cx: &mut VisualTestContext, selector: &'static str| {
+        cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+        }
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::default());
+    };
+    click(cx, "variable-manager-entry-0");
+    std::fs::write(&path, "value = 'external after selection'").unwrap();
+    click(cx, "save-variable");
+    assert_eq!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .resolve("value"),
+        Some("external after selection")
+    );
+
+    click(cx, "variable-manager-entry-0");
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("edited and saved");
+    click(cx, "save-variable");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| store.read(cx).saving) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .resolve("value"),
+        Some("edited and saved")
+    );
+    std::fs::write(&path, "value = 'external after save'").unwrap();
+    click(cx, "save-variable");
+    assert_eq!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .resolve("value"),
+        Some("external after save")
+    );
+}
+
+#[gpui_kit::test]
 fn selecting_a_secret_clears_stale_errors_and_preserves_its_masked_value(cx: &mut TestAppContext) {
     use gpui_kit::{
         AppContext as _, Modifiers,

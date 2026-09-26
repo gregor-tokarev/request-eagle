@@ -1,6 +1,37 @@
 use crate::{GENERATED_VARIABLES, VariableError, VariableResolver, VariableValues};
 
 #[test]
+fn escapes_literal_braces_without_resolving_colliding_names_or_other_sources() {
+    let values = VariableValues {
+        environment: [("customer".into(), "resolved customer".into())].into(),
+        ..Default::default()
+    };
+    let mut resolver = VariableResolver::new(&values);
+    assert_eq!(
+        resolver
+            .resolve("Hello {{!customer}} / {{customer}}")
+            .unwrap(),
+        "Hello {{customer}} / resolved customer"
+    );
+    assert_eq!(
+        resolver
+            .resolve("{{!missing}} {{!$guid}} {{!vault:missing}}")
+            .unwrap(),
+        "{{missing}} {{$guid}} {{vault:missing}}"
+    );
+    assert_eq!(
+        resolver
+            .resolve("{{! customer }} {{!!name}} {{!{name}}}")
+            .unwrap(),
+        "{{ customer }} {{!name}} {{{name}}}"
+    );
+    assert_eq!(
+        resolver.resolve("{{!#if customer}}yes{{!/if}}").unwrap(),
+        "{{#if customer}}yes{{/if}}"
+    );
+}
+
+#[test]
 fn resolves_multiple_sources_without_recursively_expanding_values() {
     let values = VariableValues {
         environment: [

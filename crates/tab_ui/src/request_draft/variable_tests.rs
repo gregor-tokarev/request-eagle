@@ -55,7 +55,14 @@ fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut Tes
     cx.update(|_, cx| {
         VariableStore::global(cx).update(cx, |store, cx| {
             let environment = store.environments.get_mut(&None).unwrap();
-            for name in ["$guid", "$unsupported", "vault:token", "vault:missing"] {
+            for name in [
+                "$guid",
+                "$unsupported",
+                "vault:token",
+                "vault:missing",
+                "!literal",
+                " spaced",
+            ] {
                 environment.insert(name.into(), "must not be suggested as environment".into());
             }
             cx.notify();
@@ -81,6 +88,12 @@ fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut Tes
             "{name} must not have a duplicate Environment suggestion"
         );
     }
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("{{!message}}");
+    assert!(
+        !popup(cx),
+        "escaped references do not open variable completion"
+    );
 }
 
 #[gpui_kit::test]

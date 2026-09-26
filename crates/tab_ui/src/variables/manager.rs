@@ -20,7 +20,17 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
     let manager = cx.new(|cx| {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Variable name"));
         let value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
-        let mut subscriptions = vec![cx.observe(&store, |_, _, cx| cx.notify())];
+        let mut subscriptions =
+            vec![cx.observe(&store, |this: &mut VariableManager, store, cx| {
+                let store = store.read(cx);
+                if !store.saving
+                    && let Some(entry) = this.pending_entry.take()
+                    && store.save_error.is_none()
+                {
+                    this.selected_entry = Some(entry);
+                }
+                cx.notify();
+            })];
         for input in [&name, &value] {
             subscriptions.push(cx.subscribe(input, |_, _, _: &InputEvent, cx| cx.notify()));
         }
@@ -30,6 +40,8 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
             name,
             value,
             secret: false,
+            selected_entry: None,
+            pending_entry: None,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -54,6 +66,8 @@ struct VariableManager {
     name: Entity<InputState>,
     value: Entity<InputState>,
     secret: bool,
+    selected_entry: Option<(String, String)>,
+    pending_entry: Option<(String, String)>,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
@@ -61,6 +75,7 @@ struct VariableManager {
 impl VariableManager {
     fn select_source(&mut self, secret: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.secret = secret;
+        self.selected_entry = None;
         self.error = None;
         self.store.update(cx, |store, cx| {
             store.save_error = None;
@@ -75,7 +90,10 @@ impl VariableManager {
         cx.notify();
     }
 
-    fn save(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.read(cx).saving || (self.secret && self.store.read(cx).loading) {
+            return;
+        }
         let name = self.name.read(cx).value().trim().to_owned();
         if !valid_variable_name(&name) {
             self.error = Some(
@@ -86,6 +104,25 @@ impl VariableManager {
         }
         let value = self.value.read(cx).value().to_string();
         let scope = self.scope.read(cx).path.clone();
+        if self
+            .selected_entry
+            .as_ref()
+            .is_some_and(|(selected_name, selected_value)| {
+                selected_name == &name && selected_value == &value
+            })
+        {
+            // An untouched editor must not revert an update made by another process.
+            self.store.update(cx, |store, cx| {
+                if self.secret {
+                    store.load_secrets(cx);
+                } else {
+                    store.reload_environment(&scope, cx);
+                }
+            });
+            self.select_source(self.secret, window, cx);
+            return;
+        }
+        self.pending_entry = Some((name.clone(), value.clone()));
         self.store.update(cx, |store, cx| {
             store.save_entry(scope, self.secret, name, Some(value), cx)
         });
@@ -127,7 +164,7 @@ impl Render for VariableManager {
                 }
             });
         let loading = self.secret && store.loading;
-        let can_retry = self.secret && store.secret_error.is_some();
+        let can_retry = store.secret_error.is_some();
 
         let source_tabs =
             h_flex()
@@ -179,6 +216,7 @@ impl Render for VariableManager {
                             .debug_selector(move || format!("variable-manager-entry-{index}"))
                             .ghost()
                             .flex_1()
+                            .disabled(busy || unavailable)
                             .child(div().w_full().text_left().child(name))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let value = if this.secret {
@@ -198,6 +236,7 @@ impl Render for VariableManager {
                                         .unwrap_or_default()
                                 };
 
+                                this.selected_entry = Some((selected_name.clone(), value.clone()));
                                 this.name.update(cx, |input, cx| {
                                     input.set_value(selected_name.clone(), window, cx)
                                 });
@@ -267,9 +306,26 @@ impl Render for VariableManager {
                         })),
                 )
             })
+            .when(self.secret, |row| {
+                row.child(
+                    Button::new("reload-secrets")
+                        .debug_selector(|| "reload-secrets".into())
+                        .ghost()
+                        .label(if can_retry {
+                            "Retry keyring"
+                        } else {
+                            "Reload secrets"
+                        })
+                        .disabled(busy || loading)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.store.update(cx, |store, cx| store.load_secrets(cx));
+                        })),
+                )
+            })
             .child(div().flex_1())
             .child(
                 Button::new("save-variable")
+                    .debug_selector(|| "save-variable".into())
                     .primary()
                     .label(if busy { "Saving…" } else { "Save variable" })
                     .disabled(busy || unavailable)
@@ -306,16 +362,6 @@ impl Render for VariableManager {
             .child(form)
             .when_some(error, |view, error| {
                 view.child(div().text_sm().text_color(cx.theme().danger).child(error))
-            })
-            .when(can_retry, |view| {
-                view.child(
-                    Button::new("retry-secrets")
-                        .label("Retry keyring")
-                        .disabled(busy || loading)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.store.update(cx, |store, cx| store.load_secrets(cx))
-                        })),
-                )
             })
             .child(buttons)
             .child(

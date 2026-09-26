@@ -152,7 +152,7 @@ impl VariableInput {
                 self.suggestions.extend(
                     values
                         .keys()
-                        .filter(|name| !name.starts_with('$') && !name.starts_with("vault:"))
+                        .filter(|name| environment::valid_variable_name(name))
                         .map(|name| Suggestion {
                             name: name.clone(),
                             source: "Environment",
