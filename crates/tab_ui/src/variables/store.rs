@@ -11,6 +11,7 @@ pub(crate) struct VariableScope {
 pub(crate) struct VariableStore {
     pub environments: HashMap<Option<PathBuf>, HashMap<String, String>>,
     pub environment_errors: HashMap<Option<PathBuf>, String>,
+    environment_targets: HashMap<Option<PathBuf>, PathBuf>,
     pub secrets: HashMap<String, String>,
     pub secret_error: Option<String>,
     pub loading: bool,
@@ -45,7 +46,11 @@ impl VariableStore {
             return;
         }
 
-        let result = Self::environment_path(scope).map(Environment::from_file);
+        let path = Self::environment_path(scope);
+        if let Some(target) = path.as_ref().and_then(|path| path.canonicalize().ok()) {
+            self.environment_targets.insert(scope.clone(), target);
+        }
+        let result = path.map(Environment::from_file);
         match result {
             Some(Ok(environment)) => {
                 self.environments.insert(scope.clone(), environment.entries);
@@ -82,7 +87,9 @@ impl VariableStore {
 
     pub fn reload_environment(&mut self, scope: &Option<PathBuf>, cx: &mut Context<Self>) {
         self.save_error = None;
-        let target = Self::environment_path(scope).and_then(|path| path.canonicalize().ok());
+        let target = Self::environment_path(scope)
+            .and_then(|path| path.canonicalize().ok())
+            .or_else(|| self.environment_targets.get(scope).cloned());
         let mut scopes = vec![scope.clone()];
         if let Some(target) = target {
             for alias in self
@@ -93,6 +100,7 @@ impl VariableStore {
                 if !scopes.contains(alias)
                     && Self::environment_path(alias)
                         .and_then(|path| path.canonicalize().ok())
+                        .or_else(|| self.environment_targets.get(alias).cloned())
                         .is_some_and(|path| path == target)
                 {
                     scopes.push(alias.clone());

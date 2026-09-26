@@ -25,9 +25,11 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
             window,
             |this: &mut VariableManager, store, window, cx| {
                 let store = store.read(cx);
-                if !store.saving
+                let saving = store.saving;
+                let save_succeeded = store.save_error.is_none();
+                if !saving
                     && let Some(entry) = this.pending_entry.take()
-                    && store.save_error.is_none()
+                    && save_succeeded
                 {
                     let saved_value = if this.secret {
                         store.secrets.get(&entry.0)
@@ -48,6 +50,19 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
                     }
                     this.selected_entry = Some((entry.0, saved_value));
                 }
+                if !saving
+                    && let Some(name) = this.pending_removal.take()
+                    && save_succeeded
+                    && let Some((selected_name, selected_value)) = this.selected_entry.take()
+                    && selected_name == name
+                    && this.name.read(cx).value().trim() == selected_name
+                    && this.value.read(cx).value() == selected_value
+                {
+                    this.name
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                    this.value
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                }
                 cx.notify();
             },
         )];
@@ -62,6 +77,7 @@ pub(crate) fn open_manager(scope: Entity<VariableScope>, window: &mut Window, cx
             secret: false,
             selected_entry: None,
             pending_entry: None,
+            pending_removal: None,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -88,6 +104,7 @@ struct VariableManager {
     secret: bool,
     selected_entry: Option<(String, String)>,
     pending_entry: Option<(String, String)>,
+    pending_removal: Option<String>,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
@@ -290,11 +307,19 @@ impl Render for VariableManager {
                     })
                     .child(
                         Button::new(("delete-variable", index))
+                            .debug_selector(move || format!("remove-variable-{index}"))
                             .ghost()
                             .label("Remove")
                             .disabled(busy || unavailable)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let scope = this.scope.read(cx).path.clone();
+                                if this
+                                    .selected_entry
+                                    .as_ref()
+                                    .is_some_and(|(name, _)| name == &delete_name)
+                                {
+                                    this.pending_removal = Some(delete_name.clone());
+                                }
                                 this.store.update(cx, |store, cx| {
                                     store.save_entry(
                                         scope,

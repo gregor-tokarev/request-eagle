@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, io::Write as _, path::Path};
 
 use anyhow::Context as _;
-use toml_edit::{DocumentMut, Item, Value};
+use toml_edit::{DocumentMut, Item, Key, Value};
 
 pub(super) fn save_entry(
     path: &Path,
@@ -59,9 +59,19 @@ pub(super) fn save_entry(
         let current = entries
             .remove(previous)
             .context("The selected variable was removed. Reload its source and retry.")?;
-        if let Some(item) = document.remove(previous) {
-            document[name] = item;
+        let order: HashMap<_, _> = document
+            .iter()
+            .enumerate()
+            .map(|(index, (key, _))| (if key == previous { name } else { key }.to_owned(), index))
+            .collect();
+        if let Some((old_key, item)) = document.remove_entry(previous) {
+            let key = Key::new(name)
+                .with_leaf_decor(old_key.leaf_decor().clone())
+                .with_dotted_decor(old_key.dotted_decor().clone());
+            document.insert_formatted(&key, item);
+            document.sort_values_by(|left, _, right, _| order[left.get()].cmp(&order[right.get()]));
         }
+        entries.insert(name.to_owned(), current.clone());
         // A rename without an edited value moves the latest stored value.
         value = Some(value.unwrap_or(current));
     }

@@ -138,6 +138,87 @@ async fn shared_environment_aliases_refresh_after_save_and_reload(cx: &mut TestA
             }
         })
     });
+    std::fs::remove_file(&target).unwrap();
+    cx.update(|cx| {
+        store.update(cx, |store, cx| {
+            store.reload_environment(&Some(first.clone()), cx);
+            for path in [&first, &second] {
+                assert!(
+                    store
+                        .values(&Some(path.clone()))
+                        .unwrap()
+                        .environment
+                        .is_empty()
+                );
+            }
+        })
+    });
+    std::fs::write(&target, "restored = 'fresh'").unwrap();
+    cx.update(|cx| {
+        store.update(cx, |store, cx| {
+            store.reload_environment(&Some(second.clone()), cx);
+            for path in [&first, &second] {
+                assert_eq!(
+                    store.values(&Some(path.clone())).unwrap().environment["restored"],
+                    "fresh"
+                );
+            }
+        })
+    });
+    std::fs::remove_file(&target).unwrap();
+    cx.update(|cx| {
+        store.update(cx, |store, cx| {
+            store.save_entry(
+                Some(first.clone()),
+                false,
+                None,
+                "local".into(),
+                Some("discard".into()),
+                cx,
+            );
+        })
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| store.read(cx).saving) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    cx.read(|cx| {
+        assert!(store.read(cx).save_error.is_some());
+        for path in [&first, &second] {
+            assert!(
+                store
+                    .read(cx)
+                    .values(&Some(path.clone()))
+                    .unwrap()
+                    .environment
+                    .is_empty()
+            );
+        }
+    });
+}
+
+#[test]
+fn environment_renames_preserve_value_syntax_comments_and_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("environment.toml");
+    for representation in [
+        "'single quoted'",
+        "'''multiline\nliteral'''",
+        "\"\"\"multiline\nbasic\"\"\"",
+        "\"escaped \\u0061\"",
+    ] {
+        let source = format!(
+            "# Before\nfirst = 'keep'\n# Value comment\nold  =  {representation} # inline\nlast = 'keep too'\n"
+        );
+        std::fs::write(&path, &source).unwrap();
+        super::environment_file::save_entry(&path, Some("old"), "renamed", None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            source.replace("old  =", "renamed  =")
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -231,7 +312,7 @@ impl gpui_kit::Render for DialogHost {
 }
 
 #[gpui_kit::test]
-async fn unchanged_editors_preserve_external_updates_after_selection_and_save(
+async fn variable_editor_preserves_external_values_and_resets_after_removal(
     cx: &mut TestAppContext,
 ) {
     use gpui_kit::{
@@ -340,6 +421,43 @@ async fn unchanged_editors_preserve_external_updates_after_selection_and_save(
             .unwrap()
             .resolve("renamed"),
         Some("external after rename")
+    );
+    click(cx, "variable-manager-entry-0");
+    click(cx, "remove-variable-0");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| store.read(cx).saving) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    assert!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    for selector in ["variable-name-field", "variable-value-field"] {
+        click(cx, selector);
+        cx.update(|window, cx| {
+            let focused = window.focused_input(cx).unwrap();
+            assert!(focused.as_input().unwrap().read(cx).value().is_empty());
+        });
+    }
+    cx.simulate_input("recreated");
+    click(cx, "variable-name-field");
+    cx.simulate_input("fresh");
+    click(cx, "save-variable");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| store.read(cx).saving) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        environment::Environment::from_file(&path)
+            .unwrap()
+            .resolve("fresh"),
+        Some("recreated")
     );
 }
 
