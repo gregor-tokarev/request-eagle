@@ -3,6 +3,25 @@ use std::collections::HashMap;
 use anyhow::Result;
 use gpui_kit::{App, Task};
 
+/// Apply one edit to the current keyring contents, rather than a UI snapshot.
+pub fn update_request_secret(
+    name: String,
+    value: Option<String>,
+    cx: &mut App,
+) -> Task<Result<HashMap<String, String>>> {
+    let read = read_request_secrets(cx);
+    cx.spawn(async move |cx| {
+        let mut values = read.await?;
+        if let Some(value) = value {
+            values.insert(name, value);
+        } else {
+            values.remove(&name);
+        }
+        cx.update(|cx| write_request_secrets(&values, cx)).await?;
+        Ok(values)
+    })
+}
+
 /// Request secrets use their own keyring item, independent of proxy credentials.
 pub fn read_request_secrets(cx: &App) -> Task<Result<HashMap<String, String>>> {
     #[cfg(not(target_os = "linux"))]

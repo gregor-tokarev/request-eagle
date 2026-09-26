@@ -128,14 +128,7 @@ impl VariableStore {
         self.saving = true;
         self.save_error = None;
         let task = if secret {
-            let mut values = self.secrets.clone();
-            if let Some(value) = value {
-                values.insert(name, value);
-            } else {
-                values.remove(&name);
-            }
-            let task = preferences::write_request_secrets(&values, cx);
-            cx.spawn(async move |_, _| task.await.map(|()| values))
+            preferences::update_request_secret(name, value, cx)
         } else {
             let path = Self::environment_path(&scope);
             cx.background_executor().spawn(async move {
@@ -157,6 +150,11 @@ impl VariableStore {
                         this.environment_errors.remove(&scope);
                     }
                     Err(error) => {
+                        if secret {
+                            this.secret_error = Some(error.to_string());
+                        } else {
+                            this.reload_environment(&scope, cx);
+                        }
                         this.save_error = Some(error.to_string());
                     }
                 }

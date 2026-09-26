@@ -38,6 +38,8 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
 #[test]
 fn templated_url_credentials_preview_authorization_as_unresolved() {
     for (path, expected) in [
+        ("{{base_url}}/users", "Resolved on Send"),
+        ("https://{{authority}}/users", "Resolved on Send"),
         (
             "https://{{user}}:{{vault:password}}@example.com",
             "Resolved on Send",

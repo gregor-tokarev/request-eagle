@@ -133,6 +133,15 @@ async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
             .await
             .is_err()
     );
+    ensure!(
+        cx.update(|cx| preferences::update_request_secret(
+            "test".into(),
+            Some("synthetic".into()),
+            cx
+        ))
+        .await
+        .is_err()
+    );
     ensure!(fs::read(&path)? == original);
     ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy == proxy));
 
@@ -161,18 +170,50 @@ async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
         .update(|cx| preferences::read_request_secrets(cx))
         .await?;
     let name = format!("variable-test-{}", uuid::Uuid::new_v4());
-    let mut values = original.clone();
-    values.insert(name.clone(), "synthetic-request-secret".into());
-    cx.update(|cx| preferences::write_request_secrets(&values, cx))
-        .await?;
+    let peer = format!("variable-peer-{}", uuid::Uuid::new_v4());
+    let check: Result<()> = async {
+        // Simulate another process changing the keyring after our initial snapshot.
+        let mut external = original.clone();
+        external.insert(peer.clone(), "external addition".into());
+        cx.update(|cx| preferences::write_request_secrets(&external, cx))
+            .await?;
+        let values = cx
+            .update(|cx| {
+                preferences::update_request_secret(
+                    name.clone(),
+                    Some("synthetic-request-secret".into()),
+                    cx,
+                )
+            })
+            .await?;
+        ensure!(values.get(&peer).map(String::as_str) == Some("external addition"));
+        ensure!(values.get(&name).map(String::as_str) == Some("synthetic-request-secret"));
+        ensure!(
+            cx.update(|cx| preferences::read_request_secrets(cx))
+                .await?
+                == values
+        );
 
-    let loaded = cx.update(|cx| preferences::read_request_secrets(cx)).await;
+        let mut external = values;
+        external.insert(peer.clone(), "external update".into());
+        cx.update(|cx| preferences::write_request_secrets(&external, cx))
+            .await?;
+        let remaining = cx
+            .update(|cx| preferences::update_request_secret(name.clone(), None, cx))
+            .await?;
+        ensure!(!remaining.contains_key(&name));
+        ensure!(remaining.get(&peer).map(String::as_str) == Some("external update"));
+        ensure!(
+            cx.update(|cx| preferences::read_request_secrets(cx))
+                .await?
+                == remaining
+        );
+        Ok(())
+    }
+    .await;
     cx.update(|cx| preferences::write_request_secrets(&original, cx))
         .await?;
-    ensure!(
-        loaded? == values,
-        "Request secrets did not round trip through the keyring"
-    );
+    check?;
     ensure!(
         !cx.update(|cx| preferences::read_request_secrets(cx))
             .await?

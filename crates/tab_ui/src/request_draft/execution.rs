@@ -23,11 +23,10 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         0
     };
     let url = request_url(&request.path);
-    let templated_credentials = url
+    let templated_authority = url
         .split_once("://")
         .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
-        .and_then(|authority| authority.rsplit_once('@'))
-        .is_some_and(|(credentials, _)| credentials.contains("{{"));
+        .is_some_and(|authority| authority.contains("{{"));
     let templated_header_names = request.headers.iter().any(|(name, _)| name.contains("{{"));
     let mut headers =
         request::generated_headers(request.method, &url, &request.headers, body_bytes);
@@ -52,7 +51,7 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.insert(0, ("Host".into(), "Resolved on Send".into()));
     }
 
-    if templated_credentials
+    if templated_authority
         && !headers.iter().any(|(name, _)| name == "Authorization")
         && !request
             .headers
@@ -65,7 +64,7 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     for (name, value) in &mut headers {
         if templated_header_names
             || (name == "Host" && value.contains("{{"))
-            || (name == "Authorization" && templated_credentials)
+            || (name == "Authorization" && templated_authority)
             || (name == "Content-Length"
                 && request
                     .body

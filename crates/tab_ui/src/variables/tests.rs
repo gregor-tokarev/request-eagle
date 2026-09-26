@@ -221,12 +221,18 @@ async fn environment_saves_merge_external_changes_and_reject_invalid_files(
     cx.read(|cx| {
         assert!(store.read(cx).save_error.is_some());
         assert!(
+            store
+                .read(cx)
+                .environment_errors
+                .contains_key(&Some(path.clone()))
+        );
+        assert!(
             !store
                 .read(cx)
                 .values(&Some(path))
                 .unwrap()
                 .environment
-                .contains_key("local")
+                .contains_key("existing")
         );
     });
 }
@@ -264,9 +270,10 @@ async fn environment_edits_persist_and_failed_saves_preserve_existing_values(
         Some("https://example.com")
     );
 
-    // Replacing a directory with a file fails even when tests run as root.
-    std::fs::remove_file(&path).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    let permissions = std::fs::metadata(&path).unwrap().permissions();
+    let mut read_only = permissions.clone();
+    read_only.set_readonly(true);
+    std::fs::set_permissions(&path, read_only).unwrap();
     cx.update(|cx| {
         store.update(cx, |store, cx| {
             store.save_entry(
@@ -294,7 +301,7 @@ async fn environment_edits_persist_and_failed_saves_preserve_existing_values(
             "https://example.com"
         );
     });
-    std::fs::remove_dir(&path).unwrap();
+    std::fs::set_permissions(&path, permissions).unwrap();
     std::fs::write(&path, "base_url = 'https://fixed.example'").unwrap();
     cx.update(|cx| {
         store.update(cx, |store, cx| {
