@@ -60,10 +60,12 @@ Scripts are synchronous. Async callbacks, promises, timers, `pm.sendRequest`,
 external packages, persistent environment/global/collection variables, and host
 file/network/process APIs are not supported. Each phase gets a fresh QuickJS
 runtime through the Rust `rquickjs` binding. Limits are 2 seconds, 32 MiB of JS
-memory, 32 MiB for the expanded request text, and 500 tests per phase. Console output retains the first 500 messages;
+memory, 32 MiB for the expanded request text, and 500 tests per phase. Console
+output retains the first 500 messages;
 individual log messages, test names and test errors are limited to 4,096 characters.
-The request timeout and cancellation also interrupt running scripts. HTTP elapsed
-time excludes scripts.
+Cancellation interrupts either script phase. The request timeout includes the
+pre-request script and HTTP transfer; post-response scripts use their own 2-second
+limit so the completed response is retained. HTTP elapsed time excludes scripts.
 
 ## Visual reference
 

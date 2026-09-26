@@ -58,21 +58,12 @@ impl RequestExecutor {
                             scripts,
                         };
 
-                        match post_request {
-                            Some(request) => Ok(crate::scripts::post_response(
-                                request,
-                                variables,
-                                execution,
-                                cancellation.0.clone(),
-                            )
-                            .await),
-                            None => Ok(execution),
-                        }
+                        Ok((post_request, variables, execution))
                     }
                 }
             };
 
-            match executor.timeout {
+            let (post_request, variables, execution) = match executor.timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;
@@ -82,6 +73,19 @@ impl RequestExecutor {
                     .await
                 }
                 None => run.await,
+            }?;
+
+            // Once the response is complete, its script uses the separate script
+            // deadline. A request timeout must not discard a received response.
+            match post_request {
+                Some(request) => Ok(crate::scripts::post_response(
+                    request,
+                    variables,
+                    execution,
+                    cancellation.0.clone(),
+                )
+                .await),
+                None => Ok(execution),
             }
         }
     }

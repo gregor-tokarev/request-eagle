@@ -17,7 +17,8 @@ pub enum HttpVersion {
 #[serde(default)]
 pub struct RequestPreferences {
     pub http_version: HttpVersion,
-    /// Total deadline, including reading the response body. Zero disables it.
+    /// Deadline through the complete response body, including pre-request scripts.
+    /// Post-response scripts have their own limit. Zero disables this deadline.
     pub timeout_ms: u64,
     /// Maximum buffered response body in MiB (1,048,576 bytes). Zero is unlimited.
     pub max_response_size_mb: u64,

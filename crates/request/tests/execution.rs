@@ -1104,3 +1104,35 @@ fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
         assert!(draft.headers.is_empty());
     });
 }
+
+#[test]
+fn request_timeout_does_not_discard_a_response_during_its_post_response_script() {
+    smol::block_on(async {
+        let (url, server) =
+            serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec())
+                .await;
+        let executor = RequestExecutor::new(&RequestPreferences {
+            timeout_ms: 250,
+            ..Default::default()
+        })
+        .unwrap();
+        let execution = executor.execute(HttpRequest {
+            path: url,
+            scripts: request::RequestScripts {
+                post_response: "const start = Date.now(); while (Date.now() - start < 350) {} throw new Error('script failed after response');".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }).await.unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.body, b"ok");
+        assert!(
+            execution.scripts[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("script failed after response")
+        );
+    });
+}
