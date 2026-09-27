@@ -132,15 +132,39 @@ impl Vim {
                 this.reset_pending();
                 this.desired_column = None;
 
-                if matches!(this.mode, Mode::Visual { .. }) {
-                    this.set_mode(Mode::Normal, cx);
-                }
+                if this.enabled && this.mode != Mode::Insert {
+                    if selection.is_empty() {
+                        this.set_mode(Mode::Normal, cx);
+                        let cursor = normal_cursor(editor.read(cx).text(), selection.start);
 
-                if this.enabled && this.mode == Mode::Normal && selection.is_empty() {
-                    let cursor = normal_cursor(editor.read(cx).text(), selection.start);
+                        if cursor != selection.start {
+                            this.normal(cursor, cx);
+                        }
+                    } else {
+                        let editor = editor.read(cx);
+                        let text = editor.text();
+                        let start = previous(text, next(text, selection.start));
+                        let end = previous(text, selection.end);
+                        let range = start..next(text, end);
+                        // Native selections are exclusive; Vim stores an
+                        // inclusive cursor, preserving the dragged active end.
+                        let (anchor, cursor) = if editor.cursor() == selection.start {
+                            (end, start)
+                        } else {
+                            (start, end)
+                        };
+                        this.set_mode(
+                            Mode::Visual {
+                                anchor,
+                                cursor,
+                                linewise: false,
+                            },
+                            cx,
+                        );
 
-                    if cursor != selection.start {
-                        this.normal(cursor, cx);
+                        if range != selection {
+                            this.select(range, cx);
+                        }
                     }
                 }
             }

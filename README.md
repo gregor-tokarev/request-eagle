@@ -91,6 +91,8 @@ Operators also accept `/`, `n`, and `N` as motions.
 For `/` searches, Enter accepts the match (including a preceding count), and
 Escape restores the original position or Visual selection. Visual `u`/`U`
 changes case, and Visual `D C Y S X` operates on the selected lines.
+Dragging to select text in Normal mode enters Visual mode, so motions and
+operators act on the highlighted text. Insert mode keeps native selection editing.
 
 Type `{{` in a request URL, query key/value, header key/value, or JSON body to
 choose a variable. Continue typing to filter; use Up/Down and Enter or Tab to

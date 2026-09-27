@@ -242,6 +242,76 @@ fn vim_visual_selection_and_changes_are_unicode_safe(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn mouse_drag_selections_enter_visual_mode_and_keep_the_active_end(cx: &mut TestAppContext) {
+    use gpui_kit::{Modifiers, MouseButton};
+
+    for (reverse, keys, expected) in [
+        (false, "x", "abghi"),
+        (true, "d", "abghi"),
+        (false, "h x", "abfghi"),
+        (true, "l x", "abcghi"),
+    ] {
+        let (view, cx) = setup(cx, "abcdefghi", true);
+        if reverse {
+            cx.simulate_keystrokes("v l");
+        }
+        let (start, end) = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let editor = view.read(cx).editor.read(cx);
+            let start = editor.range_to_bounds(&(2..2)).unwrap().center();
+            let end = editor.range_to_bounds(&(6..6)).unwrap().center();
+            if reverse { (end, start) } else { (start, end) }
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.read(|cx| assert_eq!(view.read(cx).editor.read(cx).selected_range(), 2..6));
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "reverse={reverse}, {keys}");
+    }
+}
+
+#[gpui_kit::test]
+fn native_visual_selections_expand_to_graphemes_and_preserve_crlf(cx: &mut TestAppContext) {
+    let text = "Ae\u{301}👩\u{200d}🚀\r\nB";
+    let end = text.find('B').unwrap();
+    for reverse in [false, true] {
+        let (view, cx) = setup(cx, text, true);
+        cx.update(|_, cx| {
+            view.read(cx).editor.clone().update(cx, |editor, cx| {
+                // Begin inside the combining cluster; the visual range must
+                // expand to the whole grapheme and retain the complete CRLF.
+                let (start, end) = if reverse { (end, 2) } else { (2, end) };
+                editor.set_selected_range(start..end, cx);
+            });
+        });
+        cx.simulate_keystrokes("y");
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(&text[1..end])
+        );
+        assert_eq!(value(&view, cx), text);
+    }
+}
+
+#[gpui_kit::test]
+fn insert_mode_and_disabled_vim_keep_native_selection_editing(cx: &mut TestAppContext) {
+    for enabled in [false, true] {
+        let (view, cx) = setup(cx, "abcdefghi", enabled);
+        if enabled {
+            cx.simulate_keystrokes("i");
+        }
+        cx.update(|_, cx| {
+            view.read(cx).editor.clone().update(cx, |editor, cx| {
+                editor.set_selected_range(2..6, cx);
+            });
+        });
+        cx.simulate_keystrokes("x");
+        assert_eq!(value(&view, cx), "abxghi");
+    }
+}
+
+#[gpui_kit::test]
 fn vim_keeps_single_line_inputs_and_insert_mode_shortcuts_working(cx: &mut TestAppContext) {
     let (view, cx) = setup(cx, "first\nlast", true);
     cx.simulate_keystrokes("o");
