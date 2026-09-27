@@ -1235,3 +1235,48 @@ fn shared_dispatch_keeps_search_and_unrelated_input_scoped_after_other_editors_c
     cx.read(|cx| assert_eq!(view.read(cx).input.read(cx).value().as_str(), "hjkl"));
     assert_eq!(value(&view, cx), "one two one");
 }
+
+#[gpui_kit::test]
+fn search_cancellation_routes_to_its_owner_after_another_editor_receives_keys(
+    cx: &mut TestAppContext,
+) {
+    struct Pair(Entity<Harness>, Entity<Harness>);
+
+    impl Render for Pair {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            v_flex()
+                .size_full()
+                .child(self.0.clone())
+                .child(self.1.clone())
+        }
+    }
+
+    let (first, cx) = setup(cx, "one two one", true);
+    let second = cx.update(|window, cx| {
+        let second = cx.new(|cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("abcd"));
+            let input = cx.new(|cx| InputState::new(window, cx));
+            let vim = cx.new(|cx| Vim::new(editor.clone(), cx));
+            Harness { editor, input, vim }
+        });
+        window.replace_root(cx, |_, _| Pair(first.clone(), second.clone()));
+        second
+    });
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("one");
+    let search_focus = cx.update(|window, cx| {
+        let search = window.focused(cx).unwrap();
+        second
+            .read(cx)
+            .editor
+            .clone()
+            .update(cx, |editor, cx| editor.focus(window, cx));
+        search
+    });
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&second, cx), 1);
+    cx.update(|window, cx| window.focus(&search_focus, cx));
+    cx.simulate_keystrokes("escape");
+    assert_eq!(cursor(&first, cx), 0);
+    assert_eq!(value(&first, cx), "one two one");
+}
