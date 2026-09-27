@@ -1,17 +1,15 @@
-# Request variable walkthrough
+# Request editor variable demo
 
-Native Request Eagle walkthrough recorded from source commit 843b50777665e70a5854b82c4e5bbf4b934ae12c for PR #40.
+Source: `09aed661d6cddfa365a7ed5749fce6143d6fb1fa` (PR #40).
 
-The 58-second video demonstrates environment and secret management, URL/query/header/JSON-body autocomplete, unknown-variable errors, successful localhost HTTP execution, and saving the template. All values are synthetic and the Linux keyring is isolated. The received request was checked for resolved Authorization, custom header, and body values. The saved request was checked for unchanged placeholders.
+[Watch the 41-second native application recording](editor-variables.mp4).
 
-Validation: 247 workspace tests passed; 6 benchmarks ignored. Native keyring checks cover concurrent writers, external updates, rename/collision behavior, removal, and unavailable providers. Environment tests cover concurrent writers, TOML formatting, shared-file removal/restoration, and editor lifecycle. CI and final code/security reviews completed successfully, with no unresolved review threads.
+The recording shows `{{` completion in URL, query keys/values, header keys/values, and JSON body; filtered environment/generated suggestions; Enter/Tab insertion; a successful POST to a local echo server; an unknown variable blocking Send; and saving the original placeholders.
 
-Supplemental screenshots captured during review revisions:
-- native-edge-cases.png: shared symlink edits and excluded URL fragments.
-- native-secret-escape.png: literal brace escapes sent in JSON.
-- native-rename.png: a renamed environment entry.
-- native-remove.png: cleared editor after removing the selected entry.
-- native-pending-edit.png: both entries survived typing the next variable while a save was blocked by a file lock.
-- native-conflict-error.png and native-conflict-response.png: secret-name conflicts keep editing available and leave the original secret usable for authenticated requests without a keyring retry.
+The collection environment was populated programmatically before launching the app. `environment.toml` and `request.toml` contain the demonstration fixtures. No variable-management UI or secret support is included.
 
-Video SHA-256: 20d5132035c62e850786dfed76eca05e01050e04bebfd96dbed64107574c5c4a
+Additional native checks verified fresh generated values on resend and reading external environment edits on the next Send. The saved request still contains all placeholders. The workspace test suite passed (237 tests, 6 ignored manual benchmarks), including light/dark themes and 12/16/24 px interface sizes.
+
+The video is a continuous X11 recording of the labeled native application, with no compositing or simulated UI. The app runs against `echo.py` on localhost:18765 with an isolated collection directory.
+
+SHA-256: `834019056e66abadca905f8b502f5d74ac4b0566eac75ae8dca37513b7244867`

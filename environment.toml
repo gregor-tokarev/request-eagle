@@ -1,0 +1,4 @@
+base_url = 'http://127.0.0.1:18765'
+header_name = 'X-Demo'
+message = 'Hello from variables'
+query_name = 'sent_at'
