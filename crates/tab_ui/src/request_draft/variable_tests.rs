@@ -438,7 +438,6 @@ async fn send_resolves_environment_and_script_variables_once(cx: &mut TestAppCon
             draft.request.headers = vec![("{{header}}".into(), "text/plain".into())];
             draft.request.body = Some(b"{{message}}/{{!message}}/{{literal}}".to_vec());
             draft.request.scripts.pre_request = "pm.request.method = 'POST'; pm.expect(pm.variables.get('message')).to.equal('from file'); pm.variables.set('created', 'created'); pm.variables.set('message', 'local');".into();
-            draft.trusted_scripts = Some(draft.request.scripts.clone());
             draft.send(window, cx);
         });
     });
@@ -615,7 +614,6 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
             draft.set_variable_sessions(sessions.clone(), cx);
             draft.request.path = format!("http://{address}/login");
             draft.request.scripts.post_response = "pm.environment.set('token', pm.response.json().token); pm.variables.set('scratch', 'local only');".into();
-            draft.trusted_scripts = Some(draft.request.scripts.clone());
             draft.send(window, cx);
         });
     });

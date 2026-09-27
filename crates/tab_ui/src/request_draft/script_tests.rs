@@ -42,33 +42,6 @@ fn script_draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTe
     (draft.unwrap(), cx)
 }
 
-fn answer_trust_prompt(cx: &mut VisualTestContext, answer: &str) {
-    cx.run_until_parked();
-    for _ in 0..2 {
-        cx.update(|window, cx| {
-            window.refresh();
-            window.draw(cx).clear(cx);
-        });
-    }
-    assert!(element_bounds(cx, "dialog-0").is_some());
-    let controls = cx.update(|window, _| {
-        gpui_kit::base::test_support::snapshots(window)
-            .into_iter()
-            .filter(|element| element.visible() && element.role() == Some(gpui_kit::Role::Button))
-            .collect::<Vec<_>>()
-    });
-    let button = |label| {
-        controls
-            .iter()
-            .find(|element| element.label() == Some(label))
-            .unwrap_or_else(|| panic!("missing trust dialog button {label}"))
-    };
-    assert!(button("Trust and Send").bounds().size.width > gpui_kit::px(0.));
-    assert!(button("Cancel").bounds().size.width > gpui_kit::px(0.));
-    cx.simulate_click(button(answer).bounds().center(), Modifiers::default());
-    cx.run_until_parked();
-}
-
 #[gpui_kit::test]
 fn script_editors_keep_independent_drafts_and_snippets(cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
@@ -143,7 +116,6 @@ async fn pre_request_error_is_visible_without_an_http_response(cx: &mut TestAppC
             draft.send(window, cx);
         });
     });
-    answer_trust_prompt(cx, "Trust and Send");
     let started = std::time::Instant::now();
     while cx.read(|cx| draft.read(cx).is_sending()) {
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
@@ -157,18 +129,16 @@ async fn pre_request_error_is_visible_without_an_http_response(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
-    cx: &mut TestAppContext,
-) {
+async fn saved_and_edited_scripts_run_on_send_without_confirmation(cx: &mut TestAppContext) {
     use smol::io::{AsyncReadExt, AsyncWriteExt};
     use std::time::{Duration, Instant};
 
     cx.executor().allow_parking();
     let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let destination = format!("http://{}", listener.local_addr().unwrap());
-    let (sent, received) = smol::channel::bounded(2);
+    let (sent, received) = smol::channel::bounded(3);
     let server = smol::spawn(async move {
-        for _ in 0..2 {
+        for expected in ["initial", "edited", "initial"] {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut head = Vec::new();
             while !head.ends_with(b"\r\n\r\n") {
@@ -176,14 +146,11 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
                 stream.read_exact(&mut byte).await.unwrap();
                 head.push(byte[0]);
             }
+            let head = String::from_utf8(head).unwrap();
             assert!(
-                String::from_utf8(head)
-                    .unwrap()
-                    .contains("authorization: Bearer secret\r\n")
+                head.contains(&format!("x-script: {expected}\r\n")),
+                "{head}"
             );
-            let mut body = [0; 6];
-            stream.read_exact(&mut body).await.unwrap();
-            assert_eq!(&body, b"secret");
             sent.send(()).await.unwrap();
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -192,95 +159,54 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
         }
     });
     let (draft, cx) = script_draft(cx);
-    cx.update(|window, cx| {
-        draft.update(cx, |draft, cx| {
-            *draft = RequestDraft::from_saved(
-                "Imported".into(),
-                "API".into(),
-                request::HttpRequest {
-                    method: request::Method::Post,
-                    path: "https://original.example".into(),
-                    headers: vec![("Authorization".into(), "Bearer secret".into())],
-                    body: Some(b"secret".to_vec()),
-                    scripts: request::RequestScripts {
-                        pre_request: format!("pm.request.url = {destination:?};"),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            );
-            draft.send(window, cx);
-            draft.send(window, cx);
-            assert!(!draft.is_sending());
-            assert!(draft.response.is_none());
-        });
-    });
-    assert!(
-        element_bounds(cx, "dialog-1").is_none(),
-        "repeated Send must not stack prompts"
-    );
-    answer_trust_prompt(cx, "Cancel");
-    assert!(received.try_recv().is_err());
-    assert!(element_bounds(cx, "request-scripts").is_some());
+    let saved = request::HttpRequest {
+        path: destination,
+        scripts: request::RequestScripts {
+            pre_request: "pm.request.headers.upsert({key: 'X-Script', value: 'initial'});".into(),
+            post_response: "pm.test('status', () => pm.response.to.have.status(200));".into(),
+        },
+        ..Default::default()
+    };
 
-    // An approval for old source must not authorize a concurrent replacement.
-    cx.update(|window, cx| {
-        draft.update(cx, |draft, cx| {
-            draft.send(window, cx);
-            draft
-                .request
-                .scripts
-                .pre_request
-                .push_str(" console.log('changed');");
+    for run in 0..3 {
+        cx.update(|window, cx| {
+            draft.update(cx, |draft, cx| {
+                if run == 1 {
+                    draft.request.scripts.pre_request = draft
+                        .request
+                        .scripts
+                        .pre_request
+                        .replace("initial", "edited");
+                    draft
+                        .request
+                        .scripts
+                        .post_response
+                        .push_str(" console.log('edited');");
+                } else {
+                    *draft = RequestDraft::from_saved("Saved".into(), "API".into(), saved.clone());
+                }
+                draft.prepare(window, cx);
+                cx.notify();
+            });
         });
-    });
-    answer_trust_prompt(cx, "Trust and Send");
-    cx.read(|cx| {
-        assert!(!draft.read(cx).is_sending());
-        assert!(draft.read(cx).trusted_scripts.is_none());
-    });
-    assert!(received.try_recv().is_err());
+        let send = element_bounds(cx, "send-request").unwrap();
+        cx.simulate_click(send.center(), Modifiers::default());
+        assert!(element_bounds(cx, "dialog-0").is_none());
 
-    for run in 0..2 {
-        cx.update(|window, cx| draft.update(cx, |draft, cx| draft.send(window, cx)));
-        if run == 0 {
-            answer_trust_prompt(cx, "Trust and Send");
-        } else {
-            assert!(element_bounds(cx, "dialog-0").is_none());
-        }
         let started = Instant::now();
         while cx.read(|cx| draft.read(cx).is_sending()) {
             assert!(started.elapsed() < Duration::from_secs(5));
             smol::Timer::after(Duration::from_millis(10)).await;
             cx.run_until_parked();
         }
-        received.try_recv().expect("approved script should send");
+        received
+            .try_recv()
+            .expect("Send should run scripts immediately");
+        let tests = element_bounds(cx, "response-section-Test Results").unwrap();
+        cx.simulate_click(tests.center(), Modifiers::default());
+        assert!(element_bounds(cx, "script-test-results").is_some());
     }
     server.await;
-
-    // Either phase changing, or reopening the request, requires fresh approval.
-    cx.update(|window, cx| {
-        draft.update(cx, |draft, cx| {
-            draft.request.scripts.post_response =
-                "pm.test('status', () => pm.response.to.have.status(200));".into();
-            draft.send(window, cx);
-            assert!(!draft.is_sending());
-        });
-    });
-    answer_trust_prompt(cx, "Cancel");
-    cx.update(|window, cx| {
-        draft.update(cx, |draft, cx| {
-            *draft = RequestDraft::from_saved(
-                "Reopened".into(),
-                "API".into(),
-                draft.saved_request.clone(),
-            );
-            draft.send(window, cx);
-            assert!(!draft.is_sending());
-            assert!(draft.trusted_scripts.is_none());
-        });
-    });
-    answer_trust_prompt(cx, "Cancel");
 }
 
 #[gpui_kit::test]
@@ -318,19 +244,6 @@ fn scripts_fit_zoom_themes_and_resizing(cx: &mut TestAppContext) {
             );
             assert!(snippets.right() <= scripts.right());
             assert!(snippets.bottom() <= scripts.bottom());
-
-            cx.update(|window, cx| draft.update(cx, |draft, cx| draft.send(window, cx)));
-            for _ in 0..2 {
-                cx.update(|window, cx| {
-                    window.refresh();
-                    window.draw(cx).clear(cx);
-                });
-            }
-            let dialog = element_bounds(cx, "dialog-0").unwrap();
-            assert!(dialog.origin.x >= px(0.) && dialog.origin.y >= px(0.));
-            assert!(dialog.right() <= px(40. * font_size));
-            assert!(dialog.bottom() <= px(40. * font_size));
-            answer_trust_prompt(cx, "Cancel");
         }
     }
 }

@@ -3,8 +3,7 @@
 Open a request's **Scripts** section to write JavaScript before sending or after
 receiving a response. **Snippets** provides examples; typing `pm.` offers the
 available APIs. Send runs the scripts. Test results and console output appear in
-the response panel. The first send asks you to trust the scripts in that tab;
-editing them requires trusting the new version.
+the response panel. Scripts run immediately when you send the request.
 
 Scripts run against a snapshot. Request edits affect that send without changing
 the request draft or saved file. An uncaught pre-request error prevents the
