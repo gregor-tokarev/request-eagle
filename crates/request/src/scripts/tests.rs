@@ -326,13 +326,12 @@ fn response_tests_keep_failures_logs_and_response_data() {
 }
 
 #[test]
-fn exceptions_invalid_request_data_and_async_scripts_fail_before_sending() {
+fn exceptions_invalid_request_data_and_unhandled_rejections_fail_before_sending() {
     smol::block_on(async {
         for source in [
             "throw new Error('boom');",
             "const = ;",
             "pm.request.method = 'TYPO';",
-            "Promise.resolve().then(() => {});",
             "Promise.reject('bad'); void 0;",
             "pm.test('async', async () => {}); throw new Error('stop');",
         ] {

@@ -20,6 +20,16 @@ pub(crate) struct HttpExecutor {
 }
 
 impl HttpExecutor {
+    /// Script subrequests share the transport but cannot allocate unbounded bodies.
+    pub(crate) fn with_response_limit(&self, limit: u64) -> Self {
+        let mut executor = self.clone();
+        executor.max_response_bytes = Some(
+            self.max_response_bytes
+                .map_or(limit, |configured| configured.min(limit)),
+        );
+        executor
+    }
+
     pub(crate) fn new(preferences: &RequestPreferences) -> Result<Self, ExecutionError> {
         let max_response_bytes = match preferences.max_response_size_mb {
             0 => None,

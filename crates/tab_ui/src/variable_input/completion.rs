@@ -150,11 +150,12 @@ impl VariableInput {
             self.range = Some(range);
             let query = query.to_lowercase();
             if !was_open {
-                self.environment_names = self
-                    .scope
-                    .read(cx)
+                let scope = self.scope.read(cx);
+                self.environment_names = scope
                     .values()
-                    .unwrap_or_default()
+                    .unwrap_or_else(|_| {
+                        scope.session.values(environment::VariableValues::default())
+                    })
                     .environment
                     .into_keys()
                     .filter(|name| environment::valid_variable_name(name))

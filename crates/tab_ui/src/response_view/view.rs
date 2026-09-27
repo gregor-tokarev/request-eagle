@@ -105,6 +105,11 @@ impl ResponseView {
                 self.error = false;
             }
             Err(error) => {
+                let skipped = matches!(&error, ExecutionError::Skipped { .. });
+                if let ExecutionError::Skipped { report, .. } = &error {
+                    self.scripts = vec![(**report).clone()];
+                    self.section = Section::Body;
+                }
                 if let ExecutionError::Script { report, .. } = &error {
                     self.scripts = vec![(**report).clone()];
                     self.section = Section::Tests;
@@ -115,7 +120,7 @@ impl ResponseView {
                 self.content = None;
                 self.editor = None;
                 self.editor_view = None;
-                self.error = true;
+                self.error = !skipped;
                 self.message = error.to_string().into();
             }
         }
