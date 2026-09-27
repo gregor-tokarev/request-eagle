@@ -1548,3 +1548,75 @@ fn silent_document_replacement_invalidates_vim_positions_and_pending_commands(
     assert_eq!(value(&view, cx), "xy\nzw");
     assert_eq!(cursor(&view, cx), 1);
 }
+
+#[gpui_kit::test]
+fn replacements_reconcile_unchanged_normal_and_visual_selections(cx: &mut TestAppContext) {
+    for silent in [false, true] {
+        for visual in [false, true] {
+            let (view, cx) = setup(cx, "abcd", true);
+            cx.simulate_keystrokes(if visual { "v l" } else { "2 l" });
+            cx.update(|window, cx| {
+                view.read(cx).editor.clone().update(cx, |editor, cx| {
+                    if silent {
+                        editor.set_value("xy", window, cx);
+                    } else {
+                        editor.set_selected_range(0..4, cx);
+                        editor.replace("xy".to_owned(), window, cx);
+                    }
+                    editor.set_selected_range(if visual { 0..2 } else { 2..2 }, cx);
+                });
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(view.read(cx).editor.read(cx).selected_range(), 1..1);
+                assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_some());
+            });
+            assert_eq!(value(&view, cx), "xy");
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn linewise_delete_change_and_forward_yank_do_not_shape_long_columns(cx: &mut TestAppContext) {
+    let (_, cx) = setup(cx, "small visible editor", true);
+    let length = 2 * 1024 * 1024;
+    let source = format!("{}\n{}\nlast", "a".repeat(length), "b".repeat(length));
+    for operator in ["d", "c", "y"] {
+        cx.update(|window, cx| {
+            // Exercise the real command without laying out a multi-megabyte
+            // native editor. Clipboard/edit allocations are included; measuring
+            // a display column would add hundreds of megabytes of glyph data.
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value(source.clone()));
+            editor.update(cx, |editor, cx| {
+                editor.set_selected_range(length - 2..length - 2, cx);
+                editor.focus(window, cx);
+            });
+            let vim = cx.new(|cx| Vim::new(editor.clone(), cx));
+            let allocated = crate::test_allocator::allocated_by(|| {
+                for key in [operator, "j"] {
+                    let event = gpui_kit::KeystrokeEvent {
+                        keystroke: gpui_kit::Keystroke::parse(key).unwrap(),
+                        action: None,
+                        context_stack: Vec::new(),
+                    };
+                    vim.update(cx, |vim, cx| vim.dispatch(&event, window, cx));
+                }
+            });
+            eprintln!("{operator}j allocated {allocated} bytes");
+            assert!(
+                allocated < 64 * 1024 * 1024,
+                "{operator}j allocated {allocated} bytes"
+            );
+            let expected_len = match operator {
+                "d" => 4,
+                "c" => 5,
+                _ => source.len(),
+            };
+            assert_eq!(editor.read(cx).text().len(), expected_len);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap().len(),
+                2 * (length + 1)
+            );
+        });
+    }
+}

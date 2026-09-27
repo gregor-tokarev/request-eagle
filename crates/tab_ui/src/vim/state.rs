@@ -192,8 +192,25 @@ impl Vim {
         self.reset_pending();
         self.desired_column = None;
 
-        if matches!(self.mode, Mode::Visual { .. }) {
-            self.set_mode(Mode::Normal, cx);
+        let cursor = match self.mode {
+            // Native undo restores the edited range; Vim resumes at its start.
+            Mode::Normal => Some(self.editor.read(cx).selected_range().start),
+            Mode::Visual { cursor, .. } => {
+                self.set_mode(Mode::Normal, cx);
+                Some(cursor)
+            }
+            Mode::Insert => None,
+        };
+
+        if self.enabled
+            && let Some(cursor) = cursor
+        {
+            let editor = self.editor.read(cx);
+            let cursor = normal_cursor(editor.text(), cursor);
+
+            if editor.selected_range() != (cursor..cursor) {
+                self.select(cursor..cursor, cx);
+            }
         }
     }
 
@@ -787,7 +804,14 @@ impl Vim {
                 return;
             }
 
-            let mut column = if vertical {
+            // Whole-line delete/change and forward yanks only need the row.
+            // A backward yank still places the caret at the destination column.
+            let needs_column = vertical
+                && (operator.is_none()
+                    || !movement.linewise
+                    || operator.is_some_and(|(operator, _)| operator == 'y')
+                        && movement.offset < cursor);
+            let mut column = if needs_column {
                 Some(
                     self.desired_column
                         .take()
@@ -799,7 +823,7 @@ impl Vim {
                 None
             };
 
-            if vertical {
+            if needs_column {
                 movement.offset =
                     column
                         .as_mut()
