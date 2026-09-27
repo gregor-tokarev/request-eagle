@@ -275,15 +275,18 @@ impl Vim {
         let Some(mut value) = item.text().filter(|value| !value.is_empty()) else {
             return;
         };
-        let linewise = item.entries().first().is_some_and(|entry| {
-            matches!(entry, ClipboardEntry::String(text) if text.metadata_json::<serde_json::Value>()
-                .is_some_and(|metadata| metadata["request_eagle_vim_linewise"] == true))
+        let register = item.entries().first().and_then(|entry| {
+            let ClipboardEntry::String(text) = entry else {
+                return None;
+            };
+            text.metadata_json::<serde_json::Value>()?["request_eagle_vim_linewise"].as_bool()
         });
+        let linewise = register.unwrap_or(false);
         let editor = self.editor.read(cx);
         let text = editor.text();
         let cursor = editor.cursor();
 
-        if linewise {
+        if register.is_some() {
             value = value.replace("\r\n", "\n");
 
             if newline(text, cursor) == "\r\n" {

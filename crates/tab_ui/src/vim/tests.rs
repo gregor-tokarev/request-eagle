@@ -766,7 +766,12 @@ fn visual_line_paste_preserves_boundaries_and_places_the_cursor_at_the_first_tok
                     ));
                 });
                 cx.simulate_keystrokes(&format!("{keys} {paste}"));
-                let expected = expected.replace('\n', ending);
+                let destination_ending = if source.contains("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                };
+                let expected = expected.replace('\n', destination_ending);
                 assert_eq!(value(&view, cx), expected, "{source:?}: {keys} {paste}");
                 if let Some(column) = expected.find("xx") {
                     assert_eq!(cursor(&view, cx), column);
@@ -979,4 +984,63 @@ fn refocusing_the_editor_abandons_a_pending_search_motion(cx: &mut TestAppContex
     cx.simulate_keystrokes("l");
     assert_eq!(cursor(&view, cx), 5);
     cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+}
+
+#[gpui_kit::test]
+fn characterwise_registers_use_the_destination_line_endings(cx: &mut TestAppContext) {
+    for (source_ending, destination_ending) in [("\r\n", "\n"), ("\n", "\r\n")] {
+        let source = format!("one{source_ending}second{source_ending}last");
+        let (_, source_cx) = setup(cx, &source, true);
+        source_cx.simulate_keystrokes("l v j y");
+        let destination = format!("top{destination_ending}bottom");
+        let (view, destination_cx) = setup(cx, &destination, true);
+        destination_cx.simulate_keystrokes("P");
+        assert_eq!(
+            value(&view, destination_cx),
+            format!("ne{destination_ending}setop{destination_ending}bottom")
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn external_clipboard_text_is_pasted_literally(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one\ntwo", true);
+    cx.update(|_, cx| {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("raw\r\ntext".into()))
+    });
+    cx.simulate_keystrokes("P");
+    assert_eq!(value(&view, cx), "raw\r\ntextone\ntwo");
+}
+
+#[gpui_kit::test]
+fn end_word_motions_skip_empty_lines_like_vim(cx: &mut TestAppContext) {
+    // :help e and :help E explicitly say they do not stop in an empty line.
+    for ending in ["\n", "\r\n"] {
+        for keys in ["$ e", "$ E", "$ 2 e", "$ 2 E"] {
+            let source = format!("one{ending}{ending}next");
+            let (view, cx) = setup(cx, &source, true);
+            cx.simulate_keystrokes(keys);
+            assert_eq!(cursor(&view, cx), source.len() - 1, "{keys}");
+        }
+        let (view, cx) = setup(cx, &format!("one{ending}{ending}next"), true);
+        cx.simulate_keystrokes("$ d e");
+        assert_eq!(value(&view, cx), "on");
+    }
+}
+
+#[gpui_kit::test]
+fn escaping_an_empty_insertion_moves_left_like_vim(cx: &mut TestAppContext) {
+    // A clean Vim 9.1 run of lli<Esc> on abc ends on b; I<Esc> on
+    // "  abc" ends on the second blank. An unchanged insertion still moves left.
+    for (source, keys) in [
+        ("abc", "l l i escape"),
+        ("abc", "l l 3 i escape"),
+        ("  abc", "I escape"),
+        ("  abc", "3 I escape"),
+    ] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(cursor(&view, cx), 1, "{keys}");
+        assert_eq!(value(&view, cx), source);
+    }
 }
