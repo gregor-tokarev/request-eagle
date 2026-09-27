@@ -56,10 +56,14 @@ impl RequestExecutor {
                 match request {
                     Request::Http(request) => {
                         let (mut request, variables, reports) =
-                            crate::scripts::pre_request_with_variables(
+                            crate::scripts::pre_request_with_network(
                                 request,
                                 cancellation.0.clone(),
                                 variables,
+                                Some(crate::scripts::NetworkOptions {
+                                    http: executor.http.clone(),
+                                    timeout: executor.timeout,
+                                }),
                             )
                             .await?;
                         scripts = reports;
@@ -106,12 +110,16 @@ impl RequestExecutor {
             // Once the response is complete, its script uses the separate script
             // deadline. A request timeout must not discard a received response.
             match post_request {
-                Some((request, body)) => Ok(crate::scripts::post_response(
+                Some((request, body)) => Ok(crate::scripts::post_response_with_network(
                     request,
                     body,
                     variables,
                     execution,
                     cancellation.0.clone(),
+                    Some(crate::scripts::NetworkOptions {
+                        http: executor.http.clone(),
+                        timeout: executor.timeout,
+                    }),
                 )
                 .await),
                 None => Ok(execution),

@@ -51,9 +51,9 @@ fn suggests_only_supported_members_for_the_current_phase() {
     );
     assert_eq!(
         labels("pm.response.to.have.|", ScriptPhase::PostResponse),
-        ["status", "header", "body", "jsonBody"]
+        ["status", "header", "body", "jsonBody", "jsonSchema"]
     );
-    assert!(labels("pm.environment.|", ScriptPhase::PreRequest).is_empty());
+    assert!(labels("pm.collectionVariables.|", ScriptPhase::PreRequest).is_empty());
     assert!(labels("other.pm.response.|", ScriptPhase::PostResponse).is_empty());
     assert!(labels("pm.response.json().|", ScriptPhase::PostResponse).is_empty());
     assert!(labels("assertion.|", ScriptPhase::PostResponse).is_empty());
@@ -62,6 +62,51 @@ fn suggests_only_supported_members_for_the_current_phase() {
         ["success", "serverError"]
     );
     assert!(labels("pm.response.to.be.|", ScriptPhase::PreRequest).is_empty());
+}
+
+#[test]
+fn discovers_workflow_apis_and_limits_skip_to_pre_request() {
+    for phase in [ScriptPhase::PreRequest, ScriptPhase::PostResponse] {
+        assert_eq!(
+            labels("pm.environment.|", phase),
+            [
+                "get",
+                "set",
+                "has",
+                "unset",
+                "clear",
+                "toObject",
+                "replaceIn"
+            ]
+        );
+        assert_eq!(labels("await pm.send|", phase), ["sendRequest"]);
+        assert_eq!(
+            labels("pm.crypto.|", phase),
+            ["sha256", "hmacSha256", "randomBytes"]
+        );
+        assert_eq!(
+            labels("pm.encoding.|", phase),
+            [
+                "base64Encode",
+                "base64Decode",
+                "base64UrlEncode",
+                "base64UrlDecode"
+            ]
+        );
+        assert_eq!(labels("pm.schema.v|", phase), ["validate"]);
+    }
+
+    assert!(labels("pm.|", ScriptPhase::PreRequest).contains(&"execution".into()));
+    assert_eq!(
+        labels("pm.execution.s|", ScriptPhase::PreRequest),
+        ["skipRequest"]
+    );
+    assert!(!labels("pm.|", ScriptPhase::PostResponse).contains(&"execution".into()));
+    assert!(labels("pm.execution.|", ScriptPhase::PostResponse).is_empty());
+    assert_eq!(
+        labels("pm.response.to.have.jsonS|", ScriptPhase::PostResponse),
+        ["jsonSchema"]
+    );
 }
 
 #[test]

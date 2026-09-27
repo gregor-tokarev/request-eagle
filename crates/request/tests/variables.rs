@@ -2,6 +2,71 @@ use environment::VariableValues;
 use request::{HttpRequest, Method};
 
 #[test]
+fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
+    let session = environment::EnvironmentSession::default();
+    let file_values = VariableValues {
+        environment: [("token".into(), "saved value".into())].into(),
+    };
+    session
+        .apply(&[("token".into(), Some("response token".into()))].into())
+        .unwrap();
+    let draft = HttpRequest {
+        path: "https://example.com".into(),
+        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        ..Default::default()
+    };
+
+    let first = request::RequestVariables::with_environment_session(
+        file_values.clone(),
+        None,
+        session.clone(),
+    );
+    assert_eq!(
+        first.resolve(&draft).unwrap().headers[0].1,
+        "Bearer response token"
+    );
+    session
+        .apply(&[("token".into(), Some("refreshed token".into()))].into())
+        .unwrap();
+    let next =
+        request::RequestVariables::with_environment_session(file_values.clone(), None, session);
+    assert_eq!(
+        next.resolve(&draft).unwrap().headers[0].1,
+        "Bearer refreshed token"
+    );
+    assert_eq!(draft.headers[0].1, "Bearer {{token}}");
+    assert_eq!(file_values.environment["token"], "saved value");
+}
+
+#[test]
+fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
+    let session = environment::EnvironmentSession::default();
+    session
+        .apply(&[("token".into(), Some("session token".into()))].into())
+        .unwrap();
+    let variables = request::RequestVariables::with_environment_session(
+        VariableValues::default(),
+        Some("Invalid environment file".into()),
+        session,
+    );
+    let mut draft = HttpRequest {
+        path: "https://example.com".into(),
+        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        variables.resolve(&draft).unwrap().headers[0].1,
+        "Bearer session token"
+    );
+    draft.headers[0].1 = "{{missing}}".into();
+    assert_eq!(
+        variables.resolve(&draft).unwrap_err(),
+        "Invalid environment file"
+    );
+}
+
+#[test]
 fn escaped_references_remain_literal_in_every_request_field() {
     let values = VariableValues {
         environment: [("customer".into(), "must not replace".into())].into(),

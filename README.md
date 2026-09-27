@@ -105,8 +105,15 @@ are substituted literally, without recursive expansion or automatic JSON
 escaping; quote string placeholders in JSON and escape special characters in
 their values. Disabled rows, URL fragments, and bodies excluded by GET/HEAD are
 not resolved. An invalid environment file blocks only requests that need its
-values. Environment files are read-only in the application; populate them
-programmatically or edit them on disk until variable management is available.
+values. Environment files are read-only in the application. Scripts can override
+their values for the workspace session using `pm.environment`; these changes
+are shared with other requests in that collection and never written to disk.
+
+Request scripts support asynchronous HTTP calls, session environment values,
+SHA-256/HMAC signing, Base64 helpers, JSON Schema checks, and conditional request
+skipping. Open **Scripts**, choose **Pre-request** or **Post-response**, and use
+the **Snippets** menu or API completions to get started. See the
+[scripting API and workflow examples](docs/scripting.md).
 
 Response header and cookie names and values support text selection and copying.
 Hover over status, response time, or size for selectable details. Timings include

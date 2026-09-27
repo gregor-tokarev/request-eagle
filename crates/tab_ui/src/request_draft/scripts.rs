@@ -25,11 +25,27 @@ const PRE_SNIPPETS: &[(&str, &str)] = &[
         "pm.request.headers.upsert({\n    key: \"X-Request-Id\",\n    value: String(Date.now())\n});",
     ),
     (
+        "Fetch an access token",
+        "const auth = await pm.sendRequest({\n    url: \"{{base_url}}/login\",\n    method: \"POST\"\n});\npm.expect(auth.code).to.equal(200);\npm.request.headers.upsert({\n    key: \"Authorization\",\n    value: \"Bearer \" + auth.json().token\n});",
+    ),
+    (
+        "Sign the body with HMAC",
+        "const signature = pm.crypto.hmacSha256(\n    pm.environment.get(\"signing_key\"),\n    pm.variables.replaceIn(pm.request.body.raw || \"\")\n);\npm.request.headers.upsert({key: \"X-Signature\", value: signature});",
+    ),
+    (
+        "Skip when a variable is missing",
+        "if (!pm.environment.get(\"token\")) {\n    pm.execution.skipRequest(\"No access token configured\");\n}",
+    ),
+    (
         "Log a message",
         "console.log(\"Sending\", pm.request.method, pm.request.url);",
     ),
 ];
 const POST_SNIPPETS: &[(&str, &str)] = &[
+    (
+        "Save a token for later requests",
+        "pm.environment.set(\"token\", pm.response.json().token);",
+    ),
     (
         "Status code is 200",
         "pm.test(\"Status code is 200\", function () {\n    pm.response.to.have.status(200);\n});",
@@ -49,6 +65,10 @@ const POST_SNIPPETS: &[(&str, &str)] = &[
     (
         "Check required JSON keys",
         "pm.test(\"Response has the required keys\", function () {\n    pm.expect(pm.response.json()).to.include.all.keys(\"id\", \"name\");\n});",
+    ),
+    (
+        "Validate a response schema",
+        "pm.test(\"Response matches the schema\", function () {\n    pm.response.to.have.jsonSchema({\n        type: \"object\",\n        required: [\"id\"],\n        properties: {id: {type: \"integer\"}}\n    });\n});",
     ),
     (
         "Response time is below 1 second",

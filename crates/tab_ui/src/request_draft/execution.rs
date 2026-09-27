@@ -101,30 +101,30 @@ impl RequestDraft {
             self.script_trust_prompt_open = true;
             let scripts = self.request.scripts.clone();
             let draft = cx.entity().downgrade();
-            window.open_dialog(cx, move |dialog, window, _| {
+            window.open_alert_dialog(cx, move |dialog, window, _| {
                 let accept = draft.clone();
-                let close = draft.clone();
                 let review = draft.clone();
                 let scripts = scripts.clone();
 
                 dialog
                     .title("Run scripts for this request?")
                     .w(rems(32.).to_pixels(window.rem_size()))
-                    .overlay_closable(false)
-                    .child(div().text_sm().child("Scripts can read request and response data and all collection environment variables, including secrets this request does not use. They can change the destination and send this data to another server. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
+                    .child(div().text_sm().child("Scripts can read request and response data and all environment variables, including secrets this request does not use. They can change the destination, make additional HTTP calls, and change session environment values used by other requests. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
                     .button_props(DialogButtonProps::default().ok_text("Trust and Send").show_cancel(true))
                     .on_ok(move |_, window, cx| {
                         let _ = accept.update(cx, |draft, cx| {
+                            draft.script_trust_prompt_open = false;
                             if draft.request.scripts == scripts {
                                 draft.trusted_scripts = Some(scripts.clone());
-                                draft.script_trust_prompt_open = false;
                                 draft.send(window, cx);
                             }
+                            cx.notify();
                         });
                         true
                     })
                     .on_cancel(move |_, window, cx| {
                         let _ = review.update(cx, |draft, cx| {
+                            draft.script_trust_prompt_open = false;
                             draft.section = super::draft::RequestSection::Scripts;
                             draft.script_phase = if draft.request.scripts.pre_request.is_empty() {
                                 request::ScriptPhase::PostResponse
@@ -136,12 +136,6 @@ impl RequestDraft {
                         });
                         true
                     })
-                    .on_close(move |_, _, cx| {
-                        let _ = close.update(cx, |draft, cx| {
-                            draft.script_trust_prompt_open = false;
-                            cx.notify();
-                        });
-                    })
             });
             return;
         }
@@ -151,12 +145,8 @@ impl RequestDraft {
         response.update(cx, |response, cx| response.start(cx));
 
         let scope = self.variables(cx);
-        let (values, environment_error) = match scope.read(cx).values() {
-            Ok(values) => (values, None),
-            Err(error) => (environment::VariableValues::default(), Some(error)),
-        };
         let request = self.request.clone();
-        let variables = request::RequestVariables::new(values, environment_error);
+        let variables = scope.read(cx).request_variables();
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -187,6 +177,7 @@ impl RequestDraft {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.executor = executor;
                 this.task = None;
+                scope.update(cx, |_, cx| cx.notify());
                 response.update(cx, |response, cx| response.finish(result, window, cx));
                 cx.notify();
             });

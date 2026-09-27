@@ -51,7 +51,21 @@ fn answer_trust_prompt(cx: &mut VisualTestContext, answer: &str) {
         });
     }
     assert!(element_bounds(cx, "dialog-0").is_some());
-    cx.simulate_keystrokes(answer);
+    let controls = cx.update(|window, _| {
+        gpui_kit::base::test_support::snapshots(window)
+            .into_iter()
+            .filter(|element| element.visible() && element.role() == Some(gpui_kit::Role::Button))
+            .collect::<Vec<_>>()
+    });
+    let button = |label| {
+        controls
+            .iter()
+            .find(|element| element.label() == Some(label))
+            .unwrap_or_else(|| panic!("missing trust dialog button {label}"))
+    };
+    assert!(button("Trust and Send").bounds().size.width > gpui_kit::px(0.));
+    assert!(button("Cancel").bounds().size.width > gpui_kit::px(0.));
+    cx.simulate_click(button(answer).bounds().center(), Modifiers::default());
     cx.run_until_parked();
 }
 
@@ -129,7 +143,7 @@ async fn pre_request_error_is_visible_without_an_http_response(cx: &mut TestAppC
             draft.send(window, cx);
         });
     });
-    answer_trust_prompt(cx, "enter");
+    answer_trust_prompt(cx, "Trust and Send");
     let started = std::time::Instant::now();
     while cx.read(|cx| draft.read(cx).is_sending()) {
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
@@ -205,7 +219,7 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
         element_bounds(cx, "dialog-1").is_none(),
         "repeated Send must not stack prompts"
     );
-    answer_trust_prompt(cx, "escape");
+    answer_trust_prompt(cx, "Cancel");
     assert!(received.try_recv().is_err());
     assert!(element_bounds(cx, "request-scripts").is_some());
 
@@ -220,7 +234,7 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
                 .push_str(" console.log('changed');");
         });
     });
-    answer_trust_prompt(cx, "enter");
+    answer_trust_prompt(cx, "Trust and Send");
     cx.read(|cx| {
         assert!(!draft.read(cx).is_sending());
         assert!(draft.read(cx).trusted_scripts.is_none());
@@ -230,7 +244,7 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
     for run in 0..2 {
         cx.update(|window, cx| draft.update(cx, |draft, cx| draft.send(window, cx)));
         if run == 0 {
-            answer_trust_prompt(cx, "enter");
+            answer_trust_prompt(cx, "Trust and Send");
         } else {
             assert!(element_bounds(cx, "dialog-0").is_none());
         }
@@ -253,7 +267,7 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
             assert!(!draft.is_sending());
         });
     });
-    answer_trust_prompt(cx, "escape");
+    answer_trust_prompt(cx, "Cancel");
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
             *draft = RequestDraft::from_saved(
@@ -266,7 +280,7 @@ async fn script_trust_gates_sends_and_is_bound_to_the_tab_and_exact_scripts(
             assert!(draft.trusted_scripts.is_none());
         });
     });
-    answer_trust_prompt(cx, "escape");
+    answer_trust_prompt(cx, "Cancel");
 }
 
 #[gpui_kit::test]
@@ -316,7 +330,7 @@ fn scripts_fit_zoom_themes_and_resizing(cx: &mut TestAppContext) {
             assert!(dialog.origin.x >= px(0.) && dialog.origin.y >= px(0.));
             assert!(dialog.right() <= px(40. * font_size));
             assert!(dialog.bottom() <= px(40. * font_size));
-            answer_trust_prompt(cx, "escape");
+            answer_trust_prompt(cx, "Cancel");
         }
     }
 }

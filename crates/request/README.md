@@ -76,5 +76,18 @@ Run local-server tests, with request/response and error output:
 cargo test -p request -- --nocapture --test-threads=1
 ```
 
+Request scripts expose the [scripting API](../../docs/scripting.md), including
+awaitable HTTP subrequests, signing, schema validation and request skipping.
+`ExecutionError::Skipped` is a deliberate pre-request outcome, carrying the
+reason and script report without an HTTP response.
+
+To retain `pm.environment` changes between executions, pass
+`RequestVariables::with_environment_session(file_values, file_error, session)`
+to `execute_with_variables`. Reuse the same `environment::EnvironmentSession`
+handle for requests sharing an environment and create a fresh snapshot for each
+execution. `execute` and `RequestVariables::new` have no persistent session;
+their script values last only for that execution. Session changes are in-memory
+and do not write environment files.
+
 TLS tests generate fresh self-signed certificates and private keys in memory for
 their loopback servers. No certificate or key fixtures are stored on disk.

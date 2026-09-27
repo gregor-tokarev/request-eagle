@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+environment = { path = "../environment" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
 settings_ui = { path = "../settings_ui" }

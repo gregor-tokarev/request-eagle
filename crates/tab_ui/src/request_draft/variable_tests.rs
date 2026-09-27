@@ -566,3 +566,107 @@ fn reopening_completion_reads_external_environment_changes(cx: &mut TestAppConte
     cx.simulate_keystrokes("enter");
     cx.read(|cx| assert_eq!(draft.read(cx).request.path, "{{new_name}}"));
 }
+
+#[gpui_kit::test]
+async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
+    cx: &mut TestAppContext,
+) {
+    use smol::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use std::time::{Duration, Instant};
+
+    cx.executor().allow_parking();
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = smol::spawn(async move {
+        for index in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+            }
+
+            let head = String::from_utf8(head).unwrap();
+
+            if index == 0 {
+                assert!(head.starts_with("GET /login HTTP/1.1"), "{head}");
+                let body = r#"{"token":"response-token"}"#;
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            } else {
+                assert!(head.starts_with("GET /protected HTTP/1.1"), "{head}");
+                assert!(
+                    head.contains("authorization: Bearer response-token\r\n"),
+                    "{head}"
+                );
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+    let (login, cx, directory) = setup(cx);
+    let sessions = environment::EnvironmentSessions::default();
+    let original_file = std::fs::read_to_string(directory.path().join("environment.toml")).unwrap();
+    cx.update(|window, cx| {
+        login.update(cx, |draft, cx| {
+            draft.set_variable_sessions(sessions.clone(), cx);
+            draft.request.path = format!("http://{address}/login");
+            draft.request.scripts.post_response = "pm.environment.set('token', pm.response.json().token); pm.variables.set('scratch', 'local only');".into();
+            draft.trusted_scripts = Some(draft.request.scripts.clone());
+            draft.send(window, cx);
+        });
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    while cx.read(|cx| login.read(cx).is_sending()) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+
+    let protected = cx.update(|window, cx| {
+        cx.new(|cx| {
+            let mut draft = RequestDraft::new();
+            draft.set_variable_sessions(sessions.clone(), cx);
+            draft.set_variable_environment(&directory.path().join("nested/protected.toml"), 1, cx);
+            draft.request.path = format!("http://{address}/protected");
+            draft.request.headers = vec![("Authorization".into(), "Bearer {{token}}".into())];
+            let scope = draft.variables(cx);
+            let values = scope.read(cx).values().unwrap();
+            assert_eq!(values.environment["token"], "response-token");
+            assert!(!values.environment.contains_key("scratch"));
+            draft.send(window, cx);
+            draft
+        })
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    while cx.read(|cx| protected.read(cx).is_sending()) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+
+    smol::future::or(server, async {
+        smol::Timer::after(Duration::from_secs(5)).await;
+        panic!("both requests should reach the test server");
+    })
+    .await;
+    cx.read(|cx| assert_eq!(protected.read(cx).request.headers[0].1, "Bearer {{token}}"));
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("environment.toml")).unwrap(),
+        original_file
+    );
+
+    click(cx, "request-url");
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("{{token");
+    assert!(popup(cx));
+    assert!(cx.debug_bounds("variable-suggestion-0").is_some());
+    cx.simulate_keystrokes("enter");
+    cx.read(|cx| assert_eq!(login.read(cx).request.path, "{{token}}"));
+}

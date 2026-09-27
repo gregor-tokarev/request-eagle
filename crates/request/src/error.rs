@@ -4,6 +4,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ExecutionError {
+    #[error("Request skipped: {reason}")]
+    Skipped {
+        reason: String,
+        report: Box<crate::ScriptReport>,
+    },
+
     #[error("{source}")]
     ScriptedRequest {
         source: Box<ExecutionError>,

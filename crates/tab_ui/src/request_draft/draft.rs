@@ -41,6 +41,7 @@ pub struct RequestDraft {
     pub(super) script_trust_prompt_open: bool,
     pub(super) variable_scope: Option<Entity<VariableScope>>,
     variable_path: Option<std::path::PathBuf>,
+    variable_sessions: environment::EnvironmentSessions,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
@@ -93,6 +94,7 @@ impl RequestDraft {
             script_trust_prompt_open: false,
             variable_scope: None,
             variable_path: None,
+            variable_sessions: environment::EnvironmentSessions::default(),
             url_completion: None,
             body_completion: None,
             response: None,
@@ -135,6 +137,26 @@ impl RequestDraft {
         if let Some(scope) = &self.variable_scope {
             scope.update(cx, |scope, cx| {
                 scope.path = self.variable_path.clone();
+                scope.session = self
+                    .variable_sessions
+                    .for_path(self.variable_path.as_deref());
+                cx.notify();
+            });
+        }
+    }
+
+    pub fn set_variable_sessions(
+        &mut self,
+        sessions: environment::EnvironmentSessions,
+        cx: &mut App,
+    ) {
+        self.variable_sessions = sessions;
+
+        if let Some(scope) = &self.variable_scope {
+            scope.update(cx, |scope, cx| {
+                scope.session = self
+                    .variable_sessions
+                    .for_path(self.variable_path.as_deref());
                 cx.notify();
             });
         }
@@ -145,6 +167,9 @@ impl RequestDraft {
             .get_or_insert_with(|| {
                 cx.new(|_| VariableScope {
                     path: self.variable_path.clone(),
+                    session: self
+                        .variable_sessions
+                        .for_path(self.variable_path.as_deref()),
                 })
             })
             .clone()
@@ -167,6 +192,10 @@ impl RequestDraft {
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(scope) = &self.variable_scope {
+            scope.update(cx, |_, cx| cx.notify());
+        }
+
         // Initialize newly activated controls before drawing. Their setup can
         // notify GPUI; doing it inside render schedules an unnecessary frame.
         self.url_state(window, cx);

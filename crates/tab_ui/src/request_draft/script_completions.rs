@@ -123,7 +123,9 @@ pub(super) fn completion_items(
         return Vec::new();
     };
 
-    if phase == ScriptPhase::PreRequest && receiver.starts_with("pm.response") {
+    if (phase == ScriptPhase::PreRequest && receiver.starts_with("pm.response"))
+        || (phase == ScriptPhase::PostResponse && receiver.starts_with("pm.execution"))
+    {
         return Vec::new();
     }
 
@@ -133,6 +135,7 @@ pub(super) fn completion_items(
         .filter(|(name, _)| name.starts_with(prefix))
         .filter(|(name, _)| {
             !(phase == ScriptPhase::PreRequest && receiver == "pm" && *name == "response")
+                && !(phase == ScriptPhase::PostResponse && receiver == "pm" && *name == "execution")
         })
         .map(|(name, detail)| CompletionItem {
             label: (*name).into(),
@@ -223,10 +226,19 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("request", "Outgoing request"),
             ("response", "Received response"),
             ("variables", "Variables for this run"),
+            (
+                "environment",
+                "Environment variables for this application session",
+            ),
+            ("sendRequest", "(request, callback?) → Promise"),
+            ("execution", "Control the outgoing request"),
+            ("crypto", "Hashing, signing, and secure random values"),
+            ("encoding", "UTF-8 Base64 utilities"),
+            ("schema", "JSON Schema validation"),
             ("test", "(name, callback)"),
             ("expect", "(value, message?)"),
         ],
-        "pm.variables" => &[
+        "pm.variables" | "pm.environment" => &[
             ("get", "(name)"),
             ("set", "(name, value)"),
             ("has", "(name)"),
@@ -235,6 +247,19 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("toObject", "()"),
             ("replaceIn", "(text)"),
         ],
+        "pm.execution" => &[("skipRequest", "(reason?)")],
+        "pm.crypto" => &[
+            ("sha256", "(text) → hexadecimal string"),
+            ("hmacSha256", "(secret, text) → hexadecimal string"),
+            ("randomBytes", "(count) → hexadecimal string"),
+        ],
+        "pm.encoding" => &[
+            ("base64Encode", "(text)"),
+            ("base64Decode", "(encoded)"),
+            ("base64UrlEncode", "(text)"),
+            ("base64UrlDecode", "(encoded)"),
+        ],
+        "pm.schema" => &[("validate", "(data, schema) → {valid, errors}")],
         "pm.request" => &[
             ("method", "HTTP method"),
             ("url", "URL; assign a string to replace it"),
@@ -287,6 +312,7 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
             ("header", "(name, value?)"),
             ("body", "(textOrObjectOrPattern?)"),
             ("jsonBody", "(path?, value?)"),
+            ("jsonSchema", "(schema)"),
         ],
         "pm.response.to.be" => &[
             ("ok", "Status 200"),
