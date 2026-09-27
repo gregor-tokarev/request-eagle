@@ -171,6 +171,7 @@ impl Vim {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.desired_column = None;
         let text = self.editor.read(cx).text();
         let mut copied = text.slice(range.clone()).to_string();
 
@@ -257,6 +258,7 @@ impl Vim {
 
         value = value.repeat(count);
         let visual = self.visual_range(cx);
+        let linewise_selection = matches!(self.mode, Mode::Visual { linewise: true, .. });
         let mut position = cursor;
         let mut separator_len = 0;
 
@@ -273,10 +275,12 @@ impl Vim {
                 next(text, cursor).min(line(text, cursor).end)
             };
 
-            if linewise
+            if linewise && text.len() == 0 {
+                let content = value.strip_suffix(newline(text, cursor)).unwrap_or(&value);
+                value.truncate(content.len());
+            } else if linewise
                 && !before
                 && position == text.len()
-                && text.len() > 0
                 && text.offset_to_point(cursor).row + 1 == text.lines_len()
             {
                 let separator = newline(text, cursor);
@@ -292,9 +296,28 @@ impl Vim {
         let range = visual.clone().unwrap_or(position..position);
         let start = range.start;
 
+        if linewise_selection {
+            if !linewise {
+                value.push_str(newline(text, start));
+            }
+
+            if matches!(self.mode, Mode::Visual { anchor, cursor, .. }
+                if text.offset_to_point(anchor.max(cursor)).row + 1 == text.lines_len())
+            {
+                let content = value
+                    .strip_suffix("\r\n")
+                    .or_else(|| value.strip_suffix('\n'))
+                    .unwrap_or(&value);
+                value.truncate(content.len());
+            }
+        } else if visual.is_some() && linewise {
+            let separator = newline(text, start);
+            separator_len = separator.len();
+            value.insert_str(0, separator);
+        }
+
         if visual.is_some() && !before {
             let mut replaced = text.slice(range.clone()).to_string();
-            let linewise_selection = matches!(self.mode, Mode::Visual { linewise: true, .. });
 
             if linewise_selection && !replaced.ends_with('\n') {
                 replaced.push_str(newline(text, range.start));
@@ -307,7 +330,7 @@ impl Vim {
         }
 
         self.replace(range, &value, window, cx);
-        let cursor = if linewise {
+        let cursor = if linewise || linewise_selection {
             first_nonblank(self.editor.read(cx).text(), start + separator_len)
         } else {
             previous(self.editor.read(cx).text(), start + value.len())
@@ -355,9 +378,34 @@ impl Vim {
             for _ in 0..count {
                 window.dispatch_action(Box::new(Redo), cx);
             }
-        } else if modifiers.control || modifiers.alt || modifiers.platform {
+        } else if modifiers.control
+            || modifiers.alt
+            || modifiers.platform
+            || window.has_pending_keystrokes()
+        {
             self.reset_pending();
-            return;
+            let mut input = window
+                .pending_input_keystrokes()
+                .unwrap_or_default()
+                .to_vec();
+            input.push(stroke.clone());
+            let keymap = cx.key_bindings();
+            let (bindings, _) = keymap
+                .borrow()
+                .bindings_for_input(&input, &window.context_stack());
+
+            // Keep application shortcuts (including user remappings), while
+            // preventing native editor actions from bypassing modal editing.
+            if bindings.first().is_some_and(|binding| {
+                let action = binding.action().name();
+                !action.starts_with("input::") || matches!(action, "input::Copy" | "input::Search")
+            }) || window
+                .possible_bindings_for_input(&input)
+                .iter()
+                .any(|binding| !binding.action().name().starts_with("input::"))
+            {
+                return;
+            }
         } else {
             let key = stroke.key_char.as_deref().unwrap_or(&stroke.key);
             let key = if modifiers.shift {

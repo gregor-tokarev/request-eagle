@@ -327,16 +327,15 @@ fn vim_does_not_intercept_the_send_shortcut(cx: &mut TestAppContext) {
     let (view, cx) = setup(cx, "text", true);
     let sent = Rc::new(Cell::new(0));
     cx.update(|_, cx| {
-        cx.bind_keys([gpui_kit::KeyBinding::new(
-            "ctrl-enter",
-            crate::SendRequest,
-            None,
-        )]);
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new("ctrl-enter", crate::SendRequest, None),
+            gpui_kit::KeyBinding::new("ctrl-g s", crate::SendRequest, None),
+        ]);
         let sent = sent.clone();
         cx.on_action(move |_: &crate::SendRequest, _| sent.set(sent.get() + 1));
     });
-    cx.simulate_keystrokes("ctrl-enter i ctrl-enter");
-    assert_eq!(sent.get(), 2);
+    cx.simulate_keystrokes("ctrl-enter ctrl-g s i ctrl-enter");
+    assert_eq!(sent.get(), 3);
     assert_eq!(value(&view, cx), "text");
 }
 
@@ -707,4 +706,136 @@ fn clamped_vertical_operators_do_not_delete_the_current_line(cx: &mut TestAppCon
     cx.simulate_keystrokes("j k d j d k");
     assert_eq!(cursor(&view, cx), 0);
     assert_eq!(value(&view, cx), "one line");
+}
+
+#[gpui_kit::test]
+fn linewise_paste_replaces_an_empty_buffer_without_losing_blank_lines(cx: &mut TestAppContext) {
+    for paste in ["p", "P"] {
+        for (register, count, expected) in [
+            ("one\n", "", "one"),
+            ("one\n", "2 ", "one\none"),
+            ("one\n\n", "", "one\n"),
+            ("\n", "", ""),
+            ("\n\n", "", "\n"),
+            ("one\r\n\r\n", "", "one\n"),
+        ] {
+            let (view, cx) = setup(cx, "", true);
+            cx.update(|_, cx| {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string_with_json_metadata(
+                    register.into(),
+                    serde_json::json!({ "request_eagle_vim_linewise": true }),
+                ));
+            });
+            cx.simulate_keystrokes(&format!("{count}{paste}"));
+            assert_eq!(value(&view, cx), expected, "{register:?}: {count}{paste}");
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn yanks_reset_the_desired_column_to_the_resulting_cursor(cx: &mut TestAppContext) {
+    for (yank, column) in [("y b", 0), ("y y", 1), ("y w", 1), ("Y", 1)] {
+        let (view, cx) = setup(cx, "0123456789\nab\n0123456789", true);
+        cx.simulate_keystrokes(&format!("8 l j {yank} j"));
+        assert_eq!(cursor(&view, cx), 14 + column, "{yank}");
+    }
+}
+
+#[gpui_kit::test]
+fn visual_line_paste_preserves_boundaries_and_places_the_cursor_at_the_first_token(
+    cx: &mut TestAppContext,
+) {
+    for ending in ["\n", "\r\n"] {
+        for paste in ["p", "P"] {
+            for (source, keys, register, linewise, expected) in [
+                ("one\ntwo\nthree", "j V", "  xx", false, "one\n  xx\nthree"),
+                ("one\ntwo", "G V", "  xx", false, "one\n  xx"),
+                ("one\ntwo", "G V", "  xx\n", true, "one\n  xx"),
+                ("one\n", "g g V", "  xx", false, "  xx\n"),
+                ("one\n", "G V", "  xx", false, "one\n  xx"),
+                ("one", "V", "  xx\n", false, "  xx\n"),
+                ("one\ntwo", "G V", "\n", true, "one\n"),
+            ] {
+                let source = source.replace('\n', ending);
+                let (view, cx) = setup(cx, &source, true);
+                cx.update(|_, cx| {
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string_with_json_metadata(
+                        register.replace('\n', ending),
+                        serde_json::json!({ "request_eagle_vim_linewise": linewise }),
+                    ));
+                });
+                cx.simulate_keystrokes(&format!("{keys} {paste}"));
+                let expected = expected.replace('\n', ending);
+                assert_eq!(value(&view, cx), expected, "{source:?}: {keys} {paste}");
+                if let Some(column) = expected.find("xx") {
+                    assert_eq!(cursor(&view, cx), column);
+                }
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn native_editing_shortcuts_cannot_bypass_normal_or_visual_mode(cx: &mut TestAppContext) {
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    for mode in ["", "v l"] {
+        let (view, cx) = setup(cx, "one two", true);
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("paste".into()));
+            cx.bind_keys([gpui_kit::KeyBinding::new(
+                "alt-p",
+                gpui_kit::component::input::Paste,
+                Some("Input"),
+            )]);
+        });
+        cx.simulate_keystrokes(&format!("4 l {mode}"));
+        let selected = cx.read(|cx| view.read(cx).editor.read(cx).selected_range());
+        for shortcut in [
+            format!("{modifier}-v"),
+            format!("{modifier}-x"),
+            format!("{modifier}-]"),
+            format!("{modifier}-z"),
+            "ctrl-backspace".into(),
+            "alt-backspace".into(),
+            "ctrl-delete".into(),
+            "alt-delete".into(),
+            "alt-p".into(),
+        ] {
+            cx.simulate_keystrokes(&shortcut);
+            assert_eq!(value(&view, cx), "one two", "{mode}: {shortcut}");
+            cx.read(|cx| assert_eq!(view.read(cx).editor.read(cx).selected_range(), selected));
+        }
+        cx.simulate_keystrokes(&format!("escape i {modifier}-v"));
+        assert!(value(&view, cx).contains("paste"));
+    }
+}
+
+#[gpui_kit::test]
+fn linewise_registers_pasted_over_character_selections_split_the_surrounding_line(
+    cx: &mut TestAppContext,
+) {
+    for ending in ["\n", "\r\n"] {
+        for (keys, expected) in [
+            ("3 l v 2 l p", "abc\n  one\nghi\nlast"),
+            ("v 2 l P", "\n  one\nDEFghi\nlast"),
+            ("6 l v 2 l p", "abcDEF\n  one\n\nlast"),
+            ("v j p", "\n  one\nast"),
+        ] {
+            let (view, cx) = setup(cx, &"abcDEFghi\nlast".replace('\n', ending), true);
+            cx.update(|_, cx| {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string_with_json_metadata(
+                    format!("  one{ending}"),
+                    serde_json::json!({ "request_eagle_vim_linewise": true }),
+                ));
+            });
+            cx.simulate_keystrokes(keys);
+            let expected = expected.replace('\n', ending);
+            assert_eq!(value(&view, cx), expected, "{keys}");
+            assert_eq!(cursor(&view, cx), expected.find("one").unwrap());
+        }
+    }
 }
