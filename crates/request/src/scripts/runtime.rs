@@ -115,7 +115,7 @@ pub(crate) async fn pre_request_with_variables(
 ) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
     let has_script = !request.scripts.pre_request.trim().is_empty();
     if context.is_none() && !has_script && !has_dynamic_placeholders(&request) {
-        return Ok((request, Variables::new(), Vec::new()));
+        return Ok((request, Variables::default(), Vec::new()));
     }
 
     smol::unblock(move || {
@@ -125,14 +125,17 @@ pub(crate) async fn pre_request_with_variables(
             logs: Vec::new(),
             error: None,
         };
-        let mut variables: Variables = context
-            .as_mut()
-            .map(|context| {
-                std::mem::take(&mut context.values.environment)
-                    .into_iter()
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut variables = Variables {
+            values: context
+                .as_mut()
+                .map(|context| {
+                    std::mem::take(&mut context.values.environment)
+                        .into_iter()
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ..Default::default()
+        };
 
         let mut body_changed = false;
         if has_script {
@@ -176,12 +179,13 @@ pub(crate) async fn pre_request_with_variables(
 
         let expanded = if let Some(context) = &mut context {
             context.values.environment = variables
+                .values
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
-            context.resolve_owned(request, body_changed)
+            context.resolve_owned(request, body_changed, &mut variables.generated)
         } else {
-            expand_request(&mut request, &variables, body_changed).map(|()| request)
+            expand_request(&mut request, &mut variables, body_changed).map(|()| request)
         };
 
         let mut request = match expanded {

@@ -63,6 +63,10 @@ impl<'a> VariableResolver<'a> {
         self.generated.insert(name, value);
     }
 
+    pub fn generated_values(&self) -> &HashMap<String, String> {
+        &self.generated
+    }
+
     fn append(&mut self, result: &mut String, text: &str) -> Result<(), VariableError> {
         self.remaining = self
             .remaining

@@ -197,7 +197,7 @@ fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
         assert!(test.error.is_none(), "{}: {:?}", test.name, test.error);
     }
     assert_eq!(
-        uuid::Uuid::parse_str(&variables["id"])
+        uuid::Uuid::parse_str(&variables.values["id"])
             .unwrap()
             .get_version_num(),
         4
@@ -224,7 +224,7 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
     ))
     .unwrap();
     assert!(original.path.contains("{{$guid}}"));
-    assert!(variables.is_empty());
+    assert!(variables.values.is_empty());
     assert!(reports.is_empty());
     uuid::Uuid::parse_str(sent.path.strip_prefix("https://example.com/").unwrap()).unwrap();
     assert!(sent.headers[0].1.parse::<i64>().unwrap() > 0);

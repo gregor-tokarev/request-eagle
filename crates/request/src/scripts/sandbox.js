@@ -2,7 +2,8 @@
     "use strict";
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
-    const variables = Object.assign(Object.create(null), input.variables);
+    const variables = Object.assign(Object.create(null), input.variables.values);
+    const generated = Object.assign(Object.create(null), input.variables.generated);
     const format = value => {
         try { return typeof value === "string" ? value : (stringify(value) ?? String(value)); }
         catch {
@@ -10,7 +11,14 @@
             catch { return "[Unserializable value]"; }
         }
     };
-    const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => variables[key] ?? dynamic(key) ?? match);
+    const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => {
+        const value = variables[key] ?? generated[key];
+        if (value !== undefined) return value;
+        const fresh = dynamic(key);
+        if (fresh == null) return match;
+        generated[key] = fresh;
+        return fresh;
+    });
 
     function entries(pairs, ignoreCase = false) {
         const normalize = name => ignoreCase ? String(name).toLowerCase() : String(name);
@@ -178,6 +186,6 @@
         headers: input.headers,
         body: bodyChanged ? body : null,
         body_changed: bodyChanged,
-        variables,
+        variables: {values: variables, generated},
     });
 })

@@ -50,7 +50,7 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
         assert_eq!(sent.headers, [("X-Test".into(), "a & b".into())]);
         assert_eq!(sent.query.unwrap()[0].1, "a & b");
         assert_eq!(sent.body.unwrap(), br#"{"message":"a & b"}"#);
-        assert_eq!(vars["path"], "hello");
+        assert_eq!(vars.values["path"], "hello");
         assert_eq!(reports[0].logs.len(), 1);
         assert_eq!(original.path, "http://localhost/{{path}}");
         assert_eq!(original.method, Method::Get);
@@ -201,7 +201,7 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
         .await
         .unwrap();
         assert_eq!(sent.path, "http://localhost/created");
-        assert_eq!(vars["value"], "local");
+        assert_eq!(vars.values["value"], "local");
         assert_eq!(
             sent.headers[0].1,
             format!("local/{{{{value}}}}/{}", sent.query.unwrap()[0].1)

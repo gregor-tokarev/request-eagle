@@ -1,8 +1,14 @@
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::HttpRequest;
 
-pub(super) type Variables = BTreeMap<String, String>;
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct Variables {
+    pub values: BTreeMap<String, String>,
+    pub generated: BTreeMap<String, String>,
+}
 
 pub(super) use environment::generate_variable as dynamic_variable;
 
@@ -26,21 +32,20 @@ pub(super) fn has_dynamic_placeholders(request: &HttpRequest) -> bool {
 
 pub(super) fn expand_request(
     request: &mut HttpRequest,
-    variables: &Variables,
+    variables: &mut Variables,
     body_changed: bool,
 ) -> Result<(), String> {
     // Share the limit across all fields, including generated dynamic values.
     let mut budget = 32 * 1024 * 1024;
-    let mut generated = Variables::new();
-    request.path = replace_variables(&request.path, variables, &mut generated, &mut budget)?;
+    request.path = replace_variables(&request.path, variables, &mut budget)?;
 
     for (key, value) in request
         .headers
         .iter_mut()
         .chain(request.query.iter_mut().flatten())
     {
-        *key = replace_variables(key, variables, &mut generated, &mut budget)?;
-        *value = replace_variables(value, variables, &mut generated, &mut budget)?;
+        *key = replace_variables(key, variables, &mut budget)?;
+        *value = replace_variables(value, variables, &mut budget)?;
     }
 
     // Preserve binary bodies unless a script explicitly replaced them.
@@ -48,8 +53,7 @@ pub(super) fn expand_request(
         && let Ok(text) = std::str::from_utf8(body)
         && (body_changed || text.contains("{{"))
     {
-        request.body =
-            Some(replace_variables(text, variables, &mut generated, &mut budget)?.into_bytes());
+        request.body = Some(replace_variables(text, variables, &mut budget)?.into_bytes());
     }
 
     Ok(())
@@ -57,8 +61,7 @@ pub(super) fn expand_request(
 
 fn replace_variables(
     text: &str,
-    variables: &Variables,
-    generated: &mut Variables,
+    variables: &mut Variables,
     budget: &mut usize,
 ) -> Result<String, String> {
     let mut result = String::new();
@@ -76,12 +79,16 @@ fn replace_variables(
         rest = &rest[start..];
         let Some(end) = rest.find("}}") else { break };
         let name = &rest[2..end];
-        match variables.get(name).or_else(|| generated.get(name)) {
+        match variables
+            .values
+            .get(name)
+            .or_else(|| variables.generated.get(name))
+        {
             Some(value) => append(value)?,
             None => match dynamic_variable(name) {
                 Some(value) => {
                     append(&value)?;
-                    generated.insert(name.to_owned(), value);
+                    variables.generated.insert(name.to_owned(), value);
                 }
                 None => append(&rest[..end + 2])?,
             },

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use environment::{VariableError, VariableResolver, VariableValues};
 
 use crate::HttpRequest;
@@ -22,15 +24,19 @@ impl RequestVariables {
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
-        self.resolve_owned(request.clone(), false)
+        self.resolve_owned(request.clone(), false, &mut BTreeMap::new())
     }
 
     pub(crate) fn resolve_owned(
         &self,
         request: HttpRequest,
         body_changed: bool,
+        generated: &mut BTreeMap<String, String>,
     ) -> Result<HttpRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
+        for (name, value) in generated.iter() {
+            resolver.override_generated(name.clone(), value.clone());
+        }
         if !request.scripts.is_empty() {
             resolver.limit_output(32 * 1024 * 1024);
         }
@@ -43,17 +49,23 @@ impl RequestVariables {
                 }
             }
         }
-        request
-            .resolve_with(&mut resolver, body_changed)
-            .map_err(|error| {
-                if let VariableError::Unknown(name) = &error
-                    && !name.starts_with('$')
-                    && let Some(message) = &self.environment_error
-                {
-                    return message.clone();
-                }
-                error.to_string()
-            })
+        let resolved = request.resolve_with(&mut resolver, body_changed);
+        // Keep generated values for the post-response phase, separate from
+        // local overrides so unsetting an override restores the cached value.
+        for (name, value) in resolver.generated_values() {
+            if !self.values.environment.contains_key(name) {
+                generated.insert(name.clone(), value.clone());
+            }
+        }
+        resolved.map_err(|error| {
+            if let VariableError::Unknown(name) = &error
+                && !name.starts_with('$')
+                && let Some(message) = &self.environment_error
+            {
+                return message.clone();
+            }
+            error.to_string()
+        })
     }
 }
 

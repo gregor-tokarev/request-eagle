@@ -66,6 +66,101 @@ fn executor() -> RequestExecutor {
 }
 
 #[test]
+fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
+    smol::block_on(async {
+        let mut ids = std::collections::HashSet::new();
+        for collection in [false, true] {
+            for phase in ["post only", "both", "override"] {
+                let (url, server) =
+                    serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+                let mut pre = String::new();
+                if phase != "post only" {
+                    pre.push_str(r#"
+                        const id = pm.variables.replaceIn('{{$guid}}');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}/{{$guid}}')).to.equal(`${id}/${id}`);
+                        pm.expect(pm.variables.has('$guid')).to.be.false;
+                        pm.variables.set('$guid', 'temporary');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal('temporary');
+                        pm.variables.unset('$guid');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(id);
+                        pm.variables.clear();
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(id);
+                        pm.request.headers.upsert({key: 'X-Pre-Id', value: id});
+                    "#);
+                }
+                if phase == "override" {
+                    pre.push_str("pm.variables.set('$guid', 'override');");
+                }
+                let request = HttpRequest {
+                    method: Method::Post,
+                    path: format!("{url}/{{{{$guid}}}}"),
+                    headers: vec![
+                        ("X-Id".into(), "{{$guid}}".into()),
+                        ("X-Uuid".into(), "{{$randomUUID}}".into()),
+                    ],
+                    query: Some(vec![("id".into(), "{{$guid}}".into())]),
+                    body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
+                    scripts: request::RequestScripts {
+                        pre_request: pre,
+                        post_response: r#"
+                            const sent = pm.request.headers.get('X-Id');
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(sent);
+                            pm.expect(pm.variables.replaceIn('{{$randomUUID}}')).to.equal(pm.request.headers.get('X-Uuid'));
+                            const original = pm.request.headers.get('X-Pre-Id') ?? sent;
+                            pm.variables.unset('$guid');
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
+                            pm.variables.clear();
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
+                        "#.into(),
+                    },
+                };
+                let execution = if collection {
+                    executor()
+                        .execute_with_variables(
+                            request,
+                            request::RequestVariables::new(
+                                environment::VariableValues::default(),
+                                None,
+                            ),
+                        )
+                        .await
+                } else {
+                    executor().execute(request).await
+                }
+                .unwrap();
+                for report in execution.scripts {
+                    assert!(report.error.is_none(), "{collection}/{phase}: {report:?}");
+                }
+                let received = server.await;
+                let id = String::from_utf8(received.body).unwrap();
+                let (id, repeated) = id.split_once('/').unwrap();
+                assert_eq!(id, repeated);
+                assert!(
+                    received
+                        .head
+                        .starts_with(&format!("POST /{id}?id={id} HTTP/1.1\r\n"))
+                );
+                assert!(
+                    received
+                        .head
+                        .to_lowercase()
+                        .contains(&format!("x-id: {id}\r\n"))
+                );
+                if phase == "override" {
+                    assert_eq!(id, "override");
+                } else {
+                    uuid::Uuid::parse_str(id).unwrap();
+                    assert!(
+                        ids.insert(id.to_owned()),
+                        "a new send needs fresh generated values"
+                    );
+                }
+            }
+        }
+    });
+}
+
+#[test]
 fn post_response_scripts_share_uploads_and_read_the_sent_body() {
     smol::block_on(async {
         for (body, pre, post) in [
