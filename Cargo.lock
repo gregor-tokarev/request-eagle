@@ -1743,8 +1743,11 @@ dependencies = [
 name = "environment"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "rand 0.9.5",
  "thiserror 2.0.18",
  "toml 1.1.3+spec-1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5874,6 +5877,7 @@ dependencies = [
  "anyhow",
  "base64",
  "bytes",
+ "environment",
  "flate2",
  "gpui-pre-http-client",
  "gpui-pre-reqwest",
@@ -7052,11 +7056,13 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick",
  "collection",
+ "environment",
  "gpui-kit",
  "preferences",
  "request",
  "serde_json",
  "smol",
+ "tempfile",
  "theme",
 ]
 

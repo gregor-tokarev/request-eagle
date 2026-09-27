@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ExecutionError {
+    #[error("{0}")]
+    Variables(String),
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
 

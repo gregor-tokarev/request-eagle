@@ -10,6 +10,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;
+use crate::variable_input::with_variables;
 
 fn method_color(method: Method, cx: &App) -> Hsla {
     match method {
@@ -169,15 +170,18 @@ impl RequestDraft {
                     .flex_1()
                     .min_w_0()
                     .child(
-                        div().debug_selector(|| "request-url".into()).child(
-                            InputGroup::new("request-url-group")
-                                .input(Input::new(&url).aria_label("Request URL"))
-                                .addon(
-                                    InputGroupAddon::new("request-method-addon")
-                                        .p_1()
-                                        .child(method_button),
-                                ),
-                        ),
+                        div()
+                            .debug_selector(|| "request-url".into())
+                            .child(with_variables(
+                                self.url_completion.as_ref().unwrap(),
+                                InputGroup::new("request-url-group")
+                                    .input(Input::new(&url).aria_label("Request URL"))
+                                    .addon(
+                                        InputGroupAddon::new("request-method-addon")
+                                            .p_1()
+                                            .child(method_button),
+                                    ),
+                            )),
                     ),
             )
             .child(

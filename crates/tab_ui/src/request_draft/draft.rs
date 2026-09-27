@@ -1,4 +1,8 @@
 use super::super::request_fields::{FieldsChanged, RequestFields};
+use crate::{
+    variable_input::{VariableInput, VariableTarget},
+    variables::VariableScope,
+};
 use collection::{HttpRequest, Method};
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
@@ -28,6 +32,10 @@ pub struct RequestDraft {
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) variable_scope: Option<Entity<VariableScope>>,
+    variable_path: Option<std::path::PathBuf>,
+    pub(super) url_completion: Option<Entity<VariableInput>>,
+    pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
@@ -64,6 +72,10 @@ impl RequestDraft {
             headers: None,
             generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
+            variable_scope: None,
+            variable_path: None,
+            url_completion: None,
+            body_completion: None,
             response: None,
             split: None,
             task: None,
@@ -86,6 +98,37 @@ impl RequestDraft {
 
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request
+    }
+
+    pub fn set_variable_environment(
+        &mut self,
+        request_path: &std::path::Path,
+        folder_depth: usize,
+        cx: &mut App,
+    ) {
+        let path = request_path
+            .ancestors()
+            .nth(folder_depth + 1)
+            .map(|path| path.join("environment.toml"));
+
+        self.variable_path = path;
+
+        if let Some(scope) = &self.variable_scope {
+            scope.update(cx, |scope, cx| {
+                scope.path = self.variable_path.clone();
+                cx.notify();
+            });
+        }
+    }
+
+    pub(super) fn variables(&mut self, cx: &mut Context<Self>) -> Entity<VariableScope> {
+        self.variable_scope
+            .get_or_insert_with(|| {
+                cx.new(|_| VariableScope {
+                    path: self.variable_path.clone(),
+                })
+            })
+            .clone()
     }
 
     pub fn mark_saved(&mut self, request: HttpRequest, cx: &mut Context<Self>) {
@@ -128,6 +171,7 @@ impl RequestDraft {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<InputState> {
+        let scope = self.variables(cx);
         // Unvisited tabs only need request data. Creating an InputState also
         // registers window and keystroke listeners, so wait until it is visible.
         self.url
@@ -137,6 +181,9 @@ impl RequestDraft {
                         .placeholder("Enter URL or paste text")
                         .default_value(self.request.path.clone())
                 });
+                self.url_completion = Some(cx.new(|cx| {
+                    VariableInput::new(VariableTarget::Input(url.clone()), scope, window, cx)
+                }));
                 self._subscriptions.push(cx.subscribe(
                     &url,
                     |this, input, event: &InputEvent, cx| {
@@ -158,6 +205,7 @@ impl RequestDraft {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<RequestFields> {
+        let scope = self.variables(cx);
         let is_headers = self.section == RequestSection::Headers;
         let slot = if is_headers {
             &mut self.headers
@@ -177,7 +225,7 @@ impl RequestDraft {
             } else {
                 &[]
             };
-            let fields = cx.new(|cx| RequestFields::new(id, values, generated, window, cx));
+            let fields = cx.new(|cx| RequestFields::new(id, values, generated, scope, window, cx));
             let subscription = cx.subscribe(&fields, move |this, _, event: &FieldsChanged, cx| {
                 if is_headers {
                     this.request.headers = event.0.clone();

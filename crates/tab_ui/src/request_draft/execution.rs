@@ -22,12 +22,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     } else {
         0
     };
-    let mut headers = request::generated_headers(
-        request.method,
-        &request_url(&request.path),
-        &request.headers,
-        body_bytes,
-    );
+    let url = request_url(&request.path);
+    let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        authority.contains("{{") || (scheme.contains("{{") && authority.contains('@'))
+    });
+    let templated_header_names = request.headers.iter().any(|(name, _)| name.contains("{{"));
+    let mut headers =
+        request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
     if supports_body
         && request.body.is_some()
@@ -37,6 +39,40 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
             .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
     {
         headers.push(("Content-Type".into(), "application/json".into()));
+    }
+
+    if request.path.contains("{{")
+        && !headers.iter().any(|(name, _)| name == "Host")
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        headers.insert(0, ("Host".into(), "Resolved on Send".into()));
+    }
+
+    if templated_authorization
+        && !headers.iter().any(|(name, _)| name == "Authorization")
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+    {
+        headers.push(("Authorization".into(), "Resolved on Send".into()));
+    }
+
+    for (name, value) in &mut headers {
+        if templated_header_names
+            || (name == "Host" && value.contains("{{"))
+            || (name == "Authorization" && templated_authorization)
+            || (name == "Content-Length"
+                && request
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| body.windows(2).any(|bytes| bytes == b"{{")))
+        {
+            *value = "Resolved on Send".into();
+        }
     }
 
     headers
@@ -62,6 +98,35 @@ pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
     request
 }
 
+pub(super) fn resolve_request(
+    request: &HttpRequest,
+    mut values: environment::VariableValues,
+    environment_error: Option<&str>,
+) -> Result<HttpRequest, String> {
+    let mut template = request.clone();
+    if matches!(template.method, Method::Get | Method::Head) {
+        template.body = None;
+    }
+
+    // Let the resolver parse names, including whitespace, in every request field.
+    // Never use cached values while their source is unavailable.
+    if environment_error.is_some() {
+        values.environment.clear();
+    }
+    template
+        .resolve_variables(&values)
+        .map(|request| outgoing_request(&request))
+        .map_err(|error| {
+            if let environment::VariableError::Unknown(name) = &error
+                && !name.starts_with('$')
+                && let Some(message) = environment_error
+            {
+                return message.to_owned();
+            }
+            error.to_string()
+        })
+}
+
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
         self.generated_headers = generated_headers(&self.request);
@@ -82,7 +147,21 @@ impl RequestDraft {
         let response = self.response.as_ref().unwrap().clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let request = outgoing_request(&self.request);
+        let scope = self.variables(cx);
+        let (values, environment_error) = match scope.read(cx).values() {
+            Ok(values) => (values, None),
+            Err(error) => (environment::VariableValues::default(), Some(error)),
+        };
+        let request = resolve_request(&self.request, values, environment_error.as_deref());
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                response.update(cx, |response, cx| {
+                    response.finish(Err(request::ExecutionError::Variables(error)), window, cx)
+                });
+                return;
+            }
+        };
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
