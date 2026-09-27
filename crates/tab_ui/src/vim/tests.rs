@@ -691,7 +691,7 @@ fn display_column_measurement_does_not_copy_the_unused_line_tail(cx: &mut TestAp
     let text = gpui_kit::component::input::Rope::from("a".repeat(4 * 1024 * 1024));
     cx.update(|window, cx| {
         let allocated = crate::test_allocator::allocated_by(|| {
-            let column = super::column::Column::at(&text, 10, window, cx);
+            let mut column = super::column::Column::at(&text, 10);
             assert_eq!(column.offset(&text, 0, window, cx), 10);
         });
         assert!(
@@ -1092,4 +1092,146 @@ fn disabled_application_chords_leave_their_prefixes_to_vim(cx: &mut TestAppConte
     });
     cx.simulate_keystrokes("d d");
     assert_eq!(value(&view, cx), "second");
+}
+
+#[gpui_kit::test]
+fn enabling_vim_collapses_the_native_selection_and_normalizes_the_caret(cx: &mut TestAppContext) {
+    for (text, selection, expected) in [
+        ("abc", 3..3, 2),
+        ("abc", 0..3, 2),
+        ("abc\ndef", 0..2, 2),
+        ("", 0..0, 0),
+        ("abé", 4..4, 2),
+    ] {
+        let (view, cx) = setup(cx, text, false);
+        cx.update(|_, cx| {
+            view.read(cx)
+                .editor
+                .clone()
+                .update(cx, |editor, cx| editor.set_selected_range(selection, cx));
+            preferences::update(cx, |p| p.vim_mode = true).unwrap();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(
+                view.read(cx).editor.read(cx).selected_range(),
+                expected..expected
+            );
+            assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_some());
+        });
+        assert_eq!(value(&view, cx), text);
+    }
+}
+
+#[gpui_kit::test]
+fn vertical_motions_from_long_prefixes_only_measure_what_the_destination_needs(
+    cx: &mut TestAppContext,
+) {
+    let (_, cx) = setup(cx, "small editor", true);
+    let text =
+        gpui_kit::component::input::Rope::from(format!("{}\nshort\n", "a".repeat(4 * 1024 * 1024)));
+    cx.update(|window, cx| {
+        let allocated = crate::test_allocator::allocated_by(|| {
+            let mut column = super::column::Column::at(&text, 4 * 1024 * 1024 - 10);
+            assert_eq!(
+                column.offset(&text, 4 * 1024 * 1024 + 1, window, cx),
+                text.len() - 2
+            );
+            assert_eq!(column.offset(&text, text.len(), window, cx), text.len());
+            assert_eq!(column.offset(&text, 0, window, cx), 4 * 1024 * 1024 - 10);
+        });
+        assert!(
+            allocated < 128 * 1024,
+            "allocated {allocated} bytes for a long source prefix"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn lazy_display_columns_survive_short_lines_and_match_the_full_rendered_prefix(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{
+        TextRun,
+        component::{ActiveTheme as _, input::Rope},
+        font, rems,
+    };
+
+    let (_, cx) = setup(cx, "small editor", true);
+    for prefix in [
+        "ab\t".repeat(90),
+        "é猫e\u{301}👩\u{200d}🚀".repeat(30),
+        "Wi".repeat(100),
+    ] {
+        let target = "0123456789".repeat(200);
+        let source = format!("{prefix}end\nx\n{target}");
+        let text = Rope::from(source);
+        cx.update(|window, cx| {
+            let font = font(cx.theme().mono_font_family.clone());
+            let size = rems(0.875).to_pixels(window.rem_size());
+            let x = window
+                .text_system()
+                .shape_line(
+                    prefix.clone().into(),
+                    size,
+                    &[TextRun {
+                        len: prefix.len(),
+                        font: font.clone(),
+                        ..Default::default()
+                    }],
+                    None,
+                )
+                .width;
+            let shaped = window.text_system().shape_line(
+                target.clone().into(),
+                size,
+                &[TextRun {
+                    len: target.len(),
+                    font,
+                    ..Default::default()
+                }],
+                None,
+            );
+            let mut column = super::column::Column::at(&text, prefix.len());
+            let short = prefix.len() + 4;
+            assert_eq!(column.offset(&text, short, window, cx), short);
+            assert_eq!(
+                column.offset(&text, short + 2, window, cx),
+                short + 2 + shaped.closest_index_for_x(x)
+            );
+            assert_eq!(column.offset(&text, 0, window, cx), prefix.len());
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn shared_dispatch_keeps_search_and_unrelated_input_scoped_after_other_editors_close(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = setup(cx, "one two one", true);
+    let retained = cx.update(|window, cx| {
+        (0..100)
+            .map(|_| {
+                let editor = cx.new(|cx| EditorState::new(window, cx));
+                cx.new(|cx| Vim::new(editor, cx))
+            })
+            .collect::<Vec<_>>()
+    });
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&view, cx), 1);
+    drop(retained);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("one");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(cursor(&view, cx), 8);
+    cx.update(|window, cx| {
+        view.read(cx)
+            .input
+            .clone()
+            .update(cx, |input, cx| input.focus(window, cx));
+    });
+    cx.simulate_keystrokes("h j k l");
+    cx.read(|cx| assert_eq!(view.read(cx).input.read(cx).value().as_str(), "hjkl"));
+    assert_eq!(value(&view, cx), "one two one");
 }

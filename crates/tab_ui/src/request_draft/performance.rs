@@ -1,7 +1,11 @@
 use std::time::Instant;
 
 use collection::Method;
-use gpui_kit::{AppContext as _, Keystroke, TestAppContext, component::Root, px, size};
+use gpui_kit::{
+    AppContext as _, Keystroke, TestAppContext,
+    component::{Root, input::EditorState},
+    px, size,
+};
 
 use super::{RequestDraft, draft::RequestSection};
 
@@ -21,6 +25,14 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
 
     let enabled = std::env::var("REQUEST_EAGLE_BENCH_VIM").as_deref() != Ok("0");
     let samples = 1000;
+    let retained_count: usize = std::env::var("REQUEST_EAGLE_BENCH_EDITORS")
+        .ok()
+        .map(|value| {
+            value
+                .parse()
+                .expect("REQUEST_EAGLE_BENCH_EDITORS must be a count")
+        })
+        .unwrap_or(0);
 
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -51,6 +63,7 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
             format!("{{\n{rows}\n}}")
         };
         let mut editor = None;
+        let mut retained = Vec::with_capacity(retained_count);
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| {
                 let mut draft = RequestDraft::new();
@@ -81,6 +94,12 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
 
                 draft
             });
+
+            for _ in 0..retained_count {
+                let editor =
+                    cx.new(|cx| EditorState::new(window, cx).default_value("inactive editor"));
+                retained.push(cx.new(|cx| crate::vim::Vim::new(editor, cx)));
+            }
 
             Root::new(view, window, cx)
         });
@@ -123,7 +142,7 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
         allocations.sort();
 
         eprintln!(
-            "{} vim={enabled} n={samples} mean={:.3} p95={:.3} p99={:.3} max={:.3} allocation_p99={} over8={}",
+            "{} vim={enabled} retained={retained_count} n={samples} mean={:.3} p95={:.3} p99={:.3} max={:.3} allocation_p99={} over8={}",
             if scripts { "scripts" } else { "body" },
             durations.iter().sum::<f64>() / samples as f64,
             durations[(samples * 95).div_ceil(100) - 1],

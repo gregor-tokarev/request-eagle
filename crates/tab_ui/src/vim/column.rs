@@ -5,48 +5,68 @@ use gpui_kit::{
 
 use super::motions::{line, next, normal_cursor};
 
-#[derive(Clone, Copy)]
 pub(super) enum Column {
-    Display(Pixels),
+    Position {
+        prefix: std::ops::Range<usize>,
+        width: Option<Pixels>,
+    },
     End,
 }
 
 impl Column {
-    pub(super) fn at(text: &Rope, cursor: usize, window: &Window, cx: &App) -> Self {
-        let range = line(text, cursor);
-
-        if cursor == range.start {
-            return Self::Display(px(0.));
+    pub(super) fn at(text: &Rope, cursor: usize) -> Self {
+        Self::Position {
+            prefix: line(text, cursor).start..cursor,
+            width: None,
         }
-
-        Self::Display(shape(text.slice(range.start..cursor).to_string(), window, cx).width)
     }
 
-    pub(super) fn offset(self, text: &Rope, cursor: usize, window: &Window, cx: &App) -> usize {
+    pub(super) fn offset(
+        &mut self,
+        text: &Rope,
+        cursor: usize,
+        window: &Window,
+        cx: &App,
+    ) -> usize {
         let range = line(text, cursor);
         let offset = match self {
             Self::End => range.end,
-            Self::Display(x) => {
-                if x <= px(0.) {
+            Self::Position { prefix, width } => {
+                // Vim clears the desired column whenever the document changes.
+                // Returning to the source line needs no measurement at all.
+                if range.start == prefix.start {
+                    return normal_cursor(text, prefix.end);
+                }
+
+                if prefix.start == prefix.end || range.is_empty() {
                     return range.start;
                 }
 
-                // Grow only until the requested display position is covered.
-                // A minified target line can be megabytes longer than this prefix.
+                // Measure both prefixes lazily. Once the destination ends before
+                // the desired column, the rest of a long source line is irrelevant.
+                // Remember the source position across shorter lines without
+                // copying or shaping its complete prefix upfront.
                 let mut length = 64;
 
                 loop {
-                    let mut end = range.start.saturating_add(length).min(range.end);
+                    let source_end = prefix_end(text, prefix, length);
+                    let x = width.unwrap_or_else(|| {
+                        shape(text.slice(prefix.start..source_end).to_string(), window, cx).width
+                    });
 
-                    while !text.is_char_boundary(end) {
-                        end -= 1;
+                    if source_end == prefix.end {
+                        *width = Some(x);
                     }
 
-                    let end = next(text, end).min(range.end);
+                    let end = prefix_end(text, &range, length);
                     let shaped = shape(text.slice(range.start..end).to_string(), window, cx);
 
-                    if shaped.width >= x || end == range.end {
+                    if width.is_some() && shaped.width >= x {
                         break range.start + shaped.closest_index_for_x(x);
+                    }
+
+                    if end == range.end && x >= shaped.width {
+                        break range.end;
                     }
 
                     length = length.saturating_mul(2);
@@ -55,6 +75,16 @@ impl Column {
         };
         normal_cursor(text, offset)
     }
+}
+
+fn prefix_end(text: &Rope, range: &std::ops::Range<usize>, length: usize) -> usize {
+    let mut end = range.start.saturating_add(length).min(range.end);
+
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    next(text, end).min(range.end)
 }
 
 fn shape(text: String, window: &Window, cx: &App) -> ShapedLine {

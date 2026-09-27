@@ -1,5 +1,6 @@
 mod column;
 mod cursor;
+mod dispatch;
 mod grapheme;
 mod insertion;
 mod motions;

@@ -38,8 +38,7 @@ struct Search {
     mode: Mode,
 }
 
-/// One editor's modal state. The interceptor runs before GPUI's input bindings,
-/// but only consumes keys while this exact editor has focus.
+/// One editor's modal state, reached by the shared focus-aware dispatcher.
 pub(crate) struct Vim {
     editor: Entity<EditorState>,
     enabled: bool,
@@ -61,18 +60,7 @@ impl Vim {
     }
 
     pub(crate) fn new(editor: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
-        let weak = cx.entity().downgrade();
-        let keys = cx.intercept_keystrokes(move |event, window, cx| {
-            let _ = weak.update(cx, |this, cx| {
-                if this.enabled {
-                    if this.editor.focus_handle(cx).is_focused(window) {
-                        this.keystroke(event, window, cx);
-                    } else if this.search.is_some() && this.focus.contains_focused(window, cx) {
-                        this.search_keystroke(&event.keystroke, window, cx);
-                    }
-                }
-            });
-        });
+        let registration = super::dispatch::register(&editor, cx);
         let preferences = cx.observe_global::<preferences::Preferences>(|this, cx| {
             let enabled = cx.global::<preferences::Preferences>().vim_mode;
 
@@ -83,6 +71,11 @@ impl Vim {
                 this.set_mode(Mode::Normal, cx);
                 this.reset_pending();
                 this.desired_column = None;
+
+                if enabled {
+                    this.normal(this.editor.read(cx).cursor(), cx);
+                }
+
                 cx.notify();
             }
         });
@@ -135,7 +128,7 @@ impl Vim {
             }
         });
 
-        Self {
+        let mut this = Self {
             selection: editor.read(cx).selected_range(),
             editor,
             enabled: cx
@@ -149,7 +142,28 @@ impl Vim {
             insertion: None,
             search: None,
             focus: cx.focus_handle(),
-            _subscriptions: vec![keys, preferences, changes, selection_changes],
+            _subscriptions: vec![registration, preferences, changes, selection_changes],
+        };
+
+        if this.enabled {
+            this.normal(this.editor.read(cx).cursor(), cx);
+        }
+
+        this
+    }
+
+    pub(super) fn dispatch(
+        &mut self,
+        event: &KeystrokeEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.enabled {
+            if self.editor.focus_handle(cx).is_focused(window) {
+                self.keystroke(event, window, cx);
+            } else if self.search.is_some() && self.focus.contains_focused(window, cx) {
+                self.search_keystroke(&event.keystroke, window, cx);
+            }
         }
     }
 
@@ -685,10 +699,11 @@ impl Vim {
                 return;
             }
 
-            let column = if vertical {
+            let mut column = if vertical {
                 Some(
                     self.desired_column
-                        .unwrap_or_else(|| Column::at(&text, cursor, window, cx)),
+                        .take()
+                        .unwrap_or_else(|| Column::at(&text, cursor)),
                 )
             } else if matches!(key, "$" | "end") {
                 Some(Column::End)
@@ -697,7 +712,11 @@ impl Vim {
             };
 
             if vertical {
-                movement.offset = column.unwrap().offset(&text, movement.offset, window, cx);
+                movement.offset =
+                    column
+                        .as_mut()
+                        .unwrap()
+                        .offset(&text, movement.offset, window, cx);
             }
 
             if let Some((operator, _)) = operator {

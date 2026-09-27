@@ -177,7 +177,9 @@ REQUEST_EAGLE_BENCH_VIM=1 cargo test -p tab_ui --release vim_cursor_benchmark \
   -- --ignored --nocapture --test-threads=1
 ```
 
-Use `REQUEST_EAGLE_BENCH_VIM=0` for the disabled comparison. Each case warms up
+Use `REQUEST_EAGLE_BENCH_VIM=0` for the disabled comparison and
+`REQUEST_EAGLE_BENCH_EDITORS=100` to retain 100 additional inactive editor states.
+Each case warms up
 for 120 movements and measures 1,000 more, reporting CPU interaction percentiles
 and allocated bytes. This includes dispatch, effects, Root, drawing and cleanup;
 it excludes the FPS monitor, native font rendering and GPU presentation. Run on
