@@ -243,10 +243,19 @@ impl Vim {
             matches!(entry, ClipboardEntry::String(text) if text.metadata_json::<serde_json::Value>()
                 .is_some_and(|metadata| metadata["request_eagle_vim_linewise"] == true))
         });
-        value = value.repeat(count);
         let editor = self.editor.read(cx);
         let text = editor.text();
         let cursor = editor.cursor();
+
+        if linewise {
+            value = value.replace("\r\n", "\n");
+
+            if newline(text, cursor) == "\r\n" {
+                value = value.replace('\n', "\r\n");
+            }
+        }
+
+        value = value.repeat(count);
         let visual = self.visual_range(cx);
         let mut position = cursor;
         let mut separator_len = 0;
@@ -299,7 +308,7 @@ impl Vim {
 
         self.replace(range, &value, window, cx);
         let cursor = if linewise {
-            start + separator_len
+            first_nonblank(self.editor.read(cx).text(), start + separator_len)
         } else {
             previous(self.editor.read(cx).text(), start + value.len())
         };
@@ -465,20 +474,27 @@ impl Vim {
             };
 
         let vertical = matches!(key, "j" | "k" | "up" | "down");
-        let column = if vertical {
-            Some(
-                self.desired_column
-                    .unwrap_or_else(|| Column::at(&text, cursor, window, cx)),
-            )
-        } else if matches!(key, "$" | "end") {
-            Some(Column::End)
-        } else {
-            None
-        };
 
         if let Some(mut movement) =
             motion(&text, cursor, motion_key, motion_count, operator.is_some())
         {
+            if vertical
+                && text.offset_to_point(movement.offset).row == text.offset_to_point(cursor).row
+            {
+                return;
+            }
+
+            let column = if vertical {
+                Some(
+                    self.desired_column
+                        .unwrap_or_else(|| Column::at(&text, cursor, window, cx)),
+                )
+            } else if matches!(key, "$" | "end") {
+                Some(Column::End)
+            } else {
+                None
+            };
+
             if vertical {
                 movement.offset = column.unwrap().offset(&text, movement.offset, window, cx);
             }
@@ -501,7 +517,7 @@ impl Vim {
                         && range.end == line(&text, range.end).start);
                 self.operate(operator, range, linewise, window, cx);
 
-                if operator == 'y' && movement.linewise && movement.offset < cursor {
+                if operator == 'y' && linewise && movement.offset < cursor {
                     self.normal(movement.offset, cx);
                 }
             } else if let Mode::Visual {

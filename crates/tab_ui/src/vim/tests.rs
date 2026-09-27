@@ -603,6 +603,8 @@ fn backward_words_stop_at_each_empty_line(cx: &mut TestAppContext) {
         assert_eq!(cursor(&view, cx), 3 + ending.len());
         cx.simulate_keystrokes("b");
         assert_eq!(cursor(&view, cx), 0);
+        cx.simulate_keystrokes("G y B");
+        assert_eq!(cursor(&view, cx), 3 + ending.len());
         cx.simulate_keystrokes("G d B");
         assert_eq!(value(&view, cx), format!("one{ending}next"));
         cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), ending));
@@ -646,4 +648,63 @@ fn search_repeat_extends_visual_selections(cx: &mut TestAppContext) {
     assert_eq!(value(&view, cx), "ne\nlast one");
     cx.simulate_keystrokes("u G V N d");
     assert_eq!(value(&view, cx), "");
+}
+
+#[gpui_kit::test]
+fn linewise_registers_use_the_destination_editors_line_endings(cx: &mut TestAppContext) {
+    for (source_ending, destination_ending) in [("\r\n", "\n"), ("\n", "\r\n")] {
+        let source = format!("  one{source_ending}{source_ending}last");
+        let (_, source_cx) = setup(cx, &source, true);
+        source_cx.simulate_keystrokes("3 y y");
+        let destination = format!("top{destination_ending}bottom");
+        let (view, destination_cx) = setup(cx, &destination, true);
+        destination_cx.simulate_keystrokes("p");
+        assert_eq!(
+            value(&view, destination_cx),
+            format!(
+                "top{destination_ending}  one{destination_ending}{destination_ending}last{destination_ending}bottom"
+            )
+        );
+        assert_eq!(cursor(&view, destination_cx), 5 + destination_ending.len());
+    }
+}
+
+#[gpui_kit::test]
+fn linewise_paste_targets_the_first_nonblank_character(cx: &mut TestAppContext) {
+    for (paste, expected_cursor) in [("p", 8), ("P", 2)] {
+        let (view, cx) = setup(cx, "  one\nlast", true);
+        cx.simulate_keystrokes(&format!("y y {paste}"));
+        assert_eq!(cursor(&view, cx), expected_cursor);
+        cx.simulate_keystrokes("x");
+        let expected = if paste == "p" {
+            "  one\n  ne\nlast"
+        } else {
+            "  ne\n  one\nlast"
+        };
+        assert_eq!(value(&view, cx), expected);
+    }
+}
+
+#[gpui_kit::test]
+fn display_column_measurement_does_not_copy_the_unused_line_tail(cx: &mut TestAppContext) {
+    let (_, cx) = setup(cx, "small editor", true);
+    let text = gpui_kit::component::input::Rope::from("a".repeat(4 * 1024 * 1024));
+    cx.update(|window, cx| {
+        let allocated = crate::test_allocator::allocated_by(|| {
+            let column = super::column::Column::at(&text, 10, window, cx);
+            assert_eq!(column.offset(&text, 0, window, cx), 10);
+        });
+        assert!(
+            allocated < 128 * 1024,
+            "allocated {allocated} bytes for column 10"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn clamped_vertical_operators_do_not_delete_the_current_line(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one line", true);
+    cx.simulate_keystrokes("j k d j d k");
+    assert_eq!(cursor(&view, cx), 0);
+    assert_eq!(value(&view, cx), "one line");
 }

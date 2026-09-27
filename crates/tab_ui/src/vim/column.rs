@@ -3,7 +3,7 @@ use gpui_kit::{
     *,
 };
 
-use super::motions::{line, normal_cursor};
+use super::motions::{line, next, normal_cursor};
 
 #[derive(Clone, Copy)]
 pub(super) enum Column {
@@ -14,8 +14,12 @@ pub(super) enum Column {
 impl Column {
     pub(super) fn at(text: &Rope, cursor: usize, window: &Window, cx: &App) -> Self {
         let range = line(text, cursor);
-        let shaped = shape(text.slice(range.clone()).to_string(), window, cx);
-        Self::Display(shaped.x_for_index(cursor - range.start))
+
+        if cursor == range.start {
+            return Self::Display(px(0.));
+        }
+
+        Self::Display(shape(text.slice(range.start..cursor).to_string(), window, cx).width)
     }
 
     pub(super) fn offset(self, text: &Rope, cursor: usize, window: &Window, cx: &App) -> usize {
@@ -23,9 +27,30 @@ impl Column {
         let offset = match self {
             Self::End => range.end,
             Self::Display(x) => {
-                range.start
-                    + shape(text.slice(range.clone()).to_string(), window, cx)
-                        .closest_index_for_x(x)
+                if x <= px(0.) {
+                    return range.start;
+                }
+
+                // Grow only until the requested display position is covered.
+                // A minified target line can be megabytes longer than this prefix.
+                let mut length = 64;
+
+                loop {
+                    let mut end = range.start.saturating_add(length).min(range.end);
+
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+
+                    let end = next(text, end).min(range.end);
+                    let shaped = shape(text.slice(range.start..end).to_string(), window, cx);
+
+                    if shaped.width >= x || end == range.end {
+                        break range.start + shaped.closest_index_for_x(x);
+                    }
+
+                    length = length.saturating_mul(2);
+                }
             }
         };
         normal_cursor(text, offset)
