@@ -246,3 +246,137 @@ fn schema_reference_graphs_and_json_sizes_are_bounded() {
 
     assert!(validate(data, json!(true)).is_err());
 }
+
+#[test]
+fn schema_bounds_eager_branch_errors_and_expanded_reference_work() {
+    let data = json!(vec!["value"; 19_000]);
+    let branches = vec![json!({"items": {"type": "integer"}}); 200];
+
+    for keyword in ["anyOf", "allOf", "oneOf"] {
+        let error = validate(data.clone(), json!({keyword: branches})).unwrap_err();
+        assert!(error.contains("combined data/schema work limit"), "{error}");
+    }
+
+    let schema = json!({
+        "anyOf": vec![json!({"$ref": "#/$defs/integers"}); 10],
+        "$defs": {"integers": {"items": {"enum": (0..20).collect::<Vec<_>>()}}},
+    });
+    let error = validate(json!(vec!["value"; 1000]), schema).unwrap_err();
+    assert!(error.contains("combined data/schema work limit"), "{error}");
+
+    // A large array with a simple shape stays within the combined work budget.
+    let result = validate(data, json!({"items": {"type": "string"}})).unwrap();
+    assert_eq!(result["valid"], true);
+}
+
+#[test]
+fn schema_bounds_literal_payloads_large_instances_and_repeated_error_paths() {
+    let cases = [
+        (
+            json!(vec!["value"; 1000]),
+            json!({"items": {"const": "x".repeat(50_000)}}),
+        ),
+        (
+            json!("x".repeat(900_000)),
+            json!({"anyOf": vec![json!({"type": "integer"}); 20]}),
+        ),
+        (
+            json!({"x".repeat(20_000): vec!["value"; 500]}),
+            json!({"additionalProperties": {"items": {"type": "integer"}}}),
+        ),
+    ];
+
+    for (data, schema) in cases {
+        let error = validate(data, schema).unwrap_err();
+        assert!(error.contains("combined data/schema work limit"), "{error}");
+    }
+}
+
+#[test]
+fn schema_bounds_regex_strings_and_property_names_before_native_validation() {
+    let nested_regex = (0..60_000)
+        .map(|index| format!("(?<g{index}>"))
+        .collect::<String>()
+        + "a"
+        + &")".repeat(60_000);
+    let error = validate(json!(nested_regex), json!({"format": "regex"})).unwrap_err();
+    assert!(error.contains("at most 4096 bytes"), "{error}");
+
+    let error = validate(
+        json!("ab".repeat(100_000)),
+        json!({"pattern": "^[ab]*a[ab]{1000}$"}),
+    )
+    .unwrap_err();
+    assert!(error.contains("at most 4096 bytes"), "{error}");
+
+    let error = validate(
+        json!({"ab".repeat(3000): true}),
+        json!({"patternProperties": {"^[ab]*a[ab]{1000}$": true}}),
+    )
+    .unwrap_err();
+    assert!(error.contains("at most 4096 bytes"), "{error}");
+
+    let error = validate(
+        json!({"x".repeat(4097): true}),
+        json!({
+            "propertyNames": {"$ref": "#/$defs/expression"},
+            "$defs": {"expression": {"format": "regex"}},
+        }),
+    )
+    .unwrap_err();
+    assert!(error.contains("at most 4096 bytes"), "{error}");
+
+    assert_eq!(
+        validate(json!("^[a-z]+$"), json!({"format": "regex"})).unwrap()["valid"],
+        true
+    );
+    assert_eq!(
+        validate(json!("["), json!({"format": "regex"})).unwrap()["valid"],
+        false
+    );
+}
+
+#[test]
+fn schema_rejects_annotation_dependent_applicators_with_unbounded_revalidation() {
+    for keyword in ["unevaluatedProperties", "unevaluatedItems"] {
+        let error = validate(json!({}), json!({keyword: false})).unwrap_err();
+        assert!(error.contains("not supported in script schemas"), "{error}");
+    }
+}
+
+#[test]
+fn schema_bounds_cumulative_regex_work_across_patterns_and_values() {
+    let schema = json!({
+        "allOf": vec![json!({"pattern": "^[ab]*a[ab]{1000}$"}); 100],
+    });
+    let error = validate(json!("ab".repeat(1000)), schema).unwrap_err();
+    assert!(error.contains("regular-expression work limit"), "{error}");
+
+    let mut schema = json!({"pattern": "^[ab]*a[ab]{1000}$"});
+
+    for _ in 0..4 {
+        schema = json!({"anyOf": [schema]});
+    }
+
+    let error = validate(json!("ab".repeat(500)), schema).unwrap_err();
+    assert!(error.contains("regular-expression work limit"), "{error}");
+
+    let error = validate(
+        json!(vec!["x".repeat(100); 100]),
+        json!({"items": {"pattern": "^x+$"}}),
+    )
+    .unwrap_err();
+    assert!(error.contains("regular-expression work limit"), "{error}");
+
+    let error = validate(
+        json!(""),
+        json!({"allOf": vec![json!({"pattern": "^$"}); 65]}),
+    )
+    .unwrap_err();
+    assert!(error.contains("regular-expression work limit"), "{error}");
+
+    assert_eq!(
+        validate(json!("x".repeat(3000)), json!({"pattern": "^x+$"})).unwrap()["valid"],
+        true
+    );
+}

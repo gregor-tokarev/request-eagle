@@ -181,7 +181,16 @@ do not catch its control-flow exception.
 - Crypto inputs and decoded Base64 are limited to 1 MiB. Random generation accepts
   integer counts from 0 through 65536.
 - Schema data is limited to 1 MiB, 20,000 JSON nodes and depth 64; schemas to
-  64 KiB, 1000 nodes and depth 32, with bounded reference expansion. At most 20
-  validation errors are returned; `truncated` indicates further errors.
+  64 KiB, 1000 nodes and depth 32, with bounded reference expansion. A conservative
+  combined budget also limits estimated validation work to 100,000 node visits
+  and 16 MiB of data/schema/path bytes, counting repeated references, nested
+  branches and literal values. Exceeding a budget throws before native validation.
+  Schemas using `pattern`, `patternProperties` or the `regex` format require all
+  data strings and property names to be at most 4096 bytes. A separate cumulative
+  regex-work budget of 4096 units conservatively charges all data string/key bytes
+  plus 64 units per regex occurrence and schema ancestor, including repeated references.
+  `unevaluatedProperties` and `unevaluatedItems` are
+  unsupported. At most 20 validation errors are returned; `truncated` indicates
+  further errors.
 - A phase records up to 500 tests and 500 console entries; individual messages
   are limited to 4096 characters. Exceeding the test limit fails the phase.
