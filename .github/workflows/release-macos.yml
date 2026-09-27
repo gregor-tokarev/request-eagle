@@ -184,8 +184,11 @@ jobs:
               "$zip_name" \
               "RequestEagle-$VERSION-arm64.dmg" \
               request-eagle-update.json \
-              cli/* \
               > SHA256SUMS
+            (
+              cd cli
+              shasum -a 256 *
+            ) >> SHA256SUMS
           )
 
       - name: Publish GitHub release
