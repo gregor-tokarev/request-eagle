@@ -265,3 +265,80 @@ fn typing_punctuation_hides_stale_completions(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.read(|cx| assert!(!editor.read(cx).completion_menu_state().open));
 }
+
+#[gpui_kit::test]
+fn script_completion_follows_the_caret_on_the_first_frame(cx: &mut TestAppContext) {
+    use gpui_kit::{
+        Background, EntityInputHandler as _,
+        component::{ActiveTheme as _, Theme},
+        point, px, size,
+    };
+
+    let (_, editor, cx) = script_editor(cx, true);
+    cx.simulate_resize(size(px(1440.), px(900.)));
+    for theme in ["Default Light", "Default Dark"] {
+        for font_size in [12., 16., 24.] {
+            cx.update(|_, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                Theme::global_mut(cx).font_size = px(font_size);
+                Theme::sync_base(cx);
+            });
+            for (source, keys) in [
+                ("pm.variables.", ["t", "o", "O", "b"]),
+                ("pm.request", [".", "h", "e", "a"]),
+            ] {
+                cx.simulate_keystrokes("secondary-a");
+                cx.simulate_input(source);
+                cx.run_until_parked();
+                cx.read(|cx| assert!(editor.read(cx).completion_menu_state().open));
+
+                for typed in keys {
+                    cx.update(|window, cx| {
+                        editor.update(cx, |editor, cx| {
+                            editor.replace_text_in_range(None, typed, window, cx);
+                        });
+                        window.refresh();
+                        // Inspect this draw before notifications can cause a catch-up frame.
+                        window.draw(cx).clear(cx);
+
+                        let editor = editor.read(cx);
+                        let (caret, height) = editor.cursor_layout().unwrap();
+                        let offset = point(-px(4.), editor.scroll_offset().y + height + px(4.));
+                        let expected = window
+                            .pixel_snap_point(caret.origin + offset)
+                            .scale(window.scale_factor());
+                        let background = Background::from(cx.theme().popover);
+                        let popovers = window
+                            .painted_quads()
+                            .iter()
+                            .filter(|quad| quad.background == background)
+                            .map(|quad| quad.bounds.origin)
+                            .collect::<Vec<_>>();
+                        let at_caret = popovers.iter().any(|origin| {
+                            (origin.x - expected.x).0.abs() <= 1.
+                                && (origin.y - expected.y).0.abs() <= 1.
+                        });
+                        assert!(
+                            at_caret,
+                            "{theme}, {font_size}px, typed {typed}: expected {expected:?}, got {popovers:?}"
+                        );
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn script_completion_click_uses_the_moved_popover_bounds(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, true);
+    cx.simulate_input("pm.variables.");
+    cx.simulate_input("g");
+    let bounds = cx.debug_bounds("completion-menu").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::default());
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(editor.read(cx).value(), "pm.variables.get");
+        assert!(!editor.read(cx).completion_menu_state().open);
+    });
+}
