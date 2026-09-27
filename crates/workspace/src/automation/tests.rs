@@ -146,3 +146,93 @@ fn automation_script_trust_and_invalid_settings_leave_state_intact(cx: &mut Test
     );
     assert!(call(&layout, cx, json!({"command":"drafts.get","tab":9999})).is_err());
 }
+
+#[test]
+fn automation_proxy_endpoint_changes_cannot_reuse_redacted_credentials() {
+    let saved = preferences::ProxyPreferences {
+        mode: preferences::ProxyMode::Custom,
+        protocol: preferences::ProxyProtocol::Https,
+        host: "trusted.example".into(),
+        port: 443,
+        authentication: true,
+        username: "stored-user".into(),
+        password: "stored-secret".into(),
+        ..Default::default()
+    };
+    let patch = |fields: Value, previous: preferences::ProxyPreferences| {
+        let mut command = fields;
+        command["command"] = json!("settings.proxy");
+        super::settings::patched_proxy(serde_json::from_value(command).unwrap(), previous)
+    };
+
+    for endpoint in [
+        json!({"host":"other.example"}),
+        json!({"port":8080}),
+        json!({"protocol":"http"}),
+    ] {
+        let changed = patch(endpoint.clone(), saved.clone()).unwrap();
+        assert!(!changed.authentication);
+        assert!(changed.username.is_empty());
+        assert!(changed.password.is_empty());
+
+        let mut authenticated = endpoint;
+        authenticated["authentication"] = json!(true);
+        assert!(patch(authenticated.clone(), saved.clone()).is_err());
+        authenticated["username"] = json!("replacement-user");
+        assert!(patch(authenticated.clone(), saved.clone()).is_err());
+        authenticated["password"] = json!("replacement-secret");
+        let changed = patch(authenticated, saved.clone()).unwrap();
+        assert!(changed.authentication);
+        assert_eq!(changed.username, "replacement-user");
+        assert_eq!(changed.password, "replacement-secret");
+    }
+
+    let unchanged = patch(json!({"bypass":"localhost"}), saved.clone()).unwrap();
+    assert_eq!(unchanged.username, saved.username);
+    assert_eq!(unchanged.password, saved.password);
+
+    let unavailable = preferences::ProxyPreferences {
+        credentials_unavailable: true,
+        username: String::new(),
+        password: String::new(),
+        ..saved
+    };
+    assert!(patch(json!({"host":"other.example"}), unavailable).is_err());
+}
+
+#[test]
+fn automation_can_retry_and_replace_unavailable_proxy_credentials() {
+    let unavailable = preferences::ProxyPreferences {
+        mode: preferences::ProxyMode::Custom,
+        host: "trusted.example".into(),
+        authentication: true,
+        credentials_unavailable: true,
+        ..Default::default()
+    };
+    let patch = |fields: Value| {
+        let mut command = fields;
+        command["command"] = json!("settings.proxy");
+        super::settings::patched_proxy(
+            serde_json::from_value(command).unwrap(),
+            unavailable.clone(),
+        )
+    };
+
+    let retry = patch(json!({})).unwrap();
+    assert!(
+        retry.credentials_unavailable,
+        "The store must still retry the keyring"
+    );
+    let replacement = patch(json!({"username":"new-user","password":"new-secret"})).unwrap();
+    assert_eq!(replacement.password, "new-secret");
+
+    assert!(patch(json!({"host":"other.example","username":"","password":""})).is_err());
+    let replacement = patch(json!({"host":"other.example","username":"new-user","password":"new-secret","authentication":true})).unwrap();
+    assert!(
+        !replacement.credentials_unavailable,
+        "Never restore the previous endpoint's secret over explicit replacements"
+    );
+    assert!(replacement.authentication);
+    assert_eq!(replacement.username, "new-user");
+    assert_eq!(replacement.password, "new-secret");
+}

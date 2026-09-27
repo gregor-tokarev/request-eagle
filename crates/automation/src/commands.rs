@@ -115,7 +115,9 @@ pub enum Command {
         editor_font: Option<String>,
         interface_font_size: Option<f32>,
     },
-    /// Patch proxy settings. Omitted credentials are preserved; empty strings clear them.
+    /// Patch proxy settings. Omitted credentials are preserved only for the same endpoint.
+    /// Changing host, port or protocol clears credentials and disables authentication.
+    /// To authenticate a new endpoint, explicitly supply username, password and authentication=true.
     /// Credentials are stored through the application's OS credential store.
     #[serde(rename = "settings.proxy")]
     SettingsProxy {

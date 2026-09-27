@@ -140,3 +140,38 @@ fn a_slow_instance_cannot_redirect_a_command_to_another_workspace() {
     );
     server.join().unwrap();
 }
+
+#[test]
+fn non_utf8_arguments_and_socket_paths_return_json_errors() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
+        .arg(OsString::from_vec(vec![0xff]))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "invalid_input"
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join(OsString::from_vec(vec![b'a', 0xff]));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _listener = UnixListener::bind(dir.join("test.sock")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
+        .env("REQUEST_EAGLE_AUTOMATION_DIR", dir)
+        .arg("instances")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("UTF-8")
+    );
+}

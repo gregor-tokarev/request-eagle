@@ -52,7 +52,8 @@ putting secrets in command-line arguments. The CLI never prompts.
 Every call prints one JSON object with `version`, `ok`, and either `result` or
 `error: {code, message}`. Exit status is 0 for success, 1 for application/connection
 failure, and 2 for malformed CLI input. `--help` and `--version` print plain text.
-Transport failures are ambiguous for mutations: inspect current state before
+Arguments and socket paths must be valid UTF-8; invalid encoding produces a
+structured error. Transport failures are ambiguous for mutations: inspect current state before
 retrying. A request's HTTP error status is a completed response, not a CLI error;
 inspect `status`, `failed`, and script test errors in `responses.get`.
 
@@ -95,8 +96,13 @@ variable scope without replacing the draft. Deletion requires `confirm: true`,
 and closing a dirty tab requires `discard: true` or saving first. Deleting a saved
 file leaves an open draft available to save elsewhere.
 
-Proxy credential arguments are optional patches: omission preserves a credential;
-an empty string clears it. Reads never return proxy passwords or usernames.
+Proxy credential arguments are optional patches: omission preserves a credential
+only while the endpoint stays the same; an empty string clears it. Changing the
+host, port, or protocol clears stored credentials and disables authentication.
+Authenticating a new endpoint requires explicit `username`, `password`, and
+`authentication: true`. Unavailable keyring credentials can be retried or replaced at the same endpoint;
+changing that endpoint requires explicit, nonempty replacement credentials. Reads never return proxy
+passwords or usernames.
 Writes use the same encrypted OS credential store as Settings → Proxy.
 Collections, requests, responses and script output may contain secrets; avoid
 logging their contents when running agents.

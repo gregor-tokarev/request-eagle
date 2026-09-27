@@ -72,6 +72,7 @@ impl ResponseView {
 
         Ok(json!({
             "loading": false,
+            "failed": false,
             "status": response.status.as_u16(),
             "version": format!("{:?}", response.version),
             "headers": headers,

@@ -88,7 +88,7 @@ impl RequestDraft {
     ) -> Result<Value, String> {
         match &self.response {
             Some(response) => response.read(cx).automation_snapshot(offset, limit),
-            None => Ok(json!({"loading": false, "state": "empty"})),
+            None => Ok(json!({"loading": false, "failed": false, "state": "empty"})),
         }
     }
 }

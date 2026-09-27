@@ -75,6 +75,7 @@ try:
             break
         time.sleep(.05)
     assert response.get("status") == 201, response
+    assert response["failed"] is False
     assert received == [b'{"hello":"agent"}'], received
     assert len(response["cookies"]) == 2
     assert response["scripts"][0]["tests"][0]["error"] is None

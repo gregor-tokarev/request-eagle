@@ -7,6 +7,14 @@ pub(super) fn proxy(
     command: Command,
     cx: &mut App,
 ) -> Result<gpui_kit::Task<anyhow::Result<()>>, String> {
+    let settings = patched_proxy(command, cx.global::<Preferences>().request.proxy.clone())?;
+    Ok(preferences::update_proxy(settings, cx))
+}
+
+pub(super) fn patched_proxy(
+    command: Command,
+    mut settings: preferences::ProxyPreferences,
+) -> Result<preferences::ProxyPreferences, String> {
     let Command::SettingsProxy {
         mode,
         protocol,
@@ -22,7 +30,7 @@ pub(super) fn proxy(
     else {
         unreachable!()
     };
-    let mut settings = cx.global::<Preferences>().request.proxy.clone();
+    let previous_endpoint = (settings.protocol, settings.host.clone(), settings.port);
     if let Some(value) = mode {
         settings.mode = serde_json::from_value(json!(value)).unwrap();
     }
@@ -35,6 +43,29 @@ pub(super) fn proxy(
     if let Some(value) = port {
         settings.port = value;
     }
+    let endpoint_changed =
+        previous_endpoint != (settings.protocol, settings.host.clone(), settings.port);
+    if endpoint_changed {
+        // Clearing empty placeholders must not rebind an unavailable keyring
+        // reference which could later be restored at the new endpoint.
+        if settings.credentials_unavailable {
+            let replacements = username.as_ref().zip(password.as_ref());
+            if replacements.is_none_or(|(user, secret)| user.is_empty() && secret.is_empty()) {
+                return Err("Changing the endpoint while proxy credentials are unavailable requires explicit replacement username and password values".into());
+            }
+
+            settings.credentials_unavailable = false;
+        }
+
+        if authentication == Some(true) && (username.is_none() || password.is_none()) {
+            return Err("Changing an authenticated proxy endpoint requires explicit username and password values".into());
+        }
+
+        settings.username.clear();
+        settings.password.clear();
+        settings.authentication = false;
+    }
+
     if let Some(value) = http {
         settings.http = value;
     }
@@ -53,8 +84,13 @@ pub(super) fn proxy(
     if let Some(value) = bypass {
         settings.bypass = value;
     }
-    settings.validate().map_err(str::to_owned)?;
-    Ok(preferences::update_proxy(settings, cx))
+    // The store owns retrying keyring reads and replacing unavailable secrets.
+    // Validate the endpoint here without preventing that recovery path.
+    let mut validation = settings.clone();
+    validation.credentials_unavailable = false;
+    validation.validate().map_err(str::to_owned)?;
+
+    Ok(settings)
 }
 
 pub(super) fn apply(command: Command, cx: &mut App) -> Result<Value, String> {
