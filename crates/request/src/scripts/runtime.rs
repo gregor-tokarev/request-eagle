@@ -15,7 +15,7 @@ use serde_json::json;
 
 use super::{
     ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
-    variables::{Variables, dynamic_variable, expand_request, has_dynamic_placeholders},
+    variables::{Variables, dynamic_variable, expand_request, needs_variable_expansion},
 };
 use crate::{Execution, ExecutionError, HttpRequest, Method, Response};
 
@@ -114,7 +114,7 @@ pub(crate) async fn pre_request_with_variables(
     mut context: Option<crate::RequestVariables>,
 ) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
     let has_script = !request.scripts.pre_request.trim().is_empty();
-    if context.is_none() && !has_script && !has_dynamic_placeholders(&request) {
+    if context.is_none() && !has_script && !needs_variable_expansion(&request) {
         return Ok((request, Variables::default(), Vec::new()));
     }
 

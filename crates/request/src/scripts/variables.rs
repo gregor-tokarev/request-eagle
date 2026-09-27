@@ -12,7 +12,7 @@ pub(crate) struct Variables {
 
 pub(super) use environment::generate_variable as dynamic_variable;
 
-pub(super) fn has_dynamic_placeholders(request: &HttpRequest) -> bool {
+pub(super) fn needs_variable_expansion(request: &HttpRequest) -> bool {
     std::iter::once(request.path.as_str())
         .chain(
             request
@@ -27,7 +27,7 @@ pub(super) fn has_dynamic_placeholders(request: &HttpRequest) -> bool {
                 .as_deref()
                 .and_then(|body| std::str::from_utf8(body).ok()),
         )
-        .any(|text| text.contains("{{$"))
+        .any(|text| text.contains("{{$") || text.contains("{{!"))
 }
 
 pub(super) fn expand_request(
@@ -79,19 +79,25 @@ fn replace_variables(
         rest = &rest[start..];
         let Some(end) = rest.find("}}") else { break };
         let name = &rest[2..end];
-        match variables
-            .values
-            .get(name)
-            .or_else(|| variables.generated.get(name))
-        {
-            Some(value) => append(value)?,
-            None => match dynamic_variable(name) {
-                Some(value) => {
-                    append(&value)?;
-                    variables.generated.insert(name.to_owned(), value);
-                }
-                None => append(&rest[..end + 2])?,
-            },
+        if let Some(literal) = name.strip_prefix('!') {
+            append("{{")?;
+            append(literal)?;
+            append("}}")?;
+        } else {
+            match variables
+                .values
+                .get(name)
+                .or_else(|| variables.generated.get(name))
+            {
+                Some(value) => append(value)?,
+                None => match dynamic_variable(name) {
+                    Some(value) => {
+                        append(&value)?;
+                        variables.generated.insert(name.to_owned(), value);
+                    }
+                    None => append(&rest[..end + 2])?,
+                },
+            }
         }
         rest = &rest[end + 2..];
     }

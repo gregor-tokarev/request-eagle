@@ -205,6 +205,38 @@ fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
 }
 
 #[test]
+fn direct_sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
+    for mode in ["escaped only", "dynamic", "script"] {
+        let mut request = HttpRequest {
+            method: crate::Method::Post,
+            path: "https://example.com/{{!customer}}".into(),
+            headers: vec![("X-Literal".into(), "{{!$guid}}/{{!customer}}".into())],
+            query: Some(vec![("{{!key}}".into(), "{{!customer}}".into())]),
+            body: Some(b"{{!customer}}".to_vec()),
+            ..Default::default()
+        };
+        if mode == "dynamic" {
+            request.headers.push(("X-Id".into(), "{{$guid}}".into()));
+        } else if mode == "script" {
+            request.scripts.pre_request =
+                "pm.variables.set('customer', 'must stay literal');".into();
+        }
+        let (sent, _, _) =
+            smol::block_on(pre_request(request, Arc::new(AtomicBool::new(false)))).unwrap();
+        assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
+        assert_eq!(sent.headers[0].1, "{{$guid}}/{{customer}}");
+        assert_eq!(
+            sent.query.unwrap(),
+            [("{{key}}".into(), "{{customer}}".into())]
+        );
+        assert_eq!(sent.body.unwrap(), b"{{customer}}");
+        if mode == "dynamic" {
+            uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
+        }
+    }
+}
+
+#[test]
 fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() {
     let original = HttpRequest {
         path: "https://example.com/{{$guid}}".into(),
