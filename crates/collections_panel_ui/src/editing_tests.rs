@@ -174,6 +174,39 @@ fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut T
 }
 
 #[gpui_kit::test]
+fn context_menu_restores_tree_focus_and_tracks_its_target_after_insertion(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (sidebar, cx) = sidebar(&fixture, cx);
+    cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
+    click_row(cx, "collection-row-3", MouseButton::Right, 1);
+    cx.simulate_keystrokes("escape");
+    cx.update(|window, cx| assert!(sidebar.focus_handle(cx).is_focused(window)));
+
+    click_row(cx, "collection-row-3", MouseButton::Right, 1);
+    cx.update(|_, cx| {
+        sidebar.update(cx, |sidebar, cx| {
+            sidebar
+                .collections
+                .create_folder(&fixture.0.join("API"))
+                .unwrap();
+            sidebar.rebuild_tree(None, None, cx);
+        });
+    });
+    cx.simulate_keystrokes("down down down enter");
+    cx.read(|cx| {
+        let sidebar = sidebar.read(cx);
+        assert_eq!(
+            sidebar.rename.as_ref().unwrap().path,
+            fixture.0.join("Other")
+        );
+    });
+    cx.simulate_input("Still Other");
+    cx.simulate_keystrokes("enter");
+    assert!(fixture.0.join("Still Other").is_dir());
+    assert!(fixture.0.join("API/Users/list.toml").exists());
+}
+
+#[gpui_kit::test]
 fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (sidebar, cx) = sidebar(&fixture, cx);

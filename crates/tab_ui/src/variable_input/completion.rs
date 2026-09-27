@@ -35,7 +35,7 @@ impl VariableTarget {
         }
     }
 
-    fn origin(&self, cx: &App) -> Option<Point<Pixels>> {
+    fn origin(&self, window: &Window, cx: &App) -> Option<Point<Pixels>> {
         let (cursor, line_height, scroll) = match self {
             Self::Input(input) => {
                 let input = input.read(cx);
@@ -48,7 +48,14 @@ impl VariableTarget {
                 (cursor, height, input.scroll_offset())
             }
         };
-        Some(cursor.origin + scroll + point(px(0.), line_height + px(4.)))
+        Some(
+            cursor.origin
+                + scroll
+                + point(
+                    px(0.),
+                    line_height + rems(0.25).to_pixels(window.rem_size()),
+                ),
+        )
     }
 
     fn replace(&self, range: Range<usize>, text: String, window: &mut Window, cx: &mut App) {
@@ -88,7 +95,7 @@ pub(crate) struct VariableInput {
     range: Option<Range<usize>>,
     suggestions: Vec<Suggestion>,
     selected: usize,
-    scroll: ScrollHandle,
+    scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -121,7 +128,7 @@ impl VariableInput {
             range: None,
             suggestions: Vec::new(),
             selected: 0,
-            scroll: ScrollHandle::new(),
+            scroll: UniformListScrollHandle::new(),
             _subscriptions: vec![input_subscription, scope_subscription],
         }
     }
@@ -135,7 +142,7 @@ impl VariableInput {
         let was_open = self.range.take().is_some();
         self.suggestions.clear();
         self.selected = 0;
-        self.scroll.set_offset(point(px(0.), px(0.)));
+        self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
 
         if let Some((text, cursor)) = &self.snapshot
             && let Some((range, query)) = active_token(text, *cursor)
@@ -171,6 +178,60 @@ impl VariableInput {
         cx.notify();
     }
 
+    fn render_suggestion(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let item = &self.suggestions[index];
+
+        h_flex()
+            .id(item.name.clone())
+            .role(Role::ListBoxOption)
+            .aria_label(format!("{}, {}", item.name, item.source))
+            .aria_selected(index == self.selected)
+            .aria_position_in_set(index + 1)
+            .aria_size_of_set(self.suggestions.len())
+            .debug_selector(move || format!("variable-suggestion-{index}"))
+            .h_8()
+            .px_2()
+            .gap_2()
+            .rounded(cx.theme().radius_tokens().md)
+            .when(index == self.selected, |row| {
+                row.bg(cx.theme().accent)
+                    .text_color(cx.theme().accent_foreground)
+            })
+            .hover(|row| row.bg(cx.theme().muted))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(match item.source {
+                        "Environment" => "E",
+                        _ => "G",
+                    }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .text_ellipsis()
+                    .child(item.name.clone()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(item.source),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.accept(index, window, cx);
+                }),
+            )
+            .into_any_element()
+    }
+
     fn accept(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = self.suggestions.get(index) else {
             return;
@@ -203,7 +264,8 @@ impl VariableInput {
                 } else {
                     (self.selected + count - 1) % count
                 };
-                self.scroll.scroll_to_item(self.selected);
+                self.scroll
+                    .scroll_to_item(self.selected, ScrollStrategy::Nearest);
             }
             _ => return,
         }
@@ -251,17 +313,18 @@ impl Render for VariableInput {
         if self.range.is_none() || self.target.snapshot(window, cx).is_none() {
             return Empty.into_any_element();
         }
-        let Some(origin) = self.target.origin(cx) else {
+        let Some(origin) = self.target.origin(window, cx) else {
             return Empty.into_any_element();
         };
+        let margin = rems(0.5).to_pixels(window.rem_size());
         let width = rems(24.)
             .to_pixels(window.rem_size())
-            .min(window.bounds().size.width - px(16.));
+            .min((window.bounds().size.width - margin * 2.).max(px(0.)));
 
         deferred(
             anchored()
                 .position(origin)
-                .snap_to_window_with_margin(px(8.))
+                .snap_to_window_with_margin(margin)
                 .child(
                     v_flex()
                         .id("variable-completions")
@@ -287,72 +350,28 @@ impl Render for VariableInput {
                                 .id("variable-suggestions")
                                 .role(Role::ListBox)
                                 .aria_label("Variable suggestions")
-                                .max_h(rems(16.))
-                                .overflow_y_scroll()
-                                .track_scroll(&self.scroll)
-                                .when(self.suggestions.is_empty(), |list| {
-                                    list.child(
-                                        div()
-                                            .p_2()
-                                            .text_sm()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("No matching variables"),
+                                .child(if self.suggestions.is_empty() {
+                                    div()
+                                        .p_2()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("No matching variables")
+                                        .into_any_element()
+                                } else {
+                                    uniform_list(
+                                        "variable-list",
+                                        self.suggestions.len(),
+                                        cx.processor(|this, range: Range<usize>, _, cx| {
+                                            range
+                                                .map(|index| this.render_suggestion(index, cx))
+                                                .collect()
+                                        }),
                                     )
-                                })
-                                .children(self.suggestions.iter().enumerate().map(
-                                    |(index, item)| {
-                                        h_flex()
-                                            .id(("variable", index))
-                                            .role(Role::ListBoxOption)
-                                            .aria_label(format!("{}, {}", item.name, item.source))
-                                            .aria_selected(index == self.selected)
-                                            .aria_position_in_set(index + 1)
-                                            .aria_size_of_set(self.suggestions.len())
-                                            .debug_selector(move || {
-                                                format!("variable-suggestion-{index}")
-                                            })
-                                            .h_8()
-                                            .px_2()
-                                            .gap_2()
-                                            .rounded(cx.theme().radius_tokens().md)
-                                            .when(index == self.selected, |row| {
-                                                row.bg(cx.theme().accent)
-                                                    .text_color(cx.theme().accent_foreground)
-                                            })
-                                            .hover(|row| row.bg(cx.theme().muted))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(match item.source {
-                                                        "Environment" => "E",
-                                                        _ => "G",
-                                                    }),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .text_sm()
-                                                    .text_ellipsis()
-                                                    .child(item.name.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(item.source),
-                                            )
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _, window, cx| {
-                                                    window.prevent_default();
-                                                    cx.stop_propagation();
-                                                    this.accept(index, window, cx);
-                                                }),
-                                            )
-                                    },
-                                )),
+                                    .w_full()
+                                    .h(rems(2. * self.suggestions.len().min(8) as f32))
+                                    .track_scroll(&self.scroll)
+                                    .into_any_element()
+                                }),
                         )
                         .child(
                             div()

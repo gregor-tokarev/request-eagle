@@ -200,6 +200,7 @@ impl Render for Settings {
                 h_flex()
                     .flex_1()
                     .min_h_0()
+                    .items_stretch()
                     .justify_center()
                     .px(crate::geometry::page_inset(window))
                     .py(crate::geometry::page_inset(window))

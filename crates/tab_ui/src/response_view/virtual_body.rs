@@ -221,7 +221,7 @@ impl VirtualBody {
             let line = window.text_system().shape_line(
                 text,
                 FONT_SIZE.to_pixels(self.rem_size),
-                &[run.clone()],
+                std::slice::from_ref(&run),
                 None,
             );
             let position = self.text.offset_to_point(range.start);

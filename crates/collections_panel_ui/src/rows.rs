@@ -49,7 +49,7 @@ impl CollectionPanel {
 
         if self.pending_delete.as_ref() == Some(&item.path) {
             return div()
-                .id(("collection-row", index))
+                .id(ElementId::Path(item.path.clone().into()))
                 .debug_selector(move || format!("collection-row-{index}"))
                 .track_focus(&self.delete_focus)
                 .h_8()
@@ -98,7 +98,7 @@ impl CollectionPanel {
 
         div()
             .relative()
-            .id(("collection-row", index))
+            .id(ElementId::Path(item.path.clone().into()))
             .debug_selector(move || format!("collection-row-{index}"))
             .h_8()
             .w_full()
@@ -281,14 +281,20 @@ impl CollectionPanel {
                     });
                 }
             }))
-            .context_menu(move |menu, window, cx| {
-                let _ = view.update(cx, |this, cx| {
-                    window.focus(&this.focus, cx);
-                    this.select_row(row, cx);
-                });
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.button == MouseButton::Right {
+                        window.focus(&this.focus, cx);
+                        this.select_row(row, cx);
+                    }
+                }),
+            )
+            .context_menu(move |menu, _, _| {
                 let rename_view = view.clone();
                 let delete_view = view.clone();
                 let path = path.clone();
+                let rename_path = path.clone();
+                let delete_path = path.clone();
                 let copied_path = path.to_string_lossy().into_owned();
 
                 let menu = if branch {
@@ -325,8 +331,15 @@ impl CollectionPanel {
 
                 menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
                     let view = rename_view.clone();
+                    let path = rename_path.clone();
                     window.defer(cx, move |window, cx| {
-                        let _ = view.update(cx, |this, cx| this.begin_rename(index, window, cx));
+                        let _ = view.update(cx, |this, cx| {
+                            if let Some(index) =
+                                this.tree.items.iter().position(|item| item.path == path)
+                            {
+                                this.begin_rename(index, window, cx);
+                            }
+                        });
                     });
                 }))
                 .item(
@@ -340,9 +353,15 @@ impl CollectionPanel {
                 .item(
                     PopupMenuItem::new(delete_label).on_click(move |_, window, cx| {
                         let view = delete_view.clone();
+                        let path = delete_path.clone();
                         window.defer(cx, move |window, cx| {
-                            let _ =
-                                view.update(cx, |this, cx| this.request_delete(index, window, cx));
+                            let _ = view.update(cx, |this, cx| {
+                                if let Some(index) =
+                                    this.tree.items.iter().position(|item| item.path == path)
+                                {
+                                    this.request_delete(index, window, cx);
+                                }
+                            });
                         });
                     }),
                 )

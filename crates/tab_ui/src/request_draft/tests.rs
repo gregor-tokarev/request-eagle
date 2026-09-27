@@ -96,8 +96,10 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
         );
     });
 
+    cx.run_until_parked();
     let format = element_bounds(cx, "format-request-json").unwrap();
     cx.simulate_click(format.center(), Modifiers::default());
+    cx.run_until_parked();
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).request.body.as_deref(),
@@ -125,6 +127,53 @@ fn json_editor_is_only_available_for_body_methods_and_preserves_text(cx: &mut Te
     });
     assert!(element_bounds(cx, "request-body").is_some());
     cx.read(|cx| assert_eq!(editor.read(cx).value(), "{\n  \"hello\": true\n}"));
+}
+
+#[gpui_kit::test]
+fn json_validation_and_formatting_do_not_apply_stale_edits(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(cx);
+    let editor = cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(Method::Post, cx);
+            draft.section = RequestSection::Body;
+            draft.prepare(window, cx);
+            draft.body.as_ref().unwrap().clone()
+        })
+    });
+
+    for (text, valid) in [
+        ("{}", true),
+        ("{", false),
+        ("{\"latest\":true}", true),
+        ("", false),
+    ] {
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.replace_all(text, window, cx));
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(draft.read(cx).body_json_valid, valid);
+            assert!(draft.read(cx).body_task.is_none());
+        });
+    }
+
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_all("{\"old\":true}", window, cx)
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| draft.format_body(window, cx));
+        editor.update(cx, |editor, cx| {
+            editor.replace_all("{\"new\":true}", window, cx)
+        });
+    });
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(editor.read(cx).value(), "{\"new\":true}");
+        assert!(draft.read(cx).body_json_valid);
+    });
 }
 
 #[gpui_kit::test]

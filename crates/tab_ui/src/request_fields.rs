@@ -155,6 +155,7 @@ impl Render for RequestFields {
         let id = self.id;
 
         v_flex()
+            .id(id)
             .debug_selector(move || format!("{id}-table"))
             .track_focus(&self.focus)
             .w_full()
@@ -184,6 +185,7 @@ impl Render for RequestFields {
                     .enumerate()
                     .map(|(index, (name, value))| {
                         h_flex()
+                            .id(format!("generated-header-{name}"))
                             .debug_selector(move || format!("headers-generated-row-{index}"))
                             .min_h_8()
                             .border_t_1()
@@ -227,11 +229,9 @@ impl Render for RequestFields {
                                                 view.text_color(cx.theme().muted_foreground)
                                             })
                                             .child(
-                                                SelectableText::new(
-                                                    ("generated-header", index * 3 + column_index),
-                                                    text,
-                                                )
-                                                .document_order((index * 3 + column_index) as u64),
+                                                SelectableText::new(column, text).document_order(
+                                                    (index * 3 + column_index) as u64,
+                                                ),
                                             )
                                     },
                                 ),
@@ -243,6 +243,7 @@ impl Render for RequestFields {
                     !row.key.read(cx).value().is_empty() || !row.value.read(cx).value().is_empty();
 
                 h_flex()
+                    .id(("request-field", row.key.entity_id()))
                     .group("request-field-row")
                     .h_8()
                     .border_t_1()
@@ -251,8 +252,9 @@ impl Render for RequestFields {
                         populated,
                         |this| {
                             this.child(
-                                Checkbox::new(("enabled", index))
+                                Checkbox::new("enabled")
                                     .debug_selector(move || format!("{id}-enabled-{index}"))
+                                    .accessibility_label(format!("Enable {id} row {}", index + 1))
                                     .checked(row.enabled)
                                     .on_click(cx.listener(move |this, enabled, _, cx| {
                                         this.rows[index].enabled = *enabled;
@@ -302,7 +304,10 @@ impl Render for RequestFields {
                                 .when(column == "description" && populated, |cell| {
                                     cell.child(
                                         h_flex().absolute().right_1().top_0().h_full().child(
-                                            Button::new(("remove-row", index))
+                                            Button::new("remove-row")
+                                                .debug_selector(move || {
+                                                    format!("{id}-remove-{index}")
+                                                })
                                                 .ghost()
                                                 .xsmall()
                                                 .icon(IconName::Close)
