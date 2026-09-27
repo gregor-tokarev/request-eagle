@@ -19,6 +19,12 @@ enum Mode {
     },
 }
 
+struct Search {
+    cursor: usize,
+    count: usize,
+    mode: Mode,
+}
+
 /// One editor's modal state. The interceptor runs before GPUI's input bindings,
 /// but only consumes keys while this exact editor has focus.
 pub(crate) struct Vim {
@@ -31,6 +37,8 @@ pub(crate) struct Vim {
     selection: Range<usize>,
     desired_column: Option<Column>,
     insertion: Option<Insertion>,
+    search: Option<Search>,
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -43,8 +51,12 @@ impl Vim {
         let weak = cx.entity().downgrade();
         let keys = cx.intercept_keystrokes(move |event, window, cx| {
             let _ = weak.update(cx, |this, cx| {
-                if this.enabled && this.editor.focus_handle(cx).is_focused(window) {
-                    this.keystroke(&event.keystroke, window, cx);
+                if this.enabled {
+                    if this.editor.focus_handle(cx).is_focused(window) {
+                        this.keystroke(&event.keystroke, window, cx);
+                    } else if this.search.is_some() && this.focus.contains_focused(window, cx) {
+                        this.search_keystroke(&event.keystroke, window, cx);
+                    }
                 }
             });
         });
@@ -54,13 +66,25 @@ impl Vim {
             if this.enabled != enabled {
                 this.enabled = enabled;
                 this.insertion = None;
+                this.search = None;
                 this.mode = Mode::Normal;
                 this.reset_pending();
                 this.desired_column = None;
                 cx.notify();
             }
         });
-        let changes = cx.subscribe(&editor, |this, _, event: &InputEvent, cx| {
+        let changes = cx.subscribe(&editor, |this, editor, event: &InputEvent, cx| {
+            // Clicking back into the editor abandons the pending search motion.
+            // Closing/accepting the panel clears it before focus returns.
+            if matches!(event, InputEvent::Focus)
+                && this.search.is_some()
+                && editor.read(cx).search_session().open
+            {
+                this.search = None;
+                this.mode = Mode::Normal;
+                cx.notify();
+            }
+
             if matches!(event, InputEvent::Blur) {
                 this.insertion = None;
                 this.reset_pending();
@@ -68,6 +92,7 @@ impl Vim {
             }
 
             if matches!(event, InputEvent::Change) {
+                this.search = None;
                 this.reset_pending();
                 this.desired_column = None;
 
@@ -78,6 +103,14 @@ impl Vim {
             }
         });
         let selection_changes = cx.observe(&editor, |this, editor, cx| {
+            if this.search.is_some() {
+                if !editor.read(cx).search_session().open {
+                    this.finish_search(false, cx);
+                }
+
+                return;
+            }
+
             let selection = editor.read(cx).selected_range();
 
             if selection != this.selection {
@@ -104,6 +137,8 @@ impl Vim {
             go: false,
             desired_column: None,
             insertion: None,
+            search: None,
+            focus: cx.focus_handle(),
             _subscriptions: vec![keys, preferences, changes, selection_changes],
         }
     }
@@ -338,9 +373,96 @@ impl Vim {
         self.normal(cursor, cx);
     }
 
+    fn finish_search(&mut self, cancel: bool, cx: &mut Context<Self>) {
+        let Some(search) = self.search.take() else {
+            return;
+        };
+        let editor = self.editor.read(cx);
+        let matches = editor.search_session().matcher.matched_ranges();
+        let target = if cancel || matches.is_empty() {
+            search.cursor
+        } else {
+            let index =
+                (matches.partition_point(|range| range.start <= search.cursor) + search.count - 1)
+                    % matches.len();
+            matches[index].start
+        };
+        let target = normal_cursor(editor.text(), target);
+        self.mode = search.mode;
+        self.desired_column = None;
+
+        if let Mode::Visual {
+            anchor, linewise, ..
+        } = self.mode
+        {
+            self.mode = Mode::Visual {
+                anchor,
+                cursor: target,
+                linewise,
+            };
+            self.select(self.visual_range(cx).unwrap(), cx);
+            cx.notify();
+        } else {
+            self.normal(target, cx);
+        }
+    }
+
+    fn search_keystroke(
+        &mut self,
+        stroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("SearchPanel"))
+        {
+            return;
+        }
+
+        let cancel = stroke.key == "escape" || (stroke.modifiers.control && stroke.key == "[");
+
+        if cancel || (stroke.key == "enter" && stroke.modifiers == Modifiers::default()) {
+            self.finish_search(cancel, cx);
+            self.editor.update(cx, |editor, cx| {
+                editor.close_search(cx);
+                editor.focus(window, cx);
+            });
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+    }
+
     fn keystroke(&mut self, stroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         let modifiers = stroke.modifiers;
         let escape = stroke.key == "escape" || (modifiers.control && stroke.key == "[");
+
+        if self.mode != Mode::Insert && !escape {
+            let mut input = window
+                .pending_input_keystrokes()
+                .unwrap_or_default()
+                .to_vec();
+            input.push(stroke.clone());
+            let keymap = cx.key_bindings();
+            let (bindings, _) = keymap
+                .borrow()
+                .bindings_for_input(&input, &window.context_stack());
+
+            // Application bindings take precedence even when remapped to a
+            // plain key or a chord. Native editor edits remain modal.
+            if bindings.first().is_some_and(|binding| {
+                let action = binding.action().name();
+                !action.starts_with("input::") || matches!(action, "input::Copy" | "input::Search")
+            }) || window
+                .possible_bindings_for_input(&input)
+                .iter()
+                .any(|binding| !binding.action().name().starts_with("input::"))
+            {
+                self.reset_pending();
+                return;
+            }
+        }
 
         if escape {
             if let Some(insertion) = self.insertion.take() {
@@ -372,7 +494,11 @@ impl Vim {
         } else if self.mode == Mode::Insert {
             return;
         } else if modifiers.control && !modifiers.alt && !modifiers.platform && stroke.key == "r" {
-            let count = if self.go { 0 } else { self.count.max(1) };
+            let count = if self.go || self.operator.is_some() {
+                0
+            } else {
+                self.count.max(1)
+            };
             self.reset_pending();
 
             for _ in 0..count {
@@ -384,28 +510,6 @@ impl Vim {
             || window.has_pending_keystrokes()
         {
             self.reset_pending();
-            let mut input = window
-                .pending_input_keystrokes()
-                .unwrap_or_default()
-                .to_vec();
-            input.push(stroke.clone());
-            let keymap = cx.key_bindings();
-            let (bindings, _) = keymap
-                .borrow()
-                .bindings_for_input(&input, &window.context_stack());
-
-            // Keep application shortcuts (including user remappings), while
-            // preventing native editor actions from bypassing modal editing.
-            if bindings.first().is_some_and(|binding| {
-                let action = binding.action().name();
-                !action.starts_with("input::") || matches!(action, "input::Copy" | "input::Search")
-            }) || window
-                .possible_bindings_for_input(&input)
-                .iter()
-                .any(|binding| !binding.action().name().starts_with("input::"))
-            {
-                return;
-            }
         } else {
             let key = stroke.key_char.as_deref().unwrap_or(&stroke.key);
             let key = if modifiers.shift {
@@ -476,13 +580,35 @@ impl Vim {
             return;
         }
 
-        if let Some(range) = self.visual_range(cx)
-            && matches!(key, "d" | "x" | "c" | "s" | "y")
+        if let Some(mut range) = self.visual_range(cx)
+            && matches!(
+                key,
+                "d" | "x" | "c" | "s" | "y" | "D" | "X" | "C" | "S" | "Y" | "u" | "U"
+            )
         {
-            let linewise = matches!(self.mode, Mode::Visual { linewise: true, .. });
+            if matches!(key, "u" | "U") {
+                let selected = text.slice(range.clone()).to_string();
+                let replacement = if key == "u" {
+                    selected.to_lowercase()
+                } else {
+                    selected.to_uppercase()
+                };
+                let cursor = range.start;
+                self.replace(range, &replacement, window, cx);
+                self.normal(cursor, cx);
+                return;
+            }
+
+            let linewise = matches!(self.mode, Mode::Visual { linewise: true, .. })
+                || matches!(key, "D" | "X" | "C" | "S" | "Y");
+
+            if linewise && let Mode::Visual { anchor, cursor, .. } = self.mode {
+                range = lines(&text, anchor, cursor);
+            }
+
             let operator = match key {
-                "c" | "s" => 'c',
-                "y" => 'y',
+                "c" | "s" | "C" | "S" => 'c',
+                "y" | "Y" => 'y',
                 _ => 'd',
             };
             self.operate(operator, range, linewise, window, cx);
@@ -593,6 +719,12 @@ impl Vim {
             return;
         }
 
+        if matches!(self.mode, Mode::Visual { .. })
+            && !matches!(key, "v" | "V" | "p" | "P" | "/" | "n" | "N")
+        {
+            return;
+        }
+
         match key {
             "i" => self.insert(cursor, cx),
             "a" => self.insert(next(&text, cursor).min(line(&text, cursor).end), cx),
@@ -669,9 +801,15 @@ impl Vim {
                     window.dispatch_action(Box::new(Undo), cx);
                 }
             }
-            "/" => self
-                .editor
-                .update(cx, |editor, cx| editor.open_search(false, cx)),
+            "/" => {
+                self.search = Some(Search {
+                    cursor,
+                    count,
+                    mode: self.mode,
+                });
+                self.editor
+                    .update(cx, |editor, cx| editor.open_search(false, cx));
+            }
             "n" | "N" => {
                 let matches = self
                     .editor
@@ -728,6 +866,12 @@ impl Vim {
                 separator,
             ));
         }
+    }
+}
+
+impl Focusable for Vim {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
     }
 }
 

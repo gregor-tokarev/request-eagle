@@ -147,6 +147,7 @@ impl RequestDraft {
             .child(
                 div()
                     .debug_selector(|| "request-body".into())
+                    .track_focus(&self.body_vim.as_ref().unwrap().focus_handle(cx))
                     .relative()
                     .flex_1()
                     .min_h_0()

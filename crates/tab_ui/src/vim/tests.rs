@@ -3,8 +3,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, TestAppContext,
-    VisualTestContext, Window,
+    AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, Render,
+    Styled, TestAppContext, VisualTestContext, Window,
 };
 
 use super::Vim;
@@ -16,13 +16,14 @@ struct Harness {
 }
 
 impl Render for Harness {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
             .child(self.vim.clone())
             .child(Input::new(&self.input))
             .child(
                 gpui_kit::div()
+                    .track_focus(&self.vim.focus_handle(cx))
                     .relative()
                     .flex_1()
                     .min_h_0()
@@ -838,4 +839,144 @@ fn linewise_registers_pasted_over_character_selections_split_the_surrounding_lin
             assert_eq!(cursor(&view, cx), expected.find("one").unwrap());
         }
     }
+}
+
+#[gpui_kit::test]
+fn application_shortcuts_can_override_plain_vim_keys_and_chords(cx: &mut TestAppContext) {
+    use std::{cell::Cell, rc::Rc};
+
+    let (view, cx) = setup(cx, "text", true);
+    let sent = Rc::new(Cell::new(0));
+    cx.update(|_, cx| {
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new("x", crate::SendRequest, None),
+            gpui_kit::KeyBinding::new("g s", crate::SendRequest, None),
+        ]);
+        let sent = sent.clone();
+        cx.on_action(move |_: &crate::SendRequest, _| sent.set(sent.get() + 1));
+    });
+    cx.simulate_keystrokes("x g s 2 d x l");
+    assert_eq!(sent.get(), 3);
+    assert_eq!(value(&view, cx), "text");
+    assert_eq!(cursor(&view, cx), 1);
+}
+
+#[gpui_kit::test]
+fn redo_cancels_pending_operators_without_changing_history(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abc", true);
+    cx.simulate_keystrokes("x u");
+    for operator in ["d", "c", "y", "2 d"] {
+        cx.simulate_keystrokes(&format!("{operator} ctrl-r"));
+        assert_eq!(value(&view, cx), "abc", "{operator}");
+    }
+    cx.simulate_keystrokes("ctrl-r");
+    assert_eq!(value(&view, cx), "bc");
+}
+
+#[gpui_kit::test]
+fn visual_uppercase_operators_apply_to_all_selected_lines(cx: &mut TestAppContext) {
+    for ending in ["\n", "\r\n"] {
+        for selection in ["2 l v j", "j 2 l v k", "V j"] {
+            for (operator, expected) in [
+                ("D", "last"),
+                ("X", "last"),
+                ("C", "\nlast"),
+                ("S", "\nlast"),
+                ("Y", "AbcdEF\n  ghIjK\nlast"),
+            ] {
+                let (view, cx) = setup(cx, &"AbcdEF\n  ghIjK\nlast".replace('\n', ending), true);
+                cx.simulate_keystrokes(&format!("{selection} {operator}"));
+                assert_eq!(
+                    value(&view, cx),
+                    expected.replace('\n', ending),
+                    "{selection} {operator}"
+                );
+                cx.read(|cx| {
+                    assert_eq!(
+                        cx.read_from_clipboard().unwrap().text().unwrap(),
+                        format!("AbcdEF{ending}  ghIjK{ending}")
+                    )
+                });
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn visual_case_changes_do_not_undo_or_overwrite_the_register(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "ABCDé\nNext", true);
+    cx.update(|_, cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("kept".into())));
+    cx.simulate_keystrokes("A x escape 0 l v 2 l u");
+    assert_eq!(value(&view, cx), "Abcdéx\nNext");
+    cx.simulate_keystrokes("V U");
+    assert_eq!(value(&view, cx), "ABCDÉX\nNext");
+    cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "kept"));
+    cx.simulate_keystrokes("u");
+    assert_eq!(value(&view, cx), "Abcdéx\nNext");
+}
+
+#[gpui_kit::test]
+fn visual_unsupported_insert_commands_do_not_enter_insert_mode(cx: &mut TestAppContext) {
+    for key in ["i", "a"] {
+        let (view, cx) = setup(cx, "abcd", true);
+        cx.simulate_keystrokes(&format!("v l {key} w escape"));
+        assert_eq!(value(&view, cx), "abcd");
+        cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+    }
+}
+
+#[gpui_kit::test]
+fn forward_search_commits_the_counted_match_and_wraps(cx: &mut TestAppContext) {
+    for (keys, query, expected_cursor) in [
+        ("3 /", "one", 14),
+        ("G $ 2 /", "one", 10),
+        ("6 l /", "one", 10),
+        ("2 l 3 /", "absent", 2),
+    ] {
+        let (view, cx) = setup(cx, "start one one one tail", true);
+        cx.simulate_keystrokes(keys);
+        cx.simulate_input(query);
+        cx.simulate_keystrokes("enter");
+        assert_eq!(cursor(&view, cx), expected_cursor, "{keys}");
+        cx.read(|cx| assert!(!view.read(cx).editor.read(cx).search_session().open));
+        assert_eq!(value(&view, cx), "start one one one tail");
+    }
+}
+
+#[gpui_kit::test]
+fn native_search_extends_visual_selections_and_escape_restores_them(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one two one\nlast one", true);
+    cx.simulate_keystrokes("l v 2 /");
+    cx.simulate_input("one");
+    cx.simulate_keystrokes("enter d");
+    assert_eq!(value(&view, cx), "one");
+
+    let (view, cx) = setup(cx, "one\nmiddle\nlast one\nend", true);
+    cx.simulate_keystrokes("V /");
+    cx.simulate_input("last");
+    cx.simulate_keystrokes("enter d");
+    assert_eq!(value(&view, cx), "end");
+
+    let (view, cx) = setup(cx, "one two one", true);
+    cx.simulate_keystrokes("l v l /");
+    cx.simulate_input("two");
+    cx.simulate_keystrokes("escape d");
+    assert_eq!(value(&view, cx), "o two one");
+}
+
+#[gpui_kit::test]
+fn refocusing_the_editor_abandons_a_pending_search_motion(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one two one", true);
+    cx.simulate_keystrokes("v /");
+    cx.simulate_input("one");
+    cx.update(|window, cx| {
+        let editor = view.read(cx).editor.clone();
+        editor.update(cx, |editor, cx| {
+            editor.set_selected_range(4..4, cx);
+            editor.focus(window, cx);
+        });
+    });
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&view, cx), 5);
+    cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
 }

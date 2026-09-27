@@ -213,6 +213,12 @@ impl RequestDraft {
                             .capture_action(capture_completion_action::<Escape>(&editor))
                             .capture_action(capture_completion_action::<MoveUp>(&editor))
                             .capture_action(capture_completion_action::<MoveDown>(&editor))
+                            .track_focus(
+                                &self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .as_ref()
+                                    .unwrap()
+                                    .focus_handle(cx),
+                            )
                             .flex_1()
                             .min_h_0()
                             .child(

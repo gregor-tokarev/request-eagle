@@ -87,6 +87,9 @@ bindings include `h j k l`, `w b e` (and `W B E`), `0 ^ $`, `gg G`, counts,
 `d c y` with motions or doubled for lines, `x`, `p P`, `u`/Ctrl+R, `v V`,
 `I A o O`, and `/`/`n N` through the editor's search. This is a core Vim binding
 set; Ex commands, macros, text objects, and dot-repeat are not implemented.
+For `/` searches, Enter accepts the match (including a preceding count), and
+Escape restores the original position or Visual selection. Visual `u`/`U`
+changes case, and Visual `D C Y S X` operates on the selected lines.
 
 Type `{{` in a request URL, query key/value, header key/value, or JSON body to
 choose a variable. Continue typing to filter; use Up/Down and Enter or Tab to
