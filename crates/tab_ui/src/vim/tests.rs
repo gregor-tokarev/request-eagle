@@ -1280,3 +1280,42 @@ fn search_cancellation_routes_to_its_owner_after_another_editor_receives_keys(
     assert_eq!(cursor(&first, cx), 0);
     assert_eq!(value(&first, cx), "one two one");
 }
+
+#[gpui_kit::test]
+fn external_line_copies_use_linewise_paste_without_changing_characterwise_registers(
+    cx: &mut TestAppContext,
+) {
+    for ending in ["\n", "\r\n"] {
+        for paste in ["p", "P"] {
+            for (metadata, trailing, expected) in [
+                (None, 1, "one\nx\nthree"),
+                (None, 2, "one\nx\n\nthree"),
+                (Some(false), 1, "one\nx\n\nthree"),
+                (Some(true), 1, "one\nx\nthree"),
+            ] {
+                let (view, cx) = setup(cx, &"one\ntwo\nthree".replace('\n', ending), true);
+                cx.update(|_, cx| {
+                    let text = format!("x{}", ending.repeat(trailing));
+                    let item = if let Some(linewise) = metadata {
+                        gpui_kit::ClipboardItem::new_string_with_json_metadata(
+                            text,
+                            serde_json::json!({ "request_eagle_vim_linewise": linewise }),
+                        )
+                    } else {
+                        gpui_kit::ClipboardItem::new_string(text)
+                    };
+                    cx.write_to_clipboard(item);
+                });
+                cx.simulate_keystrokes(&format!("j V {paste}"));
+                assert_eq!(value(&view, cx), expected.replace('\n', ending));
+                assert_eq!(cursor(&view, cx), 3 + ending.len());
+            }
+            let (view, cx) = setup(cx, "", true);
+            cx.update(|_, cx| {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(format!("x{ending}")))
+            });
+            cx.simulate_keystrokes(paste);
+            assert_eq!(value(&view, cx), "x");
+        }
+    }
+}

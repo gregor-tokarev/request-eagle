@@ -314,7 +314,9 @@ impl Vim {
             };
             text.metadata_json::<serde_json::Value>()?["request_eagle_vim_linewise"].as_bool()
         });
-        let linewise = register.unwrap_or(false);
+        // Like Vim's untyped registers, external text ending in a newline is
+        // linewise. An explicit characterwise register keeps its trailing blank.
+        let linewise = register.unwrap_or_else(|| value.ends_with('\n'));
         let editor = self.editor.read(cx);
         let text = editor.text();
         let cursor = editor.cursor();
@@ -347,7 +349,10 @@ impl Vim {
             };
 
             if linewise && text.len() == 0 {
-                let content = value.strip_suffix(newline(text, cursor)).unwrap_or(&value);
+                let content = value
+                    .strip_suffix("\r\n")
+                    .or_else(|| value.strip_suffix('\n'))
+                    .unwrap_or(&value);
                 value.truncate(content.len());
             } else if linewise
                 && !before
