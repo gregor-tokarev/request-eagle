@@ -194,7 +194,9 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
         clippy::assertions_on_constants,
         reason = "Reject debug builds when the ignored benchmark runs, not when compiling ordinary tests."
     )]
-    assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+    {
+        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+    }
 
     let mut failures = Vec::new();
 

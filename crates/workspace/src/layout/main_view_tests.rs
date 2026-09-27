@@ -50,6 +50,9 @@ fn search_shortcut_focuses_sidebar_from_tree_and_request_inputs(cx: &mut TestApp
     let body_tab = cx.debug_bounds("request-section-Body").unwrap();
     cx.simulate_click(body_tab.center(), Modifiers::default());
 
+    // Background validation can draw a frame that reuses cached controls;
+    // debug selectors are collected only when those controls are laid out.
+    cx.update(|window, _| window.refresh());
     let search = cx.debug_bounds("collections-search").unwrap();
     cx.simulate_click(search.center(), Modifiers::default());
     let search_focus = cx.update(|window, cx| window.focused(cx).unwrap());
@@ -62,6 +65,7 @@ fn search_shortcut_focuses_sidebar_from_tree_and_request_inputs(cx: &mut TestApp
     cx.update(|window, _| assert!(search_focus.is_focused(window)));
 
     for selector in ["request-url", "request-body", "collections-search"] {
+        cx.update(|window, _| window.refresh());
         let bounds = cx.debug_bounds(selector).unwrap();
         cx.simulate_click(bounds.center(), Modifiers::default());
         cx.simulate_keystrokes("secondary-f");
@@ -264,9 +268,11 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
     cx.update(|window, _| window.refresh());
     let body = cx.debug_bounds("request-section-Body").unwrap();
     cx.simulate_click(body.center(), Modifiers::default());
+    cx.update(|window, _| window.refresh());
     let body = cx.debug_bounds("request-body").unwrap();
     cx.simulate_click(body.center(), Modifiers::default());
     cx.simulate_input("hello");
+    cx.update(|window, _| window.refresh());
     let params = cx.debug_bounds("request-section-Params").unwrap();
     cx.simulate_click(params.center(), Modifiers::default());
 

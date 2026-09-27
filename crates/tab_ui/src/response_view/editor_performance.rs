@@ -20,7 +20,9 @@ fn standard_html_editor_benchmark(cx: &mut TestAppContext) {
         clippy::assertions_on_constants,
         reason = "Reject debug builds when the ignored benchmark runs, not when compiling ordinary tests."
     )]
-    assert!(!cfg!(debug_assertions), "run with --release");
+    {
+        assert!(!cfg!(debug_assertions), "run with --release");
+    }
     let body = std::env::var("REQUEST_EAGLE_HTML_FIXTURE")
         .map(|path| std::fs::read(path).expect("read HTML fixture"))
         .unwrap_or_else(|_| {
