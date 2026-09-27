@@ -2,8 +2,15 @@
 
 Open a request's **Scripts** section to write JavaScript before sending or after
 receiving a response. **Snippets** provides examples; typing `pm.` offers the
-available APIs. Send runs the scripts. Test results and console output appear in
-the response panel. Scripts run immediately when you send the request.
+available APIs. Scripts run immediately when you send the request. Test results
+and console output appear in the response panel.
+
+The editor uses a bundled TypeScript language service for JavaScript completion.
+It suggests object fields inside calls such as `pm.sendRequest({ ... })`, infers
+local variables and callback response types, and displays types when you hover.
+Function parameter hints highlight the current argument as you type or move the
+caret; Escape dismisses them. No Node.js installation is needed. Scripts still
+execute as JavaScript; TypeScript type annotations are not executable script syntax.
 
 Scripts run against a snapshot. Request edits affect that send without changing
 the request draft or saved file. An uncaught pre-request error prevents the

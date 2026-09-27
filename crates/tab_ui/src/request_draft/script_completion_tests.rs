@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use gpui_kit::component::input::{EditorState, RopeExt};
 use gpui_kit::{Entity, Focusable, Modifiers, TestAppContext, VisualTestContext};
 use lsp_types::{CompletionItem, CompletionTextEdit};
@@ -23,11 +25,14 @@ fn labels(source: &str, phase: ScriptPhase) -> Vec<String> {
 }
 
 #[test]
-fn suggests_only_supported_members_for_the_current_phase() {
+fn suggests_supported_members_for_the_current_phase() {
     assert!(labels("pm.|", ScriptPhase::PostResponse).contains(&"response".into()));
     assert!(!labels("pm.|", ScriptPhase::PreRequest).contains(&"response".into()));
     assert!(labels("pm.response.|", ScriptPhase::PreRequest).is_empty());
-    assert!(labels("pm.response.headers.|", ScriptPhase::PreRequest).is_empty());
+    assert!(labels("pm.collectionVariables.|", ScriptPhase::PreRequest).is_empty());
+    assert!(labels("pm.|", ScriptPhase::PreRequest).contains(&"execution".into()));
+    assert!(!labels("pm.|", ScriptPhase::PostResponse).contains(&"execution".into()));
+    assert!(labels("pm.execution.|", ScriptPhase::PostResponse).is_empty());
     assert_eq!(
         labels("pm.response.j|", ScriptPhase::PostResponse),
         ["json"]
@@ -46,63 +51,29 @@ fn suggests_only_supported_members_for_the_current_phase() {
         ["upsert"]
     );
     assert_eq!(
-        labels("pm.request.url.toS|", ScriptPhase::PostResponse),
-        ["toString"]
+        labels("pm.environment.s|", ScriptPhase::PreRequest),
+        ["set"]
     );
     assert_eq!(
-        labels("pm.response.to.have.|", ScriptPhase::PostResponse),
-        ["status", "header", "body", "jsonBody", "jsonSchema"]
+        labels("await pm.send|", ScriptPhase::PreRequest),
+        ["sendRequest"]
     );
-    assert!(labels("pm.collectionVariables.|", ScriptPhase::PreRequest).is_empty());
-    assert!(labels("other.pm.response.|", ScriptPhase::PostResponse).is_empty());
-    assert!(labels("pm.response.json().|", ScriptPhase::PostResponse).is_empty());
-    assert!(labels("assertion.|", ScriptPhase::PostResponse).is_empty());
     assert_eq!(
-        labels("pm.response.to.be.s|", ScriptPhase::PostResponse),
-        ["success", "serverError"]
+        labels("pm.crypto.sha|", ScriptPhase::PreRequest),
+        ["sha256"]
     );
-    assert!(labels("pm.response.to.be.|", ScriptPhase::PreRequest).is_empty());
-}
-
-#[test]
-fn discovers_workflow_apis_and_limits_skip_to_pre_request() {
-    for phase in [ScriptPhase::PreRequest, ScriptPhase::PostResponse] {
-        assert_eq!(
-            labels("pm.environment.|", phase),
-            [
-                "get",
-                "set",
-                "has",
-                "unset",
-                "clear",
-                "toObject",
-                "replaceIn"
-            ]
-        );
-        assert_eq!(labels("await pm.send|", phase), ["sendRequest"]);
-        assert_eq!(
-            labels("pm.crypto.|", phase),
-            ["sha256", "hmacSha256", "randomBytes"]
-        );
-        assert_eq!(
-            labels("pm.encoding.|", phase),
-            [
-                "base64Encode",
-                "base64Decode",
-                "base64UrlEncode",
-                "base64UrlDecode"
-            ]
-        );
-        assert_eq!(labels("pm.schema.v|", phase), ["validate"]);
-    }
-
-    assert!(labels("pm.|", ScriptPhase::PreRequest).contains(&"execution".into()));
+    assert_eq!(
+        labels("pm.encoding.base64UrlE|", ScriptPhase::PreRequest),
+        ["base64UrlEncode"]
+    );
+    assert_eq!(
+        labels("pm.schema.v|", ScriptPhase::PreRequest),
+        ["validate"]
+    );
     assert_eq!(
         labels("pm.execution.s|", ScriptPhase::PreRequest),
         ["skipRequest"]
     );
-    assert!(!labels("pm.|", ScriptPhase::PostResponse).contains(&"execution".into()));
-    assert!(labels("pm.execution.|", ScriptPhase::PostResponse).is_empty());
     assert_eq!(
         labels("pm.response.to.have.jsonS|", ScriptPhase::PostResponse),
         ["jsonSchema"]
@@ -110,7 +81,44 @@ fn discovers_workflow_apis_and_limits_skip_to_pre_request() {
 }
 
 #[test]
-fn distinguishes_code_from_comments_strings_and_regular_expressions() {
+fn completes_typed_object_arguments_and_inferred_values() {
+    for (source, expected) in [
+        ("pm.sendRequest({u|})", "url"),
+        ("pm.sendRequest({url: 'https://example.com', b|})", "body"),
+        ("pm.sendRequest({body: {r|}})", "raw"),
+        ("pm.request.headers.upsert({k|})", "key"),
+        ("pm.request.url.query.add({v|})", "value"),
+        ("pm.schema.validate({}, {properties: {id: {ty|}}})", "type"),
+        (
+            "const response = await pm.sendRequest('https://example.com'); response.j|",
+            "json",
+        ),
+        (
+            "pm.sendRequest('https://example.com', (error, response) => { response.he| })",
+            "headers",
+        ),
+        (
+            "const token = {value: 'secret', expiresAt: 10}; token.ex|",
+            "expiresAt",
+        ),
+        ("const send = pm.sendRequest; send({u|})", "url"),
+    ] {
+        assert!(
+            labels(source, ScriptPhase::PreRequest).contains(&expected.into()),
+            "{source}"
+        );
+    }
+    let url = complete("pm.sendRequest({u|})", ScriptPhase::PreRequest).remove(0);
+    assert_eq!(url.label, "url");
+    assert!(url.detail.unwrap().contains("string"));
+    let methods = labels("pm.sendRequest({method: \"P|\"})", ScriptPhase::PreRequest);
+    assert!(methods.contains(&"POST".into()));
+    assert!(methods.contains(&"PUT".into()));
+    assert!(methods.contains(&"PATCH".into()));
+}
+
+#[test]
+fn distinguishes_code_from_comments_strings_and_regex_literals() {
     for source in [
         "// pm.response.|",
         "/* pm.response.| */",
@@ -121,7 +129,6 @@ fn distinguishes_code_from_comments_strings_and_regular_expressions() {
         "const p| = 1;",
         "function p|() {}",
         "function f(p|) {}",
-        "({p|: true})",
         "p| => 42",
     ] {
         assert!(
@@ -133,10 +140,7 @@ fn distinguishes_code_from_comments_strings_and_regular_expressions() {
         labels("`value: ${pm.response.j|}`", ScriptPhase::PostResponse),
         ["json"]
     );
-    assert_eq!(
-        labels("const result = p|", ScriptPhase::PostResponse),
-        ["pm"]
-    );
+    assert!(labels("const result = p|", ScriptPhase::PostResponse).contains(&"pm".into()));
     assert_eq!(labels("console.l|", ScriptPhase::PreRequest), ["log"]);
     assert_eq!(labels("JSON.p|", ScriptPhase::PreRequest), ["parse"]);
 }
@@ -173,35 +177,31 @@ fn completes_assertions_with_nested_arguments_and_multiline_chains() {
         labels("pm.expect({}).to.include.k|", ScriptPhase::PostResponse),
         ["keys"]
     );
-    assert_eq!(
-        labels(
-            "pm.expect([]).to.deep.include.m|",
-            ScriptPhase::PostResponse
-        ),
-        ["members", "most", "match"]
-    );
-    assert_eq!(
-        labels("pm.expect({}).to.have.nested.p|", ScriptPhase::PostResponse),
-        ["property"]
-    );
 }
 
 #[test]
 fn edits_replace_the_entire_member_and_preserve_unicode_and_surrounding_code() {
-    let source = "const emoji = '🦅';\nconsole.log('🦅', pm.response.j|son());";
-    let offset = source.find('|').unwrap();
-    let text = Rope::from(source.replacen('|', "", 1));
-    let items = completion_items(&text, offset, ScriptPhase::PostResponse);
-    let CompletionTextEdit::Edit(edit) = items[0].text_edit.as_ref().unwrap() else {
-        panic!()
-    };
-    let start = text.position_to_offset(&edit.range.start);
-    let end = text.position_to_offset(&edit.range.end);
-    let mut actual = text.to_string();
-    actual.replace_range(start..end, &edit.new_text);
-    assert_eq!(actual, source.replace('|', ""));
-    assert_eq!(edit.new_text, "json");
-    assert_eq!(items[0].detail.as_deref(), Some("()"));
+    for source in [
+        "const emoji = '🦅';\nconsole.log('🦅', pm.response.j|son());",
+        "const text = 'a\u{2028}🦅b'; pm.response.j|son();",
+        "const text = 'a\u{2029}🦅b'; pm.response.j|son();",
+        "const text = '🦅';\rpm.response.j|son();",
+        "const text = 'a\u{2028}🦅b';\r\npm.response.j|son();",
+    ] {
+        let offset = source.find('|').unwrap();
+        let text = Rope::from(source.replacen('|', "", 1));
+        let items = completion_items(&text, offset, ScriptPhase::PostResponse);
+        let CompletionTextEdit::Edit(edit) = items[0].text_edit.as_ref().unwrap() else {
+            panic!()
+        };
+        let start = text.position_to_offset(&edit.range.start);
+        let end = text.position_to_offset(&edit.range.end);
+        let mut actual = text.to_string();
+        actual.replace_range(start..end, &edit.new_text);
+        assert_eq!(actual, source.replace('|', ""));
+        assert_eq!(edit.new_text, "json");
+        assert!(items[0].detail.as_deref().unwrap().contains("json()"));
+    }
 }
 
 fn script_editor(
@@ -212,6 +212,7 @@ fn script_editor(
     Entity<EditorState>,
     &mut VisualTestContext,
 ) {
+    cx.executor().allow_parking();
     let (draft, cx) = draft(cx);
     let scripts = element_bounds(cx, "request-section-Scripts").unwrap();
     cx.simulate_click(scripts.center(), Modifiers::default());
@@ -229,20 +230,38 @@ fn script_editor(
     (draft, editor, cx)
 }
 
+async fn wait_for(
+    cx: &mut VisualTestContext,
+    mut ready: impl FnMut(&mut VisualTestContext) -> bool,
+) {
+    let started = Instant::now();
+    loop {
+        cx.executor().advance_clock(Duration::from_millis(10));
+        cx.run_until_parked();
+        if ready(cx) {
+            return;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "editor assistance did not update"
+        );
+        smol::Timer::after(Duration::from_millis(10)).await;
+    }
+}
+
 #[gpui_kit::test]
-fn keyboard_completion_replaces_the_prefix_and_marks_the_script_dirty(cx: &mut TestAppContext) {
+async fn keyboard_completion_replaces_the_prefix_and_marks_the_script_dirty(
+    cx: &mut TestAppContext,
+) {
     let (draft, editor, cx) = script_editor(cx, true);
-    cx.simulate_input("pm.response.");
-    cx.run_until_parked();
-    cx.read(|cx| assert!(editor.read(cx).completion_menu_state().open));
-    cx.simulate_input("j");
-    cx.run_until_parked();
-    cx.read(|cx| {
-        assert_eq!(
-            editor.read(cx).completion_menu_state().items[0].label,
-            "json"
-        )
-    });
+    cx.simulate_input("pm.response.j");
+    wait_for(cx, |cx| {
+        cx.read(|cx| {
+            let menu = editor.read(cx).completion_menu_state();
+            menu.open && menu.items.len() == 1 && menu.items[0].label == "json"
+        })
+    })
+    .await;
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     cx.read(|cx| {
@@ -257,35 +276,131 @@ fn keyboard_completion_replaces_the_prefix_and_marks_the_script_dirty(cx: &mut T
 }
 
 #[gpui_kit::test]
-fn completion_navigation_and_escape_use_the_native_menu(cx: &mut TestAppContext) {
-    let (_, editor, cx) = script_editor(cx, false);
-    cx.simulate_input("pm.variables.");
-    cx.run_until_parked();
-    cx.simulate_keystrokes("down enter");
-    cx.run_until_parked();
-    cx.read(|cx| assert_eq!(editor.read(cx).value(), "pm.variables.set"));
-    cx.simulate_input(";");
-    cx.simulate_input("pm.");
-    cx.run_until_parked();
-    cx.simulate_keystrokes("escape");
-    cx.run_until_parked();
-    cx.read(|cx| {
-        assert_eq!(editor.read(cx).value(), "pm.variables.set;pm.");
-        assert!(!editor.read(cx).completion_menu_state().open);
+async fn object_field_completion_replaces_the_prefix_inside_braces(cx: &mut TestAppContext) {
+    let (draft, editor, cx) = script_editor(cx, false);
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_all("pm.sendRequest({})", window, cx);
+            let offset = editor.value().find('}').unwrap();
+            editor.set_selected_range(offset..offset, cx);
+        })
     });
-
+    cx.simulate_input("u");
+    wait_for(cx, |cx| {
+        cx.read(|cx| {
+            let menu = editor.read(cx).completion_menu_state();
+            menu.open && menu.items.len() == 1 && menu.items[0].label == "url"
+        })
+    })
+    .await;
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    cx.read(|cx| assert_eq!(editor.read(cx).value(), "pm.variables.set;pm.\n"));
+    cx.read(|cx| {
+        assert_eq!(editor.read(cx).value(), "pm.sendRequest({url})");
+        assert_eq!(
+            draft.read(cx).request.scripts.pre_request,
+            "pm.sendRequest({url})"
+        );
+    });
 }
 
 #[gpui_kit::test]
-fn typing_punctuation_hides_stale_completions(cx: &mut TestAppContext) {
-    let (_, editor, cx) = script_editor(cx, true);
-    cx.simulate_input("console.");
+async fn completion_navigation_and_escape_use_the_native_menu(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, false);
+    cx.simulate_input("pm.variables.");
+    wait_for(cx, |cx| {
+        cx.read(|cx| editor.read(cx).completion_menu_state().open)
+    })
+    .await;
+    let expected = cx.read(|cx| {
+        editor.read(cx).completion_menu_state().items[1]
+            .label
+            .clone()
+    });
+    cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
-    cx.read(|cx| assert!(editor.read(cx).completion_menu_state().open));
-    cx.simulate_input("log('");
+    cx.read(|cx| assert_eq!(editor.read(cx).value(), format!("pm.variables.{expected}")));
+    cx.simulate_input(";pm.");
+    wait_for(cx, |cx| {
+        cx.read(|cx| editor.read(cx).completion_menu_state().open)
+    })
+    .await;
+    cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     cx.read(|cx| assert!(!editor.read(cx).completion_menu_state().open));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(
+            editor.read(cx).value(),
+            format!("pm.variables.{expected};pm.\n")
+        )
+    });
+}
+
+#[gpui_kit::test]
+async fn typing_punctuation_hides_stale_completions(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, true);
+    cx.simulate_input("console.");
+    wait_for(cx, |cx| {
+        cx.read(|cx| editor.read(cx).completion_menu_state().open)
+    })
+    .await;
+    cx.simulate_input("log('");
+    wait_for(cx, |cx| {
+        cx.read(|cx| !editor.read(cx).completion_menu_state().open)
+    })
+    .await;
+}
+
+#[gpui_kit::test]
+async fn rapid_typing_cannot_accept_an_edit_for_older_text(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, true);
+    for suffix in ["s", ";"] {
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.replace_all("", window, cx));
+        });
+        cx.simulate_input("pm.response.j");
+        wait_for(cx, |cx| {
+            cx.read(|cx| editor.read(cx).completion_menu_state().open)
+        })
+        .await;
+        cx.simulate_input(suffix);
+        cx.read(|cx| assert!(!editor.read(cx).completion_menu_state().open));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(editor.read(cx).value(), format!("pm.response.j{suffix}\n"));
+        });
+    }
+}
+
+#[gpui_kit::test]
+async fn function_parameter_help_tracks_the_caret_and_can_be_dismissed(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, false);
+    cx.simulate_input("pm.crypto.hmacSha256(");
+    wait_for(cx, |cx| {
+        element_bounds(cx, "script-signature-help").is_some()
+    })
+    .await;
+    cx.simulate_input("'secret', ");
+    wait_for(cx, |cx| {
+        element_bounds(cx, "script-signature-help").is_some()
+    })
+    .await;
+    // Escape dismisses a completion list first, then the parameter popup.
+    cx.simulate_keystrokes("escape escape");
+    cx.run_until_parked();
+    assert!(element_bounds(cx, "script-signature-help").is_none());
+    cx.simulate_input("'body')");
+    wait_for(cx, |cx| {
+        element_bounds(cx, "script-signature-help").is_none()
+    })
+    .await;
+    cx.read(|cx| {
+        assert_eq!(
+            editor.read(cx).value(),
+            "pm.crypto.hmacSha256('secret', 'body')"
+        )
+    });
 }

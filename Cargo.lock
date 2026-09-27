@@ -7251,17 +7251,19 @@ dependencies = [
  "anyhow",
  "collection",
  "environment",
+ "event-listener",
+ "flate2",
+ "futures-channel",
  "gpui-kit",
  "lsp-types",
  "preferences",
  "request",
  "ropey",
+ "rquickjs",
  "serde_json",
  "smol",
  "tempfile",
  "theme",
- "tree-sitter",
- "tree-sitter-javascript",
 ]
 
 [[package]]

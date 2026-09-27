@@ -12,6 +12,7 @@ use std::rc::Rc;
 use super::{
     RequestDraft,
     script_completions::{ScriptCompletions, capture_completion_action},
+    script_signature::ScriptSignature,
 };
 
 const PRE_SNIPPETS: &[(&str, &str)] = &[
@@ -107,7 +108,7 @@ impl RequestDraft {
             &self.request.scripts.post_response
         };
         let editor = cx.new(|cx| {
-            let mut editor = EditorState::new(window, cx)
+            EditorState::new(window, cx)
                 .language("javascript")
                 .line_number(true)
                 .soft_wrap(true)
@@ -116,10 +117,17 @@ impl RequestDraft {
                 } else {
                     "// Write tests to run after the response"
                 })
-                .default_value(value.clone());
-            editor.lsp_mut().completion_provider = Some(Rc::new(ScriptCompletions(phase)));
-            editor
+                .default_value(value.clone())
         });
+        let completions = Rc::new(ScriptCompletions::new(phase, &editor));
+        editor.update(cx, |editor, _| {
+            editor.lsp_mut().completion_provider = Some(completions.clone());
+            editor.lsp_mut().hover_provider = Some(completions);
+            editor.lsp_mut().completion_menu.max_width = rems(40.).to_pixels(window.rem_size());
+        });
+        self.script_signatures[index] =
+            Some(cx.new(|cx| ScriptSignature::new(editor.clone(), phase, window, cx)));
+        crate::script_intelligence::warm_up();
         self._subscriptions.push(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {
@@ -140,7 +148,27 @@ impl RequestDraft {
 
     pub(super) fn scripts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let editor = self.script_state(window, cx);
+        editor.update(cx, |editor, _| {
+            // GPUI's completion popover uses a local cursor x-coordinate when
+            // limiting its width. Account for the editor's window position.
+            let available = editor
+                .cursor_layout()
+                .map(|(cursor, _)| {
+                    window.bounds().size.width
+                        - cursor.origin.x
+                        - editor.scroll_offset().x
+                        - rems(0.5).to_pixels(window.rem_size())
+                })
+                .unwrap_or(window.bounds().size.width);
+            editor.lsp_mut().completion_menu.max_width = rems(40.)
+                .to_pixels(window.rem_size())
+                .min(available.max(px(120.)));
+        });
         let phase = self.script_phase;
+        let index = usize::from(phase == ScriptPhase::PostResponse);
+        let signature = self.script_signatures[index].as_ref().unwrap().clone();
+        let escape_editor = editor.clone();
+        let escape_signature = signature.clone();
         let snippets = if phase == ScriptPhase::PreRequest {
             PRE_SNIPPETS
         } else {
@@ -224,7 +252,17 @@ impl RequestDraft {
                         div()
                             .debug_selector(|| "script-editor".into())
                             .capture_action(capture_completion_action::<Enter>(&editor))
-                            .capture_action(capture_completion_action::<Escape>(&editor))
+                            .capture_action(move |action: &Escape, window, cx| {
+                                let handled = escape_editor.update(cx, |editor, cx| {
+                                    editor.route_overlay_action(action.boxed_clone(), window, cx)
+                                });
+                                if handled
+                                    || escape_signature
+                                        .update(cx, |signature, cx| signature.dismiss(cx))
+                                {
+                                    cx.stop_propagation();
+                                }
+                            })
                             .capture_action(capture_completion_action::<MoveUp>(&editor))
                             .capture_action(capture_completion_action::<MoveDown>(&editor))
                             .flex_1()
@@ -242,7 +280,8 @@ impl RequestDraft {
                                         .unwrap_or_else(|| cx.theme().input_background()))
                                     .text_sm()
                                     .aria_label(format!("{} script", phase.label())),
-                            ),
+                            )
+                            .child(signature),
                     )
                     .child(
                         h_flex()
