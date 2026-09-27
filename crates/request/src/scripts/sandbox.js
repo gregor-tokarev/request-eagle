@@ -6,25 +6,75 @@
     const format = value => typeof value === "string" ? value : (stringify(value) ?? String(value));
     const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => variables[key] ?? dynamic(key) ?? match);
 
-    function headers(pairs) {
+    function entries(pairs, ignoreCase = false) {
+        const normalize = name => ignoreCase ? String(name).toLowerCase() : String(name);
         return {
-            get(name) { return pairs.find(([key]) => key.toLowerCase() === String(name).toLowerCase())?.[1]; },
+            get(name) { return pairs.find(([key]) => normalize(key) === normalize(name))?.[1]; },
             has(name) { return this.get(name) !== undefined; },
             add({key, value}) { pairs.push([String(key), String(value)]); },
             remove(name) {
                 for (let i = pairs.length - 1; i >= 0; i--) {
-                    if (pairs[i][0].toLowerCase() === String(name).toLowerCase()) pairs.splice(i, 1);
+                    if (normalize(pairs[i][0]) === normalize(name)) pairs.splice(i, 1);
                 }
             },
             upsert(header) { this.remove(header.key); this.add(header); },
+            clear() { pairs.length = 0; },
             toJSON() { return pairs.map(([key, value]) => ({key, value})); },
         };
     }
 
+    let url = input.url;
+    const query = input.query;
+    const extraQuery = entries(query);
+    const decode = value => { try { return decodeURIComponent(value.replace(/\+/g, " ")); } catch { return value; } };
+    function inlineQuery() {
+        const end = url.includes("#") ? url.indexOf("#") : url.length;
+        const start = url.indexOf("?");
+        const prefix = start >= 0 && start < end ? url.slice(0, start) : url.slice(0, end);
+        const raw = start >= 0 && start < end ? url.slice(start + 1, end) : "";
+        const pairs = raw ? raw.split("&") : [];
+        return {prefix, pairs, fragment: url.slice(end)};
+    }
+    function decodedPair(pair) {
+        const separator = pair.indexOf("=");
+        return separator < 0 ? [decode(pair), ""] : [decode(pair.slice(0, separator)), decode(pair.slice(separator + 1))];
+    }
+    const allQuery = {
+        get(name) { return this.toJSON().find(item => item.key === String(name))?.value; },
+        has(name) { return this.get(name) !== undefined; },
+        add(item) { extraQuery.add(item); },
+        remove(name) {
+            const {prefix, pairs, fragment} = inlineQuery();
+            const kept = pairs.filter(pair => decodedPair(pair)[0] !== String(name));
+            if (kept.length !== pairs.length) url = prefix + (kept.length ? "?" + kept.join("&") : "") + fragment;
+            extraQuery.remove(name);
+        },
+        upsert(item) { this.remove(item.key); this.add(item); },
+        clear() { const {prefix, fragment} = inlineQuery(); url = prefix + fragment; extraQuery.clear(); },
+        toJSON() { return inlineQuery().pairs.map(pair => { const [key, value] = decodedPair(pair); return {key, value}; }).concat(extraQuery.toJSON()); },
+    };
+    // Preserve the encoding of untouched URL pairs. Encode Params rows only
+    // when displaying the URL; the executor resolves and encodes their values.
+    const encode = text => String(text).split(/(\{\{[^{}]+\}\})/g).map(part =>
+        part.startsWith("{{") ? part : encodeURIComponent(part).replace(/[!'()~]/g, ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`).replace(/%20/g, "+")
+    ).join("");
+    const requestUrl = {
+        query: allQuery,
+        update(value) { url = String(value); query.length = 0; },
+        toString() {
+            const base = url.split("#", 1)[0];
+            const suffix = query.map(([key, value]) => `${encode(key)}=${encode(value)}`).join("&");
+            const start = base.indexOf("?");
+            return suffix ? base + (start < 0 ? "?" : start === base.length - 1 ? "" : "&") + suffix : base;
+        },
+        toJSON() { return this.toString(); },
+    };
+
     const request = {
         method: input.method,
-        url: input.url,
-        headers: headers(input.headers),
+        get url() { return requestUrl; },
+        set url(value) { requestUrl.update(value); },
+        headers: entries(input.headers, true),
         body: {mode: "raw", raw: input.body, update(value) { this.raw = String(value); }},
     };
     const pm = {
@@ -56,7 +106,7 @@
             code: response.code,
             status: response.status,
             responseTime: response.responseTime,
-            headers: headers(response.headers),
+            headers: entries(response.headers, true),
             text: () => response.body,
             json: () => JSON.parse(response.body),
             to: {have: {
@@ -102,7 +152,8 @@
 
     return () => stringify({
         method: request.method,
-        url: String(request.url),
+        url,
+        query,
         headers: input.headers,
         body: request.body.raw,
         body_changed: request.body.raw !== input.body,

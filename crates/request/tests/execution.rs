@@ -1135,6 +1135,88 @@ fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
 }
 
 #[test]
+fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
+    smol::block_on(async {
+        for mode in ["read", "edit", "clear", "replace", "post"] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            )
+            .await;
+            let initial = format!(
+                "{url}/path?tag=existing%20item&tag=a+%26+b&tag=c%2Bd&Case=keep&remove=yes"
+            );
+            let mutation = match mode {
+                "read" | "post" => "",
+                "clear" => "pm.request.url.query.clear();",
+                "edit" => {
+                    r#"
+                    pm.request.url.query.remove('tag');
+                    pm.request.url.query.remove('case');
+                    pm.expect(pm.request.url.query.has('Case')).to.be.true;
+                    pm.request.url.query.remove('remove');
+                    pm.variables.set('value', '🦅 & +');
+                    pm.request.url.query.add({key: 'x', value: 'old'});
+                    pm.request.url.query.upsert({key: 'x', value: '{{value}}'});
+                "#
+                }
+                _ => {
+                    "pm.request.url = pm.request.url.toString().split('?')[0] + '?fresh=yes'; pm.expect(pm.request.url.query.toJSON()).to.deep.equal([{key: 'fresh', value: 'yes'}]);"
+                }
+            };
+            let target = match mode {
+                "read" | "post" => {
+                    "/path?tag=existing%20item&tag=a+%26+b&tag=c%2Bd&Case=keep&remove=yes"
+                }
+                "clear" => "/path",
+                "edit" => "/path?Case=keep&x=%F0%9F%A6%85+%26+%2B",
+                _ => "/path?fresh=yes",
+            };
+            let draft = HttpRequest {
+                path: format!("{url}/path?tag=existing%20item#ignored"),
+                query: Some(vec![
+                    ("tag".into(), "a & b".into()),
+                    ("tag".into(), "c+d".into()),
+                    ("Case".into(), "keep".into()),
+                    ("remove".into(), "yes".into()),
+                ]),
+                scripts: request::RequestScripts {
+                    pre_request: format!(
+                        "pm.expect(String(pm.request.url)).to.equal({initial:?}); pm.expect(pm.request.url.query.get('tag')).to.equal('existing item'); {mutation}"
+                    ),
+                    post_response: format!(
+                        "pm.test('sent URL', () => pm.expect(pm.request.url.toString()).to.equal({:?}));",
+                        format!("{url}{target}")
+                    ),
+                },
+                ..Default::default()
+            };
+            let original = draft.clone();
+            let execution = executor()
+                .execute_with_variables(
+                    &draft,
+                    request::RequestVariables::new(environment::VariableValues::default(), None),
+                )
+                .await
+                .unwrap();
+            let received = server.await;
+            assert!(
+                received
+                    .head
+                    .starts_with(&format!("GET {target} HTTP/1.1\r\n")),
+                "{}",
+                received.head
+            );
+            assert!(
+                execution.scripts.last().unwrap().tests[0].error.is_none(),
+                "{:?}",
+                execution.scripts.last().unwrap().tests[0]
+            );
+            assert_eq!(draft, original);
+        }
+    });
+}
+
+#[test]
 fn request_timeout_does_not_discard_a_response_during_its_post_response_script() {
     smol::block_on(async {
         let (url, server) =

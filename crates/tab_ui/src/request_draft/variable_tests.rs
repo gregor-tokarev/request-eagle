@@ -388,11 +388,11 @@ async fn send_resolves_environment_and_script_variables_once(cx: &mut TestAppCon
     std::fs::write(directory.path().join("environment.toml"), format!("base_url = 'http://{address}'\nmessage = 'from file'\nliteral = '{{{{created}}}}'\nheader = 'Content-Type'\n")).unwrap();
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
-            draft.request.method = Method::Post;
+            draft.request.method = Method::Get;
             draft.request.path = "{{base_url}}/{{created}}".into();
             draft.request.headers = vec![("{{header}}".into(), "text/plain".into())];
             draft.request.body = Some(b"{{message}}/{{!message}}/{{literal}}".to_vec());
-            draft.request.scripts.pre_request = "pm.expect(pm.variables.get('message')).to.equal('from file'); pm.variables.set('created', 'created'); pm.variables.set('message', 'local');".into();
+            draft.request.scripts.pre_request = "pm.request.method = 'POST'; pm.expect(pm.variables.get('message')).to.equal('from file'); pm.variables.set('created', 'created'); pm.variables.set('message', 'local');".into();
             draft.trusted_scripts = Some(draft.request.scripts.clone());
             draft.send(window, cx);
         });

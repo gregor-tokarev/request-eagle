@@ -38,6 +38,18 @@ fn suggests_only_supported_members_for_the_current_phase() {
         ["upsert"]
     );
     assert_eq!(
+        labels("pm.request.url.q|", ScriptPhase::PreRequest),
+        ["query"]
+    );
+    assert_eq!(
+        labels("pm.request.url.query.u|", ScriptPhase::PreRequest),
+        ["upsert"]
+    );
+    assert_eq!(
+        labels("pm.request.url.toS|", ScriptPhase::PostResponse),
+        ["toString"]
+    );
+    assert_eq!(
         labels("pm.response.to.have.|", ScriptPhase::PostResponse),
         ["status", "header", "body", "jsonBody"]
     );

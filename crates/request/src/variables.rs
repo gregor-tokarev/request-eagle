@@ -12,6 +12,8 @@ impl RequestVariables {
     pub fn new(mut values: VariableValues, environment_error: Option<String>) -> Self {
         if environment_error.is_some() {
             values.environment.clear();
+        } else {
+            values.environment.retain(|name, _| !name.starts_with('$'));
         }
         Self {
             values,
@@ -20,38 +22,40 @@ impl RequestVariables {
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
-        let limit = (!request.scripts.is_empty()).then_some(32 * 1024 * 1024);
-        request
-            .resolve_variables_with_limit(&self.values, limit)
-            .map_err(|error| {
-                if let VariableError::Unknown(name) = &error
-                    && !name.starts_with('$')
-                    && let Some(message) = &self.environment_error
-                {
-                    return message.clone();
+        let mut resolver = VariableResolver::new(&self.values);
+        if !request.scripts.is_empty() {
+            resolver.limit_output(32 * 1024 * 1024);
+        }
+        // Only scripts can introduce these reserved names; collection values
+        // were filtered when this send snapshot was created.
+        if !request.scripts.pre_request.trim().is_empty() {
+            for (name, value) in &self.values.environment {
+                if name.starts_with('$') {
+                    resolver.override_generated(name.clone(), value.clone());
                 }
-                error.to_string()
-            })
+            }
+        }
+        request.resolve_with(&mut resolver).map_err(|error| {
+            if let VariableError::Unknown(name) = &error
+                && !name.starts_with('$')
+                && let Some(message) = &self.environment_error
+            {
+                return message.clone();
+            }
+            error.to_string()
+        })
     }
 }
 
 impl HttpRequest {
     /// Resolve a send snapshot, preserving the saved request and editable draft.
     pub fn resolve_variables(&self, values: &VariableValues) -> Result<Self, VariableError> {
-        self.resolve_variables_with_limit(values, None)
+        self.resolve_with(&mut VariableResolver::new(values))
     }
 
-    fn resolve_variables_with_limit(
-        &self,
-        values: &VariableValues,
-        limit: Option<usize>,
-    ) -> Result<Self, VariableError> {
-        let mut resolver = VariableResolver::new(values);
-        if let Some(limit) = limit {
-            resolver.limit_output(limit);
-        }
+    fn resolve_with(&self, resolver: &mut VariableResolver<'_>) -> Result<Self, VariableError> {
         let mut request = self.clone();
-        request.path = resolve_url(&request.path, &mut resolver)?;
+        request.path = resolve_url(&request.path, resolver)?;
 
         for (key, value) in request
             .headers

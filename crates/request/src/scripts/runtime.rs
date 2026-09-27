@@ -39,6 +39,7 @@ impl Drop for Cancellation {
 struct ScriptOutput {
     method: Method,
     url: String,
+    query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     body: Option<String>,
     body_changed: bool,
@@ -99,6 +100,7 @@ pub(crate) async fn pre_request_with_variables(
             let output = output.expect("successful script output");
             request.method = output.method;
             request.path = output.url;
+            request.query = Some(output.query);
             request.headers = output.headers;
             variables = output.variables;
 
@@ -108,6 +110,9 @@ pub(crate) async fn pre_request_with_variables(
         }
 
         let expanded = if let Some(context) = &mut context {
+            if matches!(request.method, Method::Get | Method::Head) {
+                request.body = None;
+            }
             context.values.environment = variables
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
@@ -177,6 +182,7 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
+        "query": request.query.as_deref().unwrap_or_default(),
         "headers": request.headers,
         "body": request.body.as_ref().map(|body| String::from_utf8_lossy(body)),
         "variables": variables,

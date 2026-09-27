@@ -237,9 +237,23 @@ fn members(receiver: &str) -> &'static [(&'static str, &'static str)] {
         ],
         "pm.request" => &[
             ("method", "HTTP method"),
-            ("url", "URL string"),
+            ("url", "URL; assign a string to replace it"),
             ("headers", "Request headers"),
             ("body", "Request body"),
+        ],
+        "pm.request.url" => &[
+            ("toString", "()"),
+            ("update", "(url)"),
+            ("query", "URL and Params editor query entries"),
+        ],
+        "pm.request.url.query" => &[
+            ("get", "(name)"),
+            ("has", "(name)"),
+            ("add", "({key, value})"),
+            ("upsert", "({key, value})"),
+            ("remove", "(name)"),
+            ("clear", "()"),
+            ("toJSON", "()"),
         ],
         "pm.request.headers" => &[
             ("get", "(name)"),

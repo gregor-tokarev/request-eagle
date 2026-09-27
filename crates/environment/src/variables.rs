@@ -59,6 +59,10 @@ impl<'a> VariableResolver<'a> {
         self.remaining = bytes;
     }
 
+    pub fn override_generated(&mut self, name: String, value: String) {
+        self.generated.insert(name, value);
+    }
+
     fn append(&mut self, result: &mut String, text: &str) -> Result<(), VariableError> {
         self.remaining = self
             .remaining

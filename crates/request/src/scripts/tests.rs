@@ -130,6 +130,39 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
 }
 
 #[test]
+fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
+    smol::block_on(async {
+        for (before, after, body, expected) in [
+            (Method::Post, "GET", "{{missing}}", None),
+            (Method::Put, "HEAD", "{{unclosed", None),
+            (Method::Get, "POST", "{{$guid}}", Some("fixed")),
+            (Method::Head, "PUT", "{{$guid}}", Some("fixed")),
+        ] {
+            let mut request = scripted(&format!(
+                "pm.request.method = '{after}'; pm.variables.set('$guid', 'fixed'); pm.expect(pm.variables.replaceIn('{{{{$guid}}}}')).to.equal('fixed');"
+            ));
+            request.method = before;
+            request.path = "http://localhost/{{$guid}}".into();
+            request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
+            request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
+            request.body = Some(body.as_bytes().to_vec());
+            let values = environment::VariableValues {
+                environment: [("$guid".into(), "from file".into())].into(),
+            };
+            let context = crate::RequestVariables::new(values, None);
+            let (sent, _, _) =
+                super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
+                    .await
+                    .unwrap();
+            assert_eq!(sent.path, "http://localhost/fixed");
+            assert_eq!(sent.headers[0].1, "fixed");
+            assert_eq!(sent.query.unwrap()[0].1, "fixed");
+            assert_eq!(sent.body.as_deref(), expected.map(str::as_bytes));
+        }
+    });
+}
+
+#[test]
 fn response_tests_keep_failures_logs_and_response_data() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('token', 'abc');");

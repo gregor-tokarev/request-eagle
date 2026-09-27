@@ -111,7 +111,7 @@ impl RequestDraft {
                     .title("Run scripts for this request?")
                     .w(rems(32.).to_pixels(window.rem_size()))
                     .overlay_closable(false)
-                    .child(div().text_sm().child("Scripts can read request and response data, change the destination, and send headers and body data to another server. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
+                    .child(div().text_sm().child("Scripts can read request and response data and all collection environment variables, including secrets this request does not use. They can change the destination and send this data to another server. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
                     .button_props(DialogButtonProps::default().ok_text("Trust and Send").show_cancel(true))
                     .on_ok(move |_, window, cx| {
                         let _ = accept.update(cx, |draft, cx| {
@@ -155,10 +155,7 @@ impl RequestDraft {
             Ok(values) => (values, None),
             Err(error) => (environment::VariableValues::default(), Some(error)),
         };
-        let mut request = self.request.clone();
-        if matches!(request.method, Method::Get | Method::Head) {
-            request.body = None;
-        }
+        let request = self.request.clone();
         let variables = request::RequestVariables::new(values, environment_error);
         let preferences = cx
             .try_global::<Preferences>()
