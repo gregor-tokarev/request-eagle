@@ -1091,6 +1091,8 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "gpui-kit",
+ "request-eagle-automation",
+ "serde_json",
  "suffix",
  "theme",
 ]
@@ -5902,6 +5904,7 @@ dependencies = [
  "ipnet",
  "percent-encoding",
  "rcgen",
+ "request-eagle-automation",
  "rquickjs",
  "serde",
  "serde_json",
@@ -5927,6 +5930,25 @@ dependencies = [
  "theme",
  "updater",
  "workspace",
+]
+
+[[package]]
+name = "request-eagle-automation"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "request-eagle-cli"
+version = "0.1.0"
+dependencies = [
+ "request-eagle-automation",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -7103,6 +7125,7 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "base64",
  "collection",
  "environment",
  "gpui-kit",
@@ -9076,16 +9099,19 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workspace"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "collection",
  "collections_panel_ui",
  "gpui-kit",
  "keybindings_service",
  "preferences",
  "request",
+ "request-eagle-automation",
  "serde_json",
  "settings_ui",
  "smol",
  "tab_ui",
+ "tempfile",
  "theme",
  "updater",
 ]

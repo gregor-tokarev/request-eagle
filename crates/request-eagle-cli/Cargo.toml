@@ -1,0 +1,11 @@
+[package]
+name = "request-eagle-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+request-eagle-automation = { path = "../automation" }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

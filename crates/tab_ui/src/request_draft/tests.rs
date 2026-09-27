@@ -250,3 +250,34 @@ fn cancel_button_releases_the_task_and_allows_sending_again(cx: &mut TestAppCont
     cx.read(|cx| assert!(draft.read(cx).task.is_none()));
     assert!(element_bounds(cx, "response-empty").is_some());
 }
+
+#[gpui_kit::test]
+fn automation_preserves_unchanged_editors_and_hides_get_body(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(cx);
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            let headers = draft.headers.clone().unwrap();
+            let mut request = draft.request.clone();
+            request.path = "https://example.test".into();
+            draft.replace_request(request, window, cx);
+            // Header rows can contain disabled values, descriptions and selection
+            // which are not part of the effective request sent over the wire.
+            assert_eq!(draft.headers.as_ref(), Some(&headers));
+            draft.set_method(Method::Post, cx);
+            draft.section = RequestSection::Body;
+            draft.prepare(window, cx);
+            let mut request = draft.request.clone();
+            request.method = Method::Get;
+            draft.replace_request(request, window, cx);
+            assert!(draft.section == RequestSection::Headers);
+        });
+    });
+    let url = element_bounds(cx, "request-url").unwrap();
+    cx.simulate_click(url.center(), Modifiers::default());
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("https://example.test/edited");
+    assert_eq!(
+        draft.read_with(cx, |draft, _| draft.request.path.clone()),
+        "https://example.test/edited"
+    );
+}

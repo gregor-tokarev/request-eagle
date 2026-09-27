@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+# CLI artifacts are release attachments, never files inside the desktop bundle.
+: "${VERSION:?VERSION is required}"
+: "${CLI_TARGET:?CLI_TARGET is required}"
+CLI_DIST="${CLI_DIST:-dist/cli}"
+mkdir -p "$CLI_DIST"
+REQUEST_EAGLE_RELEASE_VERSION="$VERSION" cargo build --locked --release -p request-eagle-cli --target "$CLI_TARGET"
+CLI_BINARY="$CLI_DIST/request-eagle-cli-$CLI_TARGET"
+cp "target/$CLI_TARGET/release/request-eagle-cli" "$CLI_BINARY"
+chmod 755 "$CLI_BINARY"
+
+if [[ "$CLI_TARGET" == aarch64-apple-darwin ]]; then
+  : "${SIGN_IDENTITY:?SIGN_IDENTITY is required}"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$CLI_BINARY"
+  codesign --verify --strict "$CLI_BINARY"
+  CLI_NOTARY="$CLI_DIST/cli-notarization.zip"
+  ditto -c -k "$CLI_BINARY" "$CLI_NOTARY"
+  xcrun notarytool submit "$CLI_NOTARY" \
+    --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+    --team-id "$APPLE_TEAM_ID" --wait
+  rm "$CLI_NOTARY"
+fi
+
+python3 - "$CLI_BINARY" "$VERSION" <<'PY'
+import hashlib, json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = {"version": sys.argv[2], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+path.with_name(path.name + ".json").write_text(json.dumps(manifest) + "\n")
+PY

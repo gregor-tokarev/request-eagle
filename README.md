@@ -22,6 +22,15 @@ request collections in local, readable files.
 
 The project is in early development. macOS builds are available for Apple Silicon.
 
+## Optional CLI for agents
+
+Install the separate **Request Eagle CLI** from the top of **Settings → General**
+to work with the running app using JSON commands. Agents can manage collections,
+edit and save request drafts, execute requests and scripts, inspect responses,
+and change settings. The CLI is downloaded only when requested and is not included
+in the desktop app bundle. See the [CLI guide](docs/cli.md) for installation,
+command discovery, and examples.
+
 ## Releases
 
 The `Daily patch release` workflow checks `main` every day at 06:17 UTC. If there

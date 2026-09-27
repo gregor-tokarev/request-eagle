@@ -1,3 +1,4 @@
+mod automation;
 mod body;
 mod content;
 mod headers;

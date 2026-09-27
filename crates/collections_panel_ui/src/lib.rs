@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod automation;
 mod creation;
 mod dragging;
 mod editing;

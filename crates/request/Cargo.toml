@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+request-eagle-automation = { path = "../automation" }
 anyhow.workspace = true
 base64 = "0.22"
 bytes = "1"

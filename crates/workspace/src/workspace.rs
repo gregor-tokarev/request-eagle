@@ -15,6 +15,8 @@ use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use updater::Updater;
 
 pub(super) struct Layout {
+    pub(crate) updater: Entity<Updater>,
+    pub(crate) automation_task: Option<Task<()>>,
     top_panel: Entity<TopPanel>,
     pub(super) sidebar: Entity<CollectionPanel>,
     pub(super) main_view: Entity<MainView>,
@@ -50,7 +52,7 @@ impl Layout {
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
         let sidebar_visibility_subscription = cx.observe(&sidebar_visible, |_, _, cx| cx.notify());
 
-        let settings = cx.new(|cx| Settings::new(updater, window, cx));
+        let settings = cx.new(|cx| Settings::new(updater.clone(), window, cx));
         let settings_subscription = cx.subscribe_in(
             &settings,
             window,
@@ -131,6 +133,8 @@ impl Layout {
         );
 
         Self {
+            updater,
+            automation_task: None,
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             main_view,
@@ -391,6 +395,8 @@ pub fn init(
     let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
     on_toggle_sidebar(&layout, cx);
     on_open_settings(&layout, window.window_handle(), cx);
+
+    crate::automation::start(&layout, window, cx);
 
     layout.into()
 }

@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+serde_json = "1"
+smol = "2"
+anyhow.workspace = true
+
+request-eagle-automation = { path = "../automation" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
 settings_ui = { path = "../settings_ui" }
@@ -15,6 +20,7 @@ updater = { path = "../updater" }
 request_eagle_theme = { package = "theme", path = "../theme" }
 
 [dev-dependencies]
+tempfile = "3"
 request = { path = "../request" }
 serde_json = "1"
 tab_ui = { path = "../tab_ui", features = ["test-support"] }

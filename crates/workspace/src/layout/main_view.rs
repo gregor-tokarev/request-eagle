@@ -257,7 +257,7 @@ impl MainView {
         self.remove_tab(index, cx);
     }
 
-    fn remove_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn remove_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         self.pending_close = None;
         self.save_error = None;
         self.tabs.remove(index);

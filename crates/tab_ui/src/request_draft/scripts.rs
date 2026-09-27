@@ -100,7 +100,7 @@ impl RequestDraft {
             editor.lsp_mut().completion_provider = Some(Rc::new(ScriptCompletions(phase)));
             editor
         });
-        self._subscriptions.push(cx.subscribe(
+        self.script_subscriptions[index] = Some(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {

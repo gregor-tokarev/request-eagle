@@ -8,6 +8,7 @@
 //! execution modules. Streaming protocols can return a session in their
 //! response variant; they do not have to use the buffered HTTP response.
 
+mod automation;
 mod error;
 mod executor;
 mod generated_headers;

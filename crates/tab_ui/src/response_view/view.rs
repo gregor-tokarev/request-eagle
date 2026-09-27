@@ -22,7 +22,7 @@ pub struct ResponseView {
     pub(super) editor_view: Option<Entity<ResponseBodyEditor>>,
     pub(super) message: SharedString,
     pub(super) loading: bool,
-    error: bool,
+    pub(super) error: bool,
     pub(super) scripts: Vec<request::ScriptReport>,
     section: Section,
     pub(super) pretty: bool,
