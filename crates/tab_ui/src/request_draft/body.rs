@@ -48,13 +48,63 @@ impl RequestDraft {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value();
                     this.request.body = (!value.is_empty()).then(|| value.as_bytes().to_vec());
+                    this.validate_body(value, cx);
                     this.refresh_generated_headers(cx);
                     cx.notify();
                 }
             }));
         self.body = Some(body.clone());
+        self.validate_body(body.read(cx).value(), cx);
 
         body
+    }
+
+    fn validate_body(&mut self, text: SharedString, cx: &mut Context<Self>) {
+        self.body_json_valid = false;
+
+        // A new edit drops the previous validation/formatting task, so an old
+        // result cannot enable Format or overwrite a more recent body.
+        let task = cx
+            .background_executor()
+            .spawn(async move { serde_json::from_str::<serde_json::Value>(&text).is_ok() });
+        self.body_task = Some(cx.spawn(async move |this, cx| {
+            let valid = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.body_json_valid = valid;
+                this.body_task = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(super) fn format_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.body_json_valid || self.body_task.is_some() {
+            return;
+        }
+
+        let Some(body) = &self.body else { return };
+        let text = body.read(cx).value();
+        let source = text.clone();
+        let task = cx.background_executor().spawn(async move {
+            serde_json::from_str::<serde_json::Value>(&text)
+                .and_then(|value| serde_json::to_string_pretty(&value))
+        });
+        self.body_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.body_task = None;
+
+                if let Ok(text) = result
+                    && let Some(body) = &this.body
+                    && body.read(cx).value() == source
+                {
+                    body.update(cx, |body, cx| body.replace_all(text, window, cx));
+                }
+
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     pub(super) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -86,21 +136,10 @@ impl RequestDraft {
                             .ghost()
                             .small()
                             .label("Format")
-                            .disabled(self.request.body.as_ref().is_none_or(|body| {
-                                serde_json::from_slice::<serde_json::Value>(body).is_err()
-                            }))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if let Some(value) = this.request.body.as_ref().and_then(|body| {
-                                    serde_json::from_slice::<serde_json::Value>(body).ok()
-                                }) {
-                                    let text = serde_json::to_string_pretty(&value).unwrap();
-                                    if let Some(body) = &this.body {
-                                        body.update(cx, |body, cx| {
-                                            body.replace_all(text, window, cx)
-                                        });
-                                    }
-                                }
-                            })),
+                            .disabled(!self.body_json_valid || self.body_task.is_some())
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.format_body(window, cx)),
+                            ),
                     ),
             )
             .child(

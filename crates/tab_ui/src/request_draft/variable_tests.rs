@@ -49,6 +49,51 @@ fn popup(cx: &mut VisualTestContext) -> bool {
 }
 
 #[gpui_kit::test]
+fn completion_virtualizes_large_environments_and_remeasures_at_each_zoom(cx: &mut TestAppContext) {
+    use gpui_kit::{component::Theme, px, size};
+
+    let (draft, cx, directory) = setup(cx);
+    let variables = (0..1000)
+        .map(|index| format!("variable_{index:04} = 'value'\n"))
+        .collect::<String>();
+    std::fs::write(directory.path().join("environment.toml"), variables).unwrap();
+
+    for theme in ["Default Light", "Default Dark"] {
+        for font_size in [12., 16., 24.] {
+            cx.update(|_, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                Theme::global_mut(cx).font_size = px(font_size);
+                Theme::sync_base(cx);
+            });
+            cx.simulate_resize(size(px(1100.), px(900.)));
+            click(cx, "request-url");
+            cx.simulate_keystrokes("secondary-a");
+            cx.simulate_input("{{variable_");
+            assert!(popup(cx));
+            assert!(cx.debug_bounds("variable-suggestion-999").is_none());
+            let first = cx.debug_bounds("variable-suggestion-0").unwrap();
+            assert_eq!(first.size.height, px(font_size * 2.));
+
+            // Up wraps from the first to the last model row, even though it
+            // has no element until the virtual list scrolls it into view.
+            cx.simulate_keystrokes("up");
+            assert!(popup(cx));
+            assert!(cx.debug_bounds("variable-suggestion-999").is_some());
+            cx.simulate_keystrokes("enter");
+            cx.read(|cx| assert_eq!(draft.read(cx).request.path, "{{variable_0999}}"));
+
+            click(cx, "request-url");
+            cx.simulate_keystrokes("secondary-a");
+            cx.simulate_input("{{variable_0500");
+            assert!(popup(cx));
+            let row = cx.debug_bounds("variable-suggestion-0").unwrap();
+            cx.simulate_click(row.center(), Modifiers::default());
+            cx.read(|cx| assert_eq!(draft.read(cx).request.path, "{{variable_0500}}"));
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut TestAppContext) {
     let (_, cx, directory) = setup(cx);
     std::fs::write(

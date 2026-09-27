@@ -105,6 +105,7 @@ impl Layout {
         window.focus(&sidebar.focus_handle(cx), cx);
 
         let main_view = cx.new(MainView::new);
+        main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
         let request_save_subscription = cx.subscribe_in(
             &main_view,
             window,

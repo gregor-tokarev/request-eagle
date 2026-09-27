@@ -105,6 +105,10 @@ impl MainView {
         index
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The parameters mirror CollectionPanelEvent::OpenRequest; the workspace owns tab state, not sidebar events."
+    )]
     pub(crate) fn open_request(
         &mut self,
         path: &Path,
@@ -143,6 +147,10 @@ impl MainView {
         self.tabs[index].request_id = Some(request_id);
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The parameters mirror CollectionPanelEvent::RequestRelocated while keeping the tab view independent of the sidebar."
+    )]
     pub(crate) fn relocate_request(
         &mut self,
         previous_path: &Path,

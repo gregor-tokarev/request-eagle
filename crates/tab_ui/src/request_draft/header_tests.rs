@@ -3,6 +3,61 @@ use request::Method;
 
 use super::{RequestDraft, draft::RequestSection};
 
+#[gpui_kit::test]
+fn deleting_an_earlier_row_keeps_checkbox_focus_on_the_same_header(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let mut draft = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            let mut draft = RequestDraft::from_saved(
+                "Headers".into(),
+                "API".into(),
+                request::HttpRequest {
+                    headers: vec![("First".into(), "1".into()), ("Second".into(), "2".into())],
+                    ..Default::default()
+                },
+            );
+            draft.prepare(window, cx);
+            draft
+        });
+        draft = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let draft = draft.unwrap();
+    let toggle = |cx: &mut gpui_kit::VisualTestContext| {
+        let keystroke = gpui_kit::Keystroke::parse("space").unwrap();
+        cx.simulate_event(gpui_kit::KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(gpui_kit::KeyUpEvent { keystroke });
+    };
+
+    let key = super::tests::element_bounds(cx, "headers-key-1").unwrap();
+    cx.simulate_click(key.center(), Modifiers::default());
+    cx.simulate_keystrokes("shift-tab");
+    let focus = cx.update(|window, cx| window.focused(cx).unwrap());
+
+    let remove = super::tests::element_bounds(cx, "headers-remove-0").unwrap();
+    cx.simulate_click(remove.center(), Modifiers::default());
+    cx.update(|window, _| assert!(focus.is_focused(window)));
+    toggle(cx);
+    cx.read(|cx| assert!(draft.read(cx).request.headers.is_empty()));
+
+    toggle(cx);
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).request.headers,
+            [("Second".into(), "2".into())]
+        );
+    });
+}
+
 #[test]
 fn templated_header_names_defer_potentially_overridden_defaults() {
     let request = request::HttpRequest {

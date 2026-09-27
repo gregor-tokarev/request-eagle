@@ -16,7 +16,13 @@ use super::{ResponseContent, ResponseView, body::ResponseBodyEditor};
 #[gpui_kit::test]
 #[ignore = "manual standard editor HTML performance and allocation comparison"]
 fn standard_html_editor_benchmark(cx: &mut TestAppContext) {
-    assert!(!cfg!(debug_assertions), "run with --release");
+    #[expect(
+        clippy::assertions_on_constants,
+        reason = "Reject debug builds when the ignored benchmark runs, not when compiling ordinary tests."
+    )]
+    {
+        assert!(!cfg!(debug_assertions), "run with --release");
+    }
     let body = std::env::var("REQUEST_EAGLE_HTML_FIXTURE")
         .map(|path| std::fs::read(path).expect("read HTML fixture"))
         .unwrap_or_else(|_| {

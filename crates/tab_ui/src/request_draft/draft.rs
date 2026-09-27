@@ -33,6 +33,8 @@ pub struct RequestDraft {
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) body_json_valid: bool,
+    pub(super) body_task: Option<Task<()>>,
     pub(super) script_editors: [Option<Entity<EditorState>>; 2],
     pub(super) script_phase: request::ScriptPhase,
     pub(super) trusted_scripts: Option<request::RequestScripts>,
@@ -48,6 +50,12 @@ pub struct RequestDraft {
     address_view: Option<Entity<RequestAddress>>,
     configuration_view: Option<Entity<RequestConfiguration>>,
     pub(super) _subscriptions: Vec<Subscription>,
+}
+
+impl Default for RequestDraft {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RequestDraft {
@@ -77,6 +85,8 @@ impl RequestDraft {
             headers: None,
             generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
+            body_json_valid: false,
+            body_task: None,
             script_editors: [None, None],
             script_phase: request::ScriptPhase::PreRequest,
             trusted_scripts: None,

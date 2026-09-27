@@ -88,7 +88,7 @@ impl CollectionRegistry {
                 Err(source) => {
                     return Err(CollectionRegistryLoadError::Environment {
                         path: environment_path,
-                        source,
+                        source: Box::new(source),
                     });
                 }
             };
@@ -97,7 +97,7 @@ impl CollectionRegistry {
                 Collection::from_path(&collection_path, environment).map_err(|source| {
                     CollectionRegistryLoadError::Collection {
                         path: collection_path,
-                        source,
+                        source: Box::new(source),
                     }
                 })?;
             registry.add(collection);
@@ -148,13 +148,13 @@ pub enum CollectionRegistryLoadError {
     #[error("failed to load the environment for {}: {source}", .path.display())]
     Environment {
         path: PathBuf,
-        source: EnvironmentLoadError,
+        source: Box<EnvironmentLoadError>,
     },
 
     #[error("failed to load collection {}: {source}", .path.display())]
     Collection {
         path: PathBuf,
-        source: CollectionLoadError,
+        source: Box<CollectionLoadError>,
     },
 }
 
