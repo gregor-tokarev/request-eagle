@@ -20,6 +20,167 @@ fn labels(items: &[CompletionItem]) -> Vec<&str> {
 }
 
 #[test]
+fn completion_previews_fit_one_row_without_losing_types_or_full_hover_information() {
+    let phase = ScriptPhase::PreRequest;
+    let items = complete("pm.|", phase);
+    for item in &items {
+        let detail = item.detail.as_deref().unwrap();
+        assert!(
+            !detail.contains(['\n', '\r', '\u{2028}', '\u{2029}']),
+            "{detail}"
+        );
+        assert!(!detail.contains("RequestEagle."), "{detail}");
+    }
+    let detail = |name: &str| {
+        items
+            .iter()
+            .find(|item| item.label == name)
+            .unwrap()
+            .detail
+            .as_deref()
+            .unwrap()
+    };
+    assert_eq!(detail("crypto"), "Crypto");
+    assert_eq!(
+        detail("execution"),
+        "{ skipRequest(reason?: string): never; }"
+    );
+    assert!(detail("sendRequest").starts_with("sendRequest(config:"));
+    assert!(detail("sendRequest").contains("Promise<Response>"));
+
+    let items = complete(
+        "const client = {details: {user: {id: 1, name: ''}, ready: true}, execute(message, options = {timeout: 10, headers: {token: ''}}, callback) {}, ready: true}; client.|",
+        phase,
+    );
+    assert!(labels(&items).contains(&"ready"));
+    for item in &items {
+        let detail = item.detail.as_deref().unwrap();
+        assert!(!detail.contains(['\n', '\r']), "{detail}");
+    }
+    let details = items
+        .iter()
+        .find(|item| item.label == "details")
+        .unwrap()
+        .detail
+        .as_ref()
+        .unwrap();
+    assert!(details.contains("id: number"));
+    assert!(details.contains("name: string"));
+
+    let literal = complete(
+        "/** @type {{version: 'RequestEagle.Version'}} */ const api = {}; api.v|",
+        phase,
+    );
+    assert!(
+        literal[0]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("RequestEagle.Version")
+    );
+
+    let (source, offset) = marked("pm.execut|ion");
+    let hover = smol::block_on(super::hover(source, offset, phase))
+        .unwrap()
+        .unwrap();
+    let HoverContents::Markup(contents) = hover.contents else {
+        panic!()
+    };
+    assert!(
+        contents
+            .value
+            .contains("RequestEagle.PreRequestAPI.execution")
+    );
+    assert!(contents.value.contains("{\n"));
+}
+
+#[test]
+fn completion_previews_preserve_literal_spaces_and_same_named_nested_properties() {
+    for (source, prefix, nested) in [
+        (
+            "const headers = {headers: ['a'], auth: true}; head|",
+            "const headers: {",
+            "headers: string[]; auth: boolean;",
+        ),
+        (
+            "const details = {details: {name: 'test'}, ready: true}; det|",
+            "const details: {",
+            "details: { name: string; }; ready: boolean;",
+        ),
+    ] {
+        let items = complete(source, ScriptPhase::PreRequest);
+        let detail = items[0].detail.as_deref().unwrap();
+        assert!(detail.starts_with(prefix), "{detail}");
+        assert!(detail.contains(nested), "{detail}");
+    }
+
+    let items = complete(
+        "/** @type {{text: 'a  b', 'two  spaces': number}} */ const api = {}; api.|",
+        ScriptPhase::PreRequest,
+    );
+    assert!(labels(&items).contains(&"two  spaces"));
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.label == "text")
+            .unwrap()
+            .detail
+            .as_deref(),
+        Some("\"a  b\"")
+    );
+}
+
+#[test]
+fn completion_labels_escape_line_breaks_without_changing_the_inserted_property() {
+    for (ch, escaped) in [
+        ('\n', "\\n"),
+        ('\r', "\\r"),
+        ('\u{2028}', "\\u2028"),
+        ('\u{2029}', "\\u2029"),
+    ] {
+        let name = format!("a{ch}b");
+        let literal = serde_json::to_string(&name).unwrap();
+        let (source, offset) = marked(&format!("const api = {{{literal}: 1, ordinary: 2}}; api.|"));
+        let items = smol::block_on(super::completions(
+            source.clone(),
+            offset,
+            ScriptPhase::PreRequest,
+        ))
+        .unwrap();
+        let item = items
+            .iter()
+            .find(|item| item.label == format!("a{escaped}b"))
+            .unwrap();
+        assert!(
+            !item
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains(['\n', '\r', '\u{2028}', '\u{2029}'])
+        );
+        let CompletionTextEdit::Edit(edit) = item.text_edit.as_ref().unwrap() else {
+            panic!()
+        };
+        assert_eq!(edit.range.start.line, 0);
+        assert_eq!(
+            edit.range.start.character,
+            source[..source.len() - 1].encode_utf16().count() as u32
+        );
+        assert_eq!(
+            edit.range.end.character,
+            source.encode_utf16().count() as u32
+        );
+        let key = edit
+            .new_text
+            .strip_prefix('[')
+            .unwrap()
+            .strip_suffix(']')
+            .unwrap();
+        assert_eq!(serde_json::from_str::<String>(key).unwrap(), name);
+    }
+}
+
+#[test]
 fn typescript_completes_contextual_options_nested_headers_and_raw_body() {
     let phase = ScriptPhase::PreRequest;
     let items = complete("pm.sendRequest({u|})", phase);

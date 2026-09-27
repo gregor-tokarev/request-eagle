@@ -52,6 +52,43 @@
     const service = ts.createLanguageService(host);
     const display = parts => ts.displayPartsToString(parts || []).slice(0, 8192);
     const markdown = text => text ? {kind: "markdown", value: text.slice(0, 8192)} : undefined;
+
+    const lineBreakEscapes = {"\r": "\\r", "\n": "\\n", "\u2028": "\\u2028", "\u2029": "\\u2029"};
+    const escapeLineBreaks = text => text.replace(/[\r\n\u2028\u2029]/g, ch => lineBreakEscapes[ch]);
+
+    function completionDetail(parts, name, kind) {
+        // A variable's inferred type can contain a property with the same name.
+        // Only strip the owner prefix of an actual member/function completion.
+        const member = ["property", "method", "getter", "setter", "function", "local function"].includes(kind)
+            ? parts.findIndex(part => part.text === name &&
+                ["propertyName", "methodName", "functionName"].includes(part.kind)) : -1;
+        const property = member >= 0 && parts[member].kind === "propertyName";
+        const preview = member < 0 ? parts : parts.slice(member + (property ? 1 : 0));
+        let text = "", space = false;
+        for (let index = 0; index < preview.length; index++) {
+            // Omit our internal namespace, preserving string literal types.
+            if (preview[index].kind === "moduleName" && preview[index].text === "RequestEagle"
+                && preview[index + 1]?.text === ".") {
+                index++;
+                continue;
+            }
+            const part = preview[index];
+            if (part.kind === "space" || part.kind === "lineBreak") {
+                space = true;
+                continue;
+            }
+            if (space && text) text += " ";
+            text += escapeLineBreaks(part.text);
+            space = false;
+        }
+
+        // Native completion rows have a uniform height. Anonymous object types
+        // contain hard line breaks, which would overlap neighboring rows.
+        // Collapse formatting whitespace only; spaces inside literal types and
+        // quoted property names are meaningful and must remain unchanged.
+        return (property ? text.replace(/^\??:\s*/, "") : text).slice(0, 8192);
+    }
+
     const kinds = {
         method: 2, function: 3, constructor: 4, property: 10, field: 5,
         var: 6, let: 6, const: 21, class: 7, interface: 8, module: 9,
@@ -108,9 +145,9 @@
                 const detail = service.getCompletionEntryDetails(filename, position, entry.name, {}, entry.source, {}, entry.data);
                 const span = entry.replacementSpan || result.optionalReplacementSpan || fallback;
                 return {
-                    label: entry.name,
+                    label: escapeLineBreaks(entry.name),
                     kind: kinds[entry.kind] || 1,
-                    detail: detail ? display(detail.displayParts) : undefined,
+                    detail: detail ? completionDetail(detail.displayParts || [], entry.name, entry.kind) : undefined,
                     documentation: detail ? markdown(display(detail.documentation)) : undefined,
                     sortText: entry.sortText,
                     // GPUI's menu uses this as the highlighted prefix and does
