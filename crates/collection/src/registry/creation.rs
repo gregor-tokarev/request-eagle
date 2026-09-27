@@ -60,6 +60,7 @@ impl CollectionRegistry {
                 headers: Vec::new(),
                 body: None,
                 query: None,
+                scripts: Default::default(),
             }),
         )
     }

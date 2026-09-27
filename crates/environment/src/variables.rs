@@ -35,12 +35,15 @@ pub enum VariableError {
     Unknown(String),
     #[error("Unclosed variable. Complete the reference with }}}} before sending.")]
     Unclosed,
+    #[error("Expanded request exceeds the output limit")]
+    TooLarge,
 }
 
 /// One resolver per send keeps repeated generated references consistent in that request.
 pub struct VariableResolver<'a> {
     values: &'a VariableValues,
     generated: HashMap<String, String>,
+    remaining: usize,
 }
 
 impl<'a> VariableResolver<'a> {
@@ -48,29 +51,52 @@ impl<'a> VariableResolver<'a> {
         Self {
             values,
             generated: HashMap::new(),
+            remaining: usize::MAX,
         }
     }
 
+    pub fn limit_output(&mut self, bytes: usize) {
+        self.remaining = bytes;
+    }
+
+    pub fn override_generated(&mut self, name: String, value: String) {
+        self.generated.insert(name, value);
+    }
+
+    pub fn generated_values(&self) -> &HashMap<String, String> {
+        &self.generated
+    }
+
+    fn append(&mut self, result: &mut String, text: &str) -> Result<(), VariableError> {
+        self.remaining = self
+            .remaining
+            .checked_sub(text.len())
+            .ok_or(VariableError::TooLarge)?;
+        result.push_str(text);
+        Ok(())
+    }
+
     pub fn resolve(&mut self, text: &str) -> Result<String, VariableError> {
-        let mut result = String::with_capacity(text.len());
+        let mut result = String::new();
         let mut remaining = text;
 
         while let Some(start) = remaining.find("{{") {
-            result.push_str(&remaining[..start]);
+            self.append(&mut result, &remaining[..start])?;
             remaining = &remaining[start + 2..];
             let end = remaining.find("}}").ok_or(VariableError::Unclosed)?;
             if let Some(literal) = remaining[..end].strip_prefix('!') {
-                result.push_str("{{");
-                result.push_str(literal);
-                result.push_str("}}");
+                self.append(&mut result, "{{")?;
+                self.append(&mut result, literal)?;
+                self.append(&mut result, "}}")?;
             } else {
                 let name = remaining[..end].trim();
-                result.push_str(&self.value(name)?);
+                let value = self.value(name)?;
+                self.append(&mut result, &value)?;
             }
             remaining = &remaining[end + 2..];
         }
 
-        result.push_str(remaining);
+        self.append(&mut result, remaining)?;
         Ok(result)
     }
 
@@ -80,21 +106,8 @@ impl<'a> VariableResolver<'a> {
                 return Ok(value.clone());
             }
 
-            let value = match name {
-                "$guid" => uuid::Uuid::new_v4().to_string(),
-                "$isoTimestamp" => {
-                    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-                }
-                "$timestamp" => chrono::Utc::now().timestamp().to_string(),
-                "$randomInt" => rand::rng().random_range(0..=1000).to_string(),
-                "$randomBoolean" => rand::rng().random::<bool>().to_string(),
-                "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 1),
-                "$randomEmail" => format!(
-                    "{}@example.com",
-                    Alphanumeric.sample_string(&mut rand::rng(), 12)
-                ),
-                _ => return Err(VariableError::Unknown(name.into())),
-            };
+            let value =
+                generate_variable(name).ok_or_else(|| VariableError::Unknown(name.into()))?;
             self.generated.insert(name.into(), value.clone());
             return Ok(value);
         }
@@ -105,4 +118,20 @@ impl<'a> VariableResolver<'a> {
             .cloned()
             .ok_or_else(|| VariableError::Unknown(name.into()))
     }
+}
+
+pub fn generate_variable(name: &str) -> Option<String> {
+    Some(match name {
+        "$guid" | "$randomUUID" => uuid::Uuid::new_v4().to_string(),
+        "$isoTimestamp" => chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "$timestamp" => chrono::Utc::now().timestamp().to_string(),
+        "$randomInt" => rand::rng().random_range(0..=1000).to_string(),
+        "$randomBoolean" => rand::rng().random::<bool>().to_string(),
+        "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 1),
+        "$randomEmail" => format!(
+            "{}@example.com",
+            Alphanumeric.sample_string(&mut rand::rng(), 12)
+        ),
+        _ => return None,
+    })
 }

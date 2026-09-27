@@ -71,6 +71,7 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
         response.update(cx, |view, cx| {
             view.finish(
                 Ok(ResponseContent::new(Execution {
+                    scripts: Vec::new(),
                     elapsed: Duration::from_millis(250),
                     response: Response::Http(HttpResponse {
                         status: StatusCode::OK,

@@ -1,4 +1,5 @@
 use collection::{HttpRequest, Method};
+use gpui_kit::component::{WindowExt, dialog::DialogButtonProps};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::RequestExecutor;
@@ -78,55 +79,6 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     headers
 }
 
-pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
-    let mut request = request.clone();
-    request.path = request_url(&request.path);
-
-    if matches!(request.method, Method::Get | Method::Head) {
-        request.body = None;
-    } else if request.body.is_some()
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-    {
-        request
-            .headers
-            .push(("Content-Type".into(), "application/json".into()));
-    }
-
-    request
-}
-
-pub(super) fn resolve_request(
-    request: &HttpRequest,
-    mut values: environment::VariableValues,
-    environment_error: Option<&str>,
-) -> Result<HttpRequest, String> {
-    let mut template = request.clone();
-    if matches!(template.method, Method::Get | Method::Head) {
-        template.body = None;
-    }
-
-    // Let the resolver parse names, including whitespace, in every request field.
-    // Never use cached values while their source is unavailable.
-    if environment_error.is_some() {
-        values.environment.clear();
-    }
-    template
-        .resolve_variables(&values)
-        .map(|request| outgoing_request(&request))
-        .map_err(|error| {
-            if let environment::VariableError::Unknown(name) = &error
-                && !name.starts_with('$')
-                && let Some(message) = environment_error
-            {
-                return message.to_owned();
-            }
-            error.to_string()
-        })
-}
-
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
         self.generated_headers = generated_headers(&self.request);
@@ -139,7 +91,58 @@ impl RequestDraft {
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.task.is_some() {
+        if self.task.is_some() || self.script_trust_prompt_open {
+            return;
+        }
+
+        if !self.request.scripts.is_empty()
+            && self.trusted_scripts.as_ref() != Some(&self.request.scripts)
+        {
+            self.script_trust_prompt_open = true;
+            let scripts = self.request.scripts.clone();
+            let draft = cx.entity().downgrade();
+            window.open_dialog(cx, move |dialog, window, _| {
+                let accept = draft.clone();
+                let close = draft.clone();
+                let review = draft.clone();
+                let scripts = scripts.clone();
+
+                dialog
+                    .title("Run scripts for this request?")
+                    .w(rems(32.).to_pixels(window.rem_size()))
+                    .overlay_closable(false)
+                    .child(div().text_sm().child("Scripts can read request and response data and all collection environment variables, including secrets this request does not use. They can change the destination and send this data to another server. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
+                    .button_props(DialogButtonProps::default().ok_text("Trust and Send").show_cancel(true))
+                    .on_ok(move |_, window, cx| {
+                        let _ = accept.update(cx, |draft, cx| {
+                            if draft.request.scripts == scripts {
+                                draft.trusted_scripts = Some(scripts.clone());
+                                draft.script_trust_prompt_open = false;
+                                draft.send(window, cx);
+                            }
+                        });
+                        true
+                    })
+                    .on_cancel(move |_, window, cx| {
+                        let _ = review.update(cx, |draft, cx| {
+                            draft.section = super::draft::RequestSection::Scripts;
+                            draft.script_phase = if draft.request.scripts.pre_request.is_empty() {
+                                request::ScriptPhase::PostResponse
+                            } else {
+                                request::ScriptPhase::PreRequest
+                            };
+                            draft.prepare(window, cx);
+                            cx.notify();
+                        });
+                        true
+                    })
+                    .on_close(move |_, _, cx| {
+                        let _ = close.update(cx, |draft, cx| {
+                            draft.script_trust_prompt_open = false;
+                            cx.notify();
+                        });
+                    })
+            });
             return;
         }
 
@@ -152,16 +155,8 @@ impl RequestDraft {
             Ok(values) => (values, None),
             Err(error) => (environment::VariableValues::default(), Some(error)),
         };
-        let request = resolve_request(&self.request, values, environment_error.as_deref());
-        let request = match request {
-            Ok(request) => request,
-            Err(error) => {
-                response.update(cx, |response, cx| {
-                    response.finish(Err(request::ExecutionError::Variables(error)), window, cx)
-                });
-                return;
-            }
-        };
+        let request = self.request.clone();
+        let variables = request::RequestVariables::new(values, environment_error);
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -180,7 +175,7 @@ impl RequestDraft {
                 Err(error) => return (None, Err(error)),
             };
             let result = executor
-                .execute(request)
+                .execute_with_variables(request, variables)
                 .await
                 .map(super::super::response_view::ResponseContent::new);
 

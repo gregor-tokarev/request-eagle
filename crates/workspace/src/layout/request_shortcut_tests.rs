@@ -1,5 +1,5 @@
 use collection::Method;
-use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, component::Root};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::time::Duration;
 use tab_ui::RequestDraft;
@@ -17,9 +17,9 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
     cx.executor().allow_parking();
     let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/shortcut", listener.local_addr().unwrap());
-    let (sent, received) = smol::channel::bounded(3);
+    let (sent, received) = smol::channel::bounded(4);
     let server = smol::spawn(async move {
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut head = Vec::new();
             while !head.ends_with(b"\r\n\r\n") {
@@ -45,15 +45,22 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
         preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
+        cx.set_reduce_motion(true);
     });
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
-            collection::CollectionRegistry::new(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
+    let mut layout = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            crate::workspace::Layout::new(
+                collection::CollectionRegistry::new(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        layout = Some(view.clone());
+        Root::new(view, window, cx)
     });
+    let layout = layout.unwrap();
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let first = cx.read(|cx| {
         tabs.read(cx).tabs[0]
@@ -83,10 +90,35 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
     cx.simulate_click(body.center(), Modifiers::default());
     cx.simulate_input("{\"hello\":true}");
 
-    for selector in ["request-url", "request-body", "response-body"] {
+    for selector in [
+        "request-url",
+        "request-body",
+        "response-body",
+        "script-editor",
+    ] {
+        if selector == "script-editor" {
+            let tab = element_bounds(cx, "request-section-Scripts").unwrap();
+            cx.simulate_click(tab.center(), Modifiers::default());
+        }
         let bounds = element_bounds(cx, selector).unwrap();
         cx.simulate_click(bounds.center(), Modifiers::default());
+        if selector == "script-editor" {
+            // Keep a valid script with the completion menu open when sending.
+            cx.simulate_input("pm.variables.c");
+            cx.run_until_parked();
+        }
         cx.simulate_keystrokes("secondary-enter");
+        if selector == "script-editor" {
+            assert!(!cx.read(|cx| active.read(cx).is_sending()));
+            for _ in 0..2 {
+                cx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+            }
+            assert!(element_bounds(cx, "dialog-0").is_some());
+            cx.simulate_keystrokes("enter");
+        }
         let started = std::time::Instant::now();
         while cx.read(|cx| active.read(cx).is_sending()) {
             assert!(
@@ -110,6 +142,12 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             );
             assert!(!first.read(cx).is_sending());
             assert!(first.read(cx).request.path.is_empty());
+            if selector == "script-editor" {
+                assert_eq!(
+                    active.read(cx).request.scripts.pre_request,
+                    "pm.variables.c"
+                );
+            }
         });
     }
     server.await;

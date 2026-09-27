@@ -4,6 +4,18 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ExecutionError {
+    #[error("{source}")]
+    ScriptedRequest {
+        source: Box<ExecutionError>,
+        reports: Vec<crate::ScriptReport>,
+    },
+
+    #[error("pre-request script failed: {message}")]
+    Script {
+        message: String,
+        report: Box<crate::ScriptReport>,
+    },
+
     #[error("{0}")]
     Variables(String),
     #[error("request timed out after {timeout:?}")]

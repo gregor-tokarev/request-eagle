@@ -29,23 +29,59 @@ impl RequestExecutor {
         &self,
         request: R,
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
+        self.execute_inner(request, None)
+    }
+
+    /// Resolve collection and script variables together after the pre-request script.
+    pub fn execute_with_variables<R: Into<Request>>(
+        &self,
+        request: R,
+        variables: crate::RequestVariables,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
+        self.execute_inner(request, Some(variables))
+    }
+
+    fn execute_inner<R: Into<Request>>(
+        &self,
+        request: R,
+        variables: Option<crate::RequestVariables>,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
         let request = request.into();
         let executor = self.clone();
 
         async move {
-            let started_at = Instant::now();
+            let cancellation = crate::scripts::Cancellation::new();
+            let mut scripts = Vec::new();
             let run = async {
-                let response = match request {
-                    Request::Http(request) => Response::Http(executor.http.execute(request).await?),
-                };
+                match request {
+                    Request::Http(request) => {
+                        let (mut request, variables, reports) =
+                            crate::scripts::pre_request_with_variables(
+                                request,
+                                cancellation.0.clone(),
+                                variables,
+                            )
+                            .await?;
+                        scripts = reports;
 
-                Ok(Execution {
-                    response,
-                    elapsed: started_at.elapsed(),
-                })
+                        let sent_at = Instant::now();
+                        let has_post_script = !request.scripts.post_response.trim().is_empty();
+                        let body = request.body.take().map(bytes::Bytes::from);
+                        let post_body = if has_post_script { body.clone() } else { None };
+                        let response = executor.http.execute(&request, body).await?;
+                        let post_request = has_post_script.then_some((request, post_body));
+                        let execution = Execution {
+                            response: Response::Http(response),
+                            elapsed: sent_at.elapsed(),
+                            scripts: std::mem::take(&mut scripts),
+                        };
+
+                        Ok((post_request, variables, execution))
+                    }
+                }
             };
 
-            match executor.timeout {
+            let (post_request, variables, execution) = match executor.timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;
@@ -55,6 +91,30 @@ impl RequestExecutor {
                     .await
                 }
                 None => run.await,
+            }
+            .map_err(|error| {
+                if scripts.is_empty() {
+                    error
+                } else {
+                    ExecutionError::ScriptedRequest {
+                        source: Box::new(error),
+                        reports: scripts,
+                    }
+                }
+            })?;
+
+            // Once the response is complete, its script uses the separate script
+            // deadline. A request timeout must not discard a received response.
+            match post_request {
+                Some((request, body)) => Ok(crate::scripts::post_response(
+                    request,
+                    body,
+                    variables,
+                    execution,
+                    cancellation.0.clone(),
+                )
+                .await),
+                None => Ok(execution),
             }
         }
     }

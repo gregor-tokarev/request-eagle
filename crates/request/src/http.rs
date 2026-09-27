@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Instant};
 
+use bytes::Bytes;
 use http_client::http::{HeaderMap, header::HOST, uri::Authority};
 use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
@@ -47,7 +48,8 @@ impl HttpExecutor {
 
     pub(crate) async fn execute(
         &self,
-        request: HttpRequest,
+        request: &HttpRequest,
+        body: Option<Bytes>,
     ) -> Result<HttpResponse, ExecutionError> {
         let started = Instant::now();
         let is_head = request.method.as_str() == "HEAD";
@@ -67,7 +69,7 @@ impl HttpExecutor {
             url.query_pairs_mut().extend_pairs(query);
         }
 
-        let request_body_bytes = request.body.as_ref().map_or(0, Vec::len);
+        let request_body_bytes = body.as_ref().map_or(0, Bytes::len);
         let mut builder = Request::builder()
             .method(request.method.as_str())
             .uri(url.as_str());
@@ -80,13 +82,11 @@ impl HttpExecutor {
         );
         let generated_host = generated.iter().any(|(name, _)| name == "Host");
 
-        for (name, value) in request.headers.into_iter().chain(generated) {
-            builder = builder.header(name, value);
+        for (name, value) in request.headers.iter().chain(&generated) {
+            builder = builder.header(name.as_str(), value.as_str());
         }
 
-        let mut request = builder
-            .body(request.body)
-            .map_err(HttpError::InvalidRequest)?;
+        let mut request = builder.body(body).map_err(HttpError::InvalidRequest)?;
 
         let host = validate_host(request.headers())?;
         let mut client = &self.client;

@@ -65,6 +65,165 @@ fn executor() -> RequestExecutor {
     .unwrap()
 }
 
+#[test]
+fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
+    smol::block_on(async {
+        let mut ids = std::collections::HashSet::new();
+        for collection in [false, true] {
+            for phase in ["post only", "both", "override"] {
+                let (url, server) =
+                    serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+                let mut pre = String::new();
+                if phase != "post only" {
+                    pre.push_str(r#"
+                        const id = pm.variables.replaceIn('{{$guid}}');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}/{{$guid}}')).to.equal(`${id}/${id}`);
+                        pm.expect(pm.variables.has('$guid')).to.be.false;
+                        pm.variables.set('$guid', 'temporary');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal('temporary');
+                        pm.variables.unset('$guid');
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(id);
+                        pm.variables.clear();
+                        pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(id);
+                        pm.request.headers.upsert({key: 'X-Pre-Id', value: id});
+                    "#);
+                }
+                if phase == "override" {
+                    pre.push_str("pm.variables.set('$guid', 'override');");
+                }
+                let request = HttpRequest {
+                    method: Method::Post,
+                    path: format!("{url}/{{{{$guid}}}}"),
+                    headers: vec![
+                        ("X-Id".into(), "{{$guid}}".into()),
+                        ("X-Uuid".into(), "{{$randomUUID}}".into()),
+                    ],
+                    query: Some(vec![("id".into(), "{{$guid}}".into())]),
+                    body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
+                    scripts: request::RequestScripts {
+                        pre_request: pre,
+                        post_response: r#"
+                            const sent = pm.request.headers.get('X-Id');
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(sent);
+                            pm.expect(pm.variables.replaceIn('{{$randomUUID}}')).to.equal(pm.request.headers.get('X-Uuid'));
+                            const original = pm.request.headers.get('X-Pre-Id') ?? sent;
+                            pm.variables.unset('$guid');
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
+                            pm.variables.clear();
+                            pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
+                        "#.into(),
+                    },
+                };
+                let execution = if collection {
+                    executor()
+                        .execute_with_variables(
+                            request,
+                            request::RequestVariables::new(
+                                environment::VariableValues::default(),
+                                None,
+                            ),
+                        )
+                        .await
+                } else {
+                    executor().execute(request).await
+                }
+                .unwrap();
+                for report in execution.scripts {
+                    assert!(report.error.is_none(), "{collection}/{phase}: {report:?}");
+                }
+                let received = server.await;
+                let id = String::from_utf8(received.body).unwrap();
+                let (id, repeated) = id.split_once('/').unwrap();
+                assert_eq!(id, repeated);
+                assert!(
+                    received
+                        .head
+                        .starts_with(&format!("POST /{id}?id={id} HTTP/1.1\r\n"))
+                );
+                assert!(
+                    received
+                        .head
+                        .to_lowercase()
+                        .contains(&format!("x-id: {id}\r\n"))
+                );
+                if phase == "override" {
+                    assert_eq!(id, "override");
+                } else {
+                    uuid::Uuid::parse_str(id).unwrap();
+                    assert!(
+                        ids.insert(id.to_owned()),
+                        "a new send needs fresh generated values"
+                    );
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn post_response_scripts_share_uploads_and_read_the_sent_body() {
+    smol::block_on(async {
+        for (body, pre, post) in [
+            (
+                vec![b'x'; 40 * 1024 * 1024],
+                "",
+                "pm.response.to.have.status(200);",
+            ),
+            (
+                vec![255; 40 * 1024 * 1024],
+                "",
+                "pm.response.to.have.status(200);",
+            ),
+            (
+                b"draft".to_vec(),
+                "pm.request.body.update('sent 🦅');",
+                "pm.expect(pm.request.body.raw).to.equal('sent 🦅');",
+            ),
+        ] {
+            let (url, server) =
+                serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+            let expected_len = if pre.contains("body.update") {
+                "sent 🦅".len()
+            } else {
+                body.len()
+            };
+            let execution = executor()
+                .execute_with_variables(
+                    HttpRequest {
+                        method: Method::Post,
+                        path: url,
+                        body: Some(body),
+                        scripts: request::RequestScripts {
+                            pre_request: pre.into(),
+                            post_response: post.into(),
+                        },
+                        ..Default::default()
+                    },
+                    request::RequestVariables::new(environment::VariableValues::default(), None),
+                )
+                .await
+                .unwrap();
+            assert!(
+                execution
+                    .scripts
+                    .iter()
+                    .all(|report| report.error.is_none()),
+                "{:?}",
+                execution.scripts
+            );
+            let received = server.await;
+            assert_eq!(received.body.len(), expected_len);
+            let Response::Http(response) = execution.response;
+            assert_eq!(response.metrics.request_body_bytes, expected_len);
+            if pre.contains("body.update") {
+                assert_eq!(received.body, "sent 🦅".as_bytes());
+            } else {
+                assert!(received.body.iter().all(|byte| *byte == received.body[0]));
+            }
+        }
+    });
+}
+
 fn report(label: &str, execution: &Execution) {
     let Response::Http(response) = &execution.response;
 
@@ -102,6 +261,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
                 ("X-Tag".into(), "two".into()),
             ],
             body: Some(vec![0, 255, 42]),
+            scripts: Default::default(),
             query: Some(vec![
                 ("tag".into(), "a & b".into()),
                 ("tag".into(), "c+d".into()),
@@ -945,7 +1105,8 @@ fn zero_size_and_timeout_preferences_disable_the_limits() {
 #[test]
 fn timeout_covers_waiting_for_headers_and_reading_the_body() {
     smol::block_on(async {
-        for send_headers in [false, true] {
+        for (send_headers, scripted) in [(false, false), (true, false), (false, true), (true, true)]
+        {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let server = smol::spawn(async move {
@@ -970,6 +1131,14 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
             let error = executor
                 .execute(HttpRequest {
                     path: url,
+                    scripts: request::RequestScripts {
+                        pre_request: if scripted {
+                            "console.log('prepared'); pm.test('pass', () => {}); pm.test('fail', () => pm.expect(1).to.equal(2));".into()
+                        } else {
+                            String::new()
+                        },
+                        ..Default::default()
+                    },
                     ..HttpRequest::default()
                 })
                 .await
@@ -978,6 +1147,26 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                 "\n  Stalled {} -> {error}",
                 if send_headers { "body" } else { "headers" }
             );
+            let error = if scripted {
+                let ExecutionError::ScriptedRequest { source, reports } = error else {
+                    panic!("timeout discarded pre-request diagnostics");
+                };
+
+                assert_eq!(reports.len(), 1);
+                assert_eq!(reports[0].phase, request::ScriptPhase::PreRequest);
+                assert_eq!(reports[0].logs.len(), 1);
+                assert_eq!(reports[0].logs[0].message, "prepared");
+                assert_eq!(reports[0].tests.len(), 2);
+                assert_eq!(reports[0].tests[0].name, "pass");
+                assert!(reports[0].tests[0].error.is_none());
+                assert_eq!(reports[0].tests[1].name, "fail");
+                assert!(reports[0].tests[1].error.is_some());
+                assert!(reports[0].error.is_none());
+                *source
+            } else {
+                error
+            };
+
             assert!(
                 matches!(error, ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150))
             );
@@ -1069,4 +1258,199 @@ fn preserves_serialized_request_and_preference_formats() {
         serde_json::to_value(&preferences).unwrap()["follow_all_redirects"],
         false
     );
+}
+
+#[test]
+fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
+    smol::block_on(async {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"success\":true}";
+        let (url, server) = serve(response.to_vec()).await;
+        let draft = HttpRequest {
+            method: Method::Post,
+            path: format!("{url}/{{{{resource}}}}"),
+            body: Some(br#"{"name":"{{name}}"}"#.to_vec()),
+            scripts: request::RequestScripts {
+                pre_request: "pm.variables.set('resource', 'echo'); pm.variables.set('name', 'Eagle'); pm.request.headers.upsert({key: 'X-Script', value: 'ran'});".into(),
+                post_response: "pm.test('status', () => pm.response.to.have.status(200)); pm.test('json', () => pm.expect(pm.response.json()).to.have.property('success', true)); pm.test('vars', () => pm.expect(pm.variables.get('name')).to.equal('Eagle'));".into(),
+            },
+            ..Default::default()
+        };
+        let execution = executor().execute(&draft).await.unwrap();
+        let received = server.await;
+        assert!(received.head.starts_with("POST /echo HTTP/1.1"));
+        assert!(received.head.to_lowercase().contains("x-script: ran"));
+        assert_eq!(received.body, br#"{"name":"Eagle"}"#);
+        assert_eq!(execution.scripts.len(), 2);
+        assert_eq!(execution.scripts[1].tests.len(), 3);
+        assert!(
+            execution.scripts[1]
+                .tests
+                .iter()
+                .all(|test| test.error.is_none())
+        );
+        assert!(draft.path.ends_with("{{resource}}"));
+        assert!(draft.headers.is_empty());
+    });
+}
+
+#[test]
+fn direct_scripts_filter_bodies_and_logging_failures_do_not_block_http() {
+    smol::block_on(async {
+        for method in ["GET", "HEAD"] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            )
+            .await;
+            let mut request = HttpRequest {
+                method: Method::Post,
+                path: url,
+                body: Some(b"{{unclosed".to_vec()),
+                ..Default::default()
+            };
+            request.scripts.pre_request = format!(
+                r#"
+                const cyclic = {{}}; cyclic.self = cyclic;
+                console.log(1n);
+                console.log(cyclic);
+                console.log({{toJSON() {{ throw Error('json'); }}, toString() {{ throw Error('string'); }} }});
+                console.log({{toJSON() {{ throw Error('json'); }}, toString() {{ return 'x'.repeat(10000); }} }});
+                pm.variables.set('flag', pm.variables.replaceIn('{{{{$randomBoolean}}}}'));
+                pm.request.headers.upsert({{key: 'X-Flag', value: '{{{{flag}}}}'}});
+                pm.request.method = '{method}';
+            "#
+            );
+            let execution = executor().execute(request).await.unwrap();
+            let received = server.await;
+            assert!(
+                received
+                    .head
+                    .starts_with(&format!("{method} / HTTP/1.1\r\n"))
+            );
+            assert!(received.body.is_empty());
+            assert!(
+                received.head.contains("x-flag: true\r\n")
+                    || received.head.contains("x-flag: false\r\n")
+            );
+            let logs = &execution.scripts[0].logs;
+            assert_eq!(logs.len(), 4);
+            assert_eq!(logs[0].message, "1");
+            assert_eq!(logs[1].message, "[object Object]");
+            assert_eq!(logs[2].message, "[Unserializable value]");
+            assert_eq!(logs[3].message.len(), 4096);
+        }
+    });
+}
+
+#[test]
+fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
+    smol::block_on(async {
+        for mode in ["read", "edit", "clear", "replace", "post"] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            )
+            .await;
+            let initial = format!(
+                "{url}/path?tag=existing%20item&tag=a+%26+b&tag=c%2Bd&Case=keep&remove=yes"
+            );
+            let mutation = match mode {
+                "read" | "post" => "",
+                "clear" => "pm.request.url.query.clear();",
+                "edit" => {
+                    r#"
+                    pm.request.url.query.remove('tag');
+                    pm.request.url.query.remove('case');
+                    pm.expect(pm.request.url.query.has('Case')).to.be.true;
+                    pm.request.url.query.remove('remove');
+                    pm.variables.set('value', '🦅 & +');
+                    pm.request.url.query.add({key: 'x', value: 'old'});
+                    pm.request.url.query.upsert({key: 'x', value: '{{value}}'});
+                "#
+                }
+                _ => {
+                    "pm.request.url = pm.request.url.toString().split('?')[0] + '?fresh=yes'; pm.expect(pm.request.url.query.toJSON()).to.deep.equal([{key: 'fresh', value: 'yes'}]);"
+                }
+            };
+            let target = match mode {
+                "read" | "post" => {
+                    "/path?tag=existing%20item&tag=a+%26+b&tag=c%2Bd&Case=keep&remove=yes"
+                }
+                "clear" => "/path",
+                "edit" => "/path?Case=keep&x=%F0%9F%A6%85+%26+%2B",
+                _ => "/path?fresh=yes",
+            };
+            let draft = HttpRequest {
+                path: format!("{url}/path?tag=existing%20item#ignored"),
+                query: Some(vec![
+                    ("tag".into(), "a & b".into()),
+                    ("tag".into(), "c+d".into()),
+                    ("Case".into(), "keep".into()),
+                    ("remove".into(), "yes".into()),
+                ]),
+                scripts: request::RequestScripts {
+                    pre_request: format!(
+                        "pm.expect(String(pm.request.url)).to.equal({initial:?}); pm.expect(pm.request.url.query.get('tag')).to.equal('existing item'); {mutation}"
+                    ),
+                    post_response: format!(
+                        "pm.test('sent URL', () => pm.expect(pm.request.url.toString()).to.equal({:?}));",
+                        format!("{url}{target}")
+                    ),
+                },
+                ..Default::default()
+            };
+            let original = draft.clone();
+            let execution = executor()
+                .execute_with_variables(
+                    &draft,
+                    request::RequestVariables::new(environment::VariableValues::default(), None),
+                )
+                .await
+                .unwrap();
+            let received = server.await;
+            assert!(
+                received
+                    .head
+                    .starts_with(&format!("GET {target} HTTP/1.1\r\n")),
+                "{}",
+                received.head
+            );
+            assert!(
+                execution.scripts.last().unwrap().tests[0].error.is_none(),
+                "{:?}",
+                execution.scripts.last().unwrap().tests[0]
+            );
+            assert_eq!(draft, original);
+        }
+    });
+}
+
+#[test]
+fn request_timeout_does_not_discard_a_response_during_its_post_response_script() {
+    smol::block_on(async {
+        let (url, server) =
+            serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec())
+                .await;
+        let executor = RequestExecutor::new(&RequestPreferences {
+            timeout_ms: 250,
+            ..Default::default()
+        })
+        .unwrap();
+        let execution = executor.execute(HttpRequest {
+            path: url,
+            scripts: request::RequestScripts {
+                post_response: "const start = Date.now(); while (Date.now() - start < 350) {} throw new Error('script failed after response');".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }).await.unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.body, b"ok");
+        assert!(
+            execution.scripts[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("script failed after response")
+        );
+    });
 }

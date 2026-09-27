@@ -214,18 +214,18 @@ fn variable_completion_handles_unicode_blur_and_window_edges_at_all_scales(
 }
 
 #[gpui_kit::test]
-fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request(
+async fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request(
     cx: &mut TestAppContext,
 ) {
+    cx.executor().allow_parking();
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (draft, cx, _directory) = setup(cx);
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
-            draft.request.path = "http://127.0.0.1:1/{{missing}}".into();
+            draft.request.path =
+                format!("http://{}/{{{{missing}}}}", listener.local_addr().unwrap());
             draft.send(window, cx);
-            assert!(
-                draft.task.is_none(),
-                "resolution must fail before dispatching HTTP"
-            );
+            assert!(draft.task.is_some());
 
             draft.set_variable_environment(
                 std::path::Path::new("/tmp/variable-test/Collection/Folder/request.toml"),
@@ -249,6 +249,16 @@ fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request
             );
         });
     });
+    let started = std::time::Instant::now();
+    while cx.read(|cx| draft.read(cx).task.is_some()) {
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        smol::Timer::after(std::time::Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    assert!(
+        smol::future::poll_once(listener.accept()).await.is_none(),
+        "unresolved variables must block HTTP dispatch"
+    );
 }
 
 #[gpui_kit::test]
@@ -311,17 +321,20 @@ async fn unavailable_environment_only_blocks_requests_using_environment_variable
         draft.update(cx, |draft, cx| {
             draft.request.path = "{{base_url}}".into();
             draft.send(window, cx);
-            assert!(
-                draft.task.is_none(),
-                "do not send with cached environment values after a file error"
-            );
+            assert!(draft.task.is_some());
         });
     });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.read(|cx| draft.read(cx).task.is_some()) {
+        assert!(Instant::now() < deadline);
+        smol::Timer::after(Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
 }
 
 #[test]
 fn environment_errors_are_reported_only_for_environment_references() {
-    use super::execution::resolve_request;
+    use request::RequestVariables;
     let values = environment::VariableValues {
         environment: [("base_url".into(), "https://cached.example".into())].into(),
     };
@@ -330,14 +343,71 @@ fn environment_errors_are_reported_only_for_environment_references() {
         ..Default::default()
     };
     assert_eq!(
-        resolve_request(&request, values.clone(), Some("Invalid environment file")).unwrap_err(),
+        RequestVariables::new(values.clone(), Some("Invalid environment file".into()))
+            .resolve(&request)
+            .unwrap_err(),
         "Invalid environment file"
     );
     request.path = "http://example.com/{{$unsupported}}".into();
     assert!(
-        resolve_request(&request, values, Some("Invalid environment file"))
+        RequestVariables::new(values, Some("Invalid environment file".into()))
+            .resolve(&request)
             .unwrap_err()
             .contains("Unknown variable")
+    );
+}
+
+#[gpui_kit::test]
+async fn send_resolves_environment_and_script_variables_once(cx: &mut TestAppContext) {
+    use smol::io::{AsyncReadExt, AsyncWriteExt};
+
+    cx.executor().allow_parking();
+    let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = smol::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.starts_with("POST /created HTTP/1.1"), "{head}");
+        assert!(head.contains("content-type: text/plain\r\n"), "{head}");
+        assert!(!head.contains("application/json"), "{head}");
+        let mut body = [0; 29];
+        stream.read_exact(&mut body).await.unwrap();
+        assert_eq!(&body, b"local/{{message}}/{{created}}");
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let (draft, cx, directory) = setup(cx);
+    std::fs::write(directory.path().join("environment.toml"), format!("base_url = 'http://{address}'\nmessage = 'from file'\nliteral = '{{{{created}}}}'\nheader = 'Content-Type'\n")).unwrap();
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.request.method = Method::Get;
+            draft.request.path = "{{base_url}}/{{created}}".into();
+            draft.request.headers = vec![("{{header}}".into(), "text/plain".into())];
+            draft.request.body = Some(b"{{message}}/{{!message}}/{{literal}}".to_vec());
+            draft.request.scripts.pre_request = "pm.request.method = 'POST'; pm.expect(pm.variables.get('message')).to.equal('from file'); pm.variables.set('created', 'created'); pm.variables.set('message', 'local');".into();
+            draft.trusted_scripts = Some(draft.request.scripts.clone());
+            draft.send(window, cx);
+        });
+    });
+    let started = std::time::Instant::now();
+    while cx.read(|cx| draft.read(cx).task.is_some()) {
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        smol::Timer::after(std::time::Duration::from_millis(10)).await;
+        cx.run_until_parked();
+    }
+    server.await;
+    assert!(
+        std::fs::read_to_string(directory.path().join("environment.toml"))
+            .unwrap()
+            .contains("message = 'from file'")
     );
 }
 
@@ -384,9 +454,9 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
 
 #[test]
 fn environment_errors_are_reported_in_every_request_field() {
-    use super::execution::resolve_request;
     use environment::VariableValues;
     use request::HttpRequest;
+    use request::RequestVariables;
 
     let values = VariableValues {
         environment: [("message".into(), "cached value".into())].into(),
@@ -406,9 +476,14 @@ fn environment_errors_are_reported_in_every_request_field() {
             4 => request.query = Some(vec![("message".into(), token)]),
             _ => request.body = Some(token.into_bytes()),
         }
-        assert!(resolve_request(&request, values.clone(), None).is_ok());
+        assert!(
+            RequestVariables::new(values.clone(), None)
+                .resolve(&request)
+                .is_ok()
+        );
         assert_eq!(
-            resolve_request(&request, values.clone(), Some("Invalid environment file"))
+            RequestVariables::new(values.clone(), Some("Invalid environment file".into()))
+                .resolve(&request)
                 .unwrap_err(),
             "Invalid environment file"
         );
@@ -420,7 +495,9 @@ fn environment_errors_are_reported_in_every_request_field() {
         ..Default::default()
     };
     assert!(
-        resolve_request(&request, values, Some("Invalid environment file")).is_ok(),
+        RequestVariables::new(values, Some("Invalid environment file".into()))
+            .resolve(&request.prepare_for_send())
+            .is_ok(),
         "GET excludes the body before resolution"
     );
 }

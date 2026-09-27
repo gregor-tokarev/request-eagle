@@ -12,6 +12,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         headers: vec![("X-{{!customer}}".into(), "{{!missing}}".into())],
         query: Some(vec![("{{!customer}}".into(), "{{!$guid}}".into())]),
         body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
+        ..Default::default()
     };
     let resolved = draft.resolve_variables(&values).unwrap();
     assert_eq!(resolved.path, "https://example.com/{{customer}}");
@@ -48,6 +49,7 @@ fn resolves_every_request_field_in_a_snapshot() {
         ],
         query: Some(vec![("{{key}}".into(), "{{$guid}}".into())]),
         body: Some(br#"{"value":"{{value}}","id":"{{$guid}}"}"#.to_vec()),
+        ..Default::default()
     };
     let before = draft.clone();
     let outgoing = draft.resolve_variables(&values).unwrap();

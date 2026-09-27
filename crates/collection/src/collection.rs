@@ -192,7 +192,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         .get_mut("request")
         .and_then(Item::as_table_like_mut)
     {
-        for field in ["body", "query"] {
+        for field in ["body", "query", "scripts"] {
             if updates["request"].get(field).is_none() {
                 request.remove(field);
             }

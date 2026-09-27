@@ -18,6 +18,10 @@ mod proxy;
 mod redirects;
 mod response;
 mod response_encoding;
+mod scripts;
+mod variables;
+
+pub use scripts::{RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
 pub use error::{ExecutionError, HttpError};
 pub use executor::RequestExecutor;
@@ -27,4 +31,4 @@ pub use model::{HttpRequest, Method, Request};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};
-mod variables;
+pub use variables::RequestVariables;
