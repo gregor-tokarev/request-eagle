@@ -10,6 +10,14 @@ impl Layout {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
+        if matches!(
+            &command,
+            Command::UpdatesCheck {} | Command::UpdatesDownload {} | Command::UpdatesInstall { .. }
+        ) && !self.updater.read(cx).supports_app_updates()
+        {
+            return Err("App updates are only supported in Request Eagle.app on macOS".into());
+        }
+
         match command {
             Command::AppStatus {} => Ok(
                 json!({"pid": std::process::id(), "title": std::env::var("REQUEST_EAGLE_WINDOW_TITLE").unwrap_or_else(|_| "Request Eagle".into()), "version": self.updater.read(cx).current_version(), "settings_visible": self.settings_visible}),
@@ -189,6 +197,10 @@ impl Layout {
 
     fn automation_update_status(&self, cx: &App) -> Value {
         use updater::UpdateStatus;
+        if !self.updater.read(cx).supports_app_updates() {
+            return json!({"supported": false, "state": "unsupported", "details": {"message": "App updates are only supported in Request Eagle.app on macOS"}});
+        }
+
         let (state, details) = match self.updater.read(cx).status() {
             UpdateStatus::Idle => ("idle", json!({})),
             UpdateStatus::Checking => ("checking", json!({})),
@@ -208,6 +220,6 @@ impl Layout {
             UpdateStatus::Ready(version) => ("ready", json!({"version": version})),
             UpdateStatus::Error(error) => ("error", json!({"message": error})),
         };
-        json!({"state": state, "details": details})
+        json!({"supported": true, "state": state, "details": details})
     }
 }

@@ -130,6 +130,12 @@ fn managed_install(path: &Path) -> Result<Manifest, String> {
             "The CLI destination is not a managed executable. Move it before installing.".into(),
         );
     }
+    let receipt_metadata = fs::symlink_metadata(path.with_extension("json")).map_err(
+        |_| "The CLI destination has no installation receipt. Move it before installing.",
+    )?;
+    if !receipt_metadata.is_file() || receipt_metadata.len() > 4096 {
+        return Err("The CLI receipt must be a regular file, not a symlink or directory. Move it before installing.".into());
+    }
     let manifest: Manifest =
         serde_json::from_slice(&fs::read(path.with_extension("json")).map_err(
             |_| "The CLI destination has no installation receipt. Move it before installing.",
@@ -216,14 +222,26 @@ fn verify(manifest: &Manifest, bytes: &[u8]) -> Result<(), String> {
 fn install_bytes(path: &Path, manifest: &Manifest, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("CLI destination has no parent")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    // Do not follow a user-created symlink or replace an unrelated binary.
-    match fs::symlink_metadata(path) {
+    let receipt_path = path.with_extension("json");
+    // Validate both destinations before replacing either file. Preserve the
+    // previous executable so a failed receipt commit can be rolled back.
+    let backup = match fs::symlink_metadata(path) {
         Ok(_) => {
             managed_install(path)?;
+            let backup = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+            fs::copy(path, backup.path()).map_err(|e| e.to_string())?;
+            Some(backup)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::symlink_metadata(&receipt_path) {
+                Ok(_) => return Err("A CLI receipt already exists without a managed executable. Move it before installing.".into()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            None
+        }
         Err(error) => return Err(error.to_string()),
-    }
+    };
     let mut binary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     binary.write_all(bytes).map_err(|e| e.to_string())?;
     binary
@@ -239,10 +257,27 @@ fn install_bytes(path: &Path, manifest: &Manifest, bytes: &[u8]) -> Result<(), S
         .write_all(&serde_json::to_vec(manifest).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     receipt.as_file().sync_all().map_err(|e| e.to_string())?;
-    binary.persist(path).map_err(|e| e.to_string())?;
-    receipt
-        .persist(path.with_extension("json"))
-        .map_err(|e| e.to_string())?;
+    if backup.is_some() {
+        binary.persist(path).map_err(|e| e.to_string())?;
+    } else {
+        binary.persist_noclobber(path).map_err(|e| e.to_string())?;
+    }
+    let result = if backup.is_some() {
+        receipt.persist(&receipt_path)
+    } else {
+        receipt.persist_noclobber(&receipt_path)
+    };
+    if let Err(error) = result {
+        let rollback = if let Some(backup) = backup {
+            backup.persist(path).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            fs::remove_file(path).map_err(|e| e.to_string())
+        };
+        rollback.map_err(|rollback| format!("Could not save the CLI receipt: {error}. Could not restore the executable: {rollback}"))?;
+        return Err(format!(
+            "Could not save the CLI receipt; installation was rolled back: {error}"
+        ));
+    }
     Ok(())
 }
 
@@ -307,6 +342,44 @@ mod tests {
                 assert_eq!(path.exists(), scenario == "valid");
             }
         });
+    }
+
+    #[test]
+    fn preserves_orphan_receipt_files_directories_and_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let bytes = b"executable fixture";
+        let manifest = Manifest {
+            version: "1.2.3".into(),
+            target: "test-target".into(),
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+        };
+        for kind in ["file", "directory", "symlink"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("request-eagle-cli");
+            let receipt = path.with_extension("json");
+            let unrelated = dir.path().join("unrelated");
+            fs::write(&unrelated, b"user data").unwrap();
+            match kind {
+                "file" => fs::write(&receipt, b"unrelated receipt-named file").unwrap(),
+                "directory" => fs::create_dir(&receipt).unwrap(),
+                "symlink" => symlink(&unrelated, &receipt).unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(
+                install_bytes(&path, &manifest, bytes)
+                    .unwrap_err()
+                    .contains("already exists")
+            );
+            assert!(!path.exists());
+            assert_eq!(fs::read(&unrelated).unwrap(), b"user data");
+            match kind {
+                "file" => assert_eq!(fs::read(&receipt).unwrap(), b"unrelated receipt-named file"),
+                "directory" => assert!(receipt.is_dir()),
+                "symlink" => assert!(fs::symlink_metadata(&receipt).unwrap().is_symlink()),
+                _ => unreachable!(),
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]

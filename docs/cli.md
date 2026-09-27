@@ -96,6 +96,11 @@ usual tools. No truncation is silently accepted: oversized messages fail with
 | Workspace navigation | `ui.show`, `ui.sidebar`, `app.status` |
 | Application updates | `updates.check`, `updates.status`, `updates.download`, `updates.install` |
 
+App update commands apply only to installed macOS app bundles. On Linux and
+macOS source builds, `updates.status` returns `supported: false` with state
+`unsupported`; check/download/install commands fail without making a network
+request or changing updater state. Separate CLI installation remains available.
+
 Paths returned by collection commands identify saved entries. Tab IDs identify
 open pages. `drafts.set` replaces a complete editable request without saving;
 `drafts.save` commits it. New drafts require `parent` and `name`; providing these

@@ -289,3 +289,37 @@ fn automation_checks_collection_root_encoding_before_creating_files(cx: &mut Tes
     );
     assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
 }
+
+#[gpui_kit::test]
+fn automation_rejects_unsupported_app_updates_without_network_or_state_changes(
+    cx: &mut TestAppContext,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let (layout, cx) = setup(cx, temp.path());
+    cx.update(|_, cx| {
+        cx.set_http_client(gpui_kit::http_client::FakeHttpClient::create(|_| async {
+            panic!("Unsupported app updates must not make network requests")
+        }))
+    });
+    let status = call(&layout, cx, json!({"command":"updates.status"})).unwrap();
+    assert_eq!(status["supported"], false);
+    assert_eq!(status["state"], "unsupported");
+    for command in ["updates.check", "updates.download", "updates.install"] {
+        let input = if command == "updates.install" {
+            json!({"command":command,"confirm":true})
+        } else {
+            json!({"command":command})
+        };
+        assert!(
+            call(&layout, cx, input)
+                .unwrap_err()
+                .contains("only supported")
+        );
+    }
+    cx.read(|cx| {
+        assert!(matches!(
+            layout.read(cx).updater.read(cx).status(),
+            updater::UpdateStatus::Idle
+        ))
+    });
+}
