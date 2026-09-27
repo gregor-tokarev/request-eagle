@@ -6584,6 +6584,7 @@ dependencies = [
 name = "settings_ui"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "gpui-kit",
  "keybindings_service",
  "preferences",
@@ -7792,6 +7793,7 @@ name = "updater"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "ring",
  "rustix",
  "semver",
  "serde",

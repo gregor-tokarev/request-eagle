@@ -8,6 +8,7 @@ use std::{
 
 fn cli(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
+        .env_remove("REQUEST_EAGLE_CLI_TOKEN")
         .args(args)
         .output()
         .unwrap()
@@ -48,7 +49,7 @@ fn sends_versioned_command_and_propagates_application_errors() {
         let request: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(
             request,
-            json!({"version":1,"command":{"command":"tabs.close","tab":7,"discard":false}})
+            json!({"version":1,"token":"","command":{"command":"tabs.close","tab":7,"discard":false}})
         );
         writeln!(stream, "{}", json!({"version":1,"ok":false,"error":{"code":"operation_failed","message":"Unsaved draft"}})).unwrap();
     });

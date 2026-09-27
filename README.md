@@ -28,7 +28,8 @@ Install the separate **Request Eagle CLI** from the top of **Settings → Genera
 to work with the running app using JSON commands. Agents can manage collections,
 edit and save request drafts, execute requests and scripts, inspect responses,
 and change settings. The CLI is downloaded only when requested and is not included
-in the desktop app bundle. See the [CLI guide](docs/cli.md) for installation,
+in the desktop app bundle. Enable session access in General settings and copy the
+session command to authorize your agent. See the [CLI guide](docs/cli.md) for installation,
 command discovery, and examples.
 
 ## Releases

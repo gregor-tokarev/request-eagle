@@ -11,6 +11,8 @@ pub const MAX_BODY_CHUNK: usize = 256 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Call {
     pub version: u32,
+    #[serde(default)]
+    pub token: String,
     pub command: Command,
 }
 
@@ -256,6 +258,7 @@ pub fn schema() -> Value {
     json!({"protocol_version": PROTOCOL_VERSION, "commands": schemars::schema_for!(Command),
         "output": {"version": PROTOCOL_VERSION, "ok": true, "result": "command-specific JSON"},
         "error": {"version": PROTOCOL_VERSION, "ok": false, "error": {"code": "stable_code", "message": "details"}},
+        "authentication": {"setup": "Enable CLI access in Settings > General, then Copy session command", "environment": "REQUEST_EAGLE_CLI_TOKEN", "scope": "current app session"},
         "limits": {"message_bytes": MAX_MESSAGE_BYTES, "body_chunk_bytes": MAX_BODY_CHUNK},
         "workflow": ["collections.list", "requests.open", "drafts.get", "drafts.set", "drafts.save", "requests.send", "responses.get"]})
 }

@@ -8,6 +8,7 @@ import argparse
 import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import subprocess
 import threading
@@ -30,6 +31,18 @@ def call(command, *, succeeds=True, **fields):
     assert result.returncode == (0 if succeeds else 1), result
     return reply.get("result", reply.get("error"))
 
+
+# A local socket alone is not authorization, even for harmless reads.
+for token in (None, "0" * 64):
+    environment = dict(os.environ)
+    environment.pop("REQUEST_EAGLE_CLI_TOKEN", None)
+    if token is not None:
+        environment["REQUEST_EAGLE_CLI_TOKEN"] = token
+    output = subprocess.run([args.cli, "--socket", args.socket, "call", '{"command":"tabs.new"}'],
+                            env=environment, capture_output=True, text=True, timeout=10)
+    assert output.returncode == 1, output
+    assert json.loads(output.stdout)["error"]["code"] == "unauthorized", output.stdout
+assert len(call("tabs.list")) == 1
 
 body = bytes(range(256)) * 2048
 received = []

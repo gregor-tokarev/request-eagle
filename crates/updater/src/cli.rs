@@ -35,6 +35,7 @@ pub struct CliInstaller {
 struct Manifest {
     version: String,
     sha256: String,
+    target: String,
 }
 
 pub fn cli_path() -> Result<PathBuf, String> {
@@ -178,9 +179,13 @@ async fn download_to(
     semver::Version::parse(version).map_err(|e| e.to_string())?;
     let target = cli_target()?;
     let base = format!("{RELEASES}/v{version}/request-eagle-cli-{target}");
-    let manifest: Manifest =
-        serde_json::from_slice(&fetch(&format!("{base}.json"), 4096, &http).await?)
-            .map_err(|e| e.to_string())?;
+    let manifest_bytes = fetch(&format!("{base}.json"), 4096, &http).await?;
+    let signature = fetch(&format!("{base}.sig"), 1024, &http).await?;
+    verify_manifest(&manifest_bytes, &signature)?;
+    let manifest: Manifest = serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
+    if manifest.target != target {
+        return Err("CLI release target does not match this platform".into());
+    }
     if manifest.version != version {
         return Err("CLI release version does not match this app".into());
     }
@@ -188,6 +193,15 @@ async fn download_to(
     verify(&manifest, &bytes)?;
     install_bytes(&path, &manifest, &bytes)?;
     Ok((version.into(), path))
+}
+
+fn verify_manifest(bytes: &[u8], signature: &[u8]) -> Result<(), String> {
+    ring::signature::UnparsedPublicKey::new(
+        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+        include_bytes!("cli/signing-key.der"),
+    )
+    .verify(bytes, signature)
+    .map_err(|_| "CLI release signature verification failed; nothing was installed".into())
 }
 
 fn verify(manifest: &Manifest, bytes: &[u8]) -> Result<(), String> {
@@ -217,6 +231,9 @@ fn install_bytes(path: &Path, manifest: &Manifest, bytes: &[u8]) -> Result<(), S
         .set_permissions(fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
     binary.as_file().sync_all().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    super::install::verify_developer_signature(binary.path())?;
+
     let mut receipt = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     receipt
         .write_all(&serde_json::to_vec(manifest).map_err(|e| e.to_string())?)
@@ -233,41 +250,66 @@ fn install_bytes(path: &Path, manifest: &Manifest, bytes: &[u8]) -> Result<(), S
 mod tests {
     use super::*;
 
+    const FIXTURE: &[u8] = include_bytes!("cli/fixtures/manifest.json");
+    const SIGNATURE: &[u8] = include_bytes!("cli/fixtures/manifest.sig");
+
     #[test]
-    fn download_checks_version_and_hash_before_installing() {
+    fn authenticates_manifest_before_trusting_its_checksum() {
+        verify_manifest(FIXTURE, SIGNATURE).unwrap();
+        let mut tampered: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+        tampered["sha256"] = serde_json::json!(format!("{:x}", Sha256::digest(b"attacker binary")));
+        assert!(verify_manifest(&serde_json::to_vec(&tampered).unwrap(), SIGNATURE).is_err());
+        assert!(verify_manifest(FIXTURE, &[0; 384]).is_err());
+        assert!(verify_manifest(FIXTURE, &[]).is_err());
+    }
+
+    // Synthetic executable fixtures cannot carry an Apple Developer signature.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn download_checks_signature_version_target_and_hash_before_installing() {
         use gpui_kit::http_client::{FakeHttpClient, Response};
 
         smol::block_on(async {
-            for (version, hash_ok, succeeds) in [
-                ("1.2.3", true, true),
-                ("2.0.0", true, false),
-                ("1.2.3", false, false),
-            ] {
-                let bytes = b"downloaded CLI fixture".to_vec();
-                let manifest = serde_json::json!({"version": version, "sha256": if hash_ok { format!("{:x}", Sha256::digest(&bytes)) } else { "invalid".into() }}).to_string();
+            for scenario in ["valid", "version", "manifest", "signature", "binary"] {
+                let requested_version = if scenario == "version" {
+                    "2.0.0"
+                } else {
+                    "1.2.3"
+                };
                 let http = FakeHttpClient::create(move |request| {
-                    assert!(
-                        request
-                            .uri()
-                            .to_string()
-                            .starts_with(&format!("{RELEASES}/v1.2.3/request-eagle-cli-"))
-                    );
                     let body = if request.uri().path().ends_with(".json") {
-                        manifest.as_bytes().to_vec()
+                        if scenario == "manifest" {
+                            b"{}".to_vec()
+                        } else {
+                            FIXTURE.to_vec()
+                        }
+                    } else if request.uri().path().ends_with(".sig") {
+                        if scenario == "signature" {
+                            vec![0; 384]
+                        } else {
+                            SIGNATURE.to_vec()
+                        }
+                    } else if scenario == "binary" {
+                        b"tampered executable".to_vec()
                     } else {
-                        bytes.clone()
+                        b"downloaded CLI fixture".to_vec()
                     };
                     async move { Ok(Response::builder().status(200).body(body.into()).unwrap()) }
                 });
                 let directory = tempfile::tempdir().unwrap();
                 let path = directory.path().join("cli");
-                let result = download_to("1.2.3", http, path.clone()).await;
-                assert_eq!(result.is_ok(), succeeds);
-                assert_eq!(path.exists(), succeeds);
+                let result = download_to(requested_version, http, path.clone()).await;
+                assert_eq!(
+                    result.is_ok(),
+                    scenario == "valid",
+                    "{scenario}: {result:?}"
+                );
+                assert_eq!(path.exists(), scenario == "valid");
             }
         });
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn verifies_installs_and_preserves_unmanaged_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -275,6 +317,7 @@ mod tests {
         let bytes = b"executable fixture";
         let manifest = Manifest {
             version: "1.2.3".into(),
+            target: cli_target().unwrap().into(),
             sha256: format!("{:x}", Sha256::digest(bytes)),
         };
         assert!(verify(&manifest, b"tampered").is_err());

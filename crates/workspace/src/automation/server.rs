@@ -1,10 +1,11 @@
 use crate::workspace::Layout;
-use gpui_kit::{App, Entity, Window};
+use gpui_kit::{App, Entity, Task, Window};
 use request_eagle_automation::{
     Call, Command, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, prepare_directory,
     socket_directory, success,
 };
 use serde_json::{Value, json};
+use settings_ui::CliAccess;
 use smol::{
     channel,
     future::FutureExt,
@@ -27,7 +28,16 @@ impl Drop for Endpoint {
     }
 }
 
-pub(crate) fn start(layout: &Entity<Layout>, window: &mut Window, cx: &mut App) {
+pub(crate) fn start(
+    layout: &Entity<Layout>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Result<Task<()>, String> {
+    let token = cx
+        .global::<CliAccess>()
+        .token
+        .clone()
+        .ok_or("CLI access is disabled")?;
     let result = (|| -> io::Result<Endpoint> {
         let directory = socket_directory()?;
         prepare_directory(&directory)?;
@@ -45,13 +55,7 @@ pub(crate) fn start(layout: &Entity<Layout>, window: &mut Window, cx: &mut App) 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         Ok(Endpoint { listener, path })
     })();
-    let endpoint = match result {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            eprintln!("Could not start CLI connection: {error}");
-            return;
-        }
-    };
+    let endpoint = result.map_err(|error| format!("Could not start CLI connection: {error}"))?;
     let (send, receive) = channel::bounded::<Pending>(16);
     let server = cx.background_executor().spawn(async move {
         // A fixed worker pool bounds connections, buffers and queued commands.
@@ -60,9 +64,10 @@ pub(crate) fn start(layout: &Entity<Layout>, window: &mut Window, cx: &mut App) 
             .map(|_| {
                 let incoming = incoming.clone();
                 let send = send.clone();
+                let token = token.clone();
                 smol::spawn(async move {
                     while let Ok(stream) = incoming.recv().await {
-                        let _ = serve(stream, &send)
+                        let _ = serve(stream, &send, &token)
                             .or(async {
                                 smol::Timer::after(Duration::from_secs(30)).await;
                                 Err(io::Error::new(
@@ -89,7 +94,13 @@ pub(crate) fn start(layout: &Entity<Layout>, window: &mut Window, cx: &mut App) 
             if reply.is_closed() {
                 continue;
             }
-            let response = if call.version != PROTOCOL_VERSION {
+            let authorized = cx.update(|cx| cx.global::<CliAccess>().authorizes(&call.token));
+            let response = if !authorized {
+                failure(
+                    "unauthorized",
+                    "Enable CLI access in General settings and copy the session command",
+                )
+            } else if call.version != PROTOCOL_VERSION {
                 failure(
                     "protocol_mismatch",
                     "Install the CLI matching this application",
@@ -129,10 +140,14 @@ pub(crate) fn start(layout: &Entity<Layout>, window: &mut Window, cx: &mut App) 
             let _ = reply.try_send(response);
         }
     });
-    layout.update(cx, |layout, _| layout.automation_task = Some(task));
+    Ok(task)
 }
 
-async fn serve(mut stream: UnixStream, send: &channel::Sender<Pending>) -> io::Result<()> {
+async fn serve(
+    mut stream: UnixStream,
+    send: &channel::Sender<Pending>,
+    token: &str,
+) -> io::Result<()> {
     let mut reader = BufReader::new(&mut stream).take(MAX_MESSAGE_BYTES + 1);
     let mut input = Vec::new();
     reader.read_until(b'\n', &mut input).await?;
@@ -141,6 +156,10 @@ async fn serve(mut stream: UnixStream, send: &channel::Sender<Pending>) -> io::R
     } else {
         match serde_json::from_slice::<Call>(&input) {
             Err(error) => failure("invalid_input", error),
+            Ok(call) if call.token != token => failure(
+                "unauthorized",
+                "Enable CLI access in General settings and copy the session command",
+            ),
             Ok(call) => {
                 let (reply, result) = channel::bounded(1);
                 send.send((call, reply)).await.map_err(io::Error::other)?;

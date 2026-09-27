@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-const HELP: &str = "Request Eagle CLI — control the running app with JSON\n\nrequest-eagle-cli schema\nrequest-eagle-cli instances\nrequest-eagle-cli [--socket PATH] [--timeout-ms N] call JSON\nrequest-eagle-cli [--socket PATH] call - < command.json\n\nUse schema to discover commands and their exact inputs. Output is always JSON\nexcept help/version. Exit 0 means success; 1 means an operation/connection failed;\n2 means invalid CLI input. No interactive prompts. Multiple app instances require\n--socket. Request execution is asynchronous: send, then poll responses.get.\n";
+const HELP: &str = "Request Eagle CLI — control the running app with JSON\n\nrequest-eagle-cli schema\nrequest-eagle-cli instances\nrequest-eagle-cli [--socket PATH] [--timeout-ms N] call JSON\nrequest-eagle-cli [--socket PATH] call - < command.json\n\nUse schema to discover commands and their exact inputs. Output is always JSON\nexcept help/version. Exit 0 means success; 1 means an operation/connection failed;\n2 means invalid CLI input. No interactive prompts. Multiple app instances require\n--socket. Enable CLI access in General settings and copy the session command\n(REQUEST_EAGLE_CLI_TOKEN) before connecting. Request execution is asynchronous: send, then poll responses.get.\n";
 
 fn main() {
     std::process::exit(run());
@@ -111,7 +111,7 @@ fn execute(mut args: Vec<String>) -> Result<Value, (i32, String)> {
                         return Err((
                             1,
                             format!(
-                                "Expected one running app, found {}. Start Request Eagle or use instances and --socket.",
+                                "Expected one running app, found {}. Start Request Eagle, enable CLI access in General settings, or use instances and --socket.",
                                 available.len()
                             ),
                         ));
@@ -179,6 +179,7 @@ fn call(path: &Path, command: Command, timeout: Duration) -> io::Result<Value> {
     stream.set_write_timeout(Some(timeout))?;
     let mut bytes = serde_json::to_vec(&Call {
         version: PROTOCOL_VERSION,
+        token: std::env::var("REQUEST_EAGLE_CLI_TOKEN").unwrap_or_default(),
         command,
     })?;
     bytes.push(b'\n');

@@ -10,7 +10,8 @@ and ARM64 Linux (glibc 2.39+).
 ## Install
 
 Open **Settings → General → Request Eagle CLI → Install CLI**. This downloads the
-separate binary for the installed app version, verifies its SHA-256 checksum, and
+separate binary for the installed app version, verifies a signed release manifest
+and its SHA-256 checksum, and
 installs it at `~/.request-eagle/bin/request-eagle-cli`. It never requests root or
 modifies your shell configuration. Add it to PATH:
 
@@ -30,6 +31,14 @@ source installation command. Remove the installed binary and its adjacent `.json
 receipt to uninstall; remove the PATH entry if you added it.
 
 ## Agent workflow
+
+In **Settings → General**, choose **Enable CLI access**, then **Copy session
+command** and run that command in the agent's shell. It sets
+`REQUEST_EAGLE_CLI_TOKEN` to a random credential valid for this app session.
+Access is off by default, independent of whether the CLI is installed. Disabling
+access or quitting the app revokes the token. Enabling it again creates a new one.
+Only share the token with agents you authorize to read and modify app data.
+
 
 ```sh
 request-eagle-cli schema
@@ -109,12 +118,16 @@ logging their contents when running agents.
 
 ## Instances and local protocol
 
-Each app instance creates `~/.request-eagle/automation/<pid>.sock` in a private
-0700 directory, with a 0600 Unix socket. Only processes running as the same user
-can access it. There is no network listener. The endpoint exists while the app is
-running regardless of whether the optional client is installed.
+After explicit session approval, an app instance creates
+`~/.request-eagle/automation/<pid>.sock` in a private 0700 directory, with a 0600
+Unix socket. There is no network listener. Every command, including status reads,
+requires the approved session token before dispatch. Disabling access closes the
+listener and rejects queued work. No token is persisted in the app's files.
+The socket permissions and bearer token prevent accidental or unauthorized client
+access; they do not sandbox a malicious process that can inspect your user session's
+memory or steal credentials from an authorized agent.
 
-`instances` lists live applications and their window titles. If multiple apps are
+`instances` lists enabled applications, with window titles for authorized sessions. If multiple apps are
 running, `call` requires `--socket PATH` before `call`; it never silently chooses
 one. Slow or incompatible listeners remain listed with an error and still count
 toward ambiguity. `--timeout-ms N` controls client I/O deadlines (default 30 seconds).
@@ -123,10 +136,31 @@ set it for both app and CLI. Label development windows with
 `REQUEST_EAGLE_WINDOW_TITLE='Request Eagle (CLI development)'`.
 
 The wire format is one newline-delimited JSON call per connection:
-`{"version":1,"command":{"command":"tabs.list"}}`. The response uses the CLI
+`{"version":1,"token":"<session token>","command":{"command":"tabs.list"}}`. The response uses the CLI
 output envelope. Frames are limited to 8 MiB and server connections time out
 in 30 seconds. Version mismatches fail explicitly. Requests execute on the app's
 UI thread; request network work and installer downloads remain asynchronous.
+
+For explicitly launched automation sessions, set `REQUEST_EAGLE_AUTOMATION_TOKEN`
+to 64 cryptographically random hexadecimal characters when starting the app, and
+supply that same credential as `REQUEST_EAGLE_CLI_TOKEN` only to authorized clients.
+This is an alternative opt-in for test/agent launchers; ordinary launches stay off.
+Do not use a fixed example token or put credentials in logs.
+
+## Release signing
+
+CLI manifests bind the app version, platform target and executable SHA-256. The
+installer authenticates them with the RSA public key embedded in the app before
+trusting any release metadata. macOS additionally verifies the executable's Apple
+Developer signature and expected Team ID before replacing an installation.
+
+`scripts/package-cli.sh` produces the binaries and manifests. After macOS signing
+and notarization, `scripts/sign-cli.sh` signs every platform's manifest using the
+repository Actions secret `CLI_SIGNING_KEY`; it refuses a key that does not match
+`crates/updater/src/cli/signing-key.der`. The private key is never committed or
+published. A key rotation must ship a new embedded public key in the desktop app
+and update the Actions secret together. Publish each `.sig` alongside its binary
+and `.json`. Unsigned or incorrectly signed releases cannot be installed.
 
 ## Development checks
 
@@ -139,7 +173,7 @@ cargo build -p request-eagle -p request-eagle-cli
 xvfb-run -a ./scripts/check-cli.sh
 ```
 
-This covers unsaved drafts, saving and moving requests, script trust and execution,
+This covers missing/incorrect session credential rejection, unsaved drafts, saving and moving requests, script trust and execution,
 collection variables, lossless paginated binary responses, cookies, preference
 synchronization, and light/dark appearance at 12, 16 and 24 px. The launcher gives
 the test app its own home directory, collections, socket, and window title.

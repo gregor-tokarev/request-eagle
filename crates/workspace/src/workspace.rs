@@ -17,6 +17,7 @@ use updater::Updater;
 pub(super) struct Layout {
     pub(crate) updater: Entity<Updater>,
     pub(crate) automation_task: Option<Task<()>>,
+    _automation_subscription: Option<Subscription>,
     top_panel: Entity<TopPanel>,
     pub(super) sidebar: Entity<CollectionPanel>,
     pub(super) main_view: Entity<MainView>,
@@ -135,6 +136,7 @@ impl Layout {
         Self {
             updater,
             automation_task: None,
+            _automation_subscription: None,
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             main_view,
@@ -396,7 +398,32 @@ pub fn init(
     on_toggle_sidebar(&layout, cx);
     on_open_settings(&layout, window.window_handle(), cx);
 
-    crate::automation::start(&layout, window, cx);
+    layout.update(cx, |layout, cx| {
+        if cx.global::<settings_ui::CliAccess>().token.is_some() {
+            match crate::automation::start(&cx.entity(), window, cx) {
+                Ok(task) => layout.automation_task = Some(task),
+                Err(error) => cx.set_global(settings_ui::CliAccess {
+                    token: None,
+                    error: Some(error),
+                }),
+            }
+        }
+        layout._automation_subscription = Some(cx.observe_global_in::<settings_ui::CliAccess>(
+            window,
+            |layout, window, cx| {
+                layout.automation_task = None;
+                if cx.global::<settings_ui::CliAccess>().token.is_some() {
+                    match crate::automation::start(&cx.entity(), window, cx) {
+                        Ok(task) => layout.automation_task = Some(task),
+                        Err(error) => cx.set_global(settings_ui::CliAccess {
+                            token: None,
+                            error: Some(error),
+                        }),
+                    }
+                }
+            },
+        ));
+    });
 
     layout.into()
 }

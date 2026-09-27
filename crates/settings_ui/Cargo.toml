@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+getrandom = "0.3"
 gpui-kit = { workspace = true, features = ["component"] }
 keybindings_service = { path = "../keybindings_service" }
 preferences = { path = "../preferences" }
