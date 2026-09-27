@@ -339,3 +339,156 @@ fn vim_does_not_intercept_the_send_shortcut(cx: &mut TestAppContext) {
     assert_eq!(sent.get(), 2);
     assert_eq!(value(&view, cx), "text");
 }
+
+#[gpui_kit::test]
+fn linewise_paste_preserves_trailing_and_leading_blank_lines(cx: &mut TestAppContext) {
+    for (source, keys, expected, expected_cursor) in [
+        ("one\n", "y y G p", "one\n\none", 5),
+        ("one\n", "y y G P", "one\none\n", 4),
+        ("\none\ntwo", "y y j P", "\n\none\ntwo", 1),
+        ("\none\ntwo", "y y j p", "\none\n\ntwo", 5),
+        ("\none\ntwo", "2 y y G p", "\none\ntwo\n\none", 9),
+    ] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "{keys}");
+        assert_eq!(cursor(&view, cx), expected_cursor, "{keys}");
+    }
+}
+
+#[gpui_kit::test]
+fn opening_changing_and_pasting_lines_preserve_crlf(cx: &mut TestAppContext) {
+    for (source, keys, expected) in [
+        ("one\r\ntwo", "o x escape", "one\r\nx\r\ntwo"),
+        ("one\r\ntwo", "O x escape", "x\r\none\r\ntwo"),
+        ("one\r\ntwo", "G o x escape", "one\r\ntwo\r\nx"),
+        ("one\r\ntwo", "c c x escape", "x\r\ntwo"),
+        ("one\r\ntwo\r\nlast", "2 c c x escape", "x\r\nlast"),
+        ("one\r\ntwo", "G y y p", "one\r\ntwo\r\ntwo"),
+        ("one\r\n", "y y G p", "one\r\n\r\none"),
+    ] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "{keys}");
+    }
+}
+
+#[gpui_kit::test]
+fn clicking_elsewhere_cancels_a_pending_operator_and_count(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one two three", true);
+    // Locate a real caret on "two", then click it while an operator is pending.
+    cx.simulate_keystrokes("w");
+    let point = cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        view.read(cx)
+            .editor
+            .read(cx)
+            .cursor_layout()
+            .unwrap()
+            .0
+            .center()
+    });
+    cx.simulate_keystrokes("0 2 d");
+    cx.simulate_click(point, gpui_kit::Modifiers::default());
+    assert_eq!(cursor(&view, cx), 4);
+    cx.simulate_keystrokes("w");
+    assert_eq!(value(&view, cx), "one two three");
+    assert_eq!(cursor(&view, cx), 8);
+}
+
+#[gpui_kit::test]
+fn linewise_yanks_preserve_the_column_and_backward_motions(cx: &mut TestAppContext) {
+    for (keys, expected_cursor) in [
+        ("3 l y y", 3),
+        ("3 l y j", 3),
+        ("3 l Y", 3),
+        ("j 3 l y k", 3),
+    ] {
+        let (view, cx) = setup(cx, "abcdefgh\nabcdefgh", true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), "abcdefgh\nabcdefgh");
+        assert_eq!(cursor(&view, cx), expected_cursor, "{keys}");
+    }
+}
+
+#[gpui_kit::test]
+fn word_operators_preserve_line_endings_and_count_empty_lines(cx: &mut TestAppContext) {
+    for (source, keys, expected) in [
+        ("word\nnext", "d w", "\nnext"),
+        ("word  \n  next", "d W", "\n  next"),
+        ("word\r\nnext", "d w", "\r\nnext"),
+        ("one two\nnext", "2 d w", "\nnext"),
+        ("word\nnext\nlast", "2 d w", "last"),
+        ("word\n\nnext", "2 d w", "next"),
+        ("\nnext", "d w", "next"),
+    ] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "{source:?}: {keys}");
+    }
+    let (view, cx) = setup(cx, "word\nnext", true);
+    cx.simulate_keystrokes("y w");
+    cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "word"));
+    assert_eq!(value(&view, cx), "word\nnext");
+}
+
+#[gpui_kit::test]
+fn vertical_motions_remember_the_column_and_end_of_line(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abcdef\nx\nabcdefghi", true);
+    cx.simulate_keystrokes("4 l j j");
+    assert_eq!(cursor(&view, cx), 13);
+    cx.simulate_keystrokes("k k");
+    assert_eq!(cursor(&view, cx), 4);
+    cx.simulate_keystrokes("$ j j");
+    assert_eq!(cursor(&view, cx), 17);
+    cx.simulate_keystrokes("h k k");
+    assert_eq!(cursor(&view, cx), 5);
+    cx.simulate_keystrokes("0 j j");
+    assert_eq!(cursor(&view, cx), 9);
+    cx.simulate_keystrokes("k 0 k");
+    assert_eq!(cursor(&view, cx), 0);
+}
+
+#[gpui_kit::test]
+fn redo_honors_a_count(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abc", true);
+    cx.simulate_keystrokes("x x");
+    assert_eq!(value(&view, cx), "c");
+    cx.simulate_keystrokes("2 u");
+    assert_eq!(value(&view, cx), "abc");
+    cx.simulate_keystrokes("2 ctrl-r");
+    assert_eq!(value(&view, cx), "c");
+}
+
+#[gpui_kit::test]
+fn visual_o_swaps_the_active_end_without_editing(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abcdef\nsecond\nthird", true);
+    cx.simulate_keystrokes("l v 2 l o h d");
+    assert_eq!(value(&view, cx), "ef\nsecond\nthird");
+    cx.simulate_keystrokes("u g g V j o j d");
+    assert_eq!(value(&view, cx), "abcdef\nthird");
+}
+
+#[gpui_kit::test]
+fn capital_delete_and_change_honor_line_counts(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "first\nsecond\nthird", true);
+    cx.simulate_keystrokes("l 2 D");
+    assert_eq!(value(&view, cx), "f\nthird");
+    cx.simulate_keystrokes("u 0 l 2 C");
+    cx.simulate_input("new");
+    cx.simulate_keystrokes("escape");
+    assert_eq!(value(&view, cx), "fnew\nthird");
+}
+
+#[gpui_kit::test]
+fn whitespace_only_first_nonblank_commands_match_vim(cx: &mut TestAppContext) {
+    // Vim 9.1 with -Nu NONE places ^/gg/G on the last blank, and I after it.
+    // Returning column zero here would change Vim's behavior.
+    for keys in ["^", "g g", "G"] {
+        let (view, cx) = setup(cx, " \t  ", true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(cursor(&view, cx), 3, "{keys}");
+        cx.simulate_keystrokes("I x escape");
+        assert_eq!(value(&view, cx), " \t  x");
+    }
+}

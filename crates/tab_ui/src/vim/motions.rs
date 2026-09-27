@@ -7,6 +7,12 @@ pub(super) struct Motion {
     pub linewise: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Column {
+    Character(usize),
+    End,
+}
+
 pub(super) fn next(text: &Rope, offset: usize) -> usize {
     offset + text.char_at(offset).map_or(0, char::len_utf8)
 }
@@ -41,6 +47,24 @@ pub(super) fn normal_cursor(text: &Rope, offset: usize) -> usize {
     })
 }
 
+pub(super) fn newline(text: &Rope, offset: usize) -> &'static str {
+    let row = text.offset_to_point(offset).row;
+    let end = text.line_end_offset(row);
+    let newline = if text.char_at(end) == Some('\n') {
+        end
+    } else if row > 0 {
+        previous(text, text.line_start_offset(row))
+    } else {
+        return "\n";
+    };
+
+    if newline > 0 && text.char_at(previous(text, newline)) == Some('\r') {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 pub(super) fn first_nonblank(text: &Rope, offset: usize) -> usize {
     let line = line(text, offset);
     let mut position = line.start;
@@ -73,7 +97,14 @@ fn word_class(character: Option<char>, big: bool) -> u8 {
     }
 }
 
-pub(super) fn motion(text: &Rope, cursor: usize, key: &str, count: usize) -> Option<Motion> {
+pub(super) fn motion(
+    text: &Rope,
+    cursor: usize,
+    key: &str,
+    count: usize,
+    column: Option<Column>,
+    operator: bool,
+) -> Option<Motion> {
     let count = count.max(1);
     let mut offset = cursor;
     let mut inclusive = false;
@@ -92,21 +123,31 @@ pub(super) fn motion(text: &Rope, cursor: usize, key: &str, count: usize) -> Opt
         }
         "j" | "down" | "k" | "up" => {
             let current = text.offset_to_point(cursor);
-            let column = text
-                .slice(text.line_start_offset(current.row)..cursor)
-                .chars()
-                .count();
+            let column = column.unwrap_or_else(|| {
+                Column::Character(
+                    text.slice(text.line_start_offset(current.row)..cursor)
+                        .chars()
+                        .count(),
+                )
+            });
             let row = if matches!(key, "j" | "down") {
                 current.row.saturating_add(count).min(text.lines_len() - 1)
             } else {
                 current.row.saturating_sub(count)
             };
             let target = line(text, text.line_start_offset(row));
-            offset = target.start;
-
-            for _ in 0..column {
-                offset = next(text, offset).min(target.end);
-            }
+            offset = match column {
+                Column::End => normal_cursor(text, target.end),
+                Column::Character(column) => {
+                    target.start
+                        + text
+                            .slice(target)
+                            .chars()
+                            .take(column)
+                            .map(char::len_utf8)
+                            .sum::<usize>()
+                }
+            };
 
             linewise = true;
         }
@@ -124,16 +165,42 @@ pub(super) fn motion(text: &Rope, cursor: usize, key: &str, count: usize) -> Opt
             linewise = true;
         }
         "w" | "W" => {
-            for _ in 0..count {
+            for index in 0..count {
+                let start = offset;
+                let current_line = line(text, start);
                 let class = word_class(text.char_at(offset), key == "W");
 
-                while offset < text.len() && word_class(text.char_at(offset), key == "W") == class {
+                while offset < current_line.end
+                    && word_class(text.char_at(offset), key == "W") == class
+                {
                     offset = next(text, offset);
                 }
 
                 while offset < text.len() && word_class(text.char_at(offset), true) == 0 {
+                    if operator
+                        && index + 1 == count
+                        && offset >= current_line.end
+                        && !current_line.is_empty()
+                    {
+                        offset = current_line.end;
+                        break;
+                    }
+
+                    // Empty lines count as words, including within a count.
+                    if offset > start && line(text, offset).is_empty() {
+                        break;
+                    }
+
                     offset = next(text, offset);
                 }
+            }
+
+            if operator
+                && text.offset_to_point(offset).row > text.offset_to_point(cursor).row
+                && offset == line(text, offset).end
+                && cursor <= first_nonblank(text, cursor)
+            {
+                linewise = true;
             }
         }
         "b" | "B" => {
