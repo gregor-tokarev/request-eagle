@@ -13,3 +13,11 @@ Additional native checks verified fresh generated values on resend and reading e
 The video is a continuous X11 recording of the labeled native application, with no compositing or simulated UI. The app runs against `echo.py` on localhost:18765 with an isolated collection directory.
 
 SHA-256: `834019056e66abadca905f8b502f5d74ac4b0566eac75ae8dca37513b7244867`
+
+## Repeat Linux smoke test
+
+A second clean native app session passed on source `09aed66`, with a newly seeded collection environment and a local HTTP echo server.
+
+[Watch the repeat smoke recording](linux-smoke.mp4). The recording covers URL/query/header/JSON completion, Enter/Tab acceptance, successful HTTP requests, unknown references blocking dispatch, and saving placeholders.
+
+Additional native checks passed: undoing completion, generated UUID freshness, reading an external environment edit on resend, closing and reopening the saved request, unchanged saved templates, invalid environment blocking HTTP, and recovery after repairing the file. See `linux-smoke-results.json` for the echoed requests.

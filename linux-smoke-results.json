@@ -1,0 +1,50 @@
+{
+  "refreshed": {
+    "path": "/echo?sent_at=1790482534",
+    "headers": {
+      "x-demo": "Refreshed during smoke",
+      "content-type": "application/json",
+      "content-length": "127",
+      "accept": "*/*",
+      "accept-encoding": "gzip",
+      "host": "127.0.0.1:18766"
+    },
+    "body": {
+      "message": "Refreshed during smoke",
+      "id": "5e1499da-5ed3-446a-a7a9-7808bba81b26",
+      "time": "2026-09-27T04:15:34.083Z"
+    }
+  },
+  "reopened": {
+    "path": "/echo?sent_at=1790482537",
+    "headers": {
+      "x-demo": "Refreshed during smoke",
+      "content-type": "application/json",
+      "content-length": "127",
+      "accept": "*/*",
+      "accept-encoding": "gzip",
+      "host": "127.0.0.1:18766"
+    },
+    "body": {
+      "message": "Refreshed during smoke",
+      "id": "f74e637f-1cfa-4716-a8dc-60cc7298f150",
+      "time": "2026-09-27T04:15:37.112Z"
+    }
+  },
+  "recovered": {
+    "path": "/echo?sent_at=1790482539",
+    "headers": {
+      "x-demo": "Fresh Linux smoke",
+      "content-type": "application/json",
+      "content-length": "122",
+      "accept": "*/*",
+      "accept-encoding": "gzip",
+      "host": "127.0.0.1:18766"
+    },
+    "body": {
+      "message": "Fresh Linux smoke",
+      "id": "30d15ef9-bc01-437d-aca4-2ac8ddd8be36",
+      "time": "2026-09-27T04:15:39.591Z"
+    }
+  }
+}
