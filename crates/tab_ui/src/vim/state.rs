@@ -33,6 +33,7 @@ impl Mode {
 }
 
 struct Search {
+    operator: Option<char>,
     cursor: usize,
     count: usize,
     mode: Mode,
@@ -109,7 +110,13 @@ impl Vim {
         let selection_changes = cx.observe(&editor, |this, editor, cx| {
             if this.search.is_some() {
                 if !editor.read(cx).search_session().open {
-                    this.finish_search(false, cx);
+                    // Closing the native panel without accepting a Vim search
+                    // cancels any pending operator.
+                    let cancel = this
+                        .search
+                        .as_ref()
+                        .is_some_and(|search| search.operator.is_some());
+                    let _ = this.finish_search(cancel, cx);
                 }
 
                 return;
@@ -118,12 +125,20 @@ impl Vim {
             let selection = editor.read(cx).selected_range();
 
             if selection != this.selection {
-                this.selection = selection;
+                this.selection = selection.clone();
                 this.reset_pending();
                 this.desired_column = None;
 
                 if matches!(this.mode, Mode::Visual { .. }) {
                     this.set_mode(Mode::Normal, cx);
+                }
+
+                if this.enabled && this.mode == Mode::Normal && selection.is_empty() {
+                    let cursor = normal_cursor(editor.read(cx).text(), selection.start);
+
+                    if cursor != selection.start {
+                        this.normal(cursor, cx);
+                    }
                 }
             }
         });
@@ -414,10 +429,12 @@ impl Vim {
         self.normal(cursor, cx);
     }
 
-    fn finish_search(&mut self, cancel: bool, cx: &mut Context<Self>) {
-        let Some(search) = self.search.take() else {
-            return;
-        };
+    fn finish_search(
+        &mut self,
+        cancel: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<(char, usize, usize)> {
+        let search = self.search.take()?;
         let editor = self.editor.read(cx);
         let matches = editor.search_session().matcher.matched_ranges();
         let target = if cancel || matches.is_empty() {
@@ -431,6 +448,11 @@ impl Vim {
         let target = normal_cursor(editor.text(), target);
         self.set_mode(search.mode, cx);
         self.desired_column = None;
+
+        if let Some(operator) = search.operator {
+            self.normal(search.cursor, cx);
+            return (!cancel && !matches.is_empty()).then_some((operator, search.cursor, target));
+        }
 
         if let Mode::Visual {
             anchor, linewise, ..
@@ -446,6 +468,43 @@ impl Vim {
             );
             self.select(self.visual_range(cx).unwrap(), cx);
         } else {
+            self.normal(target, cx);
+        }
+
+        None
+    }
+
+    fn operate_search(
+        &mut self,
+        operator: char,
+        cursor: usize,
+        target: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if cursor == target {
+            return;
+        }
+
+        let text = self.editor.read(cx).text();
+        let mut range = cursor.min(target)..cursor.max(target);
+        let mut linewise = false;
+
+        // Search is an exclusive motion. At column zero on another line,
+        // exclude its preceding newline, or promote the range to whole lines
+        // when it begins at/before the first nonblank character (Vim :help exclusive).
+        if range.end == line(text, range.end).start {
+            if range.start <= first_nonblank(text, range.start) {
+                range.start = line(text, range.start).start;
+                linewise = true;
+            } else {
+                range.end = line(text, previous(text, range.end)).end;
+            }
+        }
+
+        self.operate(operator, range, linewise, window, cx);
+
+        if operator == 'y' && linewise && target < cursor {
             self.normal(target, cx);
         }
     }
@@ -467,11 +526,16 @@ impl Vim {
         let cancel = stroke.key == "escape" || (stroke.modifiers.control && stroke.key == "[");
 
         if cancel || (stroke.key == "enter" && stroke.modifiers == Modifiers::default()) {
-            self.finish_search(cancel, cx);
+            let operation = self.finish_search(cancel, cx);
             self.editor.update(cx, |editor, cx| {
                 editor.close_search(cx);
                 editor.focus(window, cx);
             });
+
+            if let Some((operator, cursor, target)) = operation {
+                self.operate_search(operator, cursor, target, window, cx);
+            }
+
             window.prevent_default();
             cx.stop_propagation();
         }
@@ -501,7 +565,11 @@ impl Vim {
                 && keymap
                     .possible_next_bindings_for_input(&input, &event.context_stack)
                     .iter()
-                    .any(|binding| !binding.action().name().starts_with("input::")))
+                    .any(|binding| {
+                        let action = binding.action().name();
+                        !action.starts_with("input::")
+                            || matches!(action, "input::Copy" | "input::Search")
+                    }))
             {
                 self.reset_pending();
                 return;
@@ -769,7 +837,7 @@ impl Vim {
             return;
         }
 
-        if operator.is_some() {
+        if operator.is_some() && !matches!(key, "/" | "n" | "N") {
             return;
         }
 
@@ -860,6 +928,7 @@ impl Vim {
             }
             "/" => {
                 self.search = Some(Search {
+                    operator: operator.map(|(operator, _)| operator),
                     cursor,
                     count,
                     mode: self.mode,
@@ -886,7 +955,9 @@ impl Vim {
                     };
                     let target = normal_cursor(&text, matches[index].start);
 
-                    if let Mode::Visual {
+                    if let Some((operator, _)) = operator {
+                        self.operate_search(operator, cursor, target, window, cx);
+                    } else if let Mode::Visual {
                         anchor, linewise, ..
                     } = self.mode
                     {

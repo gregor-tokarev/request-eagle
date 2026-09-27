@@ -1319,3 +1319,205 @@ fn external_line_copies_use_linewise_paste_without_changing_characterwise_regist
         }
     }
 }
+
+#[gpui_kit::test]
+fn native_caret_changes_stay_on_graphemes_in_normal_mode(cx: &mut TestAppContext) {
+    for (text, end, expected) in [
+        ("abc", 3, 2),
+        ("abé", 4, 2),
+        ("ae\u{301}", 4, 1),
+        ("abc\n", 4, 4),
+    ] {
+        let (view, cx) = setup(cx, text, true);
+        cx.update(|_, cx| {
+            view.read(cx)
+                .editor
+                .clone()
+                .update(cx, |editor, cx| editor.set_selected_range(end..end, cx))
+        });
+        assert_eq!(cursor(&view, cx), expected);
+        cx.simulate_keystrokes("i");
+        cx.update(|_, cx| {
+            view.read(cx)
+                .editor
+                .clone()
+                .update(cx, |editor, cx| editor.set_selected_range(end..end, cx))
+        });
+        assert_eq!(cursor(&view, cx), end);
+        assert_eq!(value(&view, cx), text);
+    }
+}
+
+#[gpui_kit::test]
+fn native_copy_and_search_chords_keep_their_prefixes(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abcd", true);
+    cx.update(|_, cx| {
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new("g c", gpui_kit::component::input::Copy, Some("Input")),
+            gpui_kit::KeyBinding::new("g s", gpui_kit::component::input::Search, Some("Input")),
+        ]);
+        view.read(cx)
+            .editor
+            .clone()
+            .update(cx, |editor, cx| editor.set_selected_range(0..2, cx));
+    });
+    cx.simulate_keystrokes("g c");
+    cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "ab"));
+    cx.simulate_keystrokes("g s");
+    cx.simulate_input("cd");
+    cx.read(|cx| {
+        let search = view.read(cx).editor.read(cx).search_session();
+        assert!(search.open);
+        assert_eq!(search.query, "cd");
+    });
+    assert_eq!(value(&view, cx), "abcd");
+}
+
+#[gpui_kit::test]
+fn operators_apply_prompted_and_repeated_search_motions(cx: &mut TestAppContext) {
+    for (keys, expected, copied, inserting) in [
+        ("d", "two one two end", "one ", false),
+        ("2 d", "two end", "one two one ", false),
+        ("d 2", "two end", "one two one ", false),
+        ("y", "one two one two end", "one ", false),
+        ("c", "two one two end", "one ", true),
+    ] {
+        for prompted in [false, true] {
+            let (view, cx) = setup(cx, "one two one two end", true);
+            if prompted {
+                cx.simulate_keystrokes(&format!("{keys} /"));
+                cx.simulate_input("two");
+                cx.simulate_keystrokes("enter");
+            } else {
+                cx.simulate_keystrokes("/");
+                cx.simulate_input("two");
+                cx.simulate_keystrokes(&format!("escape {keys} n"));
+            }
+            assert_eq!(value(&view, cx), expected, "{keys}, prompted={prompted}");
+            cx.read(|cx| {
+                assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), copied);
+                assert_eq!(
+                    view.read(cx).vim.read(cx).normal_editor().is_none(),
+                    inserting
+                );
+            });
+            if inserting {
+                cx.simulate_input("new ");
+                assert_eq!(value(&view, cx), format!("new {expected}"));
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn cancelled_or_unmatched_search_operators_leave_text_and_register_unchanged(
+    cx: &mut TestAppContext,
+) {
+    for (query, completion) in [
+        ("two", "escape"),
+        ("two", "ctrl-["),
+        ("absent", "enter"),
+        ("two", "close"),
+    ] {
+        let (view, cx) = setup(cx, "one two one", true);
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("kept".into()))
+        });
+        cx.simulate_keystrokes("l d /");
+        cx.simulate_input(query);
+        if completion == "close" {
+            cx.update(|_, cx| {
+                view.read(cx)
+                    .editor
+                    .clone()
+                    .update(cx, |editor, cx| editor.close_search(cx))
+            });
+        } else {
+            cx.simulate_keystrokes(completion);
+        }
+        assert_eq!(value(&view, cx), "one two one");
+        assert_eq!(cursor(&view, cx), 1);
+        cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "kept"));
+    }
+}
+
+#[gpui_kit::test]
+fn search_operators_follow_vim_exclusive_line_boundaries_in_both_directions(
+    cx: &mut TestAppContext,
+) {
+    // Compared with Vim 9.1 using an unconfigured instance and the same n/N motions.
+    for ending in ["\n", "\r\n"] {
+        for (source, position, query, keys, expected, copied, linewise) in [
+            (
+                "  one\ntwo\nthree",
+                "2 l",
+                "two",
+                "d n",
+                "two\nthree",
+                "  one\n",
+                true,
+            ),
+            (
+                "  one\ntwo\nthree",
+                "3 l",
+                "two",
+                "d n",
+                "  o\ntwo\nthree",
+                "ne",
+                false,
+            ),
+            (
+                "one\ntwo\nthree",
+                "j 0",
+                "one",
+                "d N",
+                "two\nthree",
+                "one\n",
+                true,
+            ),
+            (
+                "one\ntwo\nthree",
+                "j 0",
+                "ne",
+                "d N",
+                "o\ntwo\nthree",
+                "ne",
+                false,
+            ),
+            (
+                "  one\ntwo\nthree",
+                "j 0",
+                "one",
+                "d N",
+                "two\nthree",
+                "  one\n",
+                true,
+            ),
+            (
+                "one\ntwo\nthree",
+                "j l",
+                "one",
+                "d N",
+                "wo\nthree",
+                "one\nt",
+                false,
+            ),
+        ] {
+            let (view, cx) = setup(cx, &source.replace('\n', ending), true);
+            cx.simulate_keystrokes("/");
+            cx.simulate_input(query);
+            cx.simulate_keystrokes(&format!("escape {position} {keys}"));
+            assert_eq!(
+                value(&view, cx),
+                expected.replace('\n', ending),
+                "{position} {keys}"
+            );
+            cx.read(|cx| {
+                let clipboard = cx.read_from_clipboard().unwrap();
+                assert_eq!(clipboard.text().unwrap(), copied.replace('\n', ending));
+                let gpui_kit::ClipboardEntry::String(entry) = &clipboard.entries()[0] else { panic!("expected text") };
+                assert_eq!(entry.metadata_json::<serde_json::Value>().unwrap()["request_eagle_vim_linewise"], linewise);
+            });
+        }
+    }
+}

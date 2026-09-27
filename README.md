@@ -87,6 +87,7 @@ bindings include `h j k l`, `w b e` (and `W B E`), `0 ^ $`, `gg G`, counts,
 `d c y` with motions or doubled for lines, `x`, `p P`, `u`/Ctrl+R, `v V`,
 `I A o O`, and `/`/`n N` through the editor's search. This is a core Vim binding
 set; Ex commands, macros, text objects, and dot-repeat are not implemented.
+Operators also accept `/`, `n`, and `N` as motions.
 For `/` searches, Enter accepts the match (including a preceding count), and
 Escape restores the original position or Visual selection. Visual `u`/`U`
 changes case, and Visual `D C Y S X` operates on the selected lines.
