@@ -2445,7 +2445,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ff0dedf715f86c0ea04840301591d678060d5193#ff0dedf715f86c0ea04840301591d678060d5193"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=cad285211ea0ab2fb775d33fee33b6f04dbf53ad#cad285211ea0ab2fb775d33fee33b6f04dbf53ad"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2482,7 +2482,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ff0dedf715f86c0ea04840301591d678060d5193#ff0dedf715f86c0ea04840301591d678060d5193"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=cad285211ea0ab2fb775d33fee33b6f04dbf53ad#cad285211ea0ab2fb775d33fee33b6f04dbf53ad"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2529,7 +2529,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ff0dedf715f86c0ea04840301591d678060d5193#ff0dedf715f86c0ea04840301591d678060d5193"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=cad285211ea0ab2fb775d33fee33b6f04dbf53ad#cad285211ea0ab2fb775d33fee33b6f04dbf53ad"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ff0dedf715f86c0ea04840301591d678060d5193#ff0dedf715f86c0ea04840301591d678060d5193"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=cad285211ea0ab2fb775d33fee33b6f04dbf53ad#cad285211ea0ab2fb775d33fee33b6f04dbf53ad"
 dependencies = [
  "anyhow",
  "gpui-pre",

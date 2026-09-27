@@ -139,7 +139,7 @@ index 6d2be4a..0d7d934 100644
      fn test_plain_text_decorations_include_unstyled_gaps() {
          let decoration = HighlightStyle {
 diff --git a/crates/base/src/input/editor/lsp/completions.rs b/crates/base/src/input/editor/lsp/completions.rs
-index 5e31131..5f99927 100644
+index 5e31131..0da5f81 100644
 --- a/crates/base/src/input/editor/lsp/completions.rs
 +++ b/crates/base/src/input/editor/lsp/completions.rs
 @@ -181,6 +181,7 @@ impl InputBaseState<EditorMode> {
@@ -174,7 +174,7 @@ index 5e31131..5f99927 100644
          self.extras.context_menu_content.code_action.open = false;
          self.extras.context_menu_task = Task::ready(Ok(()));
          cx.notify();
-@@ -241,6 +245,20 @@ impl InputBaseState<EditorMode> {
+@@ -241,6 +245,21 @@ impl InputBaseState<EditorMode> {
          window: &mut Window,
          cx: &mut Context<Self>,
      ) -> bool {
@@ -183,7 +183,8 @@ index 5e31131..5f99927 100644
 +            && completion.open
 +            && !completion.snapshot.as_ref().is_some_and(|(text, offset)| {
 +                *offset == self.cursor()
-+                    && ropey::extra::esoterica::ropes_are_instances(text, &self.text)
++                    && (ropey::extra::esoterica::ropes_are_instances(text, &self.text)
++                        || text == &self.text)
 +            })
 +        {
 +            // Old suggestions remain visible during refresh, but Enter must
@@ -195,7 +196,7 @@ index 5e31131..5f99927 100644
          let closes_overlay =
              crate::input::Enter::is_primary(&*action) || action.partial_eq(&crate::input::Escape);
          let kind = if self.extras.context_menu_content.completion.open {
-@@ -257,7 +275,8 @@ impl InputBaseState<EditorMode> {
+@@ -257,7 +276,8 @@ impl InputBaseState<EditorMode> {
          if handled && closes_overlay {
              match kind {
                  super::InputOverlayKind::Completion => {
@@ -240,7 +241,7 @@ index bae1c9a..d9db70d 100644
          }
      }
 diff --git a/crates/component/src/input/popovers/completion_menu.rs b/crates/component/src/input/popovers/completion_menu.rs
-index dbf2701..61cb40d 100644
+index dbf2701..28e2d51 100644
 --- a/crates/component/src/input/popovers/completion_menu.rs
 +++ b/crates/component/src/input/popovers/completion_menu.rs
 @@ -3,10 +3,11 @@ use std::rc::Rc;
@@ -283,13 +284,15 @@ index dbf2701..61cb40d 100644
          let item = item.clone();
          let range = self.trigger_start_offset.unwrap_or(self.offset)..self.offset;
  
-@@ -232,7 +239,12 @@ impl CompletionMenu {
+@@ -232,7 +239,14 @@ impl CompletionMenu {
  
          cx.spawn_in(window, async move |_, cx| {
              editor.update_in(cx, |editor, window, cx| {
 -                editor.insert_completion(&item, range, window, cx);
 +                // Another input event may run before this deferred insertion.
-+                if editor.cursor() == offset && ropes_are_instances(editor.text(), &text) {
++                if editor.cursor() == offset
++                    && (ropes_are_instances(editor.text(), &text) || editor.text() == &text)
++                {
 +                    editor.insert_completion(&item, range, window, cx);
 +                } else {
 +                    editor.focus(window, cx);
@@ -297,7 +300,7 @@ index dbf2701..61cb40d 100644
              })
          })
          .detach();
-@@ -292,6 +304,7 @@ impl CompletionMenu {
+@@ -292,6 +306,7 @@ impl CompletionMenu {
      /// Hide the completion menu and reset the trigger start offset.
      pub(crate) fn hide(&mut self, cx: &mut Context<Self>) {
          self.open = false;
@@ -305,7 +308,7 @@ index dbf2701..61cb40d 100644
          self.trigger_start_offset = None;
          let editor = self.editor.clone();
          cx.spawn(async move |_, cx| {
-@@ -318,6 +331,10 @@ impl CompletionMenu {
+@@ -318,6 +333,10 @@ impl CompletionMenu {
      ) {
          let items = items.into();
          self.offset = offset;
@@ -316,7 +319,7 @@ index dbf2701..61cb40d 100644
          self.open = true;
          self.list.update(cx, |this, cx| {
              let longest_ix = items
-@@ -349,14 +366,14 @@ impl CompletionMenu {
+@@ -349,14 +368,14 @@ impl CompletionMenu {
          let scroll_origin = editor.scroll_offset();
  
          Some(
@@ -334,7 +337,7 @@ index dbf2701..61cb40d 100644
          if !self.open {
              return Empty.into_any_element();
          }
-@@ -387,44 +404,71 @@ impl Render for CompletionMenu {
+@@ -387,44 +406,71 @@ impl Render for CompletionMenu {
              abs_pos.x + configured_max + POPOVER_GAP + configured_max + POPOVER_GAP
                  > window.bounds().size.width;
  

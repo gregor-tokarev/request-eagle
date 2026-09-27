@@ -477,6 +477,50 @@ async fn function_parameter_help_tracks_the_caret_and_can_be_dismissed(cx: &mut 
 }
 
 #[gpui_kit::test]
+async fn equal_text_completion_snapshots_allow_keyboard_and_pointer_acceptance(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::EntityInputHandler as _;
+    use ropey::extra::esoterica::ropes_are_instances;
+
+    let (_, editor, cx) = script_editor(cx, true);
+    let provider = cx.read(|cx| editor.read(cx).lsp().completion_provider.clone());
+
+    for click in [false, true] {
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.lsp_mut().completion_provider = provider.clone();
+                editor.replace_all("", window, cx);
+            });
+        });
+        cx.simulate_input("pm.response.j");
+        wait_for(cx, |cx| {
+            cx.read(|cx| editor.read(cx).completion_menu_state().open)
+        })
+        .await;
+
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                let snapshot = editor.text().clone();
+                editor.lsp_mut().completion_provider = Some(std::rc::Rc::new(PendingCompletions));
+                editor.replace_text_in_range(Some(12..13), "j", window, cx);
+                assert_eq!(editor.text(), &snapshot);
+                assert!(!ropes_are_instances(editor.text(), &snapshot));
+            });
+        });
+
+        if click {
+            let bounds = cx.debug_bounds("completion-menu").unwrap();
+            cx.simulate_click(bounds.center(), Modifiers::default());
+        } else {
+            cx.simulate_keystrokes("enter");
+        }
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(editor.read(cx).value(), "pm.response.json"));
+    }
+}
+
+#[gpui_kit::test]
 async fn script_completion_follows_the_caret_on_the_first_frame(cx: &mut TestAppContext) {
     use gpui_kit::{
         Background, EntityInputHandler as _,

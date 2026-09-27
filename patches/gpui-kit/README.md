@@ -3,7 +3,7 @@
 The workspace pins a four-file fix on top of GPUI Kit **0.6.2**:
 
 - Upstream tag: `v0.6.2`, commit `122c36f7be19ea0e179107c067b679efccb7d66a`.
-- Patched commit: [`ff0dedf715f86c0ea04840301591d678060d5193`](https://github.com/gregor-tokarev/gpui-kit/commit/ff0dedf715f86c0ea04840301591d678060d5193).
+- Patched commit: [`cad285211ea0ab2fb775d33fee33b6f04dbf53ad`](https://github.com/gregor-tokarev/gpui-kit/commit/cad285211ea0ab2fb775d33fee33b6f04dbf53ad).
 - Reviewable source diff: [0001-current-frame-completion-position.patch](0001-current-frame-completion-position.patch).
 
 Inputs previously published their caret geometry during paint, after popups
