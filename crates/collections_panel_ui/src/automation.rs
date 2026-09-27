@@ -1,4 +1,4 @@
-use crate::CollectionPanel;
+use crate::{CollectionPanel, CollectionPanelEvent};
 use collection::{Entry, MovePlacement};
 use gpui_kit::{Context, Window};
 use request_eagle_automation::{Command, Placement};
@@ -15,7 +15,7 @@ impl CollectionPanel {
         command: Command,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<Value, String> {
+    ) -> Result<(Value, Vec<CollectionPanelEvent>), String> {
         let result = self.apply_automation(command, window, cx);
         result.map_err(|error| error.to_string())
     }
@@ -25,19 +25,22 @@ impl CollectionPanel {
         command: Command,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<Value, collection::CollectionEditError> {
+    ) -> Result<(Value, Vec<CollectionPanelEvent>), collection::CollectionEditError> {
         let mut renamed = None;
         let path = match command {
-            Command::CollectionsList { query } => return self.list_entries(&query),
+            Command::CollectionsList { query } => {
+                return self.list_entries(&query).map(|value| (value, Vec::new()));
+            }
             Command::RequestsGet { path } => {
                 let file = self
                     .collections
                     .file(&path)
                     .ok_or(collection::CollectionEditError::NotFound)?;
                 let collection::Request::Http(request) = &file.request;
-                return Ok(
+                return Ok((
                     json!({"path": path, "id": file.id, "name": file.name, "request": request_eagle_automation::RequestInput::from(request)}),
-                );
+                    Vec::new(),
+                ));
             }
             Command::CollectionsCreate {} => {
                 if let Some(directory) = self.collections.directory() {
@@ -87,14 +90,14 @@ impl CollectionPanel {
         self.error = None;
         self.rename = None;
         self.pending_delete = None;
-        self.rebuild_tree(
+        let relocations = self.rebuild_tree_with_relocations(
             Some(&path),
             renamed
                 .as_ref()
                 .map(|(old, new)| (old.as_path(), new.as_path())),
             cx,
         );
-        Ok(json!({"path": path}))
+        Ok((json!({"path": path}), relocations))
     }
 
     fn list_entries(&self, query: &str) -> Result<Value, collection::CollectionEditError> {

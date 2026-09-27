@@ -32,9 +32,17 @@ impl Layout {
             | Command::RequestsGet { .. }
             | Command::EntriesRename { .. }
             | Command::EntriesMove { .. }
-            | Command::EntriesDelete { .. }) => self.sidebar.update(cx, |sidebar, cx| {
-                sidebar.automation_command(command, window, cx)
-            }),
+            | Command::EntriesDelete { .. }) => {
+                let (value, relocations) = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.automation_command(command, window, cx)
+                })?;
+                // Finish tab paths, breadcrumbs and variable scopes before the
+                // caller can issue another command. Do not enqueue duplicates.
+                for event in relocations {
+                    self.handle_collection_event(&event, window, cx);
+                }
+                Ok(value)
+            }
             Command::RequestsOpen { path } => {
                 let sidebar = self.sidebar.read(cx);
                 let file = sidebar

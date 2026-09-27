@@ -180,6 +180,17 @@ impl CollectionPanel {
         renamed: Option<(&Path, &Path)>,
         cx: &mut Context<Self>,
     ) {
+        for event in self.rebuild_tree_with_relocations(selected, renamed, cx) {
+            cx.emit(event);
+        }
+    }
+
+    pub(super) fn rebuild_tree_with_relocations(
+        &mut self,
+        selected: Option<&Path>,
+        renamed: Option<(&Path, &Path)>,
+        cx: &mut Context<Self>,
+    ) -> Vec<CollectionPanelEvent> {
         self.rows_task = None;
         let collapsed: HashSet<_> = self
             .collapsed
@@ -214,6 +225,7 @@ impl CollectionPanel {
         };
         self.apply_rows(rows, false, cx);
 
+        let mut relocations = Vec::new();
         if let Some((previous, destination)) = renamed {
             for item in &self.tree.items {
                 if item.is_branch() {
@@ -235,7 +247,7 @@ impl CollectionPanel {
                     continue;
                 };
 
-                cx.emit(CollectionPanelEvent::RequestRelocated {
+                relocations.push(CollectionPanelEvent::RequestRelocated {
                     id: file.id.clone().into(),
                     previous_path: if relative.as_os_str().is_empty() {
                         previous.to_path_buf()
@@ -265,5 +277,7 @@ impl CollectionPanel {
                 });
             }
         }
+
+        relocations
     }
 }

@@ -81,7 +81,6 @@ fn automation_edits_live_draft_saves_and_relocates_without_losing_changes(cx: &m
     )
     .unwrap()["path"]
         .clone();
-    cx.run_until_parked();
     let tabs = call(&layout, cx, json!({"command":"tabs.list"})).unwrap();
     let open = tabs
         .as_array()
@@ -322,4 +321,49 @@ fn automation_rejects_unsupported_app_updates_without_network_or_state_changes(
             updater::UpdateStatus::Idle
         ))
     });
+}
+
+#[gpui_kit::test]
+fn automation_relocations_finish_within_the_command_update(cx: &mut TestAppContext) {
+    use std::path::PathBuf;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (layout, cx) = setup(cx, temp.path());
+    let (tab, final_path) = cx.update(|window, cx| layout.update(cx, |layout, cx| {
+        // Deliberately keep every command in a single GPUI update. Queued UI
+        // events cannot repair stale paths between these calls.
+        let mut invoke = |input: Value| layout.automation_command(serde_json::from_value(input).unwrap(), window, cx).unwrap();
+        let collection = invoke(json!({"command":"collections.create"}))["path"].clone();
+        let destination = invoke(json!({"command":"collections.create"}))["path"].clone();
+        let folder = invoke(json!({"command":"folders.create","parent":collection}))["path"].clone();
+        let tab = invoke(json!({"command":"tabs.new"}))["tab"].clone();
+        let original = invoke(json!({"command":"drafts.save","tab":tab,"parent":folder,"name":"First"}))["path"].clone();
+        invoke(json!({"command":"drafts.set","tab":tab,"request":{"method":"GET","url":"https://example.test/unsaved"}}));
+        let filename = PathBuf::from(original.as_str().unwrap()).file_name().unwrap().to_owned();
+
+        let renamed_folder = invoke(json!({"command":"entries.rename","path":folder,"name":"Renamed folder"}))["path"].clone();
+        let expected = PathBuf::from(renamed_folder.as_str().unwrap()).join(&filename);
+        assert_eq!(invoke(json!({"command":"tabs.list"}))[1]["path"], json!(expected));
+        assert_eq!(invoke(json!({"command":"drafts.save","tab":tab}))["path"], json!(expected));
+
+        let moved_folder = invoke(json!({"command":"entries.move","path":renamed_folder,"target":destination,"placement":"inside"}))["path"].clone();
+        let expected = PathBuf::from(moved_folder.as_str().unwrap()).join(&filename);
+        assert_eq!(invoke(json!({"command":"drafts.save","tab":tab}))["path"], json!(expected));
+
+        let renamed_collection = invoke(json!({"command":"entries.rename","path":destination,"name":"Destination"}))["path"].clone();
+        let expected = PathBuf::from(renamed_collection.as_str().unwrap()).join("Renamed folder").join(&filename);
+        assert_eq!(invoke(json!({"command":"drafts.save","tab":tab}))["path"], json!(expected));
+
+        let renamed = invoke(json!({"command":"entries.rename","path":expected,"name":"Last"}))["path"].clone();
+        let final_path = invoke(json!({"command":"entries.rename","path":renamed,"name":"First"}))["path"].clone();
+        assert_eq!(invoke(json!({"command":"drafts.save","tab":tab}))["path"], final_path);
+        assert_eq!(invoke(json!({"command":"requests.get","path":final_path}))["request"]["url"], "https://example.test/unsaved");
+        (tab, final_path)
+    }));
+    // No delayed duplicate relocation may change the paths after success either.
+    cx.run_until_parked();
+    assert_eq!(
+        call(&layout, cx, json!({"command":"drafts.save","tab":tab})).unwrap()["path"],
+        final_path
+    );
 }

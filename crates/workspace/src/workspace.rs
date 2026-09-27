@@ -62,48 +62,8 @@ impl Layout {
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
-            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
-                CollectionPanelEvent::RequestRelocated {
-                    id,
-                    previous_path,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                } => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.relocate_request(
-                            previous_path,
-                            path,
-                            id,
-                            name.clone(),
-                            collection.clone(),
-                            folders.clone(),
-                            cx,
-                        );
-                    });
-                }
-                CollectionPanelEvent::OpenRequest {
-                    id,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                    request,
-                } => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_request(
-                            path,
-                            id.clone(),
-                            name.clone(),
-                            collection.clone(),
-                            folders.clone(),
-                            request,
-                            cx,
-                        );
-                        view.prepare_active_tab(window, cx);
-                    });
-                }
+            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| {
+                this.handle_collection_event(event, window, cx);
             });
         window.focus(&sidebar.focus_handle(cx), cx);
 
@@ -152,6 +112,57 @@ impl Layout {
             _new_request_save_subscription: new_request_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
+        }
+    }
+
+    pub(crate) fn handle_collection_event(
+        &mut self,
+        event: &CollectionPanelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            CollectionPanelEvent::RequestRelocated {
+                id,
+                previous_path,
+                path,
+                name,
+                collection,
+                folders,
+            } => {
+                self.main_view.update(cx, |view, cx| {
+                    view.relocate_request(
+                        previous_path,
+                        path,
+                        id,
+                        name.clone(),
+                        collection.clone(),
+                        folders.clone(),
+                        cx,
+                    );
+                });
+            }
+            CollectionPanelEvent::OpenRequest {
+                id,
+                path,
+                name,
+                collection,
+                folders,
+                request,
+            } => {
+                self.main_view.update(cx, |view, cx| {
+                    view.open_request(
+                        path,
+                        id.clone(),
+                        name.clone(),
+                        collection.clone(),
+                        folders.clone(),
+                        request,
+                        cx,
+                    );
+                    view.prepare_active_tab(window, cx);
+                });
+            }
         }
     }
 
