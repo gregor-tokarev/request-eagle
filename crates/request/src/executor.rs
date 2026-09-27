@@ -34,28 +34,22 @@ impl RequestExecutor {
 
         async move {
             let cancellation = crate::scripts::Cancellation::new();
+            let mut scripts = Vec::new();
             let run = async {
                 match request {
                     Request::Http(request) => {
-                        let (request, variables, scripts) =
+                        let (request, variables, reports) =
                             crate::scripts::pre_request(request, cancellation.0.clone()).await?;
+                        scripts = reports;
+
                         let sent_at = Instant::now();
                         let post_request = (!request.scripts.post_response.trim().is_empty())
                             .then(|| request.clone());
-                        let response = executor.http.execute(request).await.map_err(|error| {
-                            if scripts.is_empty() {
-                                error
-                            } else {
-                                ExecutionError::ScriptedRequest {
-                                    source: Box::new(error),
-                                    reports: scripts.clone(),
-                                }
-                            }
-                        })?;
+                        let response = executor.http.execute(request).await?;
                         let execution = Execution {
                             response: Response::Http(response),
                             elapsed: sent_at.elapsed(),
-                            scripts,
+                            scripts: std::mem::take(&mut scripts),
                         };
 
                         Ok((post_request, variables, execution))
@@ -73,7 +67,17 @@ impl RequestExecutor {
                     .await
                 }
                 None => run.await,
-            }?;
+            }
+            .map_err(|error| {
+                if scripts.is_empty() {
+                    error
+                } else {
+                    ExecutionError::ScriptedRequest {
+                        source: Box::new(error),
+                        reports: scripts,
+                    }
+                }
+            })?;
 
             // Once the response is complete, its script uses the separate script
             // deadline. A request timeout must not discard a received response.

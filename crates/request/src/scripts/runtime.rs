@@ -242,7 +242,7 @@ fn run(
     match result {
         Ok(output) => (Some(output), report),
         Err(error) => {
-            report.error = Some(error);
+            report.error = Some(error.chars().take(4096).collect());
             (None, report)
         }
     }

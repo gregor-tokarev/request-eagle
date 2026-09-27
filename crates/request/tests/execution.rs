@@ -946,7 +946,8 @@ fn zero_size_and_timeout_preferences_disable_the_limits() {
 #[test]
 fn timeout_covers_waiting_for_headers_and_reading_the_body() {
     smol::block_on(async {
-        for send_headers in [false, true] {
+        for (send_headers, scripted) in [(false, false), (true, false), (false, true), (true, true)]
+        {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let server = smol::spawn(async move {
@@ -971,6 +972,14 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
             let error = executor
                 .execute(HttpRequest {
                     path: url,
+                    scripts: request::RequestScripts {
+                        pre_request: if scripted {
+                            "console.log('prepared'); pm.test('pass', () => {}); pm.test('fail', () => pm.expect(1).to.equal(2));".into()
+                        } else {
+                            String::new()
+                        },
+                        ..Default::default()
+                    },
                     ..HttpRequest::default()
                 })
                 .await
@@ -979,6 +988,26 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                 "\n  Stalled {} -> {error}",
                 if send_headers { "body" } else { "headers" }
             );
+            let error = if scripted {
+                let ExecutionError::ScriptedRequest { source, reports } = error else {
+                    panic!("timeout discarded pre-request diagnostics");
+                };
+
+                assert_eq!(reports.len(), 1);
+                assert_eq!(reports[0].phase, request::ScriptPhase::PreRequest);
+                assert_eq!(reports[0].logs.len(), 1);
+                assert_eq!(reports[0].logs[0].message, "prepared");
+                assert_eq!(reports[0].tests.len(), 2);
+                assert_eq!(reports[0].tests[0].name, "pass");
+                assert!(reports[0].tests[0].error.is_none());
+                assert_eq!(reports[0].tests[1].name, "fail");
+                assert!(reports[0].tests[1].error.is_some());
+                assert!(reports[0].error.is_none());
+                *source
+            } else {
+                error
+            };
+
             assert!(
                 matches!(error, ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150))
             );

@@ -140,6 +140,27 @@ fn exceptions_invalid_request_data_and_async_scripts_fail_before_sending() {
 }
 
 #[test]
+fn uncaught_errors_are_bounded_without_splitting_unicode() {
+    smol::block_on(async {
+        for source in [
+            "throw new Error('x'.repeat(8 * 1024 * 1024));",
+            "throw new Error('🦅'.repeat(10000));",
+        ] {
+            let error = pre_request(scripted(source), cancelled())
+                .await
+                .unwrap_err();
+            let ExecutionError::Script { message, report } = error else {
+                panic!("expected a script error");
+            };
+
+            assert!(message.contains("Error:"));
+            assert_eq!(message.chars().count(), 4096);
+            assert_eq!(report.error.as_deref(), Some(message.as_str()));
+        }
+    });
+}
+
+#[test]
 fn runtime_is_isolated_and_has_no_host_io() {
     smol::block_on(async {
         let source = "pm.test('sandbox', () => { for (const name of ['process', 'require', 'fetch', 'std', 'os']) pm.expect(typeof globalThis[name]).to.equal('undefined'); }); globalThis.leak = 42;";
