@@ -70,6 +70,95 @@ fn binary_bodies_and_unknown_variables_are_preserved() {
 }
 
 #[test]
+fn request_body_reads_preserve_bytes_and_edits_are_exported() {
+    smol::block_on(async {
+        for (body, source, expected) in [
+            (None, "pm.expect(pm.request.body.raw).to.be.null;", None),
+            (
+                Some(vec![]),
+                "pm.expect(pm.request.body.raw).to.equal('');",
+                Some(vec![]),
+            ),
+            (
+                Some(vec![0, 255, 42]),
+                "const body = pm.request.body.raw; pm.expect(body).to.equal('\\u0000\\ufffd*'); pm.request.body.raw = body;",
+                Some(vec![0, 255, 42]),
+            ),
+            (
+                Some(b"original".to_vec()),
+                "pm.request.body.raw = 'edited'; pm.expect(pm.request.body.raw).to.equal('edited');",
+                Some(b"edited".to_vec()),
+            ),
+            (
+                Some(b"original".to_vec()),
+                "const body = pm.request.body.raw; pm.request.body.update('edited'); pm.request.body.raw = body;",
+                Some(b"original".to_vec()),
+            ),
+            (
+                Some(b"original".to_vec()),
+                "pm.request.body.raw = null; pm.expect(pm.request.body.raw).to.be.null;",
+                None,
+            ),
+        ] {
+            let mut request = scripted(source);
+            request.method = Method::Post;
+            request.body = body;
+            let (sent, _, _) = pre_request(request, cancelled()).await.unwrap();
+            assert_eq!(sent.body, expected, "{source}");
+        }
+    });
+}
+
+#[test]
+fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
+    smol::block_on(async {
+        let mut request = scripted("pm.variables.set('path', 'large');");
+        request.method = Method::Post;
+        request.body = Some(vec![255; 40 * 1024 * 1024]);
+        let request_buffer = request.body.as_ref().unwrap().as_ptr();
+        let (mut request, variables, _) = pre_request(request, cancelled()).await.unwrap();
+        assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
+
+        request.scripts.post_response =
+            "pm.response.to.have.status(200); throw new Error('after status');".into();
+        let body = vec![255; 40 * 1024 * 1024];
+        let response_buffer = body.as_ptr();
+        let execution = Execution {
+            elapsed: Duration::ZERO,
+            scripts: Vec::new(),
+            response: Response::Http(HttpResponse {
+                status: StatusCode::OK,
+                version: Version::HTTP_11,
+                headers: HeaderMap::new(),
+                body,
+                metrics: HttpMetrics::default(),
+            }),
+        };
+        let mut result =
+            post_response(request.clone(), variables.clone(), execution, cancelled()).await;
+        assert!(
+            result.scripts[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("after status")
+        );
+        let Response::Http(response) = &result.response;
+        assert_eq!(response.body.as_ptr(), response_buffer);
+
+        request.scripts.post_response = "pm.response.text();".into();
+        result = post_response(request, variables, result, cancelled()).await;
+        assert!(
+            result.scripts[1].error.is_some(),
+            "reading an oversized body must respect the heap limit"
+        );
+        let Response::Http(response) = result.response;
+        assert_eq!(response.body.as_ptr(), response_buffer);
+        assert_eq!(response.body.len(), 40 * 1024 * 1024);
+    });
+}
+
+#[test]
 fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
     smol::block_on(async {
         let values = environment::VariableValues {

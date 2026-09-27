@@ -1,4 +1,4 @@
-(function (source, log, test, expect, dynamic) {
+(function (source, log, test, expect, dynamic, readBody) {
     "use strict";
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
@@ -76,12 +76,25 @@
         toJSON() { return this.toString(); },
     };
 
+    let body, originalBody;
+    let bodyLoaded = false, bodyChanged = false;
     const request = {
         method: input.method,
         get url() { return requestUrl; },
         set url(value) { requestUrl.update(value); },
         headers: entries(input.headers, true),
-        body: {mode: "raw", raw: input.body, update(value) { this.raw = String(value); }},
+        body: {
+            mode: "raw",
+            get raw() {
+                if (!bodyLoaded && !bodyChanged) {
+                    body = originalBody = readBody(false);
+                    bodyLoaded = true;
+                }
+                return body;
+            },
+            set raw(value) { body = value; bodyChanged = !bodyLoaded || value !== originalBody; },
+            update(value) { this.raw = String(value); },
+        },
     };
     const pm = {
         request,
@@ -108,23 +121,25 @@
     };
     if (input.response) {
         const response = input.response;
+        let responseBody;
+        const text = () => responseBody ??= readBody(true);
         pm.response = {
             code: response.code,
             status: response.status,
             responseTime: response.responseTime,
             headers: entries(response.headers, true),
-            text: () => response.body,
-            json: () => JSON.parse(response.body),
+            text,
+            json: () => JSON.parse(text()),
             to: {have: {
                 status(codeOrReason) {
                     const actual = typeof codeOrReason === "number" ? response.code : response.status;
                     expect(actual).to.equal(codeOrReason);
                 },
                 body(content) {
-                    if (arguments.length === 0) expect(response.body).not.to.be.empty;
-                    else if (content instanceof RegExp) expect(response.body).to.match(content);
+                    if (arguments.length === 0) expect(text()).not.to.be.empty;
+                    else if (content instanceof RegExp) expect(text()).to.match(content);
                     else if (content !== null && typeof content === "object" && !Array.isArray(content)) expect(pm.response.json()).to.deep.equal(content);
-                    else expect(response.body).to.equal(content);
+                    else expect(text()).to.equal(content);
                 },
                 jsonBody(path, value) {
                     const data = pm.response.json();
@@ -161,8 +176,8 @@
         url,
         query,
         headers: input.headers,
-        body: request.body.raw,
-        body_changed: request.body.raw !== input.body,
+        body: bodyChanged ? body : null,
+        body_changed: bodyChanged,
         variables,
     });
 })

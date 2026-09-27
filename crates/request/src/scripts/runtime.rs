@@ -1,4 +1,5 @@
 use std::{
+    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -46,6 +47,26 @@ struct ScriptOutput {
     variables: Variables,
 }
 
+struct Bodies {
+    request: Option<Vec<u8>>,
+    response: Option<Vec<u8>>,
+}
+
+fn body_reader<'js>(cx: rquickjs::Ctx<'js>, bodies: Rc<Bodies>) -> rquickjs::Result<Function<'js>> {
+    Function::new(cx, move |cx: rquickjs::Ctx<'js>, response: bool| {
+        let bytes = if response {
+            &bodies.response
+        } else {
+            &bodies.request
+        };
+        match bytes {
+            Some(bytes) => rquickjs::String::from_str(cx, &String::from_utf8_lossy(bytes))
+                .map(rquickjs::String::into_value),
+            None => Ok(Value::new_null(cx)),
+        }
+    })
+}
+
 #[cfg(test)]
 pub(super) async fn pre_request(
     request: HttpRequest,
@@ -86,6 +107,8 @@ pub(crate) async fn pre_request_with_variables(
                 &request.scripts.pre_request,
                 ScriptPhase::PreRequest,
                 input,
+                &mut request.body,
+                None,
                 cancelled,
             );
             report = script_report;
@@ -147,7 +170,7 @@ pub(crate) async fn pre_request_with_variables(
 }
 
 pub(crate) async fn post_response(
-    request: HttpRequest,
+    mut request: HttpRequest,
     variables: Variables,
     mut execution: Execution,
     cancelled: Arc<AtomicBool>,
@@ -158,7 +181,7 @@ pub(crate) async fn post_response(
 
     smol::unblock(move || {
         let mut input = input(&request, &variables);
-        let Response::Http(response) = &execution.response;
+        let Response::Http(response) = &mut execution.response;
         input["response"] = json!({
             "code": response.status.as_u16(),
             "status": response.status.canonical_reason().unwrap_or(""),
@@ -166,12 +189,13 @@ pub(crate) async fn post_response(
             "headers": response.headers.iter().map(|(key, value)| {
                 (key.as_str(), String::from_utf8_lossy(value.as_bytes()).into_owned())
             }).collect::<Vec<_>>(),
-            "body": String::from_utf8_lossy(&response.body),
         });
         let (_, report) = run(
             &request.scripts.post_response,
             ScriptPhase::PostResponse,
             input,
+            &mut request.body,
+            Some(&mut response.body),
             cancelled,
         );
         execution.scripts.push(report);
@@ -186,7 +210,6 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
         "url": request.path,
         "query": request.query.as_deref().unwrap_or_default(),
         "headers": request.headers,
-        "body": request.body.as_ref().map(|body| String::from_utf8_lossy(body)),
         "variables": variables,
     })
 }
@@ -195,8 +218,16 @@ fn run(
     source: &str,
     phase: ScriptPhase,
     input: serde_json::Value,
+    request_body: &mut Option<Vec<u8>>,
+    mut response_body: Option<&mut Vec<u8>>,
     cancelled: Arc<AtomicBool>,
 ) -> (Option<ScriptOutput>, ScriptReport) {
+    // Callbacks own the buffers while QuickJS runs. Restore them after the
+    // runtime is dropped, including on script errors, without copying bytes.
+    let bodies = Rc::new(Bodies {
+        request: request_body.take(),
+        response: response_body.as_mut().map(|body| std::mem::take(*body)),
+    });
     let report = Arc::new(Mutex::new(ScriptReport {
         phase,
         tests: Vec::new(),
@@ -246,8 +277,9 @@ fn run(
                 })?;
                 let expect: Function = cx.eval(include_str!("assertions.js"))?;
                 let dynamic = Function::new(cx.clone(), |name: String| dynamic_variable(&name))?;
+                let read_body = body_reader(cx.clone(), bodies.clone())?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
-                let export: Function = setup.call((input.to_string(), log, test, expect, dynamic))?;
+                let export: Function = setup.call((input.to_string(), log, test, expect, dynamic, read_body))?;
                 let value: Value = cx.eval(source)?;
 
                 if value.is_promise() {
@@ -279,6 +311,14 @@ fn run(
 
         Ok(output)
     })();
+
+    let bodies = Rc::try_unwrap(bodies)
+        .ok()
+        .expect("runtime releases body callbacks");
+    *request_body = bodies.request;
+    if let Some(response_body) = response_body {
+        *response_body = bodies.response.unwrap();
+    }
     let mut report = report.lock().unwrap().clone();
 
     match result {
