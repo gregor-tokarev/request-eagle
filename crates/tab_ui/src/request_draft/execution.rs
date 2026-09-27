@@ -1,4 +1,5 @@
 use collection::{HttpRequest, Method};
+use gpui_kit::component::{WindowExt, dialog::DialogButtonProps};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::RequestExecutor;
@@ -74,7 +75,58 @@ impl RequestDraft {
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.task.is_some() {
+        if self.task.is_some() || self.script_trust_prompt_open {
+            return;
+        }
+
+        if !self.request.scripts.is_empty()
+            && self.trusted_scripts.as_ref() != Some(&self.request.scripts)
+        {
+            self.script_trust_prompt_open = true;
+            let scripts = self.request.scripts.clone();
+            let draft = cx.entity().downgrade();
+            window.open_dialog(cx, move |dialog, window, _| {
+                let accept = draft.clone();
+                let close = draft.clone();
+                let review = draft.clone();
+                let scripts = scripts.clone();
+
+                dialog
+                    .title("Run scripts for this request?")
+                    .w(rems(32.).to_pixels(window.rem_size()))
+                    .overlay_closable(false)
+                    .child(div().text_sm().child("Scripts can read request and response data, change the destination, and send headers and body data to another server. Only run scripts you trust. Approval applies to these scripts in this tab. Cancel to review them."))
+                    .button_props(DialogButtonProps::default().ok_text("Trust and Send").show_cancel(true))
+                    .on_ok(move |_, window, cx| {
+                        let _ = accept.update(cx, |draft, cx| {
+                            if draft.request.scripts == scripts {
+                                draft.trusted_scripts = Some(scripts.clone());
+                                draft.script_trust_prompt_open = false;
+                                draft.send(window, cx);
+                            }
+                        });
+                        true
+                    })
+                    .on_cancel(move |_, window, cx| {
+                        let _ = review.update(cx, |draft, cx| {
+                            draft.section = super::draft::RequestSection::Scripts;
+                            draft.script_phase = if draft.request.scripts.pre_request.is_empty() {
+                                request::ScriptPhase::PostResponse
+                            } else {
+                                request::ScriptPhase::PreRequest
+                            };
+                            draft.prepare(window, cx);
+                            cx.notify();
+                        });
+                        true
+                    })
+                    .on_close(move |_, _, cx| {
+                        let _ = close.update(cx, |draft, cx| {
+                            draft.script_trust_prompt_open = false;
+                            cx.notify();
+                        });
+                    })
+            });
             return;
         }
 

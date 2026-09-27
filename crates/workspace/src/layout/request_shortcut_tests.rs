@@ -1,5 +1,5 @@
 use collection::Method;
-use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, component::Root};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::time::Duration;
 use tab_ui::RequestDraft;
@@ -45,15 +45,22 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
         preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
+        cx.set_reduce_motion(true);
     });
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
-            collection::CollectionRegistry::new(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
+    let mut layout = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            crate::workspace::Layout::new(
+                collection::CollectionRegistry::new(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        layout = Some(view.clone());
+        Root::new(view, window, cx)
     });
+    let layout = layout.unwrap();
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let first = cx.read(|cx| {
         tabs.read(cx).tabs[0]
@@ -101,6 +108,17 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             cx.run_until_parked();
         }
         cx.simulate_keystrokes("secondary-enter");
+        if selector == "script-editor" {
+            assert!(!cx.read(|cx| active.read(cx).is_sending()));
+            for _ in 0..2 {
+                cx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+            }
+            assert!(element_bounds(cx, "dialog-0").is_some());
+            cx.simulate_keystrokes("enter");
+        }
         let started = std::time::Instant::now();
         while cx.read(|cx| active.read(cx).is_sending()) {
             assert!(
