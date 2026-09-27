@@ -4,6 +4,7 @@ mod controls;
 mod draft;
 mod execution;
 mod script_completions;
+mod script_signature;
 mod scripts;
 
 #[cfg(test)]

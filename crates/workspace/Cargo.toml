@@ -9,6 +9,7 @@ smol = "2"
 anyhow.workspace = true
 
 request-eagle-automation = { path = "../automation" }
+environment = { path = "../environment" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
 settings_ui = { path = "../settings_ui" }

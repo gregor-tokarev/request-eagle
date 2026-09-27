@@ -108,17 +108,7 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
             cx.run_until_parked();
         }
         cx.simulate_keystrokes("secondary-enter");
-        if selector == "script-editor" {
-            assert!(!cx.read(|cx| active.read(cx).is_sending()));
-            for _ in 0..2 {
-                cx.update(|window, cx| {
-                    window.refresh();
-                    window.draw(cx).clear(cx);
-                });
-            }
-            assert!(element_bounds(cx, "dialog-0").is_some());
-            cx.simulate_keystrokes("enter");
-        }
+        assert!(element_bounds(cx, "dialog-0").is_none());
         let started = std::time::Instant::now();
         while cx.read(|cx| active.read(cx).is_sending()) {
             assert!(

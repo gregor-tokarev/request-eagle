@@ -68,8 +68,9 @@ inspect `status`, `failed`, and script test errors in `responses.get`.
 
 `requests.send` starts execution and returns immediately. Poll `responses.get`
 until `loading` is false. `requests.cancel` cancels that tab's execution. Script
-execution needs `trust_scripts: true` after reading the scripts in `drafts.get`;
-trust applies only to the current scripts in that tab, just like the UI prompt.
+execution through the CLI needs `trust_scripts: true` on each scripted send after
+reading the current scripts in `drafts.get`. The desktop Send action runs scripts
+directly; the CLI keeps explicit approval in its noninteractive command contract.
 Scripts have the same sandbox, variables, limits, tests and console as UI sends.
 
 Response bodies are lossless base64, with byte offsets and `next_offset`; repeat

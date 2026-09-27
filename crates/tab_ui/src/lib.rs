@@ -7,6 +7,7 @@ mod page;
 mod request_draft;
 mod request_fields;
 mod response_view;
+mod script_intelligence;
 mod variable_input;
 mod variables;
 
