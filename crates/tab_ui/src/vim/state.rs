@@ -19,6 +19,19 @@ enum Mode {
     },
 }
 
+impl Mode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "NORMAL",
+            Self::Insert => "INSERT",
+            Self::Visual {
+                linewise: false, ..
+            } => "VISUAL",
+            Self::Visual { linewise: true, .. } => "VISUAL LINE",
+        }
+    }
+}
+
 struct Search {
     cursor: usize,
     count: usize,
@@ -53,7 +66,7 @@ impl Vim {
             let _ = weak.update(cx, |this, cx| {
                 if this.enabled {
                     if this.editor.focus_handle(cx).is_focused(window) {
-                        this.keystroke(&event.keystroke, window, cx);
+                        this.keystroke(event, window, cx);
                     } else if this.search.is_some() && this.focus.contains_focused(window, cx) {
                         this.search_keystroke(&event.keystroke, window, cx);
                     }
@@ -67,7 +80,7 @@ impl Vim {
                 this.enabled = enabled;
                 this.insertion = None;
                 this.search = None;
-                this.mode = Mode::Normal;
+                this.set_mode(Mode::Normal, cx);
                 this.reset_pending();
                 this.desired_column = None;
                 cx.notify();
@@ -81,8 +94,7 @@ impl Vim {
                 && editor.read(cx).search_session().open
             {
                 this.search = None;
-                this.mode = Mode::Normal;
-                cx.notify();
+                this.set_mode(Mode::Normal, cx);
             }
 
             if matches!(event, InputEvent::Blur) {
@@ -97,8 +109,7 @@ impl Vim {
                 this.desired_column = None;
 
                 if matches!(this.mode, Mode::Visual { .. }) {
-                    this.mode = Mode::Normal;
-                    cx.notify();
+                    this.set_mode(Mode::Normal, cx);
                 }
             }
         });
@@ -119,8 +130,7 @@ impl Vim {
                 this.desired_column = None;
 
                 if matches!(this.mode, Mode::Visual { .. }) {
-                    this.mode = Mode::Normal;
-                    cx.notify();
+                    this.set_mode(Mode::Normal, cx);
                 }
             }
         });
@@ -143,6 +153,17 @@ impl Vim {
         }
     }
 
+    fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
+        let changed = self.mode.label() != mode.label();
+        self.mode = mode;
+
+        // The editor invalidates itself when its selection moves. This view
+        // only displays the mode, so cursor motions need no second invalidation.
+        if changed {
+            cx.notify();
+        }
+    }
+
     fn reset_pending(&mut self) {
         self.count = 0;
         self.operator = None;
@@ -156,19 +177,17 @@ impl Vim {
     }
 
     fn normal(&mut self, cursor: usize, cx: &mut Context<Self>) {
-        self.mode = Mode::Normal;
+        self.set_mode(Mode::Normal, cx);
         self.reset_pending();
         let cursor = normal_cursor(self.editor.read(cx).text(), cursor);
         self.select(cursor..cursor, cx);
-        cx.notify();
     }
 
     fn insert(&mut self, cursor: usize, cx: &mut Context<Self>) {
-        self.mode = Mode::Insert;
+        self.set_mode(Mode::Insert, cx);
         self.reset_pending();
         self.desired_column = None;
         self.select(cursor..cursor, cx);
-        cx.notify();
     }
 
     fn replace(&self, range: Range<usize>, text: &str, window: &mut Window, cx: &mut App) {
@@ -391,20 +410,22 @@ impl Vim {
             matches[index].start
         };
         let target = normal_cursor(editor.text(), target);
-        self.mode = search.mode;
+        self.set_mode(search.mode, cx);
         self.desired_column = None;
 
         if let Mode::Visual {
             anchor, linewise, ..
         } = self.mode
         {
-            self.mode = Mode::Visual {
-                anchor,
-                cursor: target,
-                linewise,
-            };
+            self.set_mode(
+                Mode::Visual {
+                    anchor,
+                    cursor: target,
+                    linewise,
+                },
+                cx,
+            );
             self.select(self.visual_range(cx).unwrap(), cx);
-            cx.notify();
         } else {
             self.normal(target, cx);
         }
@@ -437,7 +458,8 @@ impl Vim {
         }
     }
 
-    fn keystroke(&mut self, stroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+    fn keystroke(&mut self, event: &KeystrokeEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let stroke = &event.keystroke;
         let modifiers = stroke.modifiers;
         let escape = stroke.key == "escape" || (modifiers.control && stroke.key == "[");
 
@@ -448,19 +470,19 @@ impl Vim {
                 .to_vec();
             input.push(stroke.clone());
             let keymap = cx.key_bindings();
-            let (bindings, _) = keymap
-                .borrow()
-                .bindings_for_input(&input, &window.context_stack());
+            let keymap = keymap.borrow();
+            let (bindings, pending) = keymap.bindings_for_input(&input, &event.context_stack);
 
             // Application bindings take precedence even when remapped to a
             // plain key or a chord. Native editor edits remain modal.
             if bindings.first().is_some_and(|binding| {
                 let action = binding.action().name();
                 !action.starts_with("input::") || matches!(action, "input::Copy" | "input::Search")
-            }) || window
-                .possible_bindings_for_input(&input)
-                .iter()
-                .any(|binding| !binding.action().name().starts_with("input::"))
+            }) || (pending
+                && keymap
+                    .possible_next_bindings_for_input(&input, &event.context_stack)
+                    .iter()
+                    .any(|binding| !binding.action().name().starts_with("input::")))
             {
                 self.reset_pending();
                 return;
@@ -525,7 +547,6 @@ impl Vim {
 
         window.prevent_default();
         cx.stop_propagation();
-        cx.notify();
     }
 
     fn command(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -533,7 +554,7 @@ impl Vim {
             .visual_range(cx)
             .is_some_and(|range| range != self.editor.read(cx).selected_range())
         {
-            self.mode = Mode::Normal;
+            self.set_mode(Mode::Normal, cx);
             self.reset_pending();
         }
 
@@ -573,11 +594,14 @@ impl Vim {
         } = self.mode
             && matches!(key, "o" | "O")
         {
-            self.mode = Mode::Visual {
-                anchor: cursor,
-                cursor: anchor,
-                linewise,
-            };
+            self.set_mode(
+                Mode::Visual {
+                    anchor: cursor,
+                    cursor: anchor,
+                    linewise,
+                },
+                cx,
+            );
             self.desired_column = None;
             self.select(self.visual_range(cx).unwrap(), cx);
             return;
@@ -701,11 +725,14 @@ impl Vim {
                 anchor, linewise, ..
             } = self.mode
             {
-                self.mode = Mode::Visual {
-                    anchor,
-                    cursor: normal_cursor(&text, movement.offset),
-                    linewise,
-                };
+                self.set_mode(
+                    Mode::Visual {
+                        anchor,
+                        cursor: normal_cursor(&text, movement.offset),
+                        linewise,
+                    },
+                    cx,
+                );
                 self.select(self.visual_range(cx).unwrap(), cx);
             } else {
                 self.normal(movement.offset, cx);
@@ -754,11 +781,14 @@ impl Vim {
                         Mode::Visual { anchor, .. } => anchor,
                         _ => cursor,
                     };
-                    self.mode = Mode::Visual {
-                        anchor,
-                        cursor,
-                        linewise,
-                    };
+                    self.set_mode(
+                        Mode::Visual {
+                            anchor,
+                            cursor,
+                            linewise,
+                        },
+                        cx,
+                    );
                     self.select(self.visual_range(cx).unwrap(), cx);
                 }
             }
@@ -836,11 +866,14 @@ impl Vim {
                         anchor, linewise, ..
                     } = self.mode
                     {
-                        self.mode = Mode::Visual {
-                            anchor,
-                            cursor: target,
-                            linewise,
-                        };
+                        self.set_mode(
+                            Mode::Visual {
+                                anchor,
+                                cursor: target,
+                                linewise,
+                            },
+                            cx,
+                        );
                         self.select(self.visual_range(cx).unwrap(), cx);
                     } else {
                         self.normal(target, cx);
@@ -888,14 +921,7 @@ impl Render for Vim {
             .debug_selector(|| "vim-mode-indicator".into())
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(match self.mode {
-                Mode::Normal => "NORMAL",
-                Mode::Insert => "INSERT",
-                Mode::Visual {
-                    linewise: false, ..
-                } => "VISUAL",
-                Mode::Visual { linewise: true, .. } => "VISUAL LINE",
-            })
+            .child(self.mode.label())
             .into_any_element()
     }
 }

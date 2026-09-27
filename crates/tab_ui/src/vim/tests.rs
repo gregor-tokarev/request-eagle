@@ -1044,3 +1044,52 @@ fn escaping_an_empty_insertion_moves_left_like_vim(cx: &mut TestAppContext) {
         assert_eq!(value(&view, cx), source);
     }
 }
+
+#[gpui_kit::test]
+fn cursor_motions_do_not_redraw_the_unchanged_mode_indicator(cx: &mut TestAppContext) {
+    use std::{cell::Cell, rc::Rc};
+
+    let (view, cx) = setup(cx, "abcdef\nABCDEF\nlast", true);
+    let updates = Rc::new(Cell::new(0));
+    let _subscription = cx.update(|_, cx| {
+        let updates = updates.clone();
+        let vim = view.read(cx).vim.clone();
+        cx.observe(&vim, move |_, _| {
+            updates.set(updates.get() + 1);
+        })
+    });
+
+    cx.simulate_keystrokes("j l h k 2 g escape z");
+    assert_eq!(cursor(&view, cx), 0);
+    assert_eq!(updates.get(), 0);
+
+    for (keys, expected) in [
+        ("v", 1),
+        ("l j o", 1),
+        ("V", 2),
+        ("v", 3),
+        ("escape", 4),
+        ("i", 5),
+        ("x", 5),
+        ("escape", 6),
+    ] {
+        cx.simulate_keystrokes(keys);
+        assert_eq!(updates.get(), expected, "{keys}");
+    }
+
+    cx.update(|_, cx| preferences::update(cx, |p| p.vim_mode = false).unwrap());
+    assert_eq!(updates.get(), 7);
+}
+
+#[gpui_kit::test]
+fn disabled_application_chords_leave_their_prefixes_to_vim(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "first\nsecond", true);
+    cx.update(|_, cx| {
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new("d x", crate::SendRequest, None),
+            gpui_kit::KeyBinding::new("d x", gpui_kit::NoAction, None),
+        ]);
+    });
+    cx.simulate_keystrokes("d d");
+    assert_eq!(value(&view, cx), "second");
+}

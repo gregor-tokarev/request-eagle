@@ -170,6 +170,19 @@ cargo test -p workspace --release response_interaction_benchmark \
 This uses the same 8.33 ms p99 CPU budget and window sizes. Run it serially without
 competing builds or benchmarks; native GPU presentation must be checked separately.
 
+To measure Vim cursor movement in the Body and Scripts editors:
+
+```sh
+REQUEST_EAGLE_BENCH_VIM=1 cargo test -p tab_ui --release vim_cursor_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+Use `REQUEST_EAGLE_BENCH_VIM=0` for the disabled comparison. Each case warms up
+for 120 movements and measures 1,000 more, reporting CPU interaction percentiles
+and allocated bytes. This includes dispatch, effects, Root, drawing and cleanup;
+it excludes the FPS monitor, native font rendering and GPU presentation. Run on
+an otherwise idle machine and check the native monitor separately.
+
 The response viewer displays and searches the complete body, with wrapping on
 by default. Responses over 256 KiB, or containing a line over 32 KiB, use an
 app-owned read-only viewport. These thresholds choose the renderer; they do not

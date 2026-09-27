@@ -13,9 +13,13 @@ mod script_tests;
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]
+mod performance;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod variable_tests;
+#[cfg(test)]
+mod vim_tests;
 
 pub use draft::RequestDraft;
 
