@@ -2,38 +2,37 @@ use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestCon
 use request::Method;
 
 use super::{RequestDraft, draft::RequestSection};
-use crate::variables::VariableStore;
 
-fn setup(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
+fn setup(
+    cx: &mut TestAppContext,
+) -> (
+    Entity<RequestDraft>,
+    &mut VisualTestContext,
+    tempfile::TempDir,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "base_url = 'https://example.com'\nmessage = 'hello'\n",
+    )
+    .unwrap();
     cx.update(|cx| {
         gpui_kit::init(cx);
         preferences::init(cx);
         request_eagle_theme::init(cx);
-        VariableStore::global(cx).update(cx, |store, _| {
-            store.environments.insert(
-                None,
-                [
-                    ("base_url".into(), "https://example.com".into()),
-                    ("message".into(), "hello".into()),
-                ]
-                .into(),
-            );
-            store
-                .secrets
-                .insert("token".into(), "never-display-this".into());
-        });
     });
     let mut draft = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
             let mut draft = RequestDraft::new();
+            draft.set_variable_environment(&directory.path().join("request.toml"), 0, cx);
             draft.prepare(window, cx);
             draft
         });
         draft = Some(view.clone());
         gpui_kit::component::Root::new(view, window, cx)
     });
-    (draft.unwrap(), cx)
+    (draft.unwrap(), cx, directory)
 }
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -51,30 +50,19 @@ fn popup(cx: &mut VisualTestContext) -> bool {
 
 #[gpui_kit::test]
 fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut TestAppContext) {
-    let (_, cx) = setup(cx);
-    cx.update(|_, cx| {
-        VariableStore::global(cx).update(cx, |store, cx| {
-            let environment = store.environments.get_mut(&None).unwrap();
-            for name in [
-                "$guid",
-                "$unsupported",
-                "vault:token",
-                "vault:missing",
-                "!literal",
-                " spaced",
-            ] {
-                environment.insert(name.into(), "must not be suggested as environment".into());
-            }
-            cx.notify();
-        });
-    });
+    let (_, cx, directory) = setup(cx);
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        r#"
+        "$guid" = "reserved"
+        "$unsupported" = "reserved"
+        "!literal" = "reserved"
+        " spaced" = "invalid"
+    "#,
+    )
+    .unwrap();
     click(cx, "request-url");
-    for (name, available) in [
-        ("$guid", true),
-        ("$unsupported", false),
-        ("vault:token", true),
-        ("vault:missing", false),
-    ] {
+    for (name, available) in [("$guid", true), ("$unsupported", false)] {
         cx.simulate_keystrokes("secondary-a");
         cx.simulate_input(&format!("{{{{{name}"));
         assert!(popup(cx));
@@ -98,7 +86,7 @@ fn completion_excludes_environment_names_reserved_for_other_sources(cx: &mut Tes
 
 #[gpui_kit::test]
 fn variable_completion_filters_accepts_dismisses_and_supports_undo(cx: &mut TestAppContext) {
-    let (draft, cx) = setup(cx);
+    let (draft, cx, _directory) = setup(cx);
     click(cx, "request-url");
     cx.simulate_input("{");
     assert!(!popup(cx));
@@ -124,7 +112,7 @@ fn variable_completion_filters_accepts_dismisses_and_supports_undo(cx: &mut Test
 
 #[gpui_kit::test]
 fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext) {
-    let (draft, cx) = setup(cx);
+    let (draft, cx, _directory) = setup(cx);
     click(cx, "request-section-Params");
     click(cx, "params-key-0");
     cx.simulate_input("{{mess");
@@ -145,12 +133,12 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
     cx.simulate_input("X-{{mess");
     cx.simulate_keystrokes("tab");
     click(cx, "headers-value-0");
-    cx.simulate_input("Bearer {{vault:");
+    cx.simulate_input("{{$time");
     cx.simulate_keystrokes("enter");
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).request.headers[0],
-            ("X-{{message}}".into(), "Bearer {{vault:token}}".into())
+            ("X-{{message}}".into(), "{{$timestamp}}".into())
         )
     });
 
@@ -182,7 +170,7 @@ fn variable_completion_handles_unicode_blur_and_window_edges_at_all_scales(
 ) {
     use gpui_kit::{px, size};
 
-    let (draft, cx) = setup(cx);
+    let (draft, cx, _directory) = setup(cx);
     for theme in ["Ayu Light", "Ayu Dark"] {
         for font_size in [12., 16., 24.] {
             cx.update(|window, cx| {
@@ -229,7 +217,7 @@ fn variable_completion_handles_unicode_blur_and_window_edges_at_all_scales(
 fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request(
     cx: &mut TestAppContext,
 ) {
-    let (draft, cx) = setup(cx);
+    let (draft, cx, _directory) = setup(cx);
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
             draft.request.path = "http://127.0.0.1:1/{{missing}}".into();
@@ -250,11 +238,11 @@ fn unresolved_variables_block_send_and_collection_scope_changes_with_the_request
                     "/tmp/variable-test/Collection/environment.toml"
                 ))
             );
-            let path = draft.variables(cx).read(cx).path.clone();
             assert!(
-                VariableStore::global(cx)
+                draft
+                    .variables(cx)
                     .read(cx)
-                    .values(&path)
+                    .values()
                     .unwrap()
                     .environment
                     .is_empty()
@@ -274,7 +262,7 @@ async fn unavailable_environment_only_blocks_requests_using_environment_variable
     let listener = smol::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = smol::spawn(async move {
-        for _ in 0..3 {
+        for index in 0..3 {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut head = Vec::new();
             while !head.ends_with(b"\r\n\r\n") {
@@ -282,31 +270,32 @@ async fn unavailable_environment_only_blocks_requests_using_environment_variable
                 stream.read_exact(&mut byte).await.unwrap();
                 head.push(byte[0]);
             }
-            assert!(!String::from_utf8(head).unwrap().contains("{{"));
+            let head = String::from_utf8(head).unwrap();
+            assert!(!head.contains("{{"));
+            if index == 2 {
+                assert!(head.starts_with("GET /fresh-from-file HTTP/1.1"));
+            }
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .await
                 .unwrap();
         }
     });
-    let (draft, cx) = setup(cx);
-    cx.update(|_, cx| {
-        let store = VariableStore::global(cx);
-        store.update(cx, |store, _| {
-            store
-                .environment_errors
-                .insert(None, "Invalid environment file".into());
-        });
-    });
-    for path in ["literal", "{{$guid}}", "{{vault:token}}"] {
+    let (draft, cx, _directory) = setup(cx);
+    std::fs::write(_directory.path().join("environment.toml"), "[invalid").unwrap();
+    for path in ["literal", "{{$guid}}", "{{message}}"] {
+        if path == "{{message}}" {
+            std::fs::write(
+                _directory.path().join("environment.toml"),
+                "message = 'fresh-from-file'",
+            )
+            .unwrap();
+        }
         cx.update(|window, cx| {
             draft.update(cx, |draft, cx| {
                 draft.request.path = format!("http://{address}/{path}");
                 draft.send(window, cx);
-                assert!(
-                    draft.task.is_some(),
-                    "{path} does not need the environment file"
-                );
+                assert!(draft.task.is_some(), "{path} should resolve and dispatch");
             });
         });
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -317,6 +306,7 @@ async fn unavailable_environment_only_blocks_requests_using_environment_variable
         }
     }
     server.await;
+    std::fs::write(_directory.path().join("environment.toml"), "[invalid").unwrap();
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
             draft.request.path = "{{base_url}}".into();
@@ -334,53 +324,21 @@ fn environment_errors_are_reported_only_for_environment_references() {
     use super::execution::resolve_request;
     let values = environment::VariableValues {
         environment: [("base_url".into(), "https://cached.example".into())].into(),
-        ..Default::default()
     };
     let mut request = request::HttpRequest {
         path: "{{ base_url }}".into(),
         ..Default::default()
     };
     assert_eq!(
-        resolve_request(
-            &request,
-            values.clone(),
-            Some("Invalid environment file"),
-            None
-        )
-        .unwrap_err(),
+        resolve_request(&request, values.clone(), Some("Invalid environment file")).unwrap_err(),
         "Invalid environment file"
     );
     request.path = "http://example.com/{{$unsupported}}".into();
     assert!(
-        resolve_request(&request, values, Some("Invalid environment file"), None)
+        resolve_request(&request, values, Some("Invalid environment file"))
             .unwrap_err()
             .contains("Unknown variable")
     );
-}
-
-#[gpui_kit::test]
-fn pending_variable_saves_block_sends_with_cached_values(cx: &mut TestAppContext) {
-    let (draft, cx) = setup(cx);
-    cx.update(|window, cx| {
-        let store = VariableStore::global(cx);
-        store.update(cx, |store, _| store.saving = true);
-        assert!(
-            store
-                .read(cx)
-                .values(&None)
-                .err()
-                .unwrap()
-                .contains("still saving")
-        );
-        draft.update(cx, |draft, cx| {
-            draft.request.path = "http://127.0.0.1:1/{{vault:token}}".into();
-            draft.send(window, cx);
-            assert!(
-                draft.task.is_none(),
-                "a pending edit must block HTTP dispatch"
-            );
-        });
-    });
 }
 
 #[gpui_kit::test]
@@ -390,7 +348,7 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
     let b = directory.path().join("B");
     std::fs::create_dir(&a).unwrap();
     std::fs::write(a.join("environment.toml"), "base_url = 'original'").unwrap();
-    let (draft, cx) = setup(cx);
+    let (draft, cx, _directory) = setup(cx);
 
     cx.update(|_, cx| {
         draft.update(cx, |draft, cx| {
@@ -401,13 +359,8 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
             std::fs::rename(&b, &a).unwrap();
             draft.set_variable_environment(&a.join("request.toml"), 0, cx);
 
-            let path = draft.variables(cx).read(cx).path.clone();
             assert_eq!(
-                VariableStore::global(cx)
-                    .read(cx)
-                    .values(&path)
-                    .unwrap()
-                    .environment["base_url"],
+                draft.variables(cx).read(cx).values().unwrap().environment["base_url"],
                 "updated"
             );
 
@@ -417,9 +370,10 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
             reopened.set_variable_environment(&a.join("request.toml"), 0, cx);
             assert!(reopened.variable_scope.is_none());
             assert_eq!(
-                VariableStore::global(cx)
+                reopened
+                    .variables(cx)
                     .read(cx)
-                    .values(&path)
+                    .values()
                     .unwrap()
                     .environment["base_url"],
                 "reopened"
@@ -429,14 +383,13 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
 }
 
 #[test]
-fn spaced_vault_references_report_keyring_status_in_every_request_field() {
+fn environment_errors_are_reported_in_every_request_field() {
     use super::execution::resolve_request;
     use environment::VariableValues;
     use request::HttpRequest;
 
     let values = VariableValues {
-        secrets: [("token".into(), "cached-secret".into())].into(),
-        ..Default::default()
+        environment: [("message".into(), "cached value".into())].into(),
     };
     for field in 0..6 {
         let mut request = HttpRequest {
@@ -444,31 +397,50 @@ fn spaced_vault_references_report_keyring_status_in_every_request_field() {
             path: "http://example.com".into(),
             ..Default::default()
         };
-        let token = "{{ vault:token }}".to_owned();
+        let token = "{{ message }}".to_owned();
         match field {
             0 => request.path.push_str(&format!("/{token}")),
             1 => request.headers.push((token, "value".into())),
-            2 => request.headers.push(("Authorization".into(), token)),
+            2 => request.headers.push(("X-Message".into(), token)),
             3 => request.query = Some(vec![(token, "value".into())]),
-            4 => request.query = Some(vec![("token".into(), token)]),
+            4 => request.query = Some(vec![("message".into(), token)]),
             _ => request.body = Some(token.into_bytes()),
         }
-        assert!(resolve_request(&request, values.clone(), None, None).is_ok());
-        for error in ["Secrets are still loading", "Unlock your keyring"] {
-            assert_eq!(
-                resolve_request(&request, values.clone(), None, Some(error)).unwrap_err(),
-                error
-            );
-        }
+        assert!(resolve_request(&request, values.clone(), None).is_ok());
+        assert_eq!(
+            resolve_request(&request, values.clone(), Some("Invalid environment file"))
+                .unwrap_err(),
+            "Invalid environment file"
+        );
     }
 
     let request = HttpRequest {
         path: "http://example.com".into(),
-        body: Some(b"{{ vault:token }}".to_vec()),
+        body: Some(b"{{ message }}".to_vec()),
         ..Default::default()
     };
     assert!(
-        resolve_request(&request, values, None, Some("Keyring unavailable")).is_ok(),
+        resolve_request(&request, values, Some("Invalid environment file")).is_ok(),
         "GET excludes the body before resolution"
     );
+}
+
+#[gpui_kit::test]
+fn reopening_completion_reads_external_environment_changes(cx: &mut TestAppContext) {
+    let (draft, cx, directory) = setup(cx);
+    click(cx, "request-url");
+    cx.simulate_input("{{new_name");
+    assert!(popup(cx));
+    assert!(cx.debug_bounds("variable-suggestion-0").is_none());
+    cx.simulate_keystrokes("escape");
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "new_name = 'new value'",
+    )
+    .unwrap();
+    cx.simulate_keystrokes("backspace");
+    cx.simulate_input("e");
+    assert!(popup(cx));
+    cx.simulate_keystrokes("enter");
+    cx.read(|cx| assert_eq!(draft.read(cx).request.path, "{{new_name}}"));
 }

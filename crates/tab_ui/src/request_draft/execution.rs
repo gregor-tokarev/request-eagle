@@ -102,7 +102,6 @@ pub(super) fn resolve_request(
     request: &HttpRequest,
     mut values: environment::VariableValues,
     environment_error: Option<&str>,
-    secret_error: Option<&str>,
 ) -> Result<HttpRequest, String> {
     let mut template = request.clone();
     if matches!(template.method, Method::Get | Method::Head) {
@@ -114,24 +113,15 @@ pub(super) fn resolve_request(
     if environment_error.is_some() {
         values.environment.clear();
     }
-    if secret_error.is_some() {
-        values.secrets.clear();
-    }
     template
         .resolve_variables(&values)
         .map(|request| outgoing_request(&request))
         .map_err(|error| {
-            if let environment::VariableError::Unknown(name) = &error {
-                let source_error = if name.starts_with("vault:") {
-                    secret_error
-                } else if name.starts_with('$') {
-                    None
-                } else {
-                    environment_error
-                };
-                if let Some(message) = source_error {
-                    return message.to_owned();
-                }
+            if let environment::VariableError::Unknown(name) = &error
+                && !name.starts_with('$')
+                && let Some(message) = environment_error
+            {
+                return message.to_owned();
             }
             error.to_string()
         })
@@ -158,18 +148,11 @@ impl RequestDraft {
         response.update(cx, |response, cx| response.start(cx));
 
         let scope = self.variables(cx);
-        let store = crate::variables::VariableStore::global(cx);
-        let store = store.read(cx);
-        let secret_error = if store.loading {
-            Some("Secrets are still loading. Try sending again in a moment.")
-        } else {
-            store.secret_error.as_deref()
+        let (values, environment_error) = match scope.read(cx).values() {
+            Ok(values) => (values, None),
+            Err(error) => (environment::VariableValues::default(), Some(error)),
         };
-        let scope = &scope.read(cx).path;
-        let environment_error = store.environment_errors.get(scope).map(String::as_str);
-        let request = store.values(scope).and_then(|values| {
-            resolve_request(&self.request, values, environment_error, secret_error)
-        });
+        let request = resolve_request(&self.request, values, environment_error.as_deref());
         let request = match request {
             Ok(request) => request,
             Err(error) => {

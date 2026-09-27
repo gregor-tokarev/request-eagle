@@ -12,25 +12,10 @@ use std::{
 };
 
 fn main() {
-    let arguments: Vec<_> = std::env::args().collect();
-    let secret_worker = arguments
-        .iter()
-        .position(|argument| argument == "--secret-worker")
-        .map(|index| {
-            (
-                arguments[index + 1].clone(),
-                arguments.get(index + 2).cloned(),
-            )
-        });
     let unavailable = std::env::args().any(|argument| argument == "--unavailable");
-    let request_secrets = std::env::args().any(|argument| argument == "--request-secrets");
 
     // Ordinary cargo test runs must not open the user's native credential store.
-    if !unavailable
-        && !request_secrets
-        && secret_worker.is_none()
-        && !std::env::args().any(|argument| argument == "--round-trip")
-    {
+    if !unavailable && !std::env::args().any(|argument| argument == "--round-trip") {
         println!("Native keyring checks skipped; run scripts/check-linux-keyring.sh on Linux.");
         return;
     }
@@ -39,13 +24,7 @@ fn main() {
     let result = passed.clone();
     gpui_kit::application().run(move |cx: &mut App| {
         cx.spawn(async move |cx| {
-            let check = if let Some((name, value)) = secret_worker {
-                cx.update(|cx| preferences::update_request_secret(None, name, value, cx))
-                    .await
-                    .map(|_| ())
-            } else if request_secrets {
-                request_secret_round_trip(cx).await
-            } else if unavailable {
+            let check = if unavailable {
                 missing_provider(cx).await
             } else {
                 round_trip(cx).await
@@ -53,10 +32,10 @@ fn main() {
 
             match check {
                 Ok(()) => {
-                    println!("Native credential test passed");
+                    println!("Native proxy credential test passed");
                     passed.store(true, Ordering::SeqCst);
                 }
-                Err(error) => eprintln!("Native credential test failed: {error:#}"),
+                Err(error) => eprintln!("Native proxy credential test failed: {error:#}"),
             }
             cx.update(|cx| cx.quit());
         })
@@ -112,19 +91,6 @@ async fn round_trip(cx: &mut AsyncApp) -> Result<()> {
 
 /// Run only on an isolated session bus with no Secret Service provider.
 async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
-    ensure!(
-        cx.update(|cx| preferences::read_request_secrets(cx))
-            .await
-            .is_err()
-    );
-    ensure!(
-        cx.update(|cx| preferences::write_request_secrets(
-            &[("test".into(), "synthetic".into())].into(),
-            cx
-        ))
-        .await
-        .is_err()
-    );
     let directory = tempfile::tempdir()?;
     cx.update(|cx| preferences::load(directory.path(), cx))
         .await?;
@@ -148,16 +114,6 @@ async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
             .await
             .is_err()
     );
-    ensure!(
-        cx.update(|cx| preferences::update_request_secret(
-            None,
-            "test".into(),
-            Some("synthetic".into()),
-            cx
-        ))
-        .await
-        .is_err()
-    );
     ensure!(fs::read(&path)? == original);
     ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy == proxy));
 
@@ -177,118 +133,5 @@ async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
     cx.update(|cx| preferences::update_proxy(disabled, cx))
         .await?;
     ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy.validate().is_ok()));
-    Ok(())
-}
-
-/// Run on the same disposable session bus as the native proxy checks.
-async fn request_secret_round_trip(cx: &mut AsyncApp) -> Result<()> {
-    let original = cx
-        .update(|cx| preferences::read_request_secrets(cx))
-        .await?;
-    let name = format!("variable-test-{}", uuid::Uuid::new_v4());
-    let peer = format!("variable-peer-{}", uuid::Uuid::new_v4());
-    let concurrent_names: Vec<_> = (0..4)
-        .map(|_| format!("variable-concurrent-{}", uuid::Uuid::new_v4()))
-        .collect();
-    let check: Result<()> = async {
-        // Simulate another process changing the keyring after our initial snapshot.
-        let mut external = original.clone();
-        external.insert(peer.clone(), "external addition".into());
-        cx.update(|cx| preferences::write_request_secrets(&external, cx))
-            .await?;
-        let values = cx
-            .update(|cx| {
-                preferences::update_request_secret(
-                    None,
-                    name.clone(),
-                    Some("synthetic-request-secret".into()),
-                    cx,
-                )
-            })
-            .await?;
-        ensure!(values.get(&peer).map(String::as_str) == Some("external addition"));
-        ensure!(values.get(&name).map(String::as_str) == Some("synthetic-request-secret"));
-        ensure!(
-            cx.update(|cx| preferences::read_request_secrets(cx))
-                .await?
-                == values
-        );
-
-        let mut external = values;
-        external.insert(peer.clone(), "external update".into());
-        cx.update(|cx| preferences::write_request_secrets(&external, cx))
-            .await?;
-        let remaining = cx
-            .update(|cx| preferences::update_request_secret(None, name.clone(), None, cx))
-            .await?;
-        ensure!(!remaining.contains_key(&name));
-        ensure!(remaining.get(&peer).map(String::as_str) == Some("external update"));
-        ensure!(
-            cx.update(|cx| preferences::read_request_secrets(cx))
-                .await?
-                == remaining
-        );
-        let children: Vec<_> = concurrent_names
-            .iter()
-            .map(|name| {
-                std::process::Command::new(std::env::current_exe()?)
-                    .args(["--secret-worker", name, "concurrent value"])
-                    .spawn()
-            })
-            .collect::<std::io::Result<_>>()?;
-        cx.background_executor()
-            .spawn(async move {
-                for mut child in children {
-                    ensure!(
-                        child.wait()?.success(),
-                        "A concurrent keyring worker failed"
-                    );
-                }
-                Ok::<_, anyhow::Error>(())
-            })
-            .await?;
-        let after_concurrent = cx
-            .update(|cx| preferences::read_request_secrets(cx))
-            .await?;
-        for name in &concurrent_names {
-            ensure!(
-                after_concurrent.get(name).map(String::as_str) == Some("concurrent value"),
-                "A concurrent secret edit was lost"
-            );
-        }
-        let renamed = format!("variable-renamed-{}", uuid::Uuid::new_v4());
-        let values = cx
-            .update(|cx| {
-                preferences::update_request_secret(Some(peer.clone()), renamed.clone(), None, cx)
-            })
-            .await?;
-        ensure!(!values.contains_key(&peer));
-        ensure!(values.get(&renamed).map(String::as_str) == Some("external update"));
-        ensure!(
-            cx.update(|cx| preferences::update_request_secret(
-                Some(renamed.clone()),
-                concurrent_names[0].clone(),
-                Some("must not replace".into()),
-                cx
-            ))
-            .await
-            .is_err()
-        );
-        ensure!(
-            cx.update(|cx| preferences::read_request_secrets(cx))
-                .await?
-                == values
-        );
-        Ok(())
-    }
-    .await;
-    cx.update(|cx| preferences::write_request_secrets(&original, cx))
-        .await?;
-    check?;
-    ensure!(
-        !cx.update(|cx| preferences::read_request_secrets(cx))
-            .await?
-            .contains_key(&name)
-    );
     Ok(())
 }

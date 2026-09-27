@@ -4,7 +4,6 @@ use crate::{GENERATED_VARIABLES, VariableError, VariableResolver, VariableValues
 fn escapes_literal_braces_without_resolving_colliding_names_or_other_sources() {
     let values = VariableValues {
         environment: [("customer".into(), "resolved customer".into())].into(),
-        ..Default::default()
     };
     let mut resolver = VariableResolver::new(&values);
     assert_eq!(
@@ -15,9 +14,9 @@ fn escapes_literal_braces_without_resolving_colliding_names_or_other_sources() {
     );
     assert_eq!(
         resolver
-            .resolve("{{!missing}} {{!$guid}} {{!vault:missing}}")
+            .resolve("{{!missing}} {{!$guid}} {{!another}}")
             .unwrap(),
-        "{{missing}} {{$guid}} {{vault:missing}}"
+        "{{missing}} {{$guid}} {{another}}"
     );
     assert_eq!(
         resolver
@@ -39,14 +38,13 @@ fn resolves_multiple_sources_without_recursively_expanding_values() {
             ("literal".into(), "{{leave_me}}".into()),
         ]
         .into(),
-        secrets: [("token".into(), "test-secret".into())].into(),
     };
     let mut resolver = VariableResolver::new(&values);
-    assert_eq!(
+    assert!(
         resolver
-            .resolve("{{ host }}/{{literal}}?auth={{vault:token}}")
-            .unwrap(),
-        "https://example.com/{{leave_me}}?auth=test-secret"
+            .resolve("{{ host }}/{{literal}}?id={{$timestamp}}")
+            .unwrap()
+            .starts_with("https://example.com/{{leave_me}}?id=")
     );
     assert_eq!(
         resolver.resolve("{{missing}}"),
@@ -54,8 +52,8 @@ fn resolves_multiple_sources_without_recursively_expanding_values() {
     );
     assert_eq!(resolver.resolve("{{host"), Err(VariableError::Unclosed));
     assert_eq!(
-        resolver.resolve("{{vault:missing}}"),
-        Err(VariableError::Unknown("vault:missing".into()))
+        resolver.resolve("{{another}}"),
+        Err(VariableError::Unknown("another".into()))
     );
 }
 
@@ -83,5 +81,36 @@ fn generated_values_are_valid_and_stable_for_one_send() {
             .parse::<u16>()
             .unwrap()
             <= 1000
+    );
+}
+
+#[test]
+fn generated_values_follow_postman_formats() {
+    let values = VariableValues::default();
+    let mut resolver = VariableResolver::new(&values);
+    let timestamp = resolver
+        .resolve("{{$timestamp}}")
+        .unwrap()
+        .parse::<i64>()
+        .unwrap();
+    assert!((chrono::Utc::now().timestamp() - timestamp).abs() <= 1);
+    assert!(
+        resolver
+            .resolve("{{$isoTimestamp}}")
+            .unwrap()
+            .ends_with('Z')
+    );
+    assert!(matches!(
+        resolver.resolve("{{$randomBoolean}}").unwrap().as_str(),
+        "true" | "false"
+    ));
+    let character = resolver.resolve("{{$randomAlphaNumeric}}").unwrap();
+    assert_eq!(character.len(), 1);
+    assert!(character.chars().all(|ch| ch.is_ascii_alphanumeric()));
+    assert!(
+        resolver
+            .resolve("{{$randomEmail}}")
+            .unwrap()
+            .ends_with("@example.com")
     );
 }

@@ -1,7 +1,7 @@
 use super::super::request_fields::{FieldsChanged, RequestFields};
 use crate::{
     variable_input::{VariableInput, VariableTarget},
-    variables::{VariableScope, VariableStore},
+    variables::VariableScope,
 };
 use collection::{HttpRequest, Method};
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
@@ -111,11 +111,6 @@ impl RequestDraft {
             .nth(folder_depth + 1)
             .map(|path| path.join("environment.toml"));
 
-        if self.variable_path != path {
-            // A collection can move back to a previously used path. Reload the
-            // destination even for a new tab, whose scope is still unprepared.
-            VariableStore::global(cx).update(cx, |store, cx| store.reload_environment(&path, cx));
-        }
         self.variable_path = path;
 
         if let Some(scope) = &self.variable_scope {
@@ -123,18 +118,12 @@ impl RequestDraft {
                 scope.path = self.variable_path.clone();
                 cx.notify();
             });
-            VariableStore::global(cx).update(cx, |store, cx| {
-                store.ensure_environment(&self.variable_path, cx)
-            });
         }
     }
 
     pub(super) fn variables(&mut self, cx: &mut Context<Self>) -> Entity<VariableScope> {
         self.variable_scope
             .get_or_insert_with(|| {
-                VariableStore::global(cx).update(cx, |store, cx| {
-                    store.ensure_environment(&self.variable_path, cx)
-                });
                 cx.new(|_| VariableScope {
                     path: self.variable_path.clone(),
                 })

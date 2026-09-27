@@ -16,7 +16,6 @@ reqwest_client.workspace = true
 updater = { path = "../updater" }
 request-eagle-theme = { package = "theme", path = "../theme" }
 workspace = { package = "workspace", path = "../workspace" }
-tab_ui = { path = "../tab_ui" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSWorkspace"] }

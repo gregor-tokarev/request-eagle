@@ -84,18 +84,17 @@ choose a variable. Continue typing to filter; use Up/Down and Enter or Tab to
 insert, click a suggestion, or press Escape to dismiss. Completion replaces the
 reference around the caret, keeping surrounding text and existing closing braces.
 
-Open **Variables** next to the request sections to add, update, or remove values:
-
-- `{{name}}` reads the collection's `environment.toml`. Unsaved requests use
-  `~/.request-eagle/environment.toml`. **Reload file** picks up external edits.
-- `{{vault:name}}` reads an app-wide secret from macOS Keychain or the Linux
-  Secret Service keyring. Suggestions show secret names only. Secrets are never
-  saved in request or environment files. **Reload secrets** picks up changes made
-  by another app process; **Retry keyring** retries unavailable storage.
+- `{{name}}` reads the collection's `environment.toml`. The file contains flat
+  string entries, for example `base_url = "https://example.com"`. Suggestions read
+  names when completion opens; Send reads the latest values. Requests outside a
+  collection can use generated variables.
 - `{{$guid}}`, `{{$isoTimestamp}}`, `{{$timestamp}}`, `{{$randomInt}}`,
   `{{$randomBoolean}}`, `{{$randomAlphaNumeric}}`, and `{{$randomEmail}}` generate
   values when sending. Repeated occurrences of a generated name share one value
-  per send; the next send generates fresh values.
+  per send; the next send generates fresh values. The timestamp formats, UUID v4,
+  integer range (0–1000), boolean, and single alphanumeric character follow
+  [Postman's dynamic variables](https://learning.postman.com/docs/tests-and-scripts/write-scripts/variables-list/).
+  Random email addresses use the `example.com` domain.
 - `{{!name}}` sends the literal text `{{name}}`, without looking up a variable.
   For example, `{"template":"Hello {{!customer}}"}` sends a Mustache template
   unchanged as `{"template":"Hello {{customer}}"}`.
@@ -105,13 +104,9 @@ unchanged. Unknown or unclosed variables stop execution with an error. Values
 are substituted literally, without recursive expansion or automatic JSON
 escaping; quote string placeholders in JSON and escape special characters in
 their values. Disabled rows, URL fragments, and bodies excluded by GET/HEAD are
-not resolved. Untouched variable editors reload their source on Save, preserving
-external updates. Secret edits are serialized across app processes by an empty
-`~/.request-eagle/request-secrets.lock` file.
-Environment edits use an empty lock file beside their target and refresh all
-collections sharing that target. Renaming a selected variable removes the old
-name and rejects an existing destination name; update request references to the
-new name as needed. If only the name changes, the latest stored value moves with it.
+not resolved. An invalid environment file blocks only requests that need its
+values. Environment files are read-only in the application; populate them
+programmatically or edit them on disk until variable management is available.
 
 Response header and cookie names and values support text selection and copying.
 Hover over status, response time, or size for selectable details. Timings include

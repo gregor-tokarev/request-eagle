@@ -216,76 +216,61 @@ impl RequestDraft {
             ("Body", self.supports_body().then_some(RequestSection::Body)),
         ];
 
-        h_flex()
-            .flex_none()
-            .gap_2()
-            .min_w_0()
-            .child(
-                Tabs::new("request-sections")
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .overflow_x_scroll()
-                    .gap_1()
-                    .children(sections.into_iter().map(|(label, section)| {
-                        let selected = section == Some(self.section);
-                        let count = match section {
-                            Some(RequestSection::Params) => {
-                                self.request.query.as_ref().map_or(0, Vec::len)
-                            }
-                            Some(RequestSection::Headers) => {
-                                self.request.headers.len() + self.generated_headers.len()
-                            }
-                            _ => 0,
-                        };
+        h_flex().flex_none().gap_2().min_w_0().child(
+            Tabs::new("request-sections")
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .overflow_x_scroll()
+                .gap_1()
+                .children(sections.into_iter().map(|(label, section)| {
+                    let selected = section == Some(self.section);
+                    let count = match section {
+                        Some(RequestSection::Params) => {
+                            self.request.query.as_ref().map_or(0, Vec::len)
+                        }
+                        Some(RequestSection::Headers) => {
+                            self.request.headers.len() + self.generated_headers.len()
+                        }
+                        _ => 0,
+                    };
 
-                        Tab::new(label)
-                            .debug_selector(move || format!("request-section-{label}"))
-                            .selected(selected)
-                            .disabled(section.is_none())
-                            .accessibility_label(label)
-                            .flex_none()
-                            .h_8()
-                            .px_2()
-                            .gap_1()
-                            .rounded(cx.theme().radius_tokens().md)
-                            .text_color(cx.theme().muted_foreground)
-                            .when(selected, |this| {
-                                this.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                            })
-                            .when(section.is_some(), |this| {
-                                this.hover(|this| this.bg(cx.theme().muted))
-                            })
-                            .child(label)
-                            .when(count > 0, |this| {
-                                this.child(
-                                    div()
-                                        .debug_selector(move || {
-                                            format!("request-section-{label}-count-{count}")
-                                        })
-                                        .text_xs()
-                                        .child(count.to_string()),
-                                )
-                            })
-                            .when_some(section, |this, section| {
-                                this.on_click(cx.listener(move |this, _, window, cx| {
-                                    this.section = section;
-                                    this.prepare(window, cx);
-                                    cx.notify();
-                                }))
-                            })
-                    })),
-            )
-            .child(
-                Button::new("request-variables")
-                    .debug_selector(|| "request-variables".into())
-                    .ghost()
-                    .small()
-                    .label("Variables")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let scope = this.variables(cx);
-                        crate::variables::open_manager(scope, window, cx);
-                    })),
-            )
+                    Tab::new(label)
+                        .debug_selector(move || format!("request-section-{label}"))
+                        .selected(selected)
+                        .disabled(section.is_none())
+                        .accessibility_label(label)
+                        .flex_none()
+                        .h_8()
+                        .px_2()
+                        .gap_1()
+                        .rounded(cx.theme().radius_tokens().md)
+                        .text_color(cx.theme().muted_foreground)
+                        .when(selected, |this| {
+                            this.bg(cx.theme().muted).text_color(cx.theme().foreground)
+                        })
+                        .when(section.is_some(), |this| {
+                            this.hover(|this| this.bg(cx.theme().muted))
+                        })
+                        .child(label)
+                        .when(count > 0, |this| {
+                            this.child(
+                                div()
+                                    .debug_selector(move || {
+                                        format!("request-section-{label}-count-{count}")
+                                    })
+                                    .text_xs()
+                                    .child(count.to_string()),
+                            )
+                        })
+                        .when_some(section, |this, section| {
+                            this.on_click(cx.listener(move |this, _, window, cx| {
+                                this.section = section;
+                                this.prepare(window, cx);
+                                cx.notify();
+                            }))
+                        })
+                })),
+        )
     }
 }

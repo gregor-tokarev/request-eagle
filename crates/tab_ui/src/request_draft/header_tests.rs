@@ -24,7 +24,6 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
     ] {
         let values = environment::VariableValues {
             environment: [("header_name".into(), name.into())].into(),
-            ..Default::default()
         };
         let resolved = request.resolve_variables(&values).unwrap();
         assert!(
@@ -42,13 +41,10 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
         ("{{base_url}}/users", "Resolved on Send"),
         ("https://{{authority}}/users", "Resolved on Send"),
         (
-            "https://{{user}}:{{vault:password}}@example.com",
+            "https://{{user}}:{{password}}@example.com",
             "Resolved on Send",
         ),
-        (
-            "https://user:{{vault:password}}@example.com",
-            "Resolved on Send",
-        ),
+        ("https://user:{{password}}@example.com", "Resolved on Send"),
         (
             "https://{{user}}:pass@{{host}}:{{port}}",
             "Resolved on Send",

@@ -12,7 +12,7 @@ pub const GENERATED_VARIABLES: &[(&str, &str)] = &[
     ("$timestamp", "Current Unix time in seconds"),
     ("$randomInt", "An integer from 0 to 1000"),
     ("$randomBoolean", "true or false"),
-    ("$randomAlphaNumeric", "16 random letters and digits"),
+    ("$randomAlphaNumeric", "A random letter or digit"),
     ("$randomEmail", "A random address at example.com"),
 ];
 
@@ -20,7 +20,6 @@ pub const GENERATED_VARIABLES: &[(&str, &str)] = &[
 #[derive(Clone, Default)]
 pub struct VariableValues {
     pub environment: HashMap<String, String>,
-    pub secrets: HashMap<String, String>,
 }
 
 pub fn valid_variable_name(name: &str) -> bool {
@@ -32,7 +31,7 @@ pub fn valid_variable_name(name: &str) -> bool {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum VariableError {
-    #[error("Unknown variable {{{{{0}}}}}. Add it in Variables before sending.")]
+    #[error("Unknown variable {{{{{0}}}}}. Check the name and collection environment.")]
     Unknown(String),
     #[error("Unclosed variable. Complete the reference with }}}} before sending.")]
     Unclosed,
@@ -76,15 +75,6 @@ impl<'a> VariableResolver<'a> {
     }
 
     fn value(&mut self, name: &str) -> Result<String, VariableError> {
-        if let Some(key) = name.strip_prefix("vault:") {
-            return self
-                .values
-                .secrets
-                .get(key)
-                .cloned()
-                .ok_or_else(|| VariableError::Unknown(name.into()));
-        }
-
         if name.starts_with('$') {
             if let Some(value) = self.generated.get(name) {
                 return Ok(value.clone());
@@ -98,7 +88,7 @@ impl<'a> VariableResolver<'a> {
                 "$timestamp" => chrono::Utc::now().timestamp().to_string(),
                 "$randomInt" => rand::rng().random_range(0..=1000).to_string(),
                 "$randomBoolean" => rand::rng().random::<bool>().to_string(),
-                "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 16),
+                "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 1),
                 "$randomEmail" => format!(
                     "{}@example.com",
                     Alphanumeric.sample_string(&mut rand::rng(), 12)

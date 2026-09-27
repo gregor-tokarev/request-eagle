@@ -7,7 +7,6 @@ edition = "2024"
 test-support = []
 
 [dependencies]
-anyhow.workspace = true
 environment = { path = "../environment" }
 aho-corasick = "1"
 collection = { path = "../collection" }
@@ -15,10 +14,9 @@ gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sit
 preferences = { path = "../preferences" }
 request = { path = "../request" }
 serde_json = "1"
-tempfile = "3"
-toml_edit = "0.25.13"
 
 [dev-dependencies]
+tempfile = "3"
 gpui-kit = { workspace = true, features = ["test-support"] }
 request_eagle_theme = { package = "theme", path = "../theme" }
 smol = "2"

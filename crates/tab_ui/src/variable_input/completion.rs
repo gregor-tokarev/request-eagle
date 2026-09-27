@@ -11,7 +11,7 @@ use gpui_kit::{
 };
 
 use super::token::active_token;
-use crate::variables::{VariableScope, VariableStore};
+use crate::variables::VariableScope;
 
 #[derive(Clone)]
 pub(crate) enum VariableTarget {
@@ -83,7 +83,7 @@ struct Suggestion {
 pub(crate) struct VariableInput {
     target: VariableTarget,
     scope: Entity<VariableScope>,
-    store: Entity<VariableStore>,
+    environment_names: Vec<String>,
     snapshot: Option<(SharedString, usize)>,
     range: Option<Range<usize>>,
     suggestions: Vec<Suggestion>,
@@ -99,7 +99,6 @@ impl VariableInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let store = VariableStore::global(cx);
         let input_subscription = match &target {
             VariableTarget::Input(input) => cx.observe_in(input, window, |this, _, window, cx| {
                 this.refresh(window, cx)
@@ -108,25 +107,22 @@ impl VariableInput {
                 this.refresh(window, cx)
             }),
         };
-        let store_subscription = cx.observe_in(&store, window, |this, _, window, cx| {
-            this.snapshot = None;
-            this.refresh(window, cx);
-        });
         let scope_subscription = cx.observe_in(&scope, window, |this, _, window, cx| {
             this.snapshot = None;
+            this.range = None;
             this.refresh(window, cx);
         });
 
         Self {
             target,
             scope,
-            store,
+            environment_names: Vec::new(),
             snapshot: None,
             range: None,
             suggestions: Vec::new(),
             selected: 0,
             scroll: ScrollHandle::new(),
-            _subscriptions: vec![input_subscription, store_subscription, scope_subscription],
+            _subscriptions: vec![input_subscription, scope_subscription],
         }
     }
 
@@ -136,7 +132,7 @@ impl VariableInput {
             return;
         }
         self.snapshot = snapshot;
-        self.range = None;
+        let was_open = self.range.take().is_some();
         self.suggestions.clear();
         self.selected = 0;
         self.scroll.set_offset(point(px(0.), px(0.)));
@@ -146,23 +142,21 @@ impl VariableInput {
         {
             self.range = Some(range);
             let query = query.to_lowercase();
-            let store = self.store.read(cx);
-            let path = &self.scope.read(cx).path;
-            if let Some(values) = store.environments.get(path) {
-                self.suggestions.extend(
-                    values
-                        .keys()
-                        .filter(|name| environment::valid_variable_name(name))
-                        .map(|name| Suggestion {
-                            name: name.clone(),
-                            source: "Environment",
-                        }),
-                );
+            if !was_open {
+                self.environment_names = self
+                    .scope
+                    .read(cx)
+                    .values()
+                    .unwrap_or_default()
+                    .environment
+                    .into_keys()
+                    .filter(|name| environment::valid_variable_name(name))
+                    .collect();
             }
             self.suggestions
-                .extend(store.secrets.keys().map(|name| Suggestion {
-                    name: format!("vault:{name}"),
-                    source: "Secret",
+                .extend(self.environment_names.iter().map(|name| Suggestion {
+                    name: name.clone(),
+                    source: "Environment",
                 }));
             self.suggestions.sort_by(|a, b| a.name.cmp(&b.name));
             self.suggestions
@@ -332,7 +326,6 @@ impl Render for VariableInput {
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(match item.source {
                                                         "Environment" => "E",
-                                                        "Secret" => "S",
                                                         _ => "G",
                                                     }),
                                             )
