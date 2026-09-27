@@ -213,7 +213,7 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
         ],
         query: Some(vec![("id".into(), "{{$randomUUID}}".into())]),
         body: Some(
-            br#"{"time":"{{$isoTimestamp}}","n":{{$randomInt}},"keep":"{{$unknown}}"}"#.to_vec(),
+            br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}},"keep":"{{$unknown}}"}"#.to_vec(),
         ),
         ..Default::default()
     };
@@ -229,8 +229,13 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
     assert!(sent.headers[0].1.parse::<i64>().unwrap() > 0);
     uuid::Uuid::parse_str(&sent.headers[1].0).unwrap();
     uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
-    uuid::Uuid::parse_str(&sent.query.unwrap()[0].1).unwrap();
+    assert_eq!(sent.query.unwrap()[0].1, sent.headers[1].1);
+    assert_eq!(
+        sent.path.strip_prefix("https://example.com/").unwrap(),
+        sent.headers[1].0
+    );
     let body: serde_json::Value = serde_json::from_slice(&sent.body.unwrap()).unwrap();
+    assert_eq!(body["id"], sent.headers[1].0);
     chrono::DateTime::parse_from_rfc3339(body["time"].as_str().unwrap()).unwrap();
     assert!(body["n"].as_u64().unwrap() <= 1000);
     assert_eq!(body["keep"], "{{$unknown}}");
