@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
-use environment::{VariableError, VariableResolver, VariableValues};
+use environment::{EnvironmentSession, VariableError, VariableResolver, VariableValues};
 
 use crate::HttpRequest;
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
     pub(crate) values: VariableValues,
+    pub(crate) session: Option<EnvironmentSession>,
     environment_error: Option<String>,
 }
 
@@ -19,8 +20,27 @@ impl RequestVariables {
         }
         Self {
             values,
+            session: None,
             environment_error,
         }
+    }
+
+    /// Read the current session overlay while retaining file-read errors for
+    /// references that cannot be satisfied by the session itself.
+    pub fn with_environment_session(
+        values: VariableValues,
+        environment_error: Option<String>,
+        session: EnvironmentSession,
+    ) -> Self {
+        let mut variables = Self::new(values, environment_error);
+        variables.values = session.values(variables.values);
+        variables
+            .values
+            .environment
+            .retain(|name, _| !name.starts_with('$'));
+        variables.session = Some(session);
+
+        variables
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {

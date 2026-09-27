@@ -7,7 +7,11 @@ use crate::HttpRequest;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Variables {
     pub values: BTreeMap<String, String>,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
     pub generated: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub session: Option<environment::EnvironmentSession>,
 }
 
 pub(super) use environment::generate_variable as dynamic_variable;
@@ -87,6 +91,7 @@ fn replace_variables(
             match variables
                 .values
                 .get(name)
+                .or_else(|| variables.environment.get(name))
                 .or_else(|| variables.generated.get(name))
             {
                 Some(value) => append(value)?,

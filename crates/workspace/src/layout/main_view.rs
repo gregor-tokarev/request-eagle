@@ -31,6 +31,7 @@ pub(crate) struct MainView {
     focus: FocusHandle,
     pending_close: Option<u64>,
     save_error: Option<String>,
+    variable_sessions: environment::EnvironmentSessions,
 }
 
 pub(crate) struct RequestSaveRequested {
@@ -59,6 +60,7 @@ impl MainView {
             focus: cx.focus_handle(),
             pending_close: None,
             save_error: None,
+            variable_sessions: environment::EnvironmentSessions::default(),
         };
 
         view.new_tab(cx);
@@ -189,9 +191,10 @@ impl MainView {
     fn open_draft(
         &mut self,
         title: SharedString,
-        draft: RequestDraft,
+        mut draft: RequestDraft,
         cx: &mut Context<Self>,
     ) -> usize {
+        draft.set_variable_sessions(self.variable_sessions.clone(), cx);
         let page = cx.new(|_| draft);
         self.open_tab(title, page, cx)
     }
