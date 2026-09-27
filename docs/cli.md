@@ -52,8 +52,8 @@ putting secrets in command-line arguments. The CLI never prompts.
 Every call prints one JSON object with `version`, `ok`, and either `result` or
 `error: {code, message}`. Exit status is 0 for success, 1 for application/connection
 failure, and 2 for malformed CLI input. `--help` and `--version` print plain text.
-Arguments and socket paths must be valid UTF-8; invalid encoding produces a
-structured error. Transport failures are ambiguous for mutations: inspect current state before
+Arguments, socket paths, and collection paths must be valid UTF-8; invalid
+encoding produces a structured error. Transport failures are ambiguous for mutations: inspect current state before
 retrying. A request's HTTP error status is a completed response, not a CLI error;
 inspect `status`, `failed`, and script test errors in `responses.get`.
 

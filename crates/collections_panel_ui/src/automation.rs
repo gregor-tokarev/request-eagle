@@ -28,7 +28,7 @@ impl CollectionPanel {
     ) -> Result<Value, collection::CollectionEditError> {
         let mut renamed = None;
         let path = match command {
-            Command::CollectionsList { query } => return Ok(self.list_entries(&query)),
+            Command::CollectionsList { query } => return self.list_entries(&query),
             Command::RequestsGet { path } => {
                 let file = self
                     .collections
@@ -39,7 +39,12 @@ impl CollectionPanel {
                     json!({"path": path, "id": file.id, "name": file.name, "request": request_eagle_automation::RequestInput::from(request)}),
                 );
             }
-            Command::CollectionsCreate {} => self.collections.create_collection()?,
+            Command::CollectionsCreate {} => {
+                if let Some(directory) = self.collections.directory() {
+                    require_utf8_path(directory)?;
+                }
+                self.collections.create_collection()?
+            }
             Command::FoldersCreate { parent } => self.collections.create_folder(&parent)?,
             Command::RequestsCreate {
                 parent,
@@ -92,12 +97,19 @@ impl CollectionPanel {
         Ok(json!({"path": path}))
     }
 
-    fn list_entries(&self, query: &str) -> Value {
-        fn visit(entries: &[Entry], collection: &Path, query: &str, output: &mut Vec<Value>) {
+    fn list_entries(&self, query: &str) -> Result<Value, collection::CollectionEditError> {
+        fn visit(
+            entries: &[Entry],
+            collection: &Path,
+            query: &str,
+            output: &mut Vec<Value>,
+        ) -> Result<(), collection::CollectionEditError> {
             for entry in entries {
+                require_utf8_path(entry.path())?;
+
                 let value = match entry {
                     Entry::Directory(folder) => {
-                        visit(&folder.entries, collection, query, output);
+                        visit(&folder.entries, collection, query, output)?;
                         json!({"kind": "folder", "path": folder.path, "name": folder.name, "collection": collection})
                     }
                     Entry::File(file) => {
@@ -109,11 +121,15 @@ impl CollectionPanel {
                     output.push(value);
                 }
             }
+
+            Ok(())
         }
 
         let query = query.to_lowercase();
         let mut entries = Vec::new();
         for collection in self.collections.collections() {
+            require_utf8_path(&collection.path)?;
+
             let name = collection
                 .path
                 .file_name()
@@ -122,8 +138,20 @@ impl CollectionPanel {
             if query.is_empty() || name.to_lowercase().contains(&query) {
                 entries.push(json!({"kind": "collection", "path": collection.path, "name": name}));
             }
-            visit(&collection.entries, &collection.path, &query, &mut entries);
+            visit(&collection.entries, &collection.path, &query, &mut entries)?;
         }
-        json!(entries)
+        Ok(json!(entries))
     }
+}
+
+fn require_utf8_path(path: &Path) -> Result<(), collection::CollectionEditError> {
+    if path.to_str().is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Collection paths must be valid UTF-8 for CLI commands",
+        )
+        .into());
+    }
+
+    Ok(())
 }

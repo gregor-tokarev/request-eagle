@@ -236,3 +236,56 @@ fn automation_can_retry_and_replace_unavailable_proxy_credentials() {
     assert_eq!(replacement.username, "new-user");
     assert_eq!(replacement.password, "new-secret");
 }
+
+#[gpui_kit::test]
+fn automation_rejects_non_utf8_collection_and_tab_paths(cx: &mut TestAppContext) {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let temp = tempfile::tempdir().unwrap();
+    let collection = temp.path().join(OsString::from_vec(vec![b'a', 0xff]));
+    std::fs::create_dir(&collection).unwrap();
+    let (layout, cx) = setup(cx, temp.path());
+    let error = call(&layout, cx, json!({"command":"collections.list"})).unwrap_err();
+    assert!(error.contains("UTF-8"));
+
+    cx.update(|_, cx| {
+        layout.read(cx).main_view.clone().update(cx, |view, cx| {
+            view.open_request(
+                &collection.join("request.toml"),
+                "id".into(),
+                "Request".into(),
+                "Collection".into(),
+                Vec::new(),
+                &collection::HttpRequest::default().into(),
+                cx,
+            );
+        });
+    });
+    assert!(
+        call(&layout, cx, json!({"command":"tabs.list"}))
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+    assert!(
+        call(&layout, cx, json!({"command":"drafts.save","tab":2}))
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+    assert!(call(&layout, cx, json!({"command":"app.status"})).is_ok());
+}
+
+#[gpui_kit::test]
+fn automation_checks_collection_root_encoding_before_creating_files(cx: &mut TestAppContext) {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join(OsString::from_vec(vec![b'a', 0xff]));
+    std::fs::create_dir(&root).unwrap();
+    let (layout, cx) = setup(cx, &root);
+    assert!(
+        call(&layout, cx, json!({"command":"collections.create"}))
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
+}

@@ -5,8 +5,16 @@ use serde_json::{Value, json};
 use tab_ui::RequestDraft;
 
 impl MainView {
-    pub(crate) fn automation_tabs(&self, cx: &App) -> Value {
-        json!(
+    pub(crate) fn automation_tabs(&self, cx: &App) -> Result<Value, String> {
+        if self.tabs.iter().any(|tab| {
+            tab.request_path
+                .as_ref()
+                .is_some_and(|path| path.to_str().is_none())
+        }) {
+            return Err("Tab request paths must be valid UTF-8 for CLI commands".into());
+        }
+
+        Ok(json!(
             self.tabs
                 .iter()
                 .enumerate()
@@ -16,7 +24,7 @@ impl MainView {
                     "selected": self.selected == Some(index), "dirty": tab.page.state(cx).dirty,
                 }))
                 .collect::<Vec<_>>()
-        )
+        ))
     }
 
     pub(crate) fn automation_draft(&self, id: u64) -> Result<Entity<RequestDraft>, String> {
@@ -40,6 +48,14 @@ impl MainView {
             .iter()
             .find(|tab| tab.id == id)
             .ok_or("Unknown tab ID")?;
+        if tab
+            .request_path
+            .as_ref()
+            .is_some_and(|path| path.to_str().is_none())
+        {
+            return Err("Saved request paths must be valid UTF-8 for CLI commands".into());
+        }
+
         Ok(tab.request_path.clone().zip(tab.request_id.clone()))
     }
 
@@ -55,7 +71,7 @@ impl MainView {
             return Ok(json!({"tab": self.tabs[self.selected.unwrap()].id}));
         }
         if matches!(command, Command::TabsList {}) {
-            return Ok(self.automation_tabs(cx));
+            return self.automation_tabs(cx);
         }
         let id = match &command {
             Command::TabsSelect { tab }

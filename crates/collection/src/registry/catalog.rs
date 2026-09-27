@@ -106,6 +106,10 @@ impl CollectionRegistry {
         Ok(registry)
     }
 
+    pub fn directory(&self) -> Option<&Path> {
+        self.directory.as_deref()
+    }
+
     pub fn collections(&self) -> &[Collection] {
         &self.collections
     }

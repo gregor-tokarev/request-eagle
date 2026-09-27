@@ -50,7 +50,7 @@ impl Layout {
                         cx,
                     );
                     view.prepare_active_tab(window, cx);
-                    Ok(view.automation_tabs(cx))
+                    view.automation_tabs(cx)
                 })
             }
             Command::DraftsSave { tab, parent, name } => {
