@@ -102,21 +102,8 @@ impl<'a> VariableResolver<'a> {
                 return Ok(value.clone());
             }
 
-            let value = match name {
-                "$guid" | "$randomUUID" => uuid::Uuid::new_v4().to_string(),
-                "$isoTimestamp" => {
-                    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-                }
-                "$timestamp" => chrono::Utc::now().timestamp().to_string(),
-                "$randomInt" => rand::rng().random_range(0..=1000).to_string(),
-                "$randomBoolean" => rand::rng().random::<bool>().to_string(),
-                "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 1),
-                "$randomEmail" => format!(
-                    "{}@example.com",
-                    Alphanumeric.sample_string(&mut rand::rng(), 12)
-                ),
-                _ => return Err(VariableError::Unknown(name.into())),
-            };
+            let value =
+                generate_variable(name).ok_or_else(|| VariableError::Unknown(name.into()))?;
             self.generated.insert(name.into(), value.clone());
             return Ok(value);
         }
@@ -127,4 +114,20 @@ impl<'a> VariableResolver<'a> {
             .cloned()
             .ok_or_else(|| VariableError::Unknown(name.into()))
     }
+}
+
+pub fn generate_variable(name: &str) -> Option<String> {
+    Some(match name {
+        "$guid" | "$randomUUID" => uuid::Uuid::new_v4().to_string(),
+        "$isoTimestamp" => chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "$timestamp" => chrono::Utc::now().timestamp().to_string(),
+        "$randomInt" => rand::rng().random_range(0..=1000).to_string(),
+        "$randomBoolean" => rand::rng().random::<bool>().to_string(),
+        "$randomAlphaNumeric" => Alphanumeric.sample_string(&mut rand::rng(), 1),
+        "$randomEmail" => format!(
+            "{}@example.com",
+            Alphanumeric.sample_string(&mut rand::rng(), 12)
+        ),
+        _ => return None,
+    })
 }

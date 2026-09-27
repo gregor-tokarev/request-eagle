@@ -4,17 +4,7 @@ use crate::HttpRequest;
 
 pub(super) type Variables = BTreeMap<String, String>;
 
-pub(super) fn dynamic_variable(name: &str) -> Option<String> {
-    match name {
-        "$guid" | "$randomUUID" => Some(uuid::Uuid::new_v4().to_string()),
-        "$timestamp" => Some(chrono::Utc::now().timestamp().to_string()),
-        "$isoTimestamp" => {
-            Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
-        }
-        "$randomInt" => Some(rand::random_range(0..=1000).to_string()),
-        _ => None,
-    }
-}
+pub(super) use environment::generate_variable as dynamic_variable;
 
 pub(super) fn has_dynamic_placeholders(request: &HttpRequest) -> bool {
     std::iter::once(request.path.as_str())

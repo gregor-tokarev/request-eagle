@@ -109,10 +109,12 @@ pub(crate) async fn pre_request_with_variables(
             }
         }
 
+        if (has_script || context.is_some()) && matches!(request.method, Method::Get | Method::Head)
+        {
+            request.body = None;
+        }
+
         let expanded = if let Some(context) = &mut context {
-            if matches!(request.method, Method::Get | Method::Head) {
-                request.body = None;
-            }
             context.values.environment = variables
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))

@@ -61,6 +61,7 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
 fn binary_bodies_and_unknown_variables_are_preserved() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('other', '{{nested}}');");
+        request.method = Method::Post;
         request.body = Some(vec![0, 255, 42]);
         let (sent, _, _) = pre_request(request, cancelled()).await.unwrap();
         assert_eq!(sent.body.unwrap(), [0, 255, 42]);
@@ -343,6 +344,7 @@ fn request_timeout_also_interrupts_scripts() {
 fn variable_expansion_cannot_allocate_an_unbounded_request() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('large', 'x'.repeat(1024 * 1024));");
+        request.method = Method::Post;
         request.body = Some("{{large}}".repeat(40).into_bytes());
         let error = pre_request(request, cancelled()).await.unwrap_err();
         assert!(error.to_string().contains("output limit"));

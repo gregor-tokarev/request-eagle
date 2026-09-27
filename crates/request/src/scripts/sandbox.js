@@ -3,7 +3,13 @@
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
     const variables = Object.assign(Object.create(null), input.variables);
-    const format = value => typeof value === "string" ? value : (stringify(value) ?? String(value));
+    const format = value => {
+        try { return typeof value === "string" ? value : (stringify(value) ?? String(value)); }
+        catch {
+            try { return String(value).slice(0, 4096); }
+            catch { return "[Unserializable value]"; }
+        }
+    };
     const replaceIn = text => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => variables[key] ?? dynamic(key) ?? match);
 
     function entries(pairs, ignoreCase = false) {

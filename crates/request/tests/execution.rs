@@ -1135,6 +1135,54 @@ fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
 }
 
 #[test]
+fn direct_scripts_filter_bodies_and_logging_failures_do_not_block_http() {
+    smol::block_on(async {
+        for method in ["GET", "HEAD"] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            )
+            .await;
+            let mut request = HttpRequest {
+                method: Method::Post,
+                path: url,
+                body: Some(b"{{unclosed".to_vec()),
+                ..Default::default()
+            };
+            request.scripts.pre_request = format!(
+                r#"
+                const cyclic = {{}}; cyclic.self = cyclic;
+                console.log(1n);
+                console.log(cyclic);
+                console.log({{toJSON() {{ throw Error('json'); }}, toString() {{ throw Error('string'); }} }});
+                console.log({{toJSON() {{ throw Error('json'); }}, toString() {{ return 'x'.repeat(10000); }} }});
+                pm.variables.set('flag', pm.variables.replaceIn('{{{{$randomBoolean}}}}'));
+                pm.request.headers.upsert({{key: 'X-Flag', value: '{{{{flag}}}}'}});
+                pm.request.method = '{method}';
+            "#
+            );
+            let execution = executor().execute(request).await.unwrap();
+            let received = server.await;
+            assert!(
+                received
+                    .head
+                    .starts_with(&format!("{method} / HTTP/1.1\r\n"))
+            );
+            assert!(received.body.is_empty());
+            assert!(
+                received.head.contains("x-flag: true\r\n")
+                    || received.head.contains("x-flag: false\r\n")
+            );
+            let logs = &execution.scripts[0].logs;
+            assert_eq!(logs.len(), 4);
+            assert_eq!(logs[0].message, "1");
+            assert_eq!(logs[1].message, "[object Object]");
+            assert_eq!(logs[2].message, "[Unserializable value]");
+            assert_eq!(logs[3].message.len(), 4096);
+        }
+    });
+}
+
+#[test]
 fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
     smol::block_on(async {
         for mode in ["read", "edit", "clear", "replace", "post"] {

@@ -182,13 +182,16 @@ fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
         pm.test('timestamp', () => pm.expect(Number(pm.variables.replaceIn('{{$timestamp}}'))).to.be.closeTo(Date.now() / 1000, 2));
         pm.test('ISO timestamp', () => pm.expect(pm.variables.replaceIn('{{$isoTimestamp}}')).to.match(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/));
         pm.test('integer', () => pm.expect(Number(pm.variables.replaceIn('{{$randomInt}}'))).to.be.within(0, 1000));
+        pm.test('boolean', () => pm.expect(pm.variables.replaceIn('{{$randomBoolean}}')).to.be.oneOf(['true', 'false']));
+        pm.test('character', () => pm.expect(pm.variables.replaceIn('{{$randomAlphaNumeric}}')).to.match(/^[A-Za-z0-9]$/));
+        pm.test('email', () => pm.expect(pm.variables.replaceIn('{{$randomEmail}}')).to.match(/^[A-Za-z0-9]{12}@example\.com$/));
         pm.variables.set('$guid', 'override');
         pm.test('local wins', () => pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal('override'));
         pm.test('unknown stays', () => pm.expect(pm.variables.replaceIn('{{missing}}/{{$missing}}')).to.equal('{{missing}}/{{$missing}}'));
         pm.variables.set('nested', '{{$guid}}');
         pm.test('single pass', () => pm.expect(pm.variables.replaceIn('{{nested}}')).to.equal('{{$guid}}'));
     "#);
-    assert_eq!(reports[0].tests.len(), 7);
+    assert_eq!(reports[0].tests.len(), 10);
     for test in &reports[0].tests {
         assert!(test.error.is_none(), "{}: {:?}", test.name, test.error);
     }
