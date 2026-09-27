@@ -170,19 +170,20 @@
                 if (typeof config === "string") config = {url: config};
                 if (!config || typeof config.url !== "string") throw new TypeError("sendRequest requires a URL string or an object with a url string");
                 if (callback !== undefined && typeof callback !== "function") throw new TypeError("sendRequest callback must be a function");
+                const method = String(config.method ?? "GET").toUpperCase();
                 const resolve = text => substitute(text, visibleVariables(), true);
                 const rawHeaders = config.headers ?? config.header ?? {};
                 const headers = Array.isArray(rawHeaders)
                     ? rawHeaders.map(item => Array.isArray(item) ? item : [item.key, item.value])
                     : Object.entries(rawHeaders);
-                let body = config.body ?? null;
+                let body = method === "GET" || method === "HEAD" ? null : config.body ?? null;
                 if (body !== null && typeof body !== "string") {
                     if (body.mode !== "raw" || typeof body.raw !== "string") throw new TypeError("sendRequest body must be text or {mode: 'raw', raw: text}");
                     body = body.raw;
                 }
                 const json = await send(stringify({
                     url: resolve(config.url),
-                    method: String(config.method ?? "GET").toUpperCase(),
+                    method,
                     headers: headers.map(([key, value]) => [resolve(key), resolve(value)]),
                     body: body === null ? null : resolve(body),
                 }));

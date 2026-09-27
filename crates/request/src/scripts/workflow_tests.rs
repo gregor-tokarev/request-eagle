@@ -167,6 +167,44 @@ fn async_auth_calls_resolve_variables_and_modify_only_the_outgoing_request() {
 }
 
 #[test]
+fn get_and_head_calls_omit_bodies_before_parsing_resolving_or_serializing() {
+    let server = Server::new();
+    let request = server.request(
+        r#"
+        for (const method of ['GET', 'head', undefined]) {
+            for (const body of ['{{missing}}', {mode: 'formdata'}, 'x'.repeat(1048577)]) {
+                const response = await pm.sendRequest({url: 'BASE/ignored-body', method, body});
+                response.to.have.status(200);
+            }
+            await pm.sendRequest({
+                url: 'BASE/ignored-body', method,
+                get body() { throw Error('ignored body was read'); },
+            });
+        }
+    "#,
+        "",
+    );
+
+    smol::block_on(server.executor().execute(request)).unwrap();
+
+    let received = server.requests.lock().unwrap();
+    assert_eq!(received.len(), 13);
+    assert_eq!(
+        received
+            .iter()
+            .filter(|request| request.starts_with("HEAD "))
+            .count(),
+        4
+    );
+    assert!(
+        received
+            .iter()
+            .all(|request| { request.starts_with("GET ") || request.starts_with("HEAD ") })
+    );
+    assert!(received.iter().all(|request| request.ends_with("\r\n\r\n")));
+}
+
+#[test]
 fn async_tests_and_unawaited_callbacks_finish_before_reporting() {
     let server = Server::new();
     let request = server.request("", r#"
