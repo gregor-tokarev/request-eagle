@@ -114,6 +114,7 @@ impl RequestDraft {
                 }
             },
         ));
+        self.script_vim[index] = Some(cx.new(|cx| crate::vim::Vim::new(editor.clone(), cx)));
         self.script_editors[index] = Some(editor.clone());
         editor
     }
@@ -198,6 +199,10 @@ impl RequestDraft {
                                     "Runs after the response is received."
                                 },
                             ))
+                            .children(
+                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .clone(),
+                            )
                             .child("JavaScript"),
                     )
                     .child(

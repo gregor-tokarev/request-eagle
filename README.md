@@ -79,6 +79,15 @@ Command+Enter (Ctrl+Enter on Linux/Windows) sends the active request from its UR
 fields, JSON editor, or response. The shortcut can be changed in Settings →
 Keybindings. Repeating it while a request is running does not cancel that request.
 
+Settings → General → Editor → Vim mode enables Vim keybindings in request body
+and pre-request/post-response script editors. It is off by default, saved across
+restarts, and applies to open tabs immediately. The editor shows its current mode.
+Use `i`/`a` to insert and Escape or Ctrl+`[` to return to Normal mode. Supported
+bindings include `h j k l`, `w b e` (and `W B E`), `0 ^ $`, `gg G`, counts,
+`d c y` with motions or doubled for lines, `x`, `p P`, `u`/Ctrl+R, `v V`,
+`I A o O`, and `/`/`n N` through the editor's search. This is a core Vim binding
+set; Ex commands, macros, text objects, and dot-repeat are not implemented.
+
 Type `{{` in a request URL, query key/value, header key/value, or JSON body to
 choose a variable. Continue typing to filter; use Up/Down and Enter or Tab to
 insert, click a suggestion, or press Escape to dismiss. Completion replaces the

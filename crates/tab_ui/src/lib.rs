@@ -9,6 +9,7 @@ mod request_fields;
 mod response_view;
 mod variable_input;
 mod variables;
+mod vim;
 
 #[cfg(test)]
 mod test_allocator;

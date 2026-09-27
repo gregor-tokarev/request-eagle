@@ -21,6 +21,70 @@ fn manifest(version: &str) -> String {
 }
 
 #[gpui_kit::test]
+async fn vim_toggle_saves_and_keeps_the_previous_value_if_saving_fails(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    cx.update(gpui_kit::init);
+    cx.update(|cx| preferences::load(directory.path(), cx))
+        .await
+        .unwrap();
+    let updater = cx.update(|cx| updater::init("1.2.3", cx));
+    let (_, view) = cx.add_window_view(|window, cx| GeneralSettings::new(updater, window, cx));
+    let toggle = view.debug_bounds("vim-mode").unwrap();
+
+    view.read(|cx| assert!(!cx.global::<preferences::Preferences>().vim_mode));
+    view.simulate_click(toggle.center(), Modifiers::default());
+    view.read(|cx| assert!(cx.global::<preferences::Preferences>().vim_mode));
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(document["vim_mode"], true);
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    view.simulate_click(toggle.center(), Modifiers::default());
+    view.read(|cx| assert!(cx.global::<preferences::Preferences>().vim_mode));
+    assert!(path.is_dir());
+
+    std::fs::remove_dir(&path).unwrap();
+    view.simulate_keystrokes("space");
+    view.simulate_event(gpui_kit::KeyUpEvent {
+        keystroke: gpui_kit::Keystroke::parse("space").unwrap(),
+    });
+    view.read(|cx| assert!(!cx.global::<preferences::Preferences>().vim_mode));
+}
+
+#[gpui_kit::test]
+fn vim_setting_fits_general_at_each_zoom_and_theme(cx: &mut TestAppContext) {
+    use gpui_kit::{px, size};
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let updater = cx.update(|cx| updater::init("1.2.3", cx));
+    let (_, view) = cx.add_window_view(|window, cx| GeneralSettings::new(updater, window, cx));
+
+    for theme in ["Default Light", "Default Dark"] {
+        for font_size in [12., 16., 24.] {
+            view.update(|window, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                gpui_kit::component::Theme::global_mut(cx).font_size = px(font_size);
+                window.set_rem_size(px(font_size));
+                window.refresh();
+            });
+            view.simulate_resize(size(px(30. * font_size), px(40. * font_size)));
+            let row = view.debug_bounds("vim-mode-row").unwrap();
+            let toggle = view.debug_bounds("vim-mode").unwrap();
+            assert!(toggle.origin.x >= row.origin.x);
+            assert!(toggle.right() <= row.right());
+            assert!(toggle.bottom() <= row.bottom());
+            assert!(toggle.bottom() <= px(40. * font_size));
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn checking_survives_closing_settings_and_does_not_open_a_window(cx: &mut TestAppContext) {
     let requests = Arc::new(AtomicUsize::new(0));
     let (respond, wait) = smol::channel::bounded::<()>(1);

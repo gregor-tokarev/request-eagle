@@ -39,6 +39,7 @@ impl RequestDraft {
                 .default_value(value)
         });
         let scope = self.variables(cx);
+        self.body_vim = Some(cx.new(|cx| crate::vim::Vim::new(body.clone(), cx)));
         self.body_completion =
             Some(cx.new(|cx| {
                 VariableInput::new(VariableTarget::Editor(body.clone()), scope, window, cx)
@@ -130,6 +131,7 @@ impl RequestDraft {
                             .child("JSON"),
                     )
                     .child(div().flex_1())
+                    .children(self.body_vim.clone())
                     .child(
                         Button::new("format-request-json")
                             .debug_selector(|| "format-request-json".into())

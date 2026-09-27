@@ -185,6 +185,27 @@ fn script_editor(
 }
 
 #[gpui_kit::test]
+fn vim_insert_mode_keeps_completions_and_escape_returns_to_normal(cx: &mut TestAppContext) {
+    let (_, editor, cx) = script_editor(cx, true);
+    cx.update(|_, cx| preferences::update(cx, |p| p.vim_mode = true).unwrap());
+    cx.simulate_keystrokes("i");
+    cx.simulate_input("pm.response.");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(editor.read(cx).completion_menu_state().open));
+    cx.simulate_input("j");
+    cx.simulate_keystrokes("enter");
+    cx.read(|cx| assert_eq!(editor.read(cx).value(), "pm.response.json"));
+    cx.simulate_input(";pm.");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(editor.read(cx).completion_menu_state().open));
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(!editor.read(cx).completion_menu_state().open));
+    cx.simulate_keystrokes("h");
+    cx.read(|cx| assert_eq!(editor.read(cx).value(), "pm.response.json;pm."));
+}
+
+#[gpui_kit::test]
 fn keyboard_completion_replaces_the_prefix_and_marks_the_script_dirty(cx: &mut TestAppContext) {
     let (draft, editor, cx) = script_editor(cx, true);
     cx.simulate_input("pm.response.");
