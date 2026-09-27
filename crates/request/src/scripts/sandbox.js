@@ -16,19 +16,40 @@
             catch { return "[Unserializable value]"; }
         }
     };
-    const substitute = (text, values, strict = false) => String(text).replace(/\{\{([^{}]+)\}\}/g, (match, key) => {
-        if (strict && key.startsWith("!")) return "{{" + key.slice(1) + "}}";
-        key = key.trim();
-        const value = values[key] ?? generated[key];
-        if (value !== undefined) return value;
-        const fresh = dynamic(key);
-        if (fresh == null) {
-            if (strict) throw new Error(`Unknown variable ${match}`);
-            return match;
+    const substitute = (text, values, strict = false, isUrl = false) => {
+        const resolve = (match, key) => {
+            if (strict && key.startsWith("!")) return "{{" + key.slice(1) + "}}";
+            key = key.trim();
+            const value = values[key] ?? generated[key];
+            if (value !== undefined) return value;
+            const fresh = dynamic(key);
+            if (fresh == null) {
+                if (strict) throw new Error(`Unknown variable {{${key}}}`);
+                return match;
+            }
+            generated[key] = fresh;
+            return fresh;
+        };
+        if (!strict) return String(text).replace(/\{\{([^{}]+)\}\}/g, resolve);
+
+        // Match the primary request parser: each opening pair consumes through
+        // the next closing pair, including nested braces in the variable name.
+        let remaining = isUrl ? String(text).split("#", 1)[0] : String(text);
+        let result = "";
+        while (true) {
+            const start = remaining.indexOf("{{");
+            if (start < 0) return result + remaining;
+            result += remaining.slice(0, start);
+            const end = remaining.indexOf("}}", start + 2);
+            if (end < 0) throw new Error("Unclosed variable. Complete the reference with }} before sending.");
+            const value = resolve(remaining.slice(start, end + 2), remaining.slice(start + 2, end));
+            // URL fragments are not transmitted, including those introduced
+            // by a variable value. Do not inspect references after a fragment.
+            if (isUrl && value.includes("#")) return result + value.split("#", 1)[0];
+            result += value;
+            remaining = remaining.slice(end + 2);
         }
-        generated[key] = fresh;
-        return fresh;
-    });
+    };
 
     const visibleVariables = () => Object.assign(Object.create(null), environment, variables);
     const replaceIn = text => substitute(text, visibleVariables());
@@ -182,7 +203,7 @@
                     body = body.raw;
                 }
                 const json = await send(stringify({
-                    url: resolve(config.url),
+                    url: substitute(config.url, visibleVariables(), true, true),
                     method,
                     headers: headers.map(([key, value]) => [resolve(key), resolve(value)]),
                     body: body === null ? null : resolve(body),

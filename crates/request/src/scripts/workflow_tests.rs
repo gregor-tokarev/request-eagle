@@ -167,12 +167,102 @@ fn async_auth_calls_resolve_variables_and_modify_only_the_outgoing_request() {
 }
 
 #[test]
+fn malformed_subrequest_templates_fail_before_sending() {
+    let server = Server::new();
+    let executor = server.executor();
+
+    for (template, expected_error) in [
+        ("{{token", "Unclosed variable"),
+        ("{{", "Unclosed variable"),
+        ("{{!token", "Unclosed variable"),
+        ("{{outer{{token}}", "Unknown variable {{outer{{token}}"),
+        ("{{{token}}}", "Unknown variable {{{token}}"),
+        ("{{}}", "Unknown variable {{}}"),
+    ] {
+        for field in ["url", "header name", "header value", "body", "raw body"] {
+            let mut config = serde_json::json!({"url": "BASE/template", "method": "POST"});
+            match field {
+                "url" => config["url"] = format!("BASE/{template}").into(),
+                "header name" => config["headers"] = serde_json::json!([[template, "value"]]),
+                "header value" => config["headers"] = serde_json::json!([["X-Test", template]]),
+                "body" => config["body"] = template.into(),
+                "raw body" => {
+                    config["body"] = serde_json::json!({"mode": "raw", "raw": template});
+                }
+                _ => unreachable!(),
+            }
+            let source =
+                format!("pm.variables.set('token', 'resolved'); await pm.sendRequest({config});");
+            let error = smol::block_on(executor.execute(server.request(&source, ""))).unwrap_err();
+            let ExecutionError::Script { message, .. } = error else {
+                panic!("Expected a script error for {field}: {template}, got {error}");
+            };
+            assert!(
+                message.contains(expected_error),
+                "{field}: {template}: {message}"
+            );
+        }
+    }
+
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn subrequests_preserve_escaped_literals_and_resolve_nested_names_once() {
+    let server = Server::new();
+    let request = server.request(
+        r#"
+        pm.variables.set('token', 'resolved');
+        pm.variables.set('literal', '{{unclosed');
+        pm.variables.set('header', 'X-Literal');
+        pm.variables.set('outer{{token', 'nested-name-value');
+        const literal = '{{!token}}/{{! token }}/{{!!token}}/{{!{token}}}/{{!#if token}}yes{{!/if}}/}}/{token}}/{{literal}}';
+        await pm.sendRequest({
+            url: 'BASE/{{!token}}', method: 'POST',
+            headers: {'{{header}}': literal},
+            body: {mode: 'raw', raw: literal + '/{{outer{{token}}'},
+        });
+    "#,
+        "",
+    );
+
+    smol::block_on(server.executor().execute(request)).unwrap();
+
+    let received = server.requests.lock().unwrap();
+    assert_eq!(received.len(), 2);
+    let literal = "{{token}}/{{ token }}/{{!token}}/{{{token}}}/{{#if token}}yes{{/if}}/}}/{token}}/{{unclosed";
+    assert!(received[0].starts_with("POST /%7B%7Btoken%7D%7D "));
+    assert!(received[0].contains(&format!("x-literal: {literal}\r\n")));
+    assert!(received[0].ends_with(&format!("{literal}/nested-name-value")));
+}
+
+#[test]
+fn subrequests_ignore_templates_in_literal_and_expanded_url_fragments() {
+    let server = Server::new();
+    let request = server.request(
+        r#"
+        await pm.sendRequest('BASE/literal#{{unclosed');
+        pm.variables.set('url', 'BASE/expanded#fragment');
+        await pm.sendRequest('{{url}}/{{unclosed');
+    "#,
+        "",
+    );
+
+    smol::block_on(server.executor().execute(request)).unwrap();
+
+    let received = server.requests.lock().unwrap();
+    assert_eq!(received.len(), 3);
+    assert!(received[0].starts_with("GET /literal "));
+    assert!(received[1].starts_with("GET /expanded "));
+}
+
+#[test]
 fn get_and_head_calls_omit_bodies_before_parsing_resolving_or_serializing() {
     let server = Server::new();
     let request = server.request(
         r#"
         for (const method of ['GET', 'head', undefined]) {
-            for (const body of ['{{missing}}', {mode: 'formdata'}, 'x'.repeat(1048577)]) {
+            for (const body of ['{{missing}}', '{{unclosed', '{{outer{{inner}}', {mode: 'formdata'}, 'x'.repeat(1048577)]) {
                 const response = await pm.sendRequest({url: 'BASE/ignored-body', method, body});
                 response.to.have.status(200);
             }
@@ -188,13 +278,13 @@ fn get_and_head_calls_omit_bodies_before_parsing_resolving_or_serializing() {
     smol::block_on(server.executor().execute(request)).unwrap();
 
     let received = server.requests.lock().unwrap();
-    assert_eq!(received.len(), 13);
+    assert_eq!(received.len(), 19);
     assert_eq!(
         received
             .iter()
             .filter(|request| request.starts_with("HEAD "))
             .count(),
-        4
+        6
     );
     assert!(
         received

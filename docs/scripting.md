@@ -56,7 +56,7 @@ to different keys; the last completed update to the same key wins.
 Generated values are shared within one execution. Substitution is single-pass;
 it does not expand references inside variable values or escape JSON strings.
 `replaceIn` leaves unknown references unchanged. Request sending rejects unknown
-references; use `{{!name}}` to send a literal `{{name}}`.
+and unclosed references; use `{{!name}}` to send a literal `{{name}}`.
 
 ## Make HTTP calls from a script
 
@@ -80,7 +80,8 @@ pm.request.headers.upsert({key: "Authorization", value: "Bearer {{token}}"});
 (an object, `{key, value}` entries, or `[key, value]` pairs), and `body` (text or
 `{mode: "raw", raw: text}`). `header` is an alias for `headers`. Set Content-Type
 explicitly when needed. URL, header, and body variables resolve at the time of
-the call. GET and HEAD omit the body.
+the call, using the same placeholder syntax as the primary request. URL fragments
+and GET/HEAD bodies are ignored, including any variable references inside them.
 
 The returned promise resolves to a response with `code`, `status`,
 `responseTime` in milliseconds, `headers.get/has/toJSON`, `text()`, `json()`, and
