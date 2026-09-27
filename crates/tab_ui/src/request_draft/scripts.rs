@@ -208,6 +208,7 @@ impl RequestDraft {
                     .child(
                         div()
                             .debug_selector(|| "script-editor".into())
+                            .relative()
                             .capture_action(capture_completion_action::<Enter>(&editor))
                             .capture_action(capture_completion_action::<Escape>(&editor))
                             .capture_action(capture_completion_action::<MoveUp>(&editor))
@@ -227,7 +228,12 @@ impl RequestDraft {
                                         .unwrap_or_else(|| cx.theme().input_background()))
                                     .text_sm()
                                     .aria_label(format!("{} script", phase.label())),
-                            ),
+                            )
+                            .child(crate::vim::cursor(
+                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .as_ref()
+                                    .unwrap(),
+                            )),
                     )
                     .child(
                         h_flex()

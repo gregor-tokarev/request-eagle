@@ -21,7 +21,139 @@ impl Render for Harness {
             .size_full()
             .child(self.vim.clone())
             .child(Input::new(&self.input))
-            .child(Editor::new(&self.editor).h_full())
+            .child(
+                gpui_kit::div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(Editor::new(&self.editor).h_full().text_sm())
+                    .child(super::cursor(&self.vim)),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn vim_l_reaches_the_final_character_without_crossing_the_line(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abc\né猫🦅\n", true);
+    cx.simulate_keystrokes("l l");
+    assert_eq!(cursor(&view, cx), 2);
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&view, cx), 2);
+    cx.simulate_keystrokes("x");
+    assert_eq!(value(&view, cx), "ab\né猫🦅\n");
+    cx.simulate_keystrokes("j 0 l l");
+    assert_eq!(cursor(&view, cx), "ab\né猫".len());
+    cx.simulate_keystrokes("l x");
+    assert_eq!(value(&view, cx), "ab\né猫\n");
+}
+
+#[gpui_kit::test]
+fn normal_cursor_paints_a_block_and_insert_focus_and_disabled_modes_remove_it(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::component::ActiveTheme as _;
+
+    let (view, cx) = setup(cx, "abc", true);
+    cx.simulate_keystrokes("l l");
+    let (bounds, color) = cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        let block = super::cursor::layout(&view.read(cx).vim, window, cx).unwrap();
+        let editor = view.read(cx).editor.read(cx);
+        let (caret, height) = editor.cursor_layout().unwrap();
+        assert_eq!(editor.cursor(), 2);
+        assert_eq!(block.bounds.left(), caret.left());
+        assert!(block.bounds.size.width > caret.size.width * 2.);
+        assert_eq!(block.bounds.size.height, height);
+        let bounds = gpui_kit::Bounds::from_corners(
+            window.pixel_snap_point(block.bounds.origin),
+            window.pixel_snap_point(block.bounds.bottom_right()),
+        )
+        .scale(window.scale_factor());
+        let color = gpui_kit::Background::from(cx.theme().foreground);
+        assert!(
+            window
+                .painted_quads()
+                .iter()
+                .any(|quad| quad.bounds == bounds && quad.background == color)
+        );
+        (bounds, color)
+    });
+
+    cx.simulate_keystrokes("i");
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_none());
+        assert!(
+            !window
+                .painted_quads()
+                .iter()
+                .any(|quad| quad.bounds == bounds && quad.background == color)
+        );
+    });
+    cx.simulate_keystrokes("escape");
+    cx.update(|window, cx| {
+        let input = view.read(cx).input.clone();
+        input.update(cx, |input, cx| input.focus(window, cx));
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_none());
+        let editor = view.read(cx).editor.clone();
+        editor.update(cx, |editor, cx| editor.focus(window, cx));
+        preferences::update(cx, |p| p.vim_mode = false).unwrap();
+    });
+    cx.update(|window, cx| {
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn block_cursor_follows_wrapping_scrolling_and_interface_size(cx: &mut TestAppContext) {
+    use gpui_kit::{px, size};
+
+    let text = format!("{}\n{}last", "wrapped ".repeat(100), "line\n".repeat(80));
+    let (view, cx) = setup(cx, &text, true);
+    cx.update(|_, cx| request_eagle_theme::init(cx));
+
+    for theme in ["Default Light", "Default Dark"] {
+        for font_size in [12., 16., 24.] {
+            cx.update(|window, cx| {
+                assert!(request_eagle_theme::apply(theme, cx));
+                window.set_rem_size(px(font_size));
+                window.refresh();
+            });
+            cx.simulate_resize(size(px(40. * font_size), px(20. * font_size)));
+
+            for keys in ["g g 100 l", "G $", "g g 0"] {
+                cx.simulate_keystrokes(keys);
+                cx.update(|window, cx| {
+                    window.draw(cx).clear(cx);
+                    let block = super::cursor::layout(&view.read(cx).vim, window, cx).unwrap();
+                    let editor = view.read(cx).editor.read(cx);
+                    let (caret, height) = editor.cursor_layout().unwrap();
+                    assert!(
+                        (block.bounds.center().y - caret.center().y - editor.scroll_offset().y)
+                            .abs()
+                            < px(0.01)
+                    );
+                    assert_eq!(block.bounds.size.height, height);
+                    assert!(
+                        block.clip.contains(&block.bounds.center()),
+                        "{theme}, {font_size}, {keys}: {:?} outside {:?}",
+                        block.bounds,
+                        block.clip
+                    );
+                    let bounds = gpui_kit::Bounds::from_corners(
+                        window.pixel_snap_point(block.bounds.origin),
+                        window.pixel_snap_point(block.bounds.bottom_right()),
+                    )
+                    .scale(window.scale_factor());
+                    assert!(
+                        window
+                            .painted_quads()
+                            .iter()
+                            .any(|quad| quad.bounds == bounds)
+                    );
+                });
+            }
+        }
     }
 }
 
@@ -35,7 +167,12 @@ fn setup<'a>(
         preferences::update(cx, |p| p.vim_mode = enabled).unwrap();
     });
     let (view, cx) = cx.add_window_view(|window, cx| {
-        let editor = cx.new(|cx| EditorState::new(window, cx).default_value(value.to_owned()));
+        let editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .soft_wrap(true)
+                .line_number(true)
+                .default_value(value.to_owned())
+        });
         let input = cx.new(|cx| InputState::new(window, cx));
         let vim = cx.new(|cx| Vim::new(editor.clone(), cx));
         editor.update(cx, |editor, cx| editor.focus(window, cx));

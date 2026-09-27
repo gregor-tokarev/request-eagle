@@ -147,6 +147,7 @@ impl RequestDraft {
             .child(
                 div()
                     .debug_selector(|| "request-body".into())
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .child(
@@ -166,7 +167,8 @@ impl RequestDraft {
                                 .aria_label("JSON request body"),
                         )
                         .h_full(),
-                    ),
+                    )
+                    .child(crate::vim::cursor(self.body_vim.as_ref().unwrap())),
             )
             .into_any_element()
     }

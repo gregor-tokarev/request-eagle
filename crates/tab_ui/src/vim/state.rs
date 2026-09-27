@@ -31,6 +31,10 @@ pub(crate) struct Vim {
 }
 
 impl Vim {
+    pub(super) fn normal_editor(&self) -> Option<&Entity<EditorState>> {
+        (self.enabled && self.mode == Mode::Normal).then_some(&self.editor)
+    }
+
     pub(crate) fn new(editor: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         let weak = cx.entity().downgrade();
         let keys = cx.intercept_keystrokes(move |event, window, cx| {

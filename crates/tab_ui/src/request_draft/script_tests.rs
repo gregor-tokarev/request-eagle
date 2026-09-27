@@ -56,6 +56,39 @@ fn answer_trust_prompt(cx: &mut VisualTestContext, answer: &str) {
 }
 
 #[gpui_kit::test]
+fn vim_scripts_accept_keyboard_input_after_clicking_the_editor(cx: &mut TestAppContext) {
+    let (draft, cx) = script_draft(cx);
+    cx.update(|_, cx| preferences::update(cx, |p| p.vim_mode = true).unwrap());
+    let scripts = element_bounds(cx, "request-section-Scripts").unwrap();
+    cx.simulate_click(scripts.center(), Modifiers::default());
+
+    for phase in ["Pre-request", "Post-response"] {
+        let phase_tab = element_bounds(
+            cx,
+            if phase == "Pre-request" {
+                "script-phase-Pre-request"
+            } else {
+                "script-phase-Post-response"
+            },
+        )
+        .unwrap();
+        cx.simulate_click(phase_tab.center(), Modifiers::default());
+        let bounds = element_bounds(cx, "script-editor").unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.simulate_keystrokes("h j k l i a b c escape 0 l l l x");
+        cx.read(|cx| {
+            let scripts = &draft.read(cx).request.scripts;
+            let value = if phase == "Pre-request" {
+                &scripts.pre_request
+            } else {
+                &scripts.post_response
+            };
+            assert_eq!(value, "ab", "{phase}");
+        });
+    }
+}
+
+#[gpui_kit::test]
 fn vim_edits_update_body_and_both_script_drafts(cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
     cx.update(|window, cx| {
