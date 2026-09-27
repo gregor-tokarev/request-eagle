@@ -73,13 +73,14 @@ impl Compiler {
         offset: usize,
         phase: ScriptPhase,
         kind: &str,
-    ) -> Result<String, String> {
+        cancelled: impl Fn() -> bool + 'static,
+    ) -> Result<Option<String>, String> {
         let started = Instant::now();
         self.runtime
             .set_interrupt_handler(Some(Box::new(move || started.elapsed() >= QUERY_LIMIT)));
 
         let result = self.context.with(|cx| {
-            let execute = || -> rquickjs::Result<String> {
+            let execute = || -> rquickjs::Result<Option<String>> {
                 let query: Function = cx.globals().get("requestEagleLanguageQuery")?;
                 let phase = if phase == ScriptPhase::PreRequest {
                     "pre"
@@ -87,7 +88,9 @@ impl Compiler {
                     "post"
                 };
 
-                query.call((source, offset, phase, kind))
+                let cancellation = Function::new(cx.clone(), cancelled)?;
+
+                query.call((source, offset, phase, kind, cancellation))
             };
 
             execute().map_err(|error| {
@@ -102,7 +105,10 @@ impl Compiler {
         self.runtime.set_interrupt_handler(None);
         let result = result?;
 
-        if result.len() > RESPONSE_LIMIT {
+        if result
+            .as_ref()
+            .is_some_and(|result| result.len() > RESPONSE_LIMIT)
+        {
             return Err("Script language response exceeds 1 MiB".into());
         }
 

@@ -270,3 +270,68 @@ fn invalid_offsets_and_large_sources_fail_without_entering_the_worker() {
         .is_err()
     );
 }
+
+#[test]
+fn active_cancellation_preserves_the_compiler_for_same_and_changed_source_queries() {
+    // Match the worker's native stack size. Cancel at actual language-service
+    // checkpoints so this regression does not depend on scheduler/timer speed.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            use std::{cell::Cell, rc::Rc};
+
+            let mut compiler = super::compiler::Compiler::new().unwrap();
+
+            for phase in [ScriptPhase::PreRequest, ScriptPhase::PostResponse] {
+                for (source, offset, kind, after_checks) in [
+                    ("pm.", 3, "completions", 8),
+                    ("pm.sendRequest({url: ''}, ", 25, "signature", 1),
+                    ("pm.sendRequest", 5, "hover", 1),
+                ] {
+                    let checks = Rc::new(Cell::new(0));
+                    let current_checks = checks.clone();
+                    let result = compiler
+                        .query(source, offset, phase, kind, move || {
+                            current_checks.set(current_checks.get() + 1);
+                            current_checks.get() > after_checks
+                        })
+                        .unwrap();
+
+                    assert!(result.is_none(), "active {kind} query must cancel");
+                    assert!(checks.get() > after_checks);
+
+                    // Reuse the same instance after cancellation, including
+                    // its partially visited source, then a new typed source.
+                    let result = compiler
+                        .query(source, offset, phase, kind, || false)
+                        .unwrap()
+                        .unwrap();
+                    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+                    match kind {
+                        "completions" => assert!(result.as_array().unwrap().iter().any(|item| {
+                            item["label"] == "sendRequest"
+                                && item["detail"].as_str().unwrap().contains("Promise")
+                        })),
+                        "signature" => assert_eq!(result["activeParameter"], 1),
+                        "hover" => assert!(
+                            result["contents"]["value"]
+                                .as_str()
+                                .unwrap()
+                                .contains("Promise")
+                        ),
+                        _ => unreachable!(),
+                    }
+
+                    let result = compiler
+                        .query("pm.sendRequest({u})", 17, phase, "completions", || false)
+                        .unwrap()
+                        .unwrap();
+                    let result: Vec<CompletionItem> = serde_json::from_str(&result).unwrap();
+                    assert_eq!(labels(&result), ["url"]);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

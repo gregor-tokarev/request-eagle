@@ -11,6 +11,13 @@
     const snapshots = new Map();
     let source = "", phase = "", version = 0, declarationVersion = 0;
     let lineStarts = [0];
+    let isCancelled = () => false;
+    const cancellationToken = {
+        isCancellationRequested: () => isCancelled(),
+        throwIfCancellationRequested() {
+            if (isCancelled()) throw new ts.OperationCanceledException();
+        },
+    };
     const filename = "script.js";
     const options = {
         allowJs: true,
@@ -26,6 +33,7 @@
     };
     const host = {
         getCompilationSettings: () => options,
+        getCancellationToken: () => cancellationToken,
         getScriptFileNames: () => [filename, "pm.d.ts"],
         getScriptVersion: name => String(name === filename ? version : name === "pm.d.ts" ? declarationVersion : 0),
         getScriptSnapshot(name) {
@@ -96,6 +104,7 @@
             .filter(entry => !entry.isSnippet && entry.name.startsWith(before))
             .slice(0, 100)
             .map(entry => {
+                cancellationToken.throwIfCancellationRequested();
                 const detail = service.getCompletionEntryDetails(filename, position, entry.name, {}, entry.source, {}, entry.data);
                 const span = entry.replacementSpan || result.optionalReplacementSpan || fallback;
                 return {
@@ -149,7 +158,7 @@
         };
     }
 
-    return function query(nextSource, position, nextPhase, kind) {
+    function query(nextSource, position, nextPhase, kind) {
         if (source !== nextSource) {
             source = files[filename] = nextSource;
             lineStarts = [0];
@@ -171,5 +180,22 @@
             : kind === "signature" ? signature(position)
             : hover(position);
         return JSON.stringify(result);
+    }
+
+    return function cancellableQuery(nextSource, position, nextPhase, kind, cancellation) {
+        isCancelled = cancellation || (() => false);
+        try {
+            cancellationToken.throwIfCancellationRequested();
+            const result = query(nextSource, position, nextPhase, kind);
+            cancellationToken.throwIfCancellationRequested();
+            return result;
+        } catch (error) {
+            // This is TypeScript's supported cancellation path. Preserve its
+            // reusable service/cache; unexpected exceptions still reach Rust.
+            if (error instanceof ts.OperationCanceledException) return null;
+            throw error;
+        } finally {
+            isCancelled = () => false;
+        }
     };
 })

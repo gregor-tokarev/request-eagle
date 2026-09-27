@@ -111,19 +111,24 @@ fn worker() -> Result<&'static Arc<Queue>> {
                                 .as_mut()
                                 .map_err(|error| error.clone())
                                 .and_then(|compiler| {
+                                    let cancelled = query.cancelled.clone();
                                     compiler.query(
                                         &query.source,
                                         query.offset,
                                         query.phase,
                                         query.kind,
+                                        move || cancelled.load(Ordering::Relaxed),
                                     )
                                 });
                         let failed = result.is_err();
-                        let _ = query.reply.send(result);
+                        let _ = query.reply.send(result.and_then(|result| {
+                            result.ok_or_else(|| "Script language query was cancelled".into())
+                        }));
 
                         if failed {
-                            // An interrupt can leave a partially updated TS
-                            // program. Recreate it before answering another query.
+                            // Hard interrupts/errors can leave a partially
+                            // updated TS program. Cooperative TS cancellation
+                            // returns Ok(None) and safely keeps the warm compiler.
                             compiler = Compiler::new();
                         }
                     }
