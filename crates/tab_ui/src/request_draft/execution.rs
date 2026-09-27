@@ -9,7 +9,7 @@ use super::draft::RequestDraft;
 fn request_url(path: &str) -> String {
     let path = path.trim();
 
-    if !path.is_empty() && !path.contains("://") && !path.starts_with("{{") {
+    if !path.is_empty() && !path.contains("://") {
         format!("https://{path}")
     } else {
         path.to_owned()
@@ -23,12 +23,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     } else {
         0
     };
-    let mut headers = request::generated_headers(
-        request.method,
-        &request_url(&request.path),
-        &request.headers,
-        body_bytes,
-    );
+    let url = request_url(&request.path);
+    let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        authority.contains("{{") || (scheme.contains("{{") && authority.contains('@'))
+    });
+    let templated_header_names = request.headers.iter().any(|(name, _)| name.contains("{{"));
+    let mut headers =
+        request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
     if supports_body
         && request.body.is_some()
@@ -40,27 +42,41 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         headers.push(("Content-Type".into(), "application/json".into()));
     }
 
-    headers
-}
-
-pub(super) fn outgoing_request(request: &HttpRequest) -> HttpRequest {
-    let mut request = request.clone();
-    request.path = request_url(&request.path);
-
-    if matches!(request.method, Method::Get | Method::Head) {
-        request.body = None;
-    } else if request.body.is_some()
+    if request.path.contains("{{")
+        && !headers.iter().any(|(name, _)| name == "Host")
         && !request
             .headers
             .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
     {
-        request
-            .headers
-            .push(("Content-Type".into(), "application/json".into()));
+        headers.insert(0, ("Host".into(), "Resolved on Send".into()));
     }
 
-    request
+    if templated_authorization
+        && !headers.iter().any(|(name, _)| name == "Authorization")
+        && !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+    {
+        headers.push(("Authorization".into(), "Resolved on Send".into()));
+    }
+
+    for (name, value) in &mut headers {
+        if templated_header_names
+            || (name == "Host" && value.contains("{{"))
+            || (name == "Authorization" && templated_authorization)
+            || (name == "Content-Length"
+                && request
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| body.windows(2).any(|bytes| bytes == b"{{")))
+        {
+            *value = "Resolved on Send".into();
+        }
+    }
+
+    headers
 }
 
 impl RequestDraft {
@@ -134,7 +150,16 @@ impl RequestDraft {
         let response = self.response.as_ref().unwrap().clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let request = outgoing_request(&self.request);
+        let scope = self.variables(cx);
+        let (values, environment_error) = match scope.read(cx).values() {
+            Ok(values) => (values, None),
+            Err(error) => (environment::VariableValues::default(), Some(error)),
+        };
+        let mut request = self.request.clone();
+        if matches!(request.method, Method::Get | Method::Head) {
+            request.body = None;
+        }
+        let variables = request::RequestVariables::new(values, environment_error);
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -153,7 +178,7 @@ impl RequestDraft {
                 Err(error) => return (None, Err(error)),
             };
             let result = executor
-                .execute(request)
+                .execute_with_variables(request, variables)
                 .await
                 .map(super::super::response_view::ResponseContent::new);
 

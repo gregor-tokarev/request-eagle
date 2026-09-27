@@ -45,12 +45,21 @@ struct ScriptOutput {
     variables: Variables,
 }
 
-pub(crate) async fn pre_request(
-    mut request: HttpRequest,
+#[cfg(test)]
+pub(super) async fn pre_request(
+    request: HttpRequest,
     cancelled: Arc<AtomicBool>,
 ) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
+    pre_request_with_variables(request, cancelled, None).await
+}
+
+pub(crate) async fn pre_request_with_variables(
+    mut request: HttpRequest,
+    cancelled: Arc<AtomicBool>,
+    mut context: Option<crate::RequestVariables>,
+) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
     let has_script = !request.scripts.pre_request.trim().is_empty();
-    if !has_script && !has_dynamic_placeholders(&request) {
+    if context.is_none() && !has_script && !has_dynamic_placeholders(&request) {
         return Ok((request, Variables::new(), Vec::new()));
     }
 
@@ -61,7 +70,14 @@ pub(crate) async fn pre_request(
             logs: Vec::new(),
             error: None,
         };
-        let mut variables = Variables::new();
+        let mut variables: Variables = context
+            .as_mut()
+            .map(|context| {
+                std::mem::take(&mut context.values.environment)
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if has_script {
             let input = input(&request, &variables);
@@ -91,12 +107,30 @@ pub(crate) async fn pre_request(
             }
         }
 
-        if let Err(message) = expand_request(&mut request, &variables) {
+        let expanded = if let Some(context) = &mut context {
+            context.values.environment = variables
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            context.resolve(&request).map(|resolved| request = resolved)
+        } else {
+            expand_request(&mut request, &variables)
+        };
+
+        if let Err(message) = expanded {
+            let message: String = message.chars().take(4096).collect();
+            if !has_script && context.is_some() {
+                return Err(ExecutionError::Variables(message));
+            }
             report.error = Some(message.clone());
             return Err(ExecutionError::Script {
                 message,
                 report: Box::new(report),
             });
+        }
+
+        if context.is_some() {
+            request = request.prepare_for_send();
         }
 
         let reports = if has_script { vec![report] } else { Vec::new() };

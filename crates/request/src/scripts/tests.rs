@@ -69,6 +69,67 @@ fn binary_bodies_and_unknown_variables_are_preserved() {
 }
 
 #[test]
+fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
+    smol::block_on(async {
+        let values = environment::VariableValues {
+            environment: [("value".into(), "from file".into())].into(),
+        };
+        let mut request = scripted(
+            "pm.expect(pm.variables.get('value')).to.equal('from file'); pm.variables.set('path', 'created'); pm.variables.set('value', 'local');",
+        );
+        request.headers = vec![("X-Value".into(), "{{value}}/{{!value}}/{{$guid}}".into())];
+        request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
+        let (sent, vars, _) = super::runtime::pre_request_with_variables(
+            request,
+            cancelled(),
+            Some(crate::RequestVariables::new(values, None)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent.path, "http://localhost/created");
+        assert_eq!(vars["value"], "local");
+        assert_eq!(
+            sent.headers[0].1,
+            format!("local/{{{{value}}}}/{}", sent.query.unwrap()[0].1)
+        );
+
+        let mut request = scripted("pm.variables.set('path', 'fallback');");
+        request.body = Some(vec![0, 255, 42]);
+        request.method = Method::Post;
+        let context = crate::RequestVariables::new(
+            environment::VariableValues::default(),
+            Some("File unavailable".into()),
+        );
+        let (sent, _, _) =
+            super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
+                .await
+                .unwrap();
+        assert_eq!(sent.path, "http://localhost/fallback");
+        assert_eq!(sent.body.unwrap(), [0, 255, 42]);
+
+        let mut request = scripted("pm.variables.set('path', 'x'.repeat(1024 * 1024));");
+        request.path = format!("http://localhost/{}", "{{path}}".repeat(33));
+        let context = crate::RequestVariables::new(environment::VariableValues::default(), None);
+        let error = super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("output limit"), "{error}");
+
+        let request =
+            scripted("pm.request.url = 'https://example.com/{{' + 'x'.repeat(10000) + '}}';");
+        let context = crate::RequestVariables::new(environment::VariableValues::default(), None);
+        let error = super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
+            .await
+            .unwrap_err();
+        let ExecutionError::Script { message, report } = error else {
+            panic!("expected script failure")
+        };
+        assert_eq!(message.chars().count(), 4096);
+        assert_eq!(report.error.as_deref(), Some(message.as_str()));
+    });
+}
+
+#[test]
 fn response_tests_keep_failures_logs_and_response_data() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('token', 'abc');");

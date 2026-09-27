@@ -7,6 +7,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::draft::RequestDraft;
+use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 
 impl RequestDraft {
     pub(super) fn supports_body(&self) -> bool {
@@ -37,6 +38,11 @@ impl RequestDraft {
                 .placeholder("Enter JSON request body")
                 .default_value(value)
         });
+        let scope = self.variables(cx);
+        self.body_completion =
+            Some(cx.new(|cx| {
+                VariableInput::new(VariableTarget::Editor(body.clone()), scope, window, cx)
+            }));
         self._subscriptions
             .push(cx.subscribe(&body, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -103,18 +109,22 @@ impl RequestDraft {
                     .flex_1()
                     .min_h_0()
                     .child(
-                        Editor::new(&body)
-                            .h_full()
-                            .appearance(false)
-                            .bordered(false)
-                            .bg(cx
-                                .theme()
-                                .highlight_theme
-                                .style
-                                .editor_background
-                                .unwrap_or_else(|| cx.theme().input_background()))
-                            .text_sm()
-                            .aria_label("JSON request body"),
+                        with_variables(
+                            self.body_completion.as_ref().unwrap(),
+                            Editor::new(&body)
+                                .h_full()
+                                .appearance(false)
+                                .bordered(false)
+                                .bg(cx
+                                    .theme()
+                                    .highlight_theme
+                                    .style
+                                    .editor_background
+                                    .unwrap_or_else(|| cx.theme().input_background()))
+                                .text_sm()
+                                .aria_label("JSON request body"),
+                        )
+                        .h_full(),
                     ),
             )
             .into_any_element()

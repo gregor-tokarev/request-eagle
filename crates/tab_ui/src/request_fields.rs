@@ -1,3 +1,7 @@
+use crate::{
+    variable_input::{VariableInput, VariableTarget, with_variables},
+    variables::VariableScope,
+};
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
     button::*,
@@ -12,6 +16,7 @@ struct FieldRow {
     key: Entity<InputState>,
     value: Entity<InputState>,
     description: Entity<InputState>,
+    completions: [Entity<VariableInput>; 2],
     _subscriptions: Vec<Subscription>,
 }
 
@@ -23,6 +28,7 @@ pub(super) struct RequestFields {
     rows: Vec<FieldRow>,
     generated_headers: Vec<(SharedString, SharedString)>,
     focus: FocusHandle,
+    scope: Entity<VariableScope>,
 }
 
 impl EventEmitter<FieldsChanged> for RequestFields {}
@@ -32,6 +38,7 @@ impl RequestFields {
         id: &'static str,
         values: &[(String, String)],
         generated_headers: &[(String, String)],
+        scope: Entity<VariableScope>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -43,6 +50,7 @@ impl RequestFields {
                 .map(|(name, value)| (name.clone().into(), value.clone().into()))
                 .collect(),
             focus: cx.focus_handle(),
+            scope,
         };
 
         for (key, value) in values {
@@ -87,6 +95,16 @@ impl RequestFields {
                 .default_value(value.to_owned())
         });
         let description = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
+        let completions = [&key, &value].map(|input| {
+            cx.new(|cx| {
+                VariableInput::new(
+                    VariableTarget::Input(input.clone()),
+                    self.scope.clone(),
+                    window,
+                    cx,
+                )
+            })
+        });
         let subscriptions = [&key, &value]
             .into_iter()
             .map(|input| {
@@ -110,6 +128,7 @@ impl RequestFields {
             key,
             value,
             description,
+            completions,
             _subscriptions: subscriptions,
         });
     }
@@ -264,12 +283,21 @@ impl Render for RequestFields {
                                         .when(column == "description" && populated, |input| {
                                             input.pr_7()
                                         })
-                                        .child(
-                                            Input::new(input)
+                                        .child({
+                                            let input = Input::new(input)
                                                 .small()
                                                 .appearance(false)
-                                                .aria_label(format!("{id} {column} {}", index + 1)),
-                                        ),
+                                                .aria_label(format!("{id} {column} {}", index + 1));
+                                            match column {
+                                                "key" => with_variables(&row.completions[0], input)
+                                                    .into_any_element(),
+                                                "value" => {
+                                                    with_variables(&row.completions[1], input)
+                                                        .into_any_element()
+                                                }
+                                                _ => input.into_any_element(),
+                                            }
+                                        }),
                                 )
                                 .when(column == "description" && populated, |cell| {
                                     cell.child(

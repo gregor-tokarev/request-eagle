@@ -7,6 +7,8 @@ mod page;
 mod request_draft;
 mod request_fields;
 mod response_view;
+mod variable_input;
+mod variables;
 
 #[cfg(test)]
 mod test_allocator;

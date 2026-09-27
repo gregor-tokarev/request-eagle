@@ -4,7 +4,7 @@ use collection::{HttpRequest, Method};
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::{RequestDraft, draft::RequestSection, execution::outgoing_request};
+use super::{RequestDraft, draft::RequestSection};
 
 // Debug selectors are collected only during layout, not replayed from cached
 // controls. Refresh before querying geometry; interactions still use real input.
@@ -42,8 +42,8 @@ fn prepares_json_requests_without_mutating_the_draft() {
         path: "{{baseUrl}}/echo".into(),
         ..Default::default()
     };
-    assert_eq!(outgoing_request(&templated).path, "{{baseUrl}}/echo");
-    let outgoing = outgoing_request(&original);
+    assert_eq!(templated.prepare_for_send().path, "{{baseUrl}}/echo");
+    let outgoing = original.clone().prepare_for_send();
     assert_eq!(outgoing.path, "https://ifconfig.me/ip");
     assert_eq!(
         outgoing.headers,
@@ -55,11 +55,14 @@ fn prepares_json_requests_without_mutating_the_draft() {
     original
         .headers
         .push(("content-type".into(), "application/custom+json".into()));
-    assert_eq!(outgoing_request(&original).headers, original.headers);
+    assert_eq!(
+        original.clone().prepare_for_send().headers,
+        original.headers
+    );
 
     for method in [Method::Get, Method::Head] {
         original.method = method;
-        assert!(outgoing_request(&original).body.is_none());
+        assert!(original.clone().prepare_for_send().body.is_none());
         assert!(original.body.is_some());
     }
 }

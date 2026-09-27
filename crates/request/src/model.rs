@@ -23,6 +23,30 @@ pub struct HttpRequest {
     pub scripts: crate::RequestScripts,
 }
 
+impl HttpRequest {
+    /// Apply the request editor's URL and JSON defaults to a resolved snapshot.
+    pub fn prepare_for_send(mut self) -> Self {
+        self.path = self.path.trim().to_owned();
+        if !self.path.is_empty() && !self.path.contains("://") && !self.path.starts_with("{{") {
+            self.path = format!("https://{}", self.path);
+        }
+
+        if matches!(self.method, Method::Get | Method::Head) {
+            self.body = None;
+        } else if self.body.is_some()
+            && !self
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        {
+            self.headers
+                .push(("Content-Type".into(), "application/json".into()));
+        }
+
+        self
+    }
+}
+
 impl From<HttpRequest> for Request {
     fn from(request: HttpRequest) -> Self {
         Self::Http(request)

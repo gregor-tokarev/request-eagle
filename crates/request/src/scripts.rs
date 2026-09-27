@@ -10,4 +10,4 @@ mod assertion_tests;
 mod tests;
 
 pub use model::{RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
-pub(crate) use runtime::{Cancellation, post_response, pre_request};
+pub(crate) use runtime::{Cancellation, post_response, pre_request_with_variables};

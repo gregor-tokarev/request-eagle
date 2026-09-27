@@ -16,6 +16,8 @@ pub enum ExecutionError {
         report: Box<crate::ScriptReport>,
     },
 
+    #[error("{0}")]
+    Variables(String),
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
 

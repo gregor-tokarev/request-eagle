@@ -29,6 +29,23 @@ impl RequestExecutor {
         &self,
         request: R,
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
+        self.execute_inner(request, None)
+    }
+
+    /// Resolve collection and script variables together after the pre-request script.
+    pub fn execute_with_variables<R: Into<Request>>(
+        &self,
+        request: R,
+        variables: crate::RequestVariables,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
+        self.execute_inner(request, Some(variables))
+    }
+
+    fn execute_inner<R: Into<Request>>(
+        &self,
+        request: R,
+        variables: Option<crate::RequestVariables>,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
         let request = request.into();
         let executor = self.clone();
 
@@ -39,7 +56,12 @@ impl RequestExecutor {
                 match request {
                     Request::Http(request) => {
                         let (request, variables, reports) =
-                            crate::scripts::pre_request(request, cancellation.0.clone()).await?;
+                            crate::scripts::pre_request_with_variables(
+                                request,
+                                cancellation.0.clone(),
+                                variables,
+                            )
+                            .await?;
                         scripts = reports;
 
                         let sent_at = Instant::now();
