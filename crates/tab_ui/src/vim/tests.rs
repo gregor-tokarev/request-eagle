@@ -1521,3 +1521,30 @@ fn search_operators_follow_vim_exclusive_line_boundaries_in_both_directions(
         }
     }
 }
+
+#[gpui_kit::test]
+fn silent_document_replacement_invalidates_vim_positions_and_pending_commands(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = setup(cx, "\nabcdefghijk\nabcdef", true);
+    cx.simulate_keystrokes("2 j 4 l 2 k");
+    assert_eq!(cursor(&view, cx), 0);
+    cx.update(|window, cx| {
+        view.read(cx)
+            .editor
+            .clone()
+            .update(cx, |editor, cx| editor.set_value("ab\ncd", window, cx))
+    });
+    cx.simulate_keystrokes("j");
+    assert_eq!(cursor(&view, cx), 3);
+    cx.simulate_keystrokes("g g d");
+    cx.update(|window, cx| {
+        view.read(cx)
+            .editor
+            .clone()
+            .update(cx, |editor, cx| editor.set_value("xy\nzw", window, cx))
+    });
+    cx.simulate_keystrokes("l");
+    assert_eq!(value(&view, cx), "xy\nzw");
+    assert_eq!(cursor(&view, cx), 1);
+}

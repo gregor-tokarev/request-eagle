@@ -1,8 +1,9 @@
 use gpui_kit::component::{
     ActiveTheme as _,
-    input::{EditorState, Escape, InputEvent, Redo, RopeExt, Undo},
+    input::{EditorState, Escape, InputEvent, Redo, Rope, RopeExt, Undo},
 };
 use gpui_kit::{prelude::*, *};
+use ropey::extra::esoterica::ropes_are_instances;
 use std::ops::Range;
 
 use super::motions::{first_nonblank, line, lines, motion, newline, next, normal_cursor, previous};
@@ -42,6 +43,7 @@ struct Search {
 /// One editor's modal state, reached by the shared focus-aware dispatcher.
 pub(crate) struct Vim {
     editor: Entity<EditorState>,
+    observed_text: Rope,
     enabled: bool,
     mode: Mode,
     count: usize,
@@ -98,16 +100,17 @@ impl Vim {
             }
 
             if matches!(event, InputEvent::Change) {
-                this.search = None;
-                this.reset_pending();
-                this.desired_column = None;
-
-                if matches!(this.mode, Mode::Visual { .. }) {
-                    this.set_mode(Mode::Normal, cx);
-                }
+                this.document_changed(cx);
             }
         });
         let selection_changes = cx.observe(&editor, |this, editor, cx| {
+            // set_value suppresses Change, and may leave the caret unchanged.
+            // Unmodified rope clones compare by identity in O(1), without
+            // scanning or copying the document on every cursor notification.
+            if !ropes_are_instances(&this.observed_text, editor.read(cx).text()) {
+                this.document_changed(cx);
+            }
+
             if this.search.is_some() {
                 if !editor.read(cx).search_session().open {
                     // Closing the native panel without accepting a Vim search
@@ -144,6 +147,7 @@ impl Vim {
         });
 
         let mut this = Self {
+            observed_text: editor.read(cx).text().clone(),
             selection: editor.read(cx).selected_range(),
             editor,
             enabled: cx
@@ -179,6 +183,17 @@ impl Vim {
             } else if self.search.is_some() && self.focus.contains_focused(window, cx) {
                 self.search_keystroke(&event.keystroke, window, cx);
             }
+        }
+    }
+
+    fn document_changed(&mut self, cx: &mut Context<Self>) {
+        self.observed_text = self.editor.read(cx).text().clone();
+        self.search = None;
+        self.reset_pending();
+        self.desired_column = None;
+
+        if matches!(self.mode, Mode::Visual { .. }) {
+            self.set_mode(Mode::Normal, cx);
         }
     }
 
