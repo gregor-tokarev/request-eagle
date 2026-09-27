@@ -114,14 +114,28 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('path', 'large');");
         request.method = Method::Post;
-        request.body = Some(vec![255; 40 * 1024 * 1024]);
+        request.body = Some(vec![b'x'; 40 * 1024 * 1024]);
         let request_buffer = request.body.as_ref().unwrap().as_ptr();
         let (mut request, variables, _) = pre_request(request, cancelled()).await.unwrap();
         assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
 
         request.scripts.post_response =
             "pm.response.to.have.status(200); throw new Error('after status');".into();
-        let body = vec![255; 40 * 1024 * 1024];
+        request.scripts.pre_request.clear();
+        let (mut request, _, _) = super::runtime::pre_request_with_variables(
+            request,
+            cancelled(),
+            Some(crate::RequestVariables::new(
+                environment::VariableValues::default(),
+                None,
+            )),
+        )
+        .await
+        .unwrap();
+        assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
+        let request_body = request.body.take().map(bytes::Bytes::from);
+        // Fits as bytes, but replacement characters would exceed the decode budget.
+        let body = vec![255; 11 * 1024 * 1024];
         let response_buffer = body.as_ptr();
         let execution = Execution {
             elapsed: Duration::ZERO,
@@ -134,8 +148,14 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
                 metrics: HttpMetrics::default(),
             }),
         };
-        let mut result =
-            post_response(request.clone(), variables.clone(), execution, cancelled()).await;
+        let mut result = post_response(
+            request.clone(),
+            request_body.clone(),
+            variables.clone(),
+            execution,
+            cancelled(),
+        )
+        .await;
         assert!(
             result.scripts[0]
                 .error
@@ -147,14 +167,18 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
         assert_eq!(response.body.as_ptr(), response_buffer);
 
         request.scripts.post_response = "pm.response.text();".into();
-        result = post_response(request, variables, result, cancelled()).await;
+        result = post_response(request, request_body, variables, result, cancelled()).await;
         assert!(
-            result.scripts[1].error.is_some(),
-            "reading an oversized body must respect the heap limit"
+            result.scripts[1]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("decoding limit"),
+            "lossy decoding must be bounded before allocating native text"
         );
         let Response::Http(response) = result.response;
         assert_eq!(response.body.as_ptr(), response_buffer);
-        assert_eq!(response.body.len(), 40 * 1024 * 1024);
+        assert_eq!(response.body.len(), 11 * 1024 * 1024);
     });
 }
 
@@ -281,7 +305,7 @@ fn response_tests_keep_failures_logs_and_response_data() {
                 metrics: HttpMetrics::default(),
             }),
         };
-        let result = post_response(request, variables, execution, cancelled()).await;
+        let result = post_response(request, None, variables, execution, cancelled()).await;
         let report = &result.scripts[1];
         assert_eq!(report.phase, ScriptPhase::PostResponse);
         assert_eq!(report.tests.len(), 6);

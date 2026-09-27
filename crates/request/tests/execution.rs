@@ -65,6 +65,70 @@ fn executor() -> RequestExecutor {
     .unwrap()
 }
 
+#[test]
+fn post_response_scripts_share_uploads_and_read_the_sent_body() {
+    smol::block_on(async {
+        for (body, pre, post) in [
+            (
+                vec![b'x'; 40 * 1024 * 1024],
+                "",
+                "pm.response.to.have.status(200);",
+            ),
+            (
+                vec![255; 40 * 1024 * 1024],
+                "",
+                "pm.response.to.have.status(200);",
+            ),
+            (
+                b"draft".to_vec(),
+                "pm.request.body.update('sent 🦅');",
+                "pm.expect(pm.request.body.raw).to.equal('sent 🦅');",
+            ),
+        ] {
+            let (url, server) =
+                serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+            let expected_len = if pre.contains("body.update") {
+                "sent 🦅".len()
+            } else {
+                body.len()
+            };
+            let execution = executor()
+                .execute_with_variables(
+                    HttpRequest {
+                        method: Method::Post,
+                        path: url,
+                        body: Some(body),
+                        scripts: request::RequestScripts {
+                            pre_request: pre.into(),
+                            post_response: post.into(),
+                        },
+                        ..Default::default()
+                    },
+                    request::RequestVariables::new(environment::VariableValues::default(), None),
+                )
+                .await
+                .unwrap();
+            assert!(
+                execution
+                    .scripts
+                    .iter()
+                    .all(|report| report.error.is_none()),
+                "{:?}",
+                execution.scripts
+            );
+            let received = server.await;
+            assert_eq!(received.body.len(), expected_len);
+            let Response::Http(response) = execution.response;
+            assert_eq!(response.metrics.request_body_bytes, expected_len);
+            if pre.contains("body.update") {
+                assert_eq!(received.body, "sent 🦅".as_bytes());
+            } else {
+                assert!(received.body.iter().all(|byte| *byte == received.body[0]));
+            }
+        }
+    });
+}
+
 fn report(label: &str, execution: &Execution) {
     let Response::Http(response) = &execution.response;
 

@@ -27,6 +27,7 @@ pub(super) fn has_dynamic_placeholders(request: &HttpRequest) -> bool {
 pub(super) fn expand_request(
     request: &mut HttpRequest,
     variables: &Variables,
+    body_changed: bool,
 ) -> Result<(), String> {
     // Share the limit across all fields, including generated dynamic values.
     let mut budget = 32 * 1024 * 1024;
@@ -45,6 +46,7 @@ pub(super) fn expand_request(
     // Preserve binary bodies unless a script explicitly replaced them.
     if let Some(body) = &request.body
         && let Ok(text) = std::str::from_utf8(body)
+        && (body_changed || text.contains("{{"))
     {
         request.body =
             Some(replace_variables(text, variables, &mut generated, &mut budget)?.into_bytes());

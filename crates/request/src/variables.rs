@@ -22,6 +22,14 @@ impl RequestVariables {
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
+        self.resolve_owned(request.clone(), false)
+    }
+
+    pub(crate) fn resolve_owned(
+        &self,
+        request: HttpRequest,
+        body_changed: bool,
+    ) -> Result<HttpRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
         if !request.scripts.is_empty() {
             resolver.limit_output(32 * 1024 * 1024);
@@ -35,26 +43,33 @@ impl RequestVariables {
                 }
             }
         }
-        request.resolve_with(&mut resolver).map_err(|error| {
-            if let VariableError::Unknown(name) = &error
-                && !name.starts_with('$')
-                && let Some(message) = &self.environment_error
-            {
-                return message.clone();
-            }
-            error.to_string()
-        })
+        request
+            .resolve_with(&mut resolver, body_changed)
+            .map_err(|error| {
+                if let VariableError::Unknown(name) = &error
+                    && !name.starts_with('$')
+                    && let Some(message) = &self.environment_error
+                {
+                    return message.clone();
+                }
+                error.to_string()
+            })
     }
 }
 
 impl HttpRequest {
     /// Resolve a send snapshot, preserving the saved request and editable draft.
     pub fn resolve_variables(&self, values: &VariableValues) -> Result<Self, VariableError> {
-        self.resolve_with(&mut VariableResolver::new(values))
+        self.clone()
+            .resolve_with(&mut VariableResolver::new(values), false)
     }
 
-    fn resolve_with(&self, resolver: &mut VariableResolver<'_>) -> Result<Self, VariableError> {
-        let mut request = self.clone();
+    fn resolve_with(
+        self,
+        resolver: &mut VariableResolver<'_>,
+        body_changed: bool,
+    ) -> Result<Self, VariableError> {
+        let mut request = self;
         request.path = resolve_url(&request.path, resolver)?;
 
         for (key, value) in request
@@ -68,6 +83,7 @@ impl HttpRequest {
 
         if let Some(body) = &mut request.body
             && let Ok(text) = std::str::from_utf8(body)
+            && (body_changed || text.contains("{{"))
         {
             *body = resolver.resolve(text)?.into_bytes();
         }

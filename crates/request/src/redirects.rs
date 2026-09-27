@@ -13,12 +13,11 @@ const REDIRECT_LIMIT: u32 = 100;
 
 pub(crate) async fn send(
     client: &reqwest_client::ReqwestClient,
-    request: Request<Option<Vec<u8>>>,
+    request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
 ) -> Result<Response<AsyncBody>, HttpError> {
-    let (mut parts, body) = request.into_parts();
-    let mut body = body.map(Bytes::from);
+    let (mut parts, mut body) = request.into_parts();
     let mut redirects = 0;
 
     loop {

@@ -55,7 +55,7 @@ impl RequestExecutor {
             let run = async {
                 match request {
                     Request::Http(request) => {
-                        let (request, variables, reports) =
+                        let (mut request, variables, reports) =
                             crate::scripts::pre_request_with_variables(
                                 request,
                                 cancellation.0.clone(),
@@ -65,9 +65,11 @@ impl RequestExecutor {
                         scripts = reports;
 
                         let sent_at = Instant::now();
-                        let post_request = (!request.scripts.post_response.trim().is_empty())
-                            .then(|| request.clone());
-                        let response = executor.http.execute(request).await?;
+                        let has_post_script = !request.scripts.post_response.trim().is_empty();
+                        let body = request.body.take().map(bytes::Bytes::from);
+                        let post_body = if has_post_script { body.clone() } else { None };
+                        let response = executor.http.execute(&request, body).await?;
+                        let post_request = has_post_script.then_some((request, post_body));
                         let execution = Execution {
                             response: Response::Http(response),
                             elapsed: sent_at.elapsed(),
@@ -104,8 +106,9 @@ impl RequestExecutor {
             // Once the response is complete, its script uses the separate script
             // deadline. A request timeout must not discard a received response.
             match post_request {
-                Some(request) => Ok(crate::scripts::post_response(
+                Some((request, body)) => Ok(crate::scripts::post_response(
                     request,
+                    body,
                     variables,
                     execution,
                     cancellation.0.clone(),

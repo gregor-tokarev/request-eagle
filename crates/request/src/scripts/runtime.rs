@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     rc::Rc,
     sync::{
         Arc, Mutex,
@@ -7,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bytes::Bytes;
 use rquickjs::{Context, Function, Runtime, Value};
 use serde::Deserialize;
 use serde_json::json;
@@ -48,23 +50,54 @@ struct ScriptOutput {
 }
 
 struct Bodies {
-    request: Option<Vec<u8>>,
+    request: Option<Bytes>,
     response: Option<Vec<u8>>,
 }
 
 fn body_reader<'js>(cx: rquickjs::Ctx<'js>, bodies: Rc<Bodies>) -> rquickjs::Result<Function<'js>> {
     Function::new(cx, move |cx: rquickjs::Ctx<'js>, response: bool| {
         let bytes = if response {
-            &bodies.response
+            bodies.response.as_deref()
         } else {
-            &bodies.request
+            bodies.request.as_deref()
         };
         match bytes {
-            Some(bytes) => rquickjs::String::from_str(cx, &String::from_utf8_lossy(bytes))
-                .map(rquickjs::String::into_value),
+            Some(bytes) => {
+                let text = body_text(bytes).map_err(|()| {
+                    rquickjs::Exception::throw_range(
+                        &cx,
+                        "Script body exceeds the 32 MiB decoding limit",
+                    )
+                })?;
+                rquickjs::String::from_str(cx, &text).map(rquickjs::String::into_value)
+            }
             None => Ok(Value::new_null(cx)),
         }
     })
+}
+
+fn body_text(bytes: &[u8]) -> Result<Cow<'_, str>, ()> {
+    if bytes.len() > MEMORY_LIMIT {
+        return Err(());
+    }
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return Ok(Cow::Borrowed(text));
+    }
+
+    // Count replacement characters before allocating: lossy UTF-8 decoding
+    // can triple the input size outside QuickJS's allocator.
+    let length = bytes.utf8_chunks().try_fold(0usize, |length, chunk| {
+        let length = length + chunk.valid().len() + usize::from(!chunk.invalid().is_empty()) * 3;
+        (length <= MEMORY_LIMIT).then_some(length).ok_or(())
+    })?;
+    let mut text = String::with_capacity(length);
+    for chunk in bytes.utf8_chunks() {
+        text.push_str(chunk.valid());
+        if !chunk.invalid().is_empty() {
+            text.push('\u{fffd}');
+        }
+    }
+    Ok(Cow::Owned(text))
 }
 
 #[cfg(test)]
@@ -101,16 +134,19 @@ pub(crate) async fn pre_request_with_variables(
             })
             .unwrap_or_default();
 
+        let mut body_changed = false;
         if has_script {
             let input = input(&request, &variables);
+            let mut body = request.body.take().map(Bytes::from);
             let (output, script_report) = run(
                 &request.scripts.pre_request,
                 ScriptPhase::PreRequest,
                 input,
-                &mut request.body,
+                &mut body,
                 None,
                 cancelled,
             );
+            request.body = body.map(Vec::from);
             report = script_report;
 
             if let Some(message) = &report.error {
@@ -127,7 +163,8 @@ pub(crate) async fn pre_request_with_variables(
             request.headers = output.headers;
             variables = output.variables;
 
-            if output.body_changed {
+            body_changed = output.body_changed;
+            if body_changed {
                 request.body = output.body.map(String::into_bytes);
             }
         }
@@ -142,22 +179,25 @@ pub(crate) async fn pre_request_with_variables(
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
-            context.resolve(&request).map(|resolved| request = resolved)
+            context.resolve_owned(request, body_changed)
         } else {
-            expand_request(&mut request, &variables)
+            expand_request(&mut request, &variables, body_changed).map(|()| request)
         };
 
-        if let Err(message) = expanded {
-            let message: String = message.chars().take(4096).collect();
-            if !has_script && context.is_some() {
-                return Err(ExecutionError::Variables(message));
+        let mut request = match expanded {
+            Ok(request) => request,
+            Err(message) => {
+                let message: String = message.chars().take(4096).collect();
+                if !has_script && context.is_some() {
+                    return Err(ExecutionError::Variables(message));
+                }
+                report.error = Some(message.clone());
+                return Err(ExecutionError::Script {
+                    message,
+                    report: Box::new(report),
+                });
             }
-            report.error = Some(message.clone());
-            return Err(ExecutionError::Script {
-                message,
-                report: Box::new(report),
-            });
-        }
+        };
 
         if context.is_some() {
             request = request.prepare_for_send();
@@ -170,7 +210,8 @@ pub(crate) async fn pre_request_with_variables(
 }
 
 pub(crate) async fn post_response(
-    mut request: HttpRequest,
+    request: HttpRequest,
+    mut request_body: Option<Bytes>,
     variables: Variables,
     mut execution: Execution,
     cancelled: Arc<AtomicBool>,
@@ -194,7 +235,7 @@ pub(crate) async fn post_response(
             &request.scripts.post_response,
             ScriptPhase::PostResponse,
             input,
-            &mut request.body,
+            &mut request_body,
             Some(&mut response.body),
             cancelled,
         );
@@ -218,7 +259,7 @@ fn run(
     source: &str,
     phase: ScriptPhase,
     input: serde_json::Value,
-    request_body: &mut Option<Vec<u8>>,
+    request_body: &mut Option<Bytes>,
     mut response_body: Option<&mut Vec<u8>>,
     cancelled: Arc<AtomicBool>,
 ) -> (Option<ScriptOutput>, ScriptReport) {
