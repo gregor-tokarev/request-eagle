@@ -421,6 +421,7 @@ fn word_operators_preserve_line_endings_and_count_empty_lines(cx: &mut TestAppCo
         ("word\nnext\nlast", "2 d w", "last"),
         ("word\n\nnext", "2 d w", "next"),
         ("\nnext", "d w", "next"),
+        ("\r\nnext", "d w", "next"),
     ] {
         let (view, cx) = setup(cx, source, true);
         cx.simulate_keystrokes(keys);
@@ -430,6 +431,12 @@ fn word_operators_preserve_line_endings_and_count_empty_lines(cx: &mut TestAppCo
     cx.simulate_keystrokes("y w");
     cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "word"));
     assert_eq!(value(&view, cx), "word\nnext");
+
+    let (view, cx) = setup(cx, "one\r\n\r\nnext", true);
+    cx.simulate_keystrokes("w");
+    assert_eq!(cursor(&view, cx), 5);
+    cx.simulate_keystrokes("w");
+    assert_eq!(cursor(&view, cx), 7);
 }
 
 #[gpui_kit::test]
@@ -491,4 +498,152 @@ fn whitespace_only_first_nonblank_commands_match_vim(cx: &mut TestAppContext) {
         cx.simulate_keystrokes("I x escape");
         assert_eq!(value(&view, cx), " \t  x");
     }
+}
+
+#[gpui_kit::test]
+fn character_commands_keep_combining_sequences_and_joined_emoji_whole(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "e\u{301}👩\u{200d}🚀🇺🇸z", true);
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&view, cx), "e\u{301}".len());
+    cx.simulate_keystrokes("l");
+    assert_eq!(cursor(&view, cx), "e\u{301}👩\u{200d}🚀".len());
+    cx.simulate_keystrokes("h x");
+    assert_eq!(value(&view, cx), "e\u{301}🇺🇸z");
+    cx.simulate_keystrokes("0 x");
+    assert_eq!(value(&view, cx), "🇺🇸z");
+    cx.simulate_keystrokes("v d");
+    assert_eq!(value(&view, cx), "z");
+}
+
+#[test]
+fn grapheme_navigation_crosses_rope_chunks_in_both_directions() {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let source = "e\u{301}👩\u{200d}🚀🇺🇸\r\n".repeat(500);
+    let rope = gpui_kit::component::input::Rope::from(source.clone());
+    assert!(rope.chunks().count() > 1);
+    let mut expected: Vec<_> = source
+        .grapheme_indices(true)
+        .map(|(offset, _)| offset)
+        .collect();
+    expected.push(source.len());
+
+    for pair in expected.windows(2) {
+        assert_eq!(super::grapheme::next(&rope, pair[0]), pair[1]);
+        assert_eq!(super::grapheme::previous(&rope, pair[1]), pair[0]);
+    }
+}
+
+#[gpui_kit::test]
+fn unsupported_g_sequences_never_execute_their_suffix(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abc", true);
+    cx.simulate_keystrokes("x");
+    for keys in ["g x", "g i", "g u", "g o", "g p", "g d", "2 g x"] {
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), "bc", "{keys}");
+        cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+    }
+    cx.simulate_keystrokes("l g g");
+    assert_eq!(cursor(&view, cx), 0);
+    cx.simulate_keystrokes("u g ctrl-r");
+    assert_eq!(value(&view, cx), "abc");
+}
+
+#[gpui_kit::test]
+fn vertical_motions_keep_the_rendered_column_after_tabs(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "\tabc\n0123456789\n\tabc", true);
+    cx.simulate_keystrokes("l");
+    let left = cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        view.read(cx)
+            .editor
+            .read(cx)
+            .cursor_layout()
+            .unwrap()
+            .0
+            .left()
+    });
+    cx.simulate_keystrokes("j");
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        let caret = view.read(cx).editor.read(cx).cursor_layout().unwrap().0;
+        assert!((caret.left() - left).abs() < gpui_kit::px(0.01));
+    });
+    cx.simulate_keystrokes("j");
+    assert_eq!(cursor(&view, cx), "\tabc\n0123456789\n\t".len());
+}
+
+#[gpui_kit::test]
+fn counted_insert_and_open_commands_repeat_the_completed_edit(cx: &mut TestAppContext) {
+    for (keys, expected) in [
+        ("3 i a b c escape", "abcabcabcold"),
+        ("3 a a b c escape", "oabcabcabcld"),
+        ("3 I a b c escape", "abcabcabcold"),
+        ("3 A a b c escape", "oldabcabcabc"),
+        ("3 o a b c escape", "old\nabc\nabc\nabc"),
+        ("3 O a b c escape", "abc\nabc\nabc\nold"),
+        ("3 i a b backspace escape", "aaaold"),
+        ("3 o escape", "old\n\n\n"),
+        ("3 i a b left escape", "abold"),
+    ] {
+        let (view, cx) = setup(cx, "old", true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "{keys}");
+    }
+    let (view, cx) = setup(cx, "old\r\nlast", true);
+    cx.simulate_keystrokes("3 o a escape");
+    assert_eq!(value(&view, cx), "old\r\na\r\na\r\na\r\nlast");
+}
+
+#[gpui_kit::test]
+fn backward_words_stop_at_each_empty_line(cx: &mut TestAppContext) {
+    for ending in ["\n", "\r\n"] {
+        let source = format!("one{ending}{ending}next");
+        let (view, cx) = setup(cx, &source, true);
+        cx.simulate_keystrokes("G b");
+        assert_eq!(cursor(&view, cx), 3 + ending.len());
+        cx.simulate_keystrokes("b");
+        assert_eq!(cursor(&view, cx), 0);
+        cx.simulate_keystrokes("G d B");
+        assert_eq!(value(&view, cx), format!("one{ending}next"));
+        cx.read(|cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), ending));
+    }
+}
+
+#[gpui_kit::test]
+fn visual_paste_swaps_the_register_but_capital_p_preserves_it(cx: &mut TestAppContext) {
+    for (paste, expected_register) in [("p", "bar"), ("P", "foo")] {
+        let (view, cx) = setup(cx, "foo bar", true);
+        cx.simulate_keystrokes(&format!("y e w v e {paste}"));
+        assert_eq!(value(&view, cx), "foo foo");
+        cx.read(|cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                expected_register
+            )
+        });
+        cx.simulate_keystrokes("p");
+        assert_eq!(value(&view, cx), format!("foo foo{expected_register}"));
+    }
+}
+
+#[gpui_kit::test]
+fn linewise_delete_lands_on_the_first_nonblank_of_the_survivor(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one\n  two\n\tlast", true);
+    cx.simulate_keystrokes("d d");
+    assert_eq!(cursor(&view, cx), 2);
+    cx.simulate_keystrokes("x");
+    assert_eq!(value(&view, cx), "  wo\n\tlast");
+    cx.simulate_keystrokes("G d d");
+    assert_eq!(cursor(&view, cx), 2);
+}
+
+#[gpui_kit::test]
+fn search_repeat_extends_visual_selections(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "one two one\nlast one", true);
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("one");
+    cx.simulate_keystrokes("escape g g 0 v n d");
+    assert_eq!(value(&view, cx), "ne\nlast one");
+    cx.simulate_keystrokes("u G V N d");
+    assert_eq!(value(&view, cx), "");
 }

@@ -7116,6 +7116,7 @@ dependencies = [
  "theme",
  "tree-sitter",
  "tree-sitter-javascript",
+ "unicode-segmentation",
 ]
 
 [[package]]

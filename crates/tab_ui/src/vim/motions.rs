@@ -7,31 +7,14 @@ pub(super) struct Motion {
     pub linewise: bool,
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum Column {
-    Character(usize),
-    End,
-}
-
-pub(super) fn next(text: &Rope, offset: usize) -> usize {
-    offset + text.char_at(offset).map_or(0, char::len_utf8)
-}
-
-pub(super) fn previous(text: &Rope, offset: usize) -> usize {
-    offset
-        - text
-            .chars_at(offset)
-            .reversed()
-            .next()
-            .map_or(0, char::len_utf8)
-}
+pub(super) use super::grapheme::{next, previous};
 
 pub(super) fn line(text: &Rope, offset: usize) -> Range<usize> {
     let row = text.offset_to_point(offset).row;
     let start = text.line_start_offset(row);
     let mut end = text.line_end_offset(row);
 
-    if end > start && text.char_at(previous(text, end)) == Some('\r') {
+    if end > start && text.char_at(end - 1) == Some('\r') {
         end -= 1;
     }
 
@@ -40,11 +23,17 @@ pub(super) fn line(text: &Rope, offset: usize) -> Range<usize> {
 
 pub(super) fn normal_cursor(text: &Rope, offset: usize) -> usize {
     let line = line(text, offset.min(text.len()));
-    offset.min(if line.is_empty() {
+    let offset = offset.min(if line.is_empty() {
         line.start
     } else {
         previous(text, line.end)
-    })
+    });
+
+    if offset < text.len() {
+        previous(text, next(text, offset))
+    } else {
+        offset
+    }
 }
 
 pub(super) fn newline(text: &Rope, offset: usize) -> &'static str {
@@ -53,12 +42,12 @@ pub(super) fn newline(text: &Rope, offset: usize) -> &'static str {
     let newline = if text.char_at(end) == Some('\n') {
         end
     } else if row > 0 {
-        previous(text, text.line_start_offset(row))
+        text.line_start_offset(row) - 1
     } else {
         return "\n";
     };
 
-    if newline > 0 && text.char_at(previous(text, newline)) == Some('\r') {
+    if newline > 0 && text.char_at(newline - 1) == Some('\r') {
         "\r\n"
     } else {
         "\n"
@@ -102,7 +91,6 @@ pub(super) fn motion(
     cursor: usize,
     key: &str,
     count: usize,
-    column: Option<Column>,
     operator: bool,
 ) -> Option<Motion> {
     let count = count.max(1);
@@ -123,31 +111,12 @@ pub(super) fn motion(
         }
         "j" | "down" | "k" | "up" => {
             let current = text.offset_to_point(cursor);
-            let column = column.unwrap_or_else(|| {
-                Column::Character(
-                    text.slice(text.line_start_offset(current.row)..cursor)
-                        .chars()
-                        .count(),
-                )
-            });
             let row = if matches!(key, "j" | "down") {
                 current.row.saturating_add(count).min(text.lines_len() - 1)
             } else {
                 current.row.saturating_sub(count)
             };
-            let target = line(text, text.line_start_offset(row));
-            offset = match column {
-                Column::End => normal_cursor(text, target.end),
-                Column::Character(column) => {
-                    target.start
-                        + text
-                            .slice(target)
-                            .chars()
-                            .take(column)
-                            .map(char::len_utf8)
-                            .sum::<usize>()
-                }
-            };
+            offset = text.line_start_offset(row);
 
             linewise = true;
         }
@@ -187,7 +156,9 @@ pub(super) fn motion(
                     }
 
                     // Empty lines count as words, including within a count.
-                    if offset > start && line(text, offset).is_empty() {
+                    let whitespace_line = line(text, offset);
+
+                    if whitespace_line.start > current_line.start && whitespace_line.is_empty() {
                         break;
                     }
 
@@ -207,8 +178,15 @@ pub(super) fn motion(
             for _ in 0..count {
                 offset = previous(text, offset);
 
-                while offset > 0 && word_class(text.char_at(offset), true) == 0 {
+                while offset > 0
+                    && word_class(text.char_at(offset), true) == 0
+                    && !line(text, offset).is_empty()
+                {
                     offset = previous(text, offset);
+                }
+
+                if line(text, offset).is_empty() {
+                    continue;
                 }
 
                 let class = word_class(text.char_at(offset), key == "B");

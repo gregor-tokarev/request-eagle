@@ -1,4 +1,7 @@
+mod column;
 mod cursor;
+mod grapheme;
+mod insertion;
 mod motions;
 mod state;
 

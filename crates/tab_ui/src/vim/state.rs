@@ -5,9 +5,8 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::*, *};
 use std::ops::Range;
 
-use super::motions::{
-    Column, first_nonblank, line, lines, motion, newline, next, normal_cursor, previous,
-};
+use super::motions::{first_nonblank, line, lines, motion, newline, next, normal_cursor, previous};
+use super::{column::Column, insertion::Insertion};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -31,6 +30,7 @@ pub(crate) struct Vim {
     go: bool,
     selection: Range<usize>,
     desired_column: Option<Column>,
+    insertion: Option<Insertion>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -53,6 +53,7 @@ impl Vim {
 
             if this.enabled != enabled {
                 this.enabled = enabled;
+                this.insertion = None;
                 this.mode = Mode::Normal;
                 this.reset_pending();
                 this.desired_column = None;
@@ -61,6 +62,7 @@ impl Vim {
         });
         let changes = cx.subscribe(&editor, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Blur) {
+                this.insertion = None;
                 this.reset_pending();
                 this.desired_column = None;
             }
@@ -101,6 +103,7 @@ impl Vim {
             operator: None,
             go: false,
             desired_column: None,
+            insertion: None,
             _subscriptions: vec![keys, preferences, changes, selection_changes],
         }
     }
@@ -194,9 +197,9 @@ impl Vim {
             // Keep an empty line for cc; dd of the final line also removes its
             // preceding newline so it does not leave an extra blank line.
             let ends_in_newline =
-                range.end > range.start && text.char_at(previous(text, range.end)) == Some('\n');
+                range.end > range.start && text.char_at(range.end - 1) == Some('\n');
             let replacement = if linewise && operator == 'c' && ends_in_newline {
-                newline(text, previous(text, range.end))
+                newline(text, range.end - 1)
             } else {
                 ""
             };
@@ -209,14 +212,17 @@ impl Vim {
             {
                 range.start = previous(text, range.start);
 
-                if range.start > 0 && text.char_at(previous(text, range.start)) == Some('\r') {
-                    range.start -= 1;
-                }
-
                 cursor = range.start;
             }
 
             self.replace(range, replacement, window, cx);
+
+            if linewise && operator == 'd' {
+                cursor = first_nonblank(
+                    self.editor.read(cx).text(),
+                    cursor.min(self.editor.read(cx).text().len()),
+                );
+            }
         }
 
         if operator == 'c' {
@@ -274,8 +280,23 @@ impl Vim {
             }
         }
 
-        let range = visual.unwrap_or(position..position);
+        let range = visual.clone().unwrap_or(position..position);
         let start = range.start;
+
+        if visual.is_some() && !before {
+            let mut replaced = text.slice(range.clone()).to_string();
+            let linewise_selection = matches!(self.mode, Mode::Visual { linewise: true, .. });
+
+            if linewise_selection && !replaced.ends_with('\n') {
+                replaced.push_str(newline(text, range.start));
+            }
+
+            cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
+                replaced,
+                serde_json::json!({ "request_eagle_vim_linewise": linewise_selection }),
+            ));
+        }
+
         self.replace(range, &value, window, cx);
         let cursor = if linewise {
             start + separator_len
@@ -290,6 +311,17 @@ impl Vim {
         let escape = stroke.key == "escape" || (modifiers.control && stroke.key == "[");
 
         if escape {
+            if let Some(insertion) = self.insertion.take() {
+                let editor = self.editor.read(cx);
+                let cursor = editor.cursor();
+
+                if let Some(repeated) = insertion.finish(editor.text(), cursor)
+                    && !repeated.is_empty()
+                {
+                    self.replace(cursor..cursor, &repeated, window, cx);
+                }
+            }
+
             let editor = self.editor.read(cx);
             let mut cursor = editor.cursor();
 
@@ -308,7 +340,7 @@ impl Vim {
         } else if self.mode == Mode::Insert {
             return;
         } else if modifiers.control && !modifiers.alt && !modifiers.platform && stroke.key == "r" {
-            let count = self.count.max(1);
+            let count = if self.go { 0 } else { self.count.max(1) };
             self.reset_pending();
 
             for _ in 0..count {
@@ -354,7 +386,12 @@ impl Vim {
             return;
         }
 
-        let key = if self.go && key == "g" { "gg" } else { key };
+        if self.go && key != "g" {
+            self.reset_pending();
+            return;
+        }
+
+        let key = if self.go { "gg" } else { key };
         self.go = false;
         let explicit_count = self.count > 0;
         let count = std::mem::take(&mut self.count).max(1);
@@ -429,27 +466,23 @@ impl Vim {
 
         let vertical = matches!(key, "j" | "k" | "up" | "down");
         let column = if vertical {
-            Some(self.desired_column.unwrap_or_else(|| {
-                Column::Character(
-                    text.slice(line(&text, cursor).start..cursor)
-                        .chars()
-                        .count(),
-                )
-            }))
+            Some(
+                self.desired_column
+                    .unwrap_or_else(|| Column::at(&text, cursor, window, cx)),
+            )
         } else if matches!(key, "$" | "end") {
             Some(Column::End)
         } else {
             None
         };
 
-        if let Some(movement) = motion(
-            &text,
-            cursor,
-            motion_key,
-            motion_count,
-            column,
-            operator.is_some(),
-        ) {
+        if let Some(mut movement) =
+            motion(&text, cursor, motion_key, motion_count, operator.is_some())
+        {
+            if vertical {
+                movement.offset = column.unwrap().offset(&text, movement.offset, window, cx);
+            }
+
             if let Some((operator, _)) = operator {
                 let range = if movement.linewise {
                     lines(&text, cursor, movement.offset)
@@ -461,7 +494,12 @@ impl Vim {
                         end
                     }
                 };
-                self.operate(operator, range, movement.linewise, window, cx);
+                let linewise = movement.linewise
+                    || (matches!(key, "w" | "W" | "b" | "B")
+                        && range.start < range.end
+                        && range.start == line(&text, range.start).start
+                        && range.end == line(&text, range.end).start);
+                self.operate(operator, range, linewise, window, cx);
 
                 if operator == 'y' && movement.linewise && movement.offset < cursor {
                     self.normal(movement.offset, cx);
@@ -527,9 +565,7 @@ impl Vim {
             }
             "d" | "c" | "y" => self.operator = Some((key.chars().next().unwrap(), count)),
             "x" | "s" => {
-                let end = motion(&text, cursor, "l", count, None, false)
-                    .unwrap()
-                    .offset;
+                let end = motion(&text, cursor, "l", count, false).unwrap().offset;
                 self.operate(
                     if key == "s" { 'c' } else { 'd' },
                     cursor..end,
@@ -539,9 +575,7 @@ impl Vim {
                 );
             }
             "X" => {
-                let start = motion(&text, cursor, "h", count, None, false)
-                    .unwrap()
-                    .offset;
+                let start = motion(&text, cursor, "h", count, false).unwrap().offset;
                 self.operate('d', start..cursor, false, window, cx);
             }
             "D" | "C" => {
@@ -575,26 +609,60 @@ impl Vim {
                 .editor
                 .update(cx, |editor, cx| editor.open_search(false, cx)),
             "n" | "N" => {
-                let range = self.editor.update(cx, |editor, cx| {
-                    let mut range = None;
+                let matches = self
+                    .editor
+                    .read(cx)
+                    .search_session()
+                    .matcher
+                    .matched_ranges();
 
-                    for _ in 0..count {
-                        range = if key == "n" {
-                            editor.next_search_match(cx)
-                        } else {
-                            editor.previous_search_match(cx)
+                if !matches.is_empty() {
+                    let index = if key == "n" {
+                        (matches.partition_point(|range| range.start <= cursor) + count - 1)
+                            % matches.len()
+                    } else {
+                        (matches.partition_point(|range| range.start < cursor) + matches.len()
+                            - count % matches.len())
+                            % matches.len()
+                    };
+                    let target = normal_cursor(&text, matches[index].start);
+
+                    if let Mode::Visual {
+                        anchor, linewise, ..
+                    } = self.mode
+                    {
+                        self.mode = Mode::Visual {
+                            anchor,
+                            cursor: target,
+                            linewise,
                         };
+                        self.select(self.visual_range(cx).unwrap(), cx);
+                    } else {
+                        self.normal(target, cx);
                     }
-
-                    range
-                });
-
-                if let Some(range) = range {
-                    self.normal(range.start, cx);
+                    self.desired_column = None;
                 }
             }
             // Unrecognized Normal-mode keys must never become inserted text.
             _ => {}
+        }
+
+        if count > 1
+            && matches!(key, "i" | "a" | "I" | "A" | "o" | "O")
+            && self.mode == Mode::Insert
+        {
+            let editor = self.editor.read(cx);
+            let separator = if matches!(key, "o" | "O") {
+                newline(&text, cursor)
+            } else {
+                ""
+            };
+            self.insertion = Some(Insertion::new(
+                editor.text().clone(),
+                editor.cursor(),
+                count,
+                separator,
+            ));
         }
     }
 }
