@@ -1,14 +1,16 @@
 use serde_json::{Value, json};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::Read,
     os::unix::{fs::PermissionsExt, net::UnixListener},
     process::Command,
     thread,
 };
 
+const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn cli(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
-        .env_remove("REQUEST_EAGLE_CLI_TOKEN")
+        .env("REQUEST_EAGLE_CLI_TOKEN", TOKEN)
         .args(args)
         .output()
         .unwrap()
@@ -41,17 +43,22 @@ fn sends_versioned_command_and_propagates_application_errors() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let path = dir.path().join("test.sock");
-    let listener = UnixListener::bind(&path).unwrap();
+    let listener = smol::net::unix::UnixListener::bind(&path).unwrap();
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut line = String::new();
-        BufReader::new(&stream).read_line(&mut line).unwrap();
-        let request: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(
-            request,
-            json!({"version":1,"token":"","command":{"command":"tabs.close","tab":7,"discard":false}})
-        );
-        writeln!(stream, "{}", json!({"version":1,"ok":false,"error":{"code":"operation_failed","message":"Unsaved draft"}})).unwrap();
+        smol::block_on(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut connection = request_eagle_automation::Connection::server(stream, TOKEN)
+                .await
+                .unwrap();
+            let bytes = connection.receive().await.unwrap();
+            let request: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                request,
+                json!({"version":1,"command":{"command":"tabs.close","tab":7,"discard":false}})
+            );
+            let reply = serde_json::to_vec(&json!({"version":1,"ok":false,"error":{"code":"operation_failed","message":"Unsaved draft"}})).unwrap();
+            connection.send(&reply).await.unwrap();
+        })
     });
     let output = cli(&[
         "--socket",
@@ -112,22 +119,17 @@ fn a_slow_instance_cannot_redirect_a_command_to_another_workspace() {
     let _slow = UnixListener::bind(dir.path().join("slow.sock")).unwrap();
     let server = thread::spawn(move || {
         let (mut stream, _) = responsive.accept().unwrap();
-        let mut line = String::new();
-        BufReader::new(&stream).read_line(&mut line).unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&line).unwrap()["command"]["command"],
-            "app.status"
+        let mut data = Vec::new();
+        stream.read_to_end(&mut data).unwrap();
+        assert!(
+            data.is_empty(),
+            "Discovery must not send credentials or commands"
         );
-        writeln!(
-            stream,
-            "{}",
-            json!({"version":1,"ok":true,"result":{"pid":1}})
-        )
-        .unwrap();
     });
 
     let output = Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
         .env("REQUEST_EAGLE_AUTOMATION_DIR", dir.path())
+        .env("REQUEST_EAGLE_CLI_TOKEN", TOKEN)
         .args(["call", r#"{"command":"tabs.new"}"#])
         .output()
         .unwrap();
@@ -175,4 +177,39 @@ fn non_utf8_arguments_and_socket_paths_return_json_errors() {
             .unwrap()
             .contains("UTF-8")
     );
+}
+
+#[test]
+fn counterfeit_listener_never_receives_credentials_or_command_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = dir.path().join("fake.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut length = [0u8; 2];
+        stream.read_exact(&mut length).unwrap();
+        let mut handshake = vec![0; u16::from_be_bytes(length) as usize];
+        stream.read_exact(&mut handshake).unwrap();
+        assert_eq!(handshake.len(), 48); // ephemeral public key and authentication tag
+        assert!(
+            !handshake
+                .windows(16)
+                .any(|bytes| bytes == &TOKEN.as_bytes()[..16])
+        );
+        // An impostor cannot produce the responder's proof. Closing the stream
+        // must fail authentication before the CLI sends the requested mutation.
+    });
+    let output = cli(&[
+        "--socket",
+        path.to_str().unwrap(),
+        "call",
+        r#"{"command":"tabs.new"}"#,
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "unauthorized"
+    );
+    server.join().unwrap();
 }

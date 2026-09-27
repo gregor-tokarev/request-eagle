@@ -11,8 +11,6 @@ pub const MAX_BODY_CHUNK: usize = 256 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Call {
     pub version: u32,
-    #[serde(default)]
-    pub token: String,
     pub command: Command,
 }
 

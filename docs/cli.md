@@ -121,13 +121,16 @@ logging their contents when running agents.
 After explicit session approval, an app instance creates
 `~/.request-eagle/automation/<pid>.sock` in a private 0700 directory, with a 0600
 Unix socket. There is no network listener. Every command, including status reads,
-requires the approved session token before dispatch. Disabling access closes the
+requires a Noise channel authenticated by the approved session key before dispatch.
+The raw token never crosses the socket. Both commands and responses are encrypted;
+a counterfeit same-user listener cannot extract the key or read/alter commands. Disabling access closes the
 listener and rejects queued work. No token is persisted in the app's files.
-The socket permissions and bearer token prevent accidental or unauthorized client
+The socket permissions and authenticated session prevent accidental or unauthorized client
 access; they do not sandbox a malicious process that can inspect your user session's
 memory or steal credentials from an authorized agent.
 
-`instances` lists enabled applications, with window titles for authorized sessions. If multiple apps are
+`instances` lists candidate socket paths without sending credentials or app commands.
+Use an explicit socket and `app.status` to read an authenticated window title. If multiple apps are
 running, `call` requires `--socket PATH` before `call`; it never silently chooses
 one. Slow or incompatible listeners remain listed with an error and still count
 toward ambiguity. `--timeout-ms N` controls client I/O deadlines (default 30 seconds).
@@ -135,9 +138,14 @@ toward ambiguity. `--timeout-ms N` controls client I/O deadlines (default 30 sec
 set it for both app and CLI. Label development windows with
 `REQUEST_EAGLE_WINDOW_TITLE='Request Eagle (CLI development)'`.
 
-The wire format is one newline-delimited JSON call per connection:
-`{"version":1,"token":"<session token>","command":{"command":"tabs.list"}}`. The response uses the CLI
-output envelope. Frames are limited to 8 MiB and server connections time out
+The Unix transport uses `Noise_NNpsk0_25519_ChaChaPoly_SHA256` with the session token
+decoded as a 32-byte PSK, and prologue `Request Eagle CLI protocol 1`. No app payload
+is sent before mutual authentication completes. Noise records have a two-byte
+big-endian length prefix. JSON messages are split into encrypted records of at
+most 60 KiB plaintext, followed by an authenticated empty record. One call and
+one response are exchanged per connection. The decrypted call is
+`{"version":1,"command":{"command":"tabs.list"}}`; the response uses the CLI
+output envelope. Messages are limited to 8 MiB and server connections time out
 in 30 seconds. Version mismatches fail explicitly. Requests execute on the app's
 UI thread; request network work and installer downloads remain asynchronous.
 

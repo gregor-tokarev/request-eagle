@@ -1,12 +1,12 @@
 use request_eagle_automation::{
-    Call, Command, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, schema, socket_directory, success,
-    validate_directory, validate_socket,
+    Call, Command, Connection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, schema,
+    socket_directory, success, validate_directory, validate_socket,
 };
 use serde_json::{Value, json};
+use smol::{future::FutureExt, net::unix::UnixStream};
 use std::{
     fs,
-    io::{self, BufRead, BufReader, Read, Write},
-    os::unix::net::UnixStream,
+    io::{self, Read},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -119,7 +119,12 @@ fn execute(mut args: Vec<String>) -> Result<Value, (i32, String)> {
                     PathBuf::from(available[0]["socket"].as_str().unwrap())
                 }
             };
-            call(&path, command, timeout).map_err(|e| (1, e.to_string()))
+            match call(&path, command, timeout) {
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    Ok(failure("unauthorized", error))
+                }
+                result => result.map_err(|error| (1, error.to_string())),
+            }
         }
         _ => Err((
             2,
@@ -146,12 +151,19 @@ fn instances() -> Result<Vec<Value>, (i32, String)> {
             .to_str()
             .ok_or_else(|| (1, "Automation socket paths must be valid UTF-8".to_owned()))?;
 
-        match call(&path, Command::AppStatus {}, Duration::from_millis(500)) {
-            Ok(reply) => instances.push(json!({
-                "socket": socket_name,
-                "app": reply.get("result"),
-                "error": reply.get("error"),
-            })),
+        // Discovery never reads credentials or sends handshake/application data.
+        // Even a counterfeit same-UID listener receives zero bytes.
+        let probe = validate_socket(&path).and_then(|_| {
+            smol::block_on(UnixStream::connect(&path).or(async {
+                smol::Timer::after(Duration::from_millis(500)).await;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Discovery timed out",
+                ))
+            }))
+        });
+        match probe {
+            Ok(_) => instances.push(json!({"socket": socket_name})),
             Err(error)
                 if matches!(
                     error.kind(),
@@ -174,28 +186,31 @@ fn instances() -> Result<Vec<Value>, (i32, String)> {
 
 fn call(path: &Path, command: Command, timeout: Duration) -> io::Result<Value> {
     validate_socket(path)?;
-    let mut stream = UnixStream::connect(path)?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    let mut bytes = serde_json::to_vec(&Call {
-        version: PROTOCOL_VERSION,
-        token: std::env::var("REQUEST_EAGLE_CLI_TOKEN").unwrap_or_default(),
-        command,
-    })?;
-    bytes.push(b'\n');
-    stream.write_all(&bytes)?;
-    let mut reply = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_MESSAGE_BYTES + 1)
-        .read_until(b'\n', &mut reply)?;
-    if reply.len() as u64 > MAX_MESSAGE_BYTES || reply.last() != Some(&b'\n') {
-        return Err(io::Error::other("Incomplete or oversized reply"));
-    }
-    let value: Value = serde_json::from_slice(&reply)?;
-    if value["version"] != PROTOCOL_VERSION || !value["ok"].is_boolean() {
-        return Err(io::Error::other(
-            "Incompatible automation protocol; install the CLI for this app version",
-        ));
-    }
-    Ok(value)
+    let token = std::env::var("REQUEST_EAGLE_CLI_TOKEN").unwrap_or_default();
+    smol::block_on(
+        async {
+            let stream = UnixStream::connect(path).await?;
+            let mut connection = Connection::client(stream, &token).await?;
+            let bytes = serde_json::to_vec(&Call {
+                version: PROTOCOL_VERSION,
+                command,
+            })?;
+            connection.send(&bytes).await?;
+            let reply = connection.receive().await?;
+            let value: Value = serde_json::from_slice(&reply)?;
+            if value["version"] != PROTOCOL_VERSION || !value["ok"].is_boolean() {
+                return Err(io::Error::other(
+                    "Incompatible automation protocol; install the CLI for this app version",
+                ));
+            }
+            Ok(value)
+        }
+        .or(async {
+            smol::Timer::after(timeout).await;
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "CLI connection timed out",
+            ))
+        }),
+    )
 }

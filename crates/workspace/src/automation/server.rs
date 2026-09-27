@@ -1,7 +1,7 @@
 use crate::workspace::Layout;
 use gpui_kit::{App, Entity, Task, Window};
 use request_eagle_automation::{
-    Call, Command, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, prepare_directory,
+    Call, Command, Connection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, prepare_directory,
     socket_directory, success,
 };
 use serde_json::{Value, json};
@@ -9,12 +9,11 @@ use settings_ui::CliAccess;
 use smol::{
     channel,
     future::FutureExt,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::unix::{UnixListener, UnixStream},
 };
 use std::{io, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
-type Pending = (Call, channel::Sender<Value>);
+type Pending = (Call, String, channel::Sender<Value>);
 
 // The owning task holds the listener and removes only its own socket on drop.
 struct Endpoint {
@@ -90,11 +89,11 @@ pub(crate) fn start(
     let weak = layout.downgrade();
     let task = cx.spawn(async move |cx| {
         let _server = server;
-        while let Ok((call, reply)) = receive.recv().await {
+        while let Ok((call, token, reply)) = receive.recv().await {
             if reply.is_closed() {
                 continue;
             }
-            let authorized = cx.update(|cx| cx.global::<CliAccess>().authorizes(&call.token));
+            let authorized = cx.update(|cx| cx.global::<CliAccess>().authorizes(&token));
             let response = if !authorized {
                 failure(
                     "unauthorized",
@@ -143,28 +142,17 @@ pub(crate) fn start(
     Ok(task)
 }
 
-async fn serve(
-    mut stream: UnixStream,
-    send: &channel::Sender<Pending>,
-    token: &str,
-) -> io::Result<()> {
-    let mut reader = BufReader::new(&mut stream).take(MAX_MESSAGE_BYTES + 1);
-    let mut input = Vec::new();
-    reader.read_until(b'\n', &mut input).await?;
-    let response = if input.len() as u64 > MAX_MESSAGE_BYTES || input.last() != Some(&b'\n') {
-        failure("invalid_input", "Incomplete or oversized command")
-    } else {
-        match serde_json::from_slice::<Call>(&input) {
-            Err(error) => failure("invalid_input", error),
-            Ok(call) if call.token != token => failure(
-                "unauthorized",
-                "Enable CLI access in General settings and copy the session command",
-            ),
-            Ok(call) => {
-                let (reply, result) = channel::bounded(1);
-                send.send((call, reply)).await.map_err(io::Error::other)?;
-                result.recv().await.map_err(io::Error::other)?
-            }
+async fn serve(stream: UnixStream, send: &channel::Sender<Pending>, token: &str) -> io::Result<()> {
+    let mut connection = Connection::server(stream, token).await?;
+    let input = connection.receive().await?;
+    let response = match serde_json::from_slice::<Call>(&input) {
+        Err(error) => failure("invalid_input", error),
+        Ok(call) => {
+            let (reply, result) = channel::bounded(1);
+            send.send((call, token.to_owned(), reply))
+                .await
+                .map_err(io::Error::other)?;
+            result.recv().await.map_err(io::Error::other)?
         }
     };
     let mut output = serde_json::to_vec(&response)?;
@@ -174,6 +162,5 @@ async fn serve(
             "Use a narrower query or smaller body chunk",
         ))?;
     }
-    output.push(b'\n');
-    stream.write_all(&output).await
+    connection.send(&output).await
 }
