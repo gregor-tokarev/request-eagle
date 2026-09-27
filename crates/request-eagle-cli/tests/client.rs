@@ -102,3 +102,41 @@ fn times_out_without_retrying_a_mutation() {
         "connection_error"
     );
 }
+
+#[test]
+fn a_slow_instance_cannot_redirect_a_command_to_another_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let responsive = UnixListener::bind(dir.path().join("responsive.sock")).unwrap();
+    let _slow = UnixListener::bind(dir.path().join("slow.sock")).unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = responsive.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(&stream).read_line(&mut line).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&line).unwrap()["command"]["command"],
+            "app.status"
+        );
+        writeln!(
+            stream,
+            "{}",
+            json!({"version":1,"ok":true,"result":{"pid":1}})
+        )
+        .unwrap();
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
+        .env("REQUEST_EAGLE_AUTOMATION_DIR", dir.path())
+        .args(["call", r#"{"command":"tabs.new"}"#])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("found 2")
+    );
+    server.join().unwrap();
+}

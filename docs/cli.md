@@ -110,7 +110,8 @@ running regardless of whether the optional client is installed.
 
 `instances` lists live applications and their window titles. If multiple apps are
 running, `call` requires `--socket PATH` before `call`; it never silently chooses
-one. `--timeout-ms N` controls client I/O deadlines (default 30 seconds).
+one. Slow or incompatible listeners remain listed with an error and still count
+toward ambiguity. `--timeout-ms N` controls client I/O deadlines (default 30 seconds).
 `REQUEST_EAGLE_AUTOMATION_DIR` overrides discovery for isolated development runs;
 set it for both app and CLI. Label development windows with
 `REQUEST_EAGLE_WINDOW_TITLE='Request Eagle (CLI development)'`.

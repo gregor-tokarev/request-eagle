@@ -125,11 +125,30 @@ fn instances() -> Result<Vec<Value>, (i32, String)> {
     let mut instances = Vec::new();
     for entry in entries {
         let path = entry.map_err(|e| (1, e.to_string()))?.path();
-        if path.extension().is_some_and(|ext| ext == "sock")
-            && let Ok(reply) = call(&path, Command::AppStatus {}, Duration::from_millis(500))
-            && reply["ok"] == true
-        {
-            instances.push(json!({"socket": path, "app": reply["result"]}));
+        if !path.extension().is_some_and(|ext| ext == "sock") {
+            continue;
+        }
+
+        match call(&path, Command::AppStatus {}, Duration::from_millis(500)) {
+            Ok(reply) => instances.push(json!({
+                "socket": path,
+                "app": reply.get("result"),
+                "error": reply.get("error"),
+            })),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+                ) =>
+            {
+                // Only a definitely absent listener is stale. A busy app may
+                // accept the connection but miss the short discovery deadline.
+            }
+            Err(error) => instances.push(json!({
+                "socket": path,
+                "app": null,
+                "error": error.to_string(),
+            })),
         }
     }
     instances.sort_by_key(|value| value["socket"].as_str().unwrap().to_owned());
