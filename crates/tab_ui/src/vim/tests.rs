@@ -17,6 +17,8 @@ struct Harness {
 
 impl Render for Harness {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mouse_vim = self.vim.clone();
+
         v_flex()
             .size_full()
             .child(self.vim.clone())
@@ -24,6 +26,9 @@ impl Render for Harness {
             .child(
                 gpui_kit::div()
                     .track_focus(&self.vim.focus_handle(cx))
+                    .capture_any_mouse_down(move |_, _, cx| {
+                        mouse_vim.update(cx, |vim, _| vim.mouse_down());
+                    })
                     .relative()
                     .flex_1()
                     .min_h_0()
@@ -464,6 +469,29 @@ fn clicking_elsewhere_cancels_a_pending_operator_and_count(cx: &mut TestAppConte
     cx.simulate_keystrokes("w");
     assert_eq!(value(&view, cx), "one two three");
     assert_eq!(cursor(&view, cx), 8);
+}
+
+#[gpui_kit::test]
+fn same_position_click_cancels_partial_vim_commands(cx: &mut TestAppContext) {
+    for pending in ["d", "2", "2 d", "g", "d g"] {
+        let (view, cx) = setup(cx, "one two three", true);
+        let point = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            view.read(cx)
+                .editor
+                .read(cx)
+                .cursor_layout()
+                .unwrap()
+                .0
+                .center()
+        });
+        cx.simulate_keystrokes(pending);
+        cx.simulate_click(point, gpui_kit::Modifiers::default());
+        assert_eq!(cursor(&view, cx), 0);
+        cx.simulate_keystrokes("w");
+        assert_eq!(value(&view, cx), "one two three", "{pending}");
+        assert_eq!(cursor(&view, cx), 4, "{pending}");
+    }
 }
 
 #[gpui_kit::test]
@@ -934,6 +962,47 @@ fn application_shortcuts_can_override_plain_vim_keys_and_chords(cx: &mut TestApp
     assert_eq!(sent.get(), 3);
     assert_eq!(value(&view, cx), "text");
     assert_eq!(cursor(&view, cx), 1);
+}
+
+#[gpui_kit::test]
+fn application_shortcuts_can_override_escape_in_every_vim_mode(cx: &mut TestAppContext) {
+    use std::{cell::Cell, rc::Rc};
+
+    for key in ["escape", "ctrl-["] {
+        for mode in ["l", "v", "V", "i"] {
+            let (view, cx) = setup(cx, "text", true);
+            let sent = Rc::new(Cell::new(0));
+            cx.update(|_, cx| {
+                cx.bind_keys([gpui_kit::KeyBinding::new(key, crate::SendRequest, None)]);
+                let sent = sent.clone();
+                cx.on_action(move |_: &crate::SendRequest, _| sent.set(sent.get() + 1));
+            });
+            cx.simulate_keystrokes(&format!("{mode} {key}"));
+            assert_eq!(sent.get(), 1, "{mode} {key}");
+            assert_eq!(value(&view, cx), "text");
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn digits_after_g_cancel_the_prefix_and_operator(cx: &mut TestAppContext) {
+    let source = "first\nsecond\nthird\nfourth\n";
+    for invalid in ["g 2", "d g 2", "c g 2", "y g 2", "2 d g 2"] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(&format!("3 G {invalid} g g"));
+        assert_eq!(value(&view, cx), source, "{invalid}");
+        assert_eq!(cursor(&view, cx), 0, "{invalid}");
+    }
+    for (keys, expected, offset) in [
+        ("3 G 2 g g", source, 6),
+        ("3 G d 2 g g", "first\nfourth\n", 6),
+        ("3 G 2 d g g", "first\nfourth\n", 6),
+    ] {
+        let (view, cx) = setup(cx, source, true);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(value(&view, cx), expected, "{keys}");
+        assert_eq!(cursor(&view, cx), offset, "{keys}");
+    }
 }
 
 #[gpui_kit::test]

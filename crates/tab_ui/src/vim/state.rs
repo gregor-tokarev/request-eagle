@@ -255,6 +255,14 @@ impl Vim {
         self.go = false;
     }
 
+    pub(crate) fn mouse_down(&mut self) {
+        if self.enabled {
+            self.reset_pending();
+            self.desired_column = None;
+            self.insertion = None;
+        }
+    }
+
     fn select(&mut self, range: Range<usize>, cx: &mut App) {
         self.editor
             .update(cx, |editor, cx| editor.set_selected_range(range, cx));
@@ -602,7 +610,7 @@ impl Vim {
         let modifiers = stroke.modifiers;
         let escape = stroke.key == "escape" || (modifiers.control && stroke.key == "[");
 
-        if self.mode != Mode::Insert && !escape {
+        if self.mode != Mode::Insert || escape {
             let mut input = window
                 .pending_input_keystrokes()
                 .unwrap_or_default()
@@ -701,6 +709,11 @@ impl Vim {
             self.reset_pending();
         }
 
+        if self.go && key != "g" {
+            self.reset_pending();
+            return;
+        }
+
         if let Ok(digit) = key.parse::<usize>()
             && key.len() == 1
             && (digit != 0 || self.count != 0)
@@ -711,11 +724,6 @@ impl Vim {
 
         if key == "g" && !self.go {
             self.go = true;
-            return;
-        }
-
-        if self.go && key != "g" {
-            self.reset_pending();
             return;
         }
 

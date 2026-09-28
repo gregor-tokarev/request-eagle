@@ -110,6 +110,7 @@ impl RequestDraft {
 
     pub(super) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let body = self.body_state(window, cx);
+        let mouse_vim = self.body_vim.as_ref().unwrap().clone();
 
         v_flex()
             .size_full()
@@ -148,6 +149,9 @@ impl RequestDraft {
                 div()
                     .debug_selector(|| "request-body".into())
                     .track_focus(&self.body_vim.as_ref().unwrap().focus_handle(cx))
+                    .capture_any_mouse_down(move |_, _, cx| {
+                        mouse_vim.update(cx, |vim, _| vim.mouse_down());
+                    })
                     .relative()
                     .flex_1()
                     .min_h_0()

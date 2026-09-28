@@ -168,6 +168,7 @@ impl RequestDraft {
         let phase = self.script_phase;
         let index = usize::from(phase == ScriptPhase::PostResponse);
         let signature = self.script_signatures[index].as_ref().unwrap().clone();
+        let mouse_vim = self.script_vim[index].as_ref().unwrap().clone();
         let escape_editor = editor.clone();
         let escape_signature = signature.clone();
         let snippets = if phase == ScriptPhase::PreRequest {
@@ -256,6 +257,9 @@ impl RequestDraft {
                     .child(
                         div()
                             .debug_selector(|| "script-editor".into())
+                            .capture_any_mouse_down(move |_, _, cx| {
+                                mouse_vim.update(cx, |vim, _| vim.mouse_down());
+                            })
                             .relative()
                             .capture_action(capture_completion_action::<Enter>(&editor))
                             .capture_action(move |action: &Escape, window, cx| {
