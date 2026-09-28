@@ -50,7 +50,7 @@ impl VariableTarget {
         };
         Some(
             cursor.origin
-                + scroll
+                + point(px(0.), scroll.y)
                 + point(
                     px(0.),
                     line_height + rems(0.25).to_pixels(window.rem_size()),
@@ -309,8 +309,8 @@ pub(crate) fn with_variables(completion: &Entity<VariableInput>, content: impl I
         .child(completion.clone())
 }
 
-impl Render for VariableInput {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl VariableInput {
+    fn render_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.range.is_none() || self.target.snapshot(window, cx).is_none() {
             return Empty.into_any_element();
         }
@@ -322,67 +322,95 @@ impl Render for VariableInput {
             .to_pixels(window.rem_size())
             .min((window.bounds().size.width - margin * 2.).max(px(0.)));
 
-        deferred(
-            anchored()
-                .position(origin)
-                .snap_to_window_with_margin(margin)
-                .child(
-                    v_flex()
-                        .id("variable-completions")
-                        .debug_selector(|| "variable-completions".into())
-                        .w(width)
-                        .p_1()
-                        .bg(cx.theme().popover)
-                        .text_color(cx.theme().popover_foreground)
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .rounded(cx.theme().radius_tokens().lg)
-                        .shadow_md()
-                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                        })
-                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                            this.range = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .id("variable-suggestions")
-                                .role(Role::ListBox)
-                                .aria_label("Variable suggestions")
-                                .child(if self.suggestions.is_empty() {
-                                    div()
-                                        .p_2()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("No matching variables")
-                                        .into_any_element()
-                                } else {
-                                    uniform_list(
-                                        "variable-list",
-                                        self.suggestions.len(),
-                                        cx.processor(|this, range: Range<usize>, _, cx| {
-                                            range
-                                                .map(|index| this.render_suggestion(index, cx))
-                                                .collect()
-                                        }),
-                                    )
-                                    .w_full()
-                                    .h(rems(2. * self.suggestions.len().min(8) as f32))
-                                    .track_scroll(&self.scroll)
+        anchored()
+            .position(origin)
+            .snap_to_window_with_margin(margin)
+            .child(
+                v_flex()
+                    .id("variable-completions")
+                    .debug_selector(|| "variable-completions".into())
+                    .w(width)
+                    .p_1()
+                    .bg(cx.theme().popover)
+                    .text_color(cx.theme().popover_foreground)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(cx.theme().radius_tokens().lg)
+                    .shadow_md()
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    })
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.range = None;
+                        cx.notify();
+                    }))
+                    .child(
+                        v_flex()
+                            .id("variable-suggestions")
+                            .role(Role::ListBox)
+                            .aria_label("Variable suggestions")
+                            .child(if self.suggestions.is_empty() {
+                                div()
+                                    .p_2()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No matching variables")
                                     .into_any_element()
-                                }),
-                        )
-                        .child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("↑ ↓ to navigate · Enter / Tab to insert · Esc to dismiss"),
-                        ),
-                ),
+                            } else {
+                                uniform_list(
+                                    "variable-list",
+                                    self.suggestions.len(),
+                                    cx.processor(|this, range: Range<usize>, _, cx| {
+                                        range
+                                            .map(|index| this.render_suggestion(index, cx))
+                                            .collect()
+                                    }),
+                                )
+                                .w_full()
+                                .h(rems(2. * self.suggestions.len().min(8) as f32))
+                                .track_scroll(&self.scroll)
+                                .into_any_element()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("↑ ↓ to navigate · Enter / Tab to insert · Esc to dismiss"),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+impl Render for VariableInput {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.range.is_none() {
+            return Empty.into_any_element();
+        }
+
+        let completion = cx.entity();
+
+        // Defer positioning until the input has laid out this frame's caret.
+        deferred(
+            canvas(
+                move |_, window, cx| {
+                    let mut popover = completion
+                        .update(cx, |completion, cx| completion.render_popover(window, cx));
+                    popover.prepaint_as_root(
+                        Point::default(),
+                        window.viewport_size().map(AvailableSpace::Definite),
+                        window,
+                        cx,
+                    );
+                    popover
+                },
+                |_, mut popover, window, cx| popover.paint(window, cx),
+            )
+            .absolute(),
         )
         .into_any_element()
     }

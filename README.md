@@ -87,6 +87,21 @@ Command+Enter (Ctrl+Enter on Linux/Windows) sends the active request from its UR
 fields, JSON editor, or response. The shortcut can be changed in Settings →
 Keybindings. Repeating it while a request is running does not cancel that request.
 
+Settings → General → Editor → Vim mode enables Vim keybindings in request body
+and pre-request/post-response script editors. It is off by default, saved across
+restarts, and applies to open tabs immediately. The editor shows its current mode.
+Use `i`/`a` to insert and Escape or Ctrl+`[` to return to Normal mode. Supported
+bindings include `h j k l`, `w b e` (and `W B E`), `0 ^ $`, `gg G`, counts,
+`d c y` with motions or doubled for lines, `x`, `p P`, `u`/Ctrl+R, `v V`,
+`I A o O`, and `/`/`n N` through the editor's search. This is a core Vim binding
+set; Ex commands, macros, text objects, and dot-repeat are not implemented.
+Operators also accept `/`, `n`, and `N` as motions.
+For `/` searches, Enter accepts the match (including a preceding count), and
+Escape restores the original position or Visual selection. Visual `u`/`U`
+changes case, and Visual `D C Y S X` operates on the selected lines.
+Dragging to select text in Normal mode enters Visual mode, so motions and
+operators act on the highlighted text. Insert mode keeps native selection editing.
+
 Type `{{` in a request URL, query key/value, header key/value, or JSON body to
 choose a variable. Continue typing to filter; use Up/Down and Enter or Tab to
 insert, click a suggestion, or press Escape to dismiss. Completion replaces the
@@ -172,6 +187,21 @@ cargo test -p workspace --release response_interaction_benchmark \
 
 This uses the same 8.33 ms p99 CPU budget and window sizes. Run it serially without
 competing builds or benchmarks; native GPU presentation must be checked separately.
+
+To measure Vim cursor movement in the Body and Scripts editors:
+
+```sh
+REQUEST_EAGLE_BENCH_VIM=1 cargo test -p tab_ui --release vim_cursor_benchmark \
+  -- --ignored --nocapture --test-threads=1
+```
+
+Use `REQUEST_EAGLE_BENCH_VIM=0` for the disabled comparison and
+`REQUEST_EAGLE_BENCH_EDITORS=100` to retain 100 additional inactive editor states.
+Each case warms up
+for 120 movements and measures 1,000 more, reporting CPU interaction percentiles
+and allocated bytes. This includes dispatch, effects, Root, drawing and cleanup;
+it excludes the FPS monitor, native font rendering and GPU presentation. Run on
+an otherwise idle machine and check the native monitor separately.
 
 The response viewer displays and searches the complete body, with wrapping on
 by default. Responses over 256 KiB, or containing a line over 32 KiB, use an

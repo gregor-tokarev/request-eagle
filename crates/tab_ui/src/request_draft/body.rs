@@ -39,6 +39,7 @@ impl RequestDraft {
                 .default_value(value)
         });
         let scope = self.variables(cx);
+        self.body_vim = Some(cx.new(|cx| crate::vim::Vim::new(body.clone(), cx)));
         self.body_completion =
             Some(cx.new(|cx| {
                 VariableInput::new(VariableTarget::Editor(body.clone()), scope, window, cx)
@@ -109,6 +110,7 @@ impl RequestDraft {
 
     pub(super) fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let body = self.body_state(window, cx);
+        let mouse_vim = self.body_vim.as_ref().unwrap().clone();
 
         v_flex()
             .size_full()
@@ -130,6 +132,7 @@ impl RequestDraft {
                             .child("JSON"),
                     )
                     .child(div().flex_1())
+                    .children(self.body_vim.clone())
                     .child(
                         Button::new("format-request-json")
                             .debug_selector(|| "format-request-json".into())
@@ -145,6 +148,11 @@ impl RequestDraft {
             .child(
                 div()
                     .debug_selector(|| "request-body".into())
+                    .track_focus(&self.body_vim.as_ref().unwrap().focus_handle(cx))
+                    .capture_any_mouse_down(move |_, _, cx| {
+                        mouse_vim.update(cx, |vim, _| vim.mouse_down());
+                    })
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .child(
@@ -164,7 +172,8 @@ impl RequestDraft {
                                 .aria_label("JSON request body"),
                         )
                         .h_full(),
-                    ),
+                    )
+                    .child(crate::vim::cursor(self.body_vim.as_ref().unwrap())),
             )
             .into_any_element()
     }

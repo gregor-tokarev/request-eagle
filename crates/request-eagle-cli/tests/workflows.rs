@@ -258,6 +258,31 @@ fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
 }
 
 #[test]
+fn settings_edits_preserve_the_desktop_vim_preference() {
+    let cli = Cli::new();
+    let path = cli.0.path().join("preferences.json");
+
+    for enabled in [true, false] {
+        fs::write(&path, json!({"vim_mode": enabled}).to_string()).unwrap();
+
+        for command in [
+            json!({"command":"settings.request","timeout_ms":1200}),
+            json!({"command":"settings.appearance","mode":"light"}),
+            json!({"command":"settings.proxy","mode":"disabled"}),
+        ] {
+            cli.call(command);
+
+            let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["vim_mode"], enabled);
+            let reloaded = preferences::PreferencesFile::new(cli.0.path())
+                .read()
+                .unwrap();
+            assert_eq!(reloaded.vim_mode, enabled);
+        }
+    }
+}
+
+#[test]
 fn settings_reads_do_not_reveal_legacy_proxy_secrets_or_erase_them() {
     let cli = Cli::new();
     let path = cli.0.path().join("preferences.json");

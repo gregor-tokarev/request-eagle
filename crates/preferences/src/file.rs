@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub struct Preferences {
     pub appearance: AppearancePreferences,
     pub request: RequestPreferences,
+    pub vim_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) proxy_credentials_id: Option<String>,
 }

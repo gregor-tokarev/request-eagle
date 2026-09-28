@@ -142,6 +142,7 @@ impl RequestDraft {
                 }
             },
         ));
+        self.script_vim[index] = Some(cx.new(|cx| crate::vim::Vim::new(editor.clone(), cx)));
         self.script_editors[index] = Some(editor.clone());
         editor
     }
@@ -167,6 +168,7 @@ impl RequestDraft {
         let phase = self.script_phase;
         let index = usize::from(phase == ScriptPhase::PostResponse);
         let signature = self.script_signatures[index].as_ref().unwrap().clone();
+        let mouse_vim = self.script_vim[index].as_ref().unwrap().clone();
         let escape_editor = editor.clone();
         let escape_signature = signature.clone();
         let snippets = if phase == ScriptPhase::PreRequest {
@@ -246,11 +248,19 @@ impl RequestDraft {
                                     "Runs after the response is received."
                                 },
                             ))
+                            .children(
+                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .clone(),
+                            )
                             .child("JavaScript"),
                     )
                     .child(
                         div()
                             .debug_selector(|| "script-editor".into())
+                            .capture_any_mouse_down(move |_, _, cx| {
+                                mouse_vim.update(cx, |vim, _| vim.mouse_down());
+                            })
+                            .relative()
                             .capture_action(capture_completion_action::<Enter>(&editor))
                             .capture_action(move |action: &Escape, window, cx| {
                                 let handled = escape_editor.update(cx, |editor, cx| {
@@ -265,6 +275,12 @@ impl RequestDraft {
                             })
                             .capture_action(capture_completion_action::<MoveUp>(&editor))
                             .capture_action(capture_completion_action::<MoveDown>(&editor))
+                            .track_focus(
+                                &self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .as_ref()
+                                    .unwrap()
+                                    .focus_handle(cx),
+                            )
                             .flex_1()
                             .min_h_0()
                             .child(
@@ -281,6 +297,11 @@ impl RequestDraft {
                                     .text_sm()
                                     .aria_label(format!("{} script", phase.label())),
                             )
+                            .child(crate::vim::cursor(
+                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
+                                    .as_ref()
+                                    .unwrap(),
+                            ))
                             .child(signature),
                     )
                     .child(

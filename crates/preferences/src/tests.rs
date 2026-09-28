@@ -293,6 +293,27 @@ async fn partial_documents_default_missing_fields_and_save_normally(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+async fn vim_defaults_off_for_existing_preferences_and_survives_reload(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    fs::write(&path, r#"{"appearance":{"editor_font":"Menlo"}}"#).unwrap();
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.read(|cx| assert!(!cx.global::<Preferences>().vim_mode));
+
+    for enabled in [true, false] {
+        cx.update(|cx| {
+            update(cx, |p| p.vim_mode = enabled).unwrap();
+            cx.set_global(Preferences::default());
+        });
+        cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+        cx.read(|cx| {
+            assert_eq!(cx.global::<Preferences>().vim_mode, enabled);
+            assert_eq!(cx.global::<Preferences>().appearance.editor_font, "Menlo");
+        });
+    }
+}
+
+#[gpui_kit::test]
 async fn certificate_verification_defaults_and_saved_choices_survive_reload(
     cx: &mut TestAppContext,
 ) {

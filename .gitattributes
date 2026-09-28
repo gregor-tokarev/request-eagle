@@ -1,0 +1,2 @@
+# Unified patches preserve upstream blank context lines and mail signatures.
+patches/**/*.patch -whitespace

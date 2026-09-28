@@ -2535,8 +2535,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "256fb935007c75f850d9e4e405bed5aa09f9e155af2cb9563148384971177471"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=45c222ca2a43bcaa67a4c43f0cba62b1e2e74461#45c222ca2a43bcaa67a4c43f0cba62b1e2e74461"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2573,8 +2572,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae035e9a52e26045c33a3e3e39502275ee51525e5c211ac3217da37540320d21"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=45c222ca2a43bcaa67a4c43f0cba62b1e2e74461#45c222ca2a43bcaa67a4c43f0cba62b1e2e74461"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2621,8 +2619,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26eb2217a73fabce2140761af76f3b8220cefd8feb854d0681a8b34d4eb640cb"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=45c222ca2a43bcaa67a4c43f0cba62b1e2e74461#45c222ca2a43bcaa67a4c43f0cba62b1e2e74461"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2665,8 +2662,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4589df8dc603a2a389415cf8ea03ded91a06117456dc2051c73efb4ad76fe825"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=45c222ca2a43bcaa67a4c43f0cba62b1e2e74461#45c222ca2a43bcaa67a4c43f0cba62b1e2e74461"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -7395,6 +7391,7 @@ dependencies = [
  "smol",
  "tempfile",
  "theme",
+ "unicode-segmentation",
 ]
 
 [[package]]
