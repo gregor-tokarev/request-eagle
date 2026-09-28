@@ -1444,6 +1444,62 @@ fn native_copy_and_search_chords_keep_their_prefixes(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn application_search_highlights_preserve_vim_selection(cx: &mut TestAppContext) {
+    for binding in ["secondary-f", "z", "g s"] {
+        for (before, selection, expected) in [
+            ("l", 1..1, "oe two one\nlast one"),
+            ("l v l", 1..3, "o two one\nlast one"),
+            ("V", 0..12, "last one"),
+        ] {
+            let (view, cx) = setup(cx, "one two one\nlast one", true);
+            cx.update(|_, cx| {
+                cx.bind_keys([
+                    gpui_kit::KeyBinding::new(
+                        "z",
+                        gpui_kit::component::input::Search,
+                        Some("Input"),
+                    ),
+                    gpui_kit::KeyBinding::new(
+                        "g s",
+                        gpui_kit::component::input::Search,
+                        Some("Input"),
+                    ),
+                ]);
+            });
+            cx.simulate_keystrokes(&format!("{before} {binding}"));
+            cx.simulate_input("one");
+            // Native search navigates painted highlights, not the editor's
+            // selection. Enter keeps the panel open; Escape returns to editing.
+            for navigation in ["enter", "enter", "shift-enter"] {
+                cx.simulate_keystrokes(navigation);
+                cx.read(|cx| {
+                    let editor = view.read(cx).editor.read(cx);
+                    assert!(editor.search_session().open);
+                    assert_eq!(editor.search_session().query, "one");
+                    assert_eq!(editor.search_session().matcher.matched_ranges().len(), 3);
+                    assert_eq!(
+                        editor.selected_range(),
+                        selection,
+                        "{before} {binding} {navigation}"
+                    );
+                    assert_eq!(
+                        view.read(cx).vim.read(cx).normal_editor().is_some(),
+                        before == "l"
+                    );
+                });
+            }
+            cx.simulate_keystrokes("escape");
+            cx.read(|cx| {
+                assert_eq!(view.read(cx).editor.read(cx).selected_range(), selection);
+                assert!(!view.read(cx).editor.read(cx).search_session().open);
+            });
+            cx.simulate_keystrokes("x");
+            assert_eq!(value(&view, cx), expected, "{before} {binding}");
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn operators_apply_prompted_and_repeated_search_motions(cx: &mut TestAppContext) {
     for (keys, expected, copied, inserting) in [
         ("d", "two one two end", "one ", false),
