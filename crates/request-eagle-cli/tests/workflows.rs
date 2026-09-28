@@ -274,7 +274,8 @@ fn settings_reads_do_not_reveal_legacy_proxy_secrets_or_erase_them() {
     assert_eq!(fs::read_to_string(path).unwrap(), original);
 }
 
-#[cfg(unix)]
+// The macOS runner's filesystem rejects invalid UTF-8 names before CLI startup.
+#[cfg(target_os = "linux")]
 #[test]
 fn non_utf8_paths_fail_before_collection_mutation() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
@@ -290,6 +291,21 @@ fn non_utf8_paths_fail_before_collection_mutation() {
             .contains("UTF-8")
     );
     assert!(!root.join("New Collection").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_arguments_return_a_structured_error() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let output = Command::new(env!("CARGO_BIN_EXE_request-eagle-cli"))
+        .arg(OsString::from_vec(b"bad-\xff".to_vec()))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["error"]["code"], "invalid_input");
 }
 
 #[test]
