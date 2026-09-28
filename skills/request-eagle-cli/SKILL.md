@@ -1,6 +1,6 @@
 ---
 name: request-eagle-cli
-description: Manage Request Eagle's saved collections, requests, and settings, and execute requests through its standalone CLI. Use for Request Eagle data operations, not desktop UI automation.
+description: Load when the user asks to use request-eagle-cli or to inspect, edit, or run saved requests, manage collections, or change settings in Request Eagle. Do not load merely because a task involves developing Request Eagle or automating its desktop UI.
 ---
 
 # Request Eagle CLI
