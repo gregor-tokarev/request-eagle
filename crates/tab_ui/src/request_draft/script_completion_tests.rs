@@ -204,7 +204,7 @@ fn edits_replace_the_entire_member_and_preserve_unicode_and_surrounding_code() {
     }
 }
 
-fn script_editor(
+pub(super) fn script_editor(
     cx: &mut TestAppContext,
     post: bool,
 ) -> (
@@ -230,7 +230,7 @@ fn script_editor(
     (draft, editor, cx)
 }
 
-async fn wait_for(
+pub(super) async fn wait_for(
     cx: &mut VisualTestContext,
     mut ready: impl FnMut(&mut VisualTestContext) -> bool,
 ) {
