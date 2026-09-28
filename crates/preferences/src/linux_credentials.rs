@@ -1,66 +1,50 @@
 use anyhow::Result;
-use gpui_kit::{App, Task};
 
-use crate::credentials::{CredentialStore, NativeCredentialStore, unavailable};
+use crate::credentials::unavailable;
 
-impl CredentialStore for NativeCredentialStore {
-    fn read(&self, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>> {
-        let id = id.to_owned();
+pub(crate) async fn read(id: &str) -> Result<Option<Vec<u8>>> {
+    let result: Result<_> = async {
+        let keyring = oo7::Keyring::new().await?;
+        keyring.unlock().await?;
+        let items = keyring.search_items(&attributes(id)).await?;
 
-        cx.background_executor().spawn(async move {
-            let result: Result<_> = async {
-                let keyring = oo7::Keyring::new().await?;
-                keyring.unlock().await?;
-                let items = keyring.search_items(&attributes(&id)).await?;
-
-                match items.first() {
-                    Some(item) => {
-                        item.unlock().await?;
-                        Ok(Some(item.secret().await?.to_vec()))
-                    }
-                    None => Ok(None),
-                }
+        match items.first() {
+            Some(item) => {
+                item.unlock().await?;
+                Ok(Some(item.secret().await?.to_vec()))
             }
-            .await;
-
-            result.map_err(|_| unavailable())
-        })
+            None => Ok(None),
+        }
     }
+    .await;
 
-    fn write(&self, id: &str, secret: &[u8], cx: &App) -> Task<Result<()>> {
-        let id = id.to_owned();
-        let secret = secret.to_vec();
+    result.map_err(|_| unavailable())
+}
 
-        cx.background_executor().spawn(async move {
-            let result: Result<()> = async {
-                let keyring = oo7::Keyring::new().await?;
-                keyring.unlock().await?;
-                keyring
-                    .create_item("Request Eagle proxy", &attributes(&id), secret, true)
-                    .await?;
-                Ok(())
-            }
-            .await;
-
-            result.map_err(|_| unavailable())
-        })
+pub(crate) async fn write(id: &str, secret: &[u8]) -> Result<()> {
+    let result: Result<()> = async {
+        let keyring = oo7::Keyring::new().await?;
+        keyring.unlock().await?;
+        keyring
+            .create_item("Request Eagle proxy", &attributes(id), secret, true)
+            .await?;
+        Ok(())
     }
+    .await;
 
-    fn delete(&self, id: &str, cx: &App) -> Task<Result<()>> {
-        let id = id.to_owned();
+    result.map_err(|_| unavailable())
+}
 
-        cx.background_executor().spawn(async move {
-            let result: Result<()> = async {
-                let keyring = oo7::Keyring::new().await?;
-                keyring.unlock().await?;
-                keyring.delete(&attributes(&id)).await?;
-                Ok(())
-            }
-            .await;
-
-            result.map_err(|_| unavailable())
-        })
+pub(crate) async fn delete(id: &str) -> Result<()> {
+    let result: Result<()> = async {
+        let keyring = oo7::Keyring::new().await?;
+        keyring.unlock().await?;
+        keyring.delete(&attributes(id)).await?;
+        Ok(())
     }
+    .await;
+
+    result.map_err(|_| unavailable())
 }
 
 fn attributes(id: &str) -> [(&str, &str); 2] {

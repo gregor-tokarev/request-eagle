@@ -13,6 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cli-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: macos-cli-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-cli-
+      - name: Test standalone CLI and macOS credential backend
+        run: cargo test --locked -p request-eagle-cli
+
   arch:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
@@ -43,6 +57,11 @@ jobs:
             target
           key: arch-${{ hashFiles('Cargo.lock') }}
           restore-keys: arch-
+
+      - name: Build and test the standalone CLI without desktop features
+        run: |
+          cargo build --locked -p request-eagle-cli
+          cargo test --locked -p request-eagle-cli
 
       - name: Build Linux app and native credential check
         run: cargo build --locked -p request-eagle -p preferences --all-targets

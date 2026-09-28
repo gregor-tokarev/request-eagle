@@ -1,4 +1,7 @@
-use anyhow::{Result, anyhow};
+#[cfg(feature = "ui")]
+use anyhow::Result;
+use anyhow::anyhow;
+#[cfg(feature = "ui")]
 use gpui_kit::{App, Task};
 use serde::{Deserialize, Serialize};
 
@@ -9,40 +12,42 @@ pub(crate) struct ProxyCredentials {
     pub password: String,
 }
 
+#[cfg(feature = "ui")]
 pub(crate) trait CredentialStore {
     fn read(&self, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>>;
     fn write(&self, id: &str, secret: &[u8], cx: &App) -> Task<Result<()>>;
     fn delete(&self, id: &str, cx: &App) -> Task<Result<()>>;
 }
 
+#[cfg(feature = "ui")]
 pub(crate) struct NativeCredentialStore;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(feature = "ui")]
 impl CredentialStore for NativeCredentialStore {
     fn read(&self, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>> {
-        let task = cx.read_credentials(&format!("request-eagle.proxy/{id}"));
-
-        cx.background_executor().spawn(async move {
-            task.await
-                .map(|entry| entry.map(|(_, secret)| secret))
-                .map_err(|_| unavailable())
-        })
+        let id = id.to_owned();
+        cx.background_executor()
+            .spawn(async move { read(&id).await })
     }
 
     fn write(&self, id: &str, secret: &[u8], cx: &App) -> Task<Result<()>> {
-        let task = cx.write_credentials(&format!("request-eagle.proxy/{id}"), "proxy", secret);
-
+        let id = id.to_owned();
+        let secret = secret.to_vec();
         cx.background_executor()
-            .spawn(async move { task.await.map_err(|_| unavailable()) })
+            .spawn(async move { write(&id, &secret).await })
     }
 
     fn delete(&self, id: &str, cx: &App) -> Task<Result<()>> {
-        let task = cx.delete_credentials(&format!("request-eagle.proxy/{id}"));
-
+        let id = id.to_owned();
         cx.background_executor()
-            .spawn(async move { task.await.map_err(|_| unavailable()) })
+            .spawn(async move { delete(&id).await })
     }
 }
+
+#[cfg(target_os = "linux")]
+pub(crate) use crate::linux_credentials::{delete, read, write};
+#[cfg(target_os = "macos")]
+pub(crate) use crate::macos_credentials::{delete, read, write};
 
 pub(crate) fn unavailable() -> anyhow::Error {
     if cfg!(target_os = "linux") {

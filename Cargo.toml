@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/request-eagle-cli",
     "crates/collection",
     "crates/collections_panel_ui",
     "crates/environment",
@@ -13,6 +14,7 @@ members = [
     "crates/tab_ui",
     "crates/request-eagle",
 ]
+default-members = ["crates/request-eagle"]
 resolver = "3"
 
 [workspace.dependencies]

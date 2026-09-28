@@ -86,6 +86,7 @@ impl Render for GeneralSettings {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("General"),
             )
+            .child(super::cli::install_section(cx))
             .child(
                 h_flex()
                     .w_full()

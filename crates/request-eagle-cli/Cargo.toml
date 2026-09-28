@@ -1,0 +1,21 @@
+[package]
+name = "request-eagle-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "string"] }
+collection = { path = "../collection" }
+dirs = "6"
+environment = { path = "../environment" }
+preferences = { path = "../preferences", default-features = false }
+request = { path = "../request" }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+smol = "2"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

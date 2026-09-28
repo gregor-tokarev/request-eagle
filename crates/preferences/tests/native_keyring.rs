@@ -69,6 +69,22 @@ async fn round_trip(cx: &mut AsyncApp) -> Result<()> {
         cx.update(|cx| preferences::load(directory.path(), cx))
             .await?;
         ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy == proxy));
+
+        let file = preferences::PreferencesFile::new(directory.path());
+        ensure!(file.request_preferences().await?.proxy == proxy);
+        ensure!(file.read()?.request.proxy.password.is_empty());
+        file.update_proxy(
+            |_| Ok(()),
+            Some(("headless-user".into(), "headless-password".into())),
+        )
+        .await?;
+        let updated = fs::read_to_string(&path)?;
+        ensure!(!updated.contains("headless-user") && !updated.contains("headless-password"));
+        cx.update(|cx| preferences::load(directory.path(), cx))
+            .await?;
+        ensure!(cx.read_global::<Preferences, _>(
+                |p, _| p.request.proxy.password == "headless-password"
+            ));
         Ok(())
     }
     .await;
@@ -117,11 +133,26 @@ async fn missing_provider(cx: &mut AsyncApp) -> Result<()> {
     ensure!(fs::read(&path)? == original);
     ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy == proxy));
 
+    let file = preferences::PreferencesFile::new(directory.path());
+    ensure!(
+        file.update_proxy(
+            |proxy| {
+                proxy.authentication = true;
+                Ok(())
+            },
+            Some(("headless-user".into(), "headless-password".into())),
+        )
+        .await
+        .is_err()
+    );
+    ensure!(fs::read(&path)? == original);
+
     // Simulate a saved credential whose provider was removed between launches.
     let mut document: serde_json::Value = serde_json::from_slice(&original)?;
     document["proxy_credentials_id"] = uuid::Uuid::new_v4().to_string().into();
     document["request"]["proxy"]["authentication"] = true.into();
     fs::write(&path, serde_json::to_vec(&document)?)?;
+    ensure!(file.request_preferences().await.is_err());
     ensure!(
         cx.update(|cx| preferences::load(directory.path(), cx))
             .await
