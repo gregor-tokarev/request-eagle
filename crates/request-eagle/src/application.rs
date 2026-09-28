@@ -21,6 +21,15 @@ pub fn run() {
     app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
 
+        // Compile shared syntax queries alongside preference loading, off the
+        // UI thread. Finish before opening the workspace so even an immediate
+        // first editor opening can reuse them.
+        let editor_highlighting = cx.background_executor().spawn(async {
+            for language in ["json", "javascript"] {
+                gpui_kit::component::highlighter::SyntaxHighlighter::new(language);
+            }
+        });
+
         #[cfg(target_os = "macos")]
         cx.set_reduce_motion(
             objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion(),
@@ -49,6 +58,7 @@ pub fn run() {
                 return;
             }
 
+            editor_highlighting.await;
             cx.update(open_workspace);
         })
         .detach();

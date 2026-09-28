@@ -23,7 +23,7 @@ reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.5" }
 thiserror = "2"
 
 [patch.crates-io]
-# GPUI Kit 0.6.2 with same-frame completion positioning; see patches/gpui-kit/README.md.
-gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "cad285211ea0ab2fb775d33fee33b6f04dbf53ad" }
-gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "cad285211ea0ab2fb775d33fee33b6f04dbf53ad" }
-gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "cad285211ea0ab2fb775d33fee33b6f04dbf53ad" }
+# GPUI Kit 0.6.2 with editor fixes; see patches/gpui-kit/README.md.
+gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "45c222ca2a43bcaa67a4c43f0cba62b1e2e74461" }
+gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "45c222ca2a43bcaa67a4c43f0cba62b1e2e74461" }
+gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "45c222ca2a43bcaa67a4c43f0cba62b1e2e74461" }
