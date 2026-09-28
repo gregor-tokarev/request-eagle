@@ -51,6 +51,8 @@ request-eagle-cli call '{"command":"collections.list"}'
 request-eagle-cli call '{"command":"requests.list","query":"health"}'
 ```
 
+Use `--help` for CLI options and `call --help` for JSON input usage.
+
 Use the absolute paths and IDs returned by the list/get commands. To enumerate
 folders and requests in a collection, use `collections.get` with its `path`.
 
@@ -92,7 +94,7 @@ By default the CLI uses `~/.request-eagle/collections` and
 `~/.request-eagle/preferences.json`. `--data-dir PATH` selects another data root.
 `--collections-dir PATH` overrides only the collection location; otherwise
 `REQUEST_EAGLE_COLLECTIONS_DIR` is honored, as in the desktop app. Explicit flags
-win over the environment. Put flags before `call`.
+win over the environment. Directory flags work before or after the subcommand.
 
 ```sh
 request-eagle-cli --data-dir /tmp/eagle-example call '{"command":"collections.create"}'

@@ -3,6 +3,7 @@ mod commands;
 mod execution;
 mod settings;
 
+use clap::{Parser, Subcommand, error::ErrorKind};
 use commands::{Command, FORMAT_VERSION, MAX_INPUT_BYTES};
 use serde_json::{Value, json};
 use std::{
@@ -10,27 +11,51 @@ use std::{
     path::PathBuf,
 };
 
-const HELP: &str = "Request Eagle CLI — saved collections, requests and settings\n\nrequest-eagle-cli schema\nrequest-eagle-cli [--data-dir PATH] [--collections-dir PATH] call JSON\nrequest-eagle-cli call - < command.json\n\nUses ~/.request-eagle by default. REQUEST_EAGLE_COLLECTIONS_DIR can override\nthe collections directory. The desktop app does not need to be running.\nUse schema to discover commands and exact inputs. Run requests with requests.run;\nit waits for completion and returns the HTTP response, body and script results.\nOutput is JSON except help/version. Exit 0: success; 1: operation failed;\n2: invalid input. HTTP error statuses remain successful executions.\nQuit the desktop app before editing its files or settings; reopen it to reload.\n";
+#[derive(Parser)]
+#[command(
+    name = "request-eagle-cli",
+    bin_name = "request-eagle-cli",
+    version = format!(
+        "{} (format {FORMAT_VERSION})",
+        option_env!("REQUEST_EAGLE_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    ),
+    about = "Manage Request Eagle's saved collections, requests and settings",
+    arg_required_else_help = true,
+    after_help = "Use schema to discover commands and exact inputs. Run requests with requests.run;\n\
+        it waits for completion and returns the HTTP response, body and script results.\n\
+        Output is JSON except help/version. Exit 0: success; 1: operation failed;\n\
+        2: invalid input. HTTP error statuses remain successful executions.\n\
+        The desktop app does not need to be running. Quit it before editing its files\n\
+        or settings; reopen it to reload."
+)]
+struct Cli {
+    /// Data directory [default: ~/.request-eagle]
+    #[arg(long, global = true, value_name = "PATH")]
+    data_dir: Option<String>,
+
+    /// Collections directory [default: REQUEST_EAGLE_COLLECTIONS_DIR or DATA_DIR/collections]
+    #[arg(long, global = true, value_name = "PATH")]
+    collections_dir: Option<String>,
+
+    #[command(subcommand)]
+    command: CliCommand,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Print the JSON command schema
+    Schema,
+    /// Execute a JSON command
+    Call {
+        /// JSON command, or - to read it from stdin (maximum 8 MiB)
+        #[arg(value_name = "JSON")]
+        input: String,
+    },
+}
 
 fn main() {
-    let args = std::env::args_os()
-        .skip(1)
-        .map(|argument| {
-            argument
-                .into_string()
-                .map_err(|_| "CLI arguments must be valid UTF-8".to_owned())
-        })
-        .collect::<Result<Vec<_>, _>>();
-
-    let (code, output) = match args.and_then(parse) {
-        Ok(Action::Help) => (0, HELP.to_owned()),
-        Ok(Action::Version) => (
-            0,
-            format!(
-                "request-eagle-cli {} (format {FORMAT_VERSION})\n",
-                option_env!("REQUEST_EAGLE_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
-            ),
-        ),
+    let (code, output) = match parse() {
+        Ok(Action::Display(output)) => (0, output),
         Ok(Action::Schema) => (0, success(commands::schema()).to_string()),
         Ok(Action::Call {
             data,
@@ -81,8 +106,7 @@ fn main() {
 }
 
 enum Action {
-    Help,
-    Version,
+    Display(String),
     Schema,
     Call {
         data: PathBuf,
@@ -91,38 +115,22 @@ enum Action {
     },
 }
 
-fn parse(mut args: Vec<String>) -> Result<Action, String> {
-    if args.is_empty() || args == ["--help"] || args == ["help"] {
-        return Ok(Action::Help);
-    }
-    if args == ["--version"] {
-        return Ok(Action::Version);
-    }
-    if args == ["schema"] {
-        return Ok(Action::Schema);
-    }
-
-    let mut data = None;
-    let mut collections = None;
-    while args.first().is_some_and(|arg| arg.starts_with("--")) {
-        if args.len() < 2 {
-            return Err("Option needs a value".into());
-        }
-        let flag = args.remove(0);
-        let value = args.remove(0);
-        match flag.as_str() {
-            "--data-dir" => data = Some(PathBuf::from(value)),
-            "--collections-dir" => collections = Some(PathBuf::from(value)),
-            _ => return Err(format!("Unknown option {flag}")),
-        }
-    }
-
-    let [command, input] = args.as_slice() else {
-        return Err("Expected schema or call JSON (use --help)".into());
+fn parse() -> Result<Action, String> {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => match error.kind() {
+            ErrorKind::DisplayHelp
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            | ErrorKind::DisplayVersion => return Ok(Action::Display(error.to_string())),
+            _ => return Err(error.to_string()),
+        },
     };
-    if command != "call" {
-        return Err("Expected call JSON (use --help)".into());
-    }
+
+    let input = match cli.command {
+        CliCommand::Schema => return Ok(Action::Schema),
+        CliCommand::Call { input } => input,
+    };
+
     let input = if input == "-" {
         let mut bytes = Vec::new();
         io::stdin()
@@ -131,18 +139,22 @@ fn parse(mut args: Vec<String>) -> Result<Action, String> {
             .map_err(|e| e.to_string())?;
         String::from_utf8(bytes).map_err(|_| "Command input must be valid UTF-8".to_owned())?
     } else {
-        input.clone()
+        input
     };
     if input.len() as u64 > MAX_INPUT_BYTES {
         return Err("Command exceeds input limit".into());
     }
     let command = serde_json::from_str(&input).map_err(|e| format!("Invalid command: {e}"))?;
 
-    let data = data
+    let data = cli
+        .data_dir
+        .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".request-eagle")))
         .ok_or("Home directory unavailable; use --data-dir")?;
     let data = std::path::absolute(data).map_err(|e| e.to_string())?;
-    let collections = collections
+    let collections = cli
+        .collections_dir
+        .map(PathBuf::from)
         .or_else(|| std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR").map(PathBuf::from))
         .unwrap_or_else(|| data.join("collections"));
     let collections = std::path::absolute(collections).map_err(|e| e.to_string())?;
