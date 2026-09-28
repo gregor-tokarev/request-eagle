@@ -5,7 +5,13 @@ use std::{fs, path::Path};
 
 use crate::commands::{Command, Placement, RequestInput};
 
-pub fn load(root: &Path) -> Result<(CollectionRegistry, fs::File)> {
+pub fn load(root: &Path) -> Result<CollectionRegistry> {
+    let registry = CollectionRegistry::from_path(root)?;
+    validate_paths(&registry)?;
+    Ok(registry)
+}
+
+fn lock_for_edit(root: &Path) -> Result<fs::File> {
     // Serialize CLI edits before loading the registry, so parallel invocations
     // cannot save stale ordering or act on a moved/deleted snapshot.
     fs::create_dir_all(root)?;
@@ -15,13 +21,18 @@ pub fn load(root: &Path) -> Result<(CollectionRegistry, fs::File)> {
         .open(root.join(".cli.lock"))?;
     lock.try_lock()
         .context("Collections are being used by another CLI command; retry")?;
-    let registry = CollectionRegistry::from_path(root)?;
-    validate_paths(&registry)?;
-    Ok((registry, lock))
+    Ok(lock)
 }
 
 pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
-    let (mut registry, _lock) = load(root)?;
+    let _lock = match &command {
+        Command::CollectionsList {}
+        | Command::CollectionsGet { .. }
+        | Command::RequestsList { .. }
+        | Command::RequestsGet { .. } => None,
+        _ => Some(lock_for_edit(root)?),
+    };
+    let mut registry = load(root)?;
 
     let path = match command {
         Command::CollectionsList {} => return Ok(json!(registry.collections().iter().map(|collection| {

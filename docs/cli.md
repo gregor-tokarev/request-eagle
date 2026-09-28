@@ -118,9 +118,12 @@ clears the previous reference. Keyring access may require unlocking the OS store
 **Quit the desktop app before editing its collections or settings with the CLI,
 and reopen it to load the changes.** The current desktop app caches that data;
 there is no live synchronization. CLI commands use file locks to serialize their
-own edits. External editors and the desktop app do not participate in those
-locks. Unsaved drafts, open tabs, and previous desktop responses are outside the
-CLI's scope. Keybinding and app-update automation are also outside this interface.
+own edits. Reads and request execution do not write or lock collection files, so
+they also work on read-only collections. Avoid reading during edits if you need
+a consistent snapshot. External editors and the desktop app do not participate
+in the edit locks. Unsaved drafts, open tabs, and previous desktop responses are
+outside the CLI's scope. Keybinding and app-update automation are also outside
+this interface.
 
 ## Execution and output
 

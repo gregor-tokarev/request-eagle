@@ -76,13 +76,13 @@ impl Render for GeneralSettings {
             .w_full()
             .max_w(crate::geometry::PAGE_WIDTH)
             .gap_6()
-            .child(super::cli::install_section(cx))
             .child(
                 div()
                     .text_xl()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("General"),
             )
+            .child(super::cli::install_section(cx))
             .child(
                 h_flex()
                     .w_full()

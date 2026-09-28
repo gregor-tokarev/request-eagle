@@ -333,3 +333,89 @@ fn explicit_collection_directory_overrides_the_environment() {
     assert!(selected.join("New Collection").is_dir());
     assert!(!ignored.exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn read_only_collections_can_be_listed_read_and_run_without_writing_a_lock() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let cli = Cli::new();
+    cli.call(json!({"command":"settings.proxy","mode":"disabled"}));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut received = Vec::new();
+            let mut buffer = [0; 1024];
+            while !received.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                received.extend_from_slice(&buffer[..count]);
+            }
+            socket
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        }
+    });
+    let collection = cli.collection();
+    let created = cli.create(&collection, json!({"method":"GET","url":url}));
+    let root = cli.0.path().join("collections");
+    let lock_path = root.join(".cli.lock");
+    fs::remove_file(&lock_path).unwrap();
+
+    for existing_lock in [false, true] {
+        if existing_lock {
+            fs::write(&lock_path, "existing lock").unwrap();
+            fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o444)).unwrap();
+        }
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        let results = [
+            json!({"command":"collections.list"}),
+            json!({"command":"collections.get","path":collection}),
+            json!({"command":"requests.list"}),
+            json!({"command":"requests.get","path":created["path"]}),
+            json!({"command":"requests.run","path":created["path"],"timeout_ms":3000}),
+        ]
+        .map(|command| cli.raw(&command.to_string()));
+        let lock_exists = lock_path.exists();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+
+        for (code, result) in &results {
+            assert_eq!(*code, 0, "{result}");
+            assert_eq!(result["ok"], true);
+        }
+        assert_eq!(results[4].1["result"]["status"], 204);
+        assert_eq!(lock_exists, existing_lock);
+        if existing_lock {
+            assert_eq!(fs::read_to_string(&lock_path).unwrap(), "existing lock");
+        }
+    }
+    server.join().unwrap();
+}
+
+#[test]
+fn collection_edits_still_require_the_exclusive_lock() {
+    let cli = Cli::new();
+    let collection = cli.collection();
+    let root = cli.0.path().join("collections");
+    let lock = fs::OpenOptions::new()
+        .append(true)
+        .open(root.join(".cli.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    let (code, result) = cli.raw(r#"{"command":"collections.create"}"#);
+    assert_eq!(code, 1);
+    assert!(
+        result["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("retry")
+    );
+    let listed = cli.call(json!({"command":"collections.list"}));
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["path"], collection);
+}

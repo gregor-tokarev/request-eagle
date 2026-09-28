@@ -15,7 +15,7 @@ pub async fn run(
     variables: HashMap<String, String>,
     timeout_ms: Option<u64>,
 ) -> Result<Value> {
-    let (registry, lock) = crate::collections::load(root)?;
+    let registry = crate::collections::load(root)?;
     let file = registry.file(path).context("Unknown saved request path")?;
     let request::Request::Http(request) = file.request.clone();
     if !request.scripts.is_empty() && !trust_scripts {
@@ -31,7 +31,6 @@ pub async fn run(
         environment: collection.local_env().entries.clone(),
     };
     values.environment.extend(variables);
-    drop(lock);
     let variables = RequestVariables::with_environment_session(values, None, Default::default());
     let mut settings = preferences.request_preferences().await?;
     if let Some(timeout) = timeout_ms {
