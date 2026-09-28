@@ -68,27 +68,6 @@ impl Settings {
         }
     }
 
-    /// Refresh controls after a command changes persisted preferences. Keep the
-    /// updater and CLI installer alive while replacing the affected form state.
-    pub fn refresh_preferences(
-        &mut self,
-        page: SettingsPage,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match page {
-            SettingsPage::General => self
-                .general
-                .update(cx, |general, cx| general.refresh_request(window, cx)),
-            SettingsPage::Proxy => self.proxy = cx.new(|cx| ProxySettings::new(window, cx)),
-            SettingsPage::Appearance => {
-                self.appearance = cx.new(|cx| appearance::AppearanceSettings::new(window, cx))
-            }
-            SettingsPage::Keybindings => {}
-        }
-        cx.notify();
-    }
-
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
             SettingsPage::General | SettingsPage::Proxy | SettingsPage::Appearance => {

@@ -13,6 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cli-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: macos-cli-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-cli-
+      - name: Test standalone CLI and macOS credential backend
+        run: cargo test --locked -p request-eagle-cli
+
   arch:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
@@ -29,7 +43,7 @@ jobs:
         run: |
           pacman --disable-sandbox -Syu --noconfirm --needed rust cmake clang git fontconfig \
             freetype2 libxcb libxkbcommon-x11 wayland openssl vulkan-headers \
-            vulkan-swrast mesa dbus xorg-server-xvfb xorg-xauth xdotool ttf-dejavu keepassxc weston python
+            vulkan-swrast mesa dbus xorg-server-xvfb xorg-xauth xdotool ttf-dejavu keepassxc weston
 
       - uses: actions/checkout@v7
 
@@ -44,19 +58,16 @@ jobs:
           key: arch-${{ hashFiles('Cargo.lock') }}
           restore-keys: arch-
 
+      - name: Build and test the standalone CLI without desktop features
+        run: |
+          cargo build --locked -p request-eagle-cli
+          cargo test --locked -p request-eagle-cli
+
       - name: Build Linux app and native credential check
-        run: cargo build --locked -p request-eagle -p request-eagle-cli -p preferences --all-targets
+        run: cargo build --locked -p request-eagle -p preferences --all-targets
 
       - name: Test proxy, preferences, and settings
         run: cargo test --locked -p preferences -p settings_ui -p request -p theme
-
-      - name: Test CLI automation
-        run: |
-          cargo test --locked -p request-eagle-automation -p request-eagle-cli -p updater
-          cargo test --locked -p workspace automation
-
-      - name: Exercise CLI against the native app
-        run: xvfb-run -a ./scripts/check-cli.sh
 
       - name: Save Cargo cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'

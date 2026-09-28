@@ -7,8 +7,6 @@ edition = "2024"
 test-support = []
 
 [dependencies]
-base64 = "0.22"
-
 environment = { path = "../environment" }
 event-listener = "5"
 aho-corasick = "1"

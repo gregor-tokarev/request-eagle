@@ -146,11 +146,6 @@ jobs:
           merge-multiple: true
           path: dist/cli
 
-      - name: Sign CLI release manifests
-        env:
-          CLI_SIGNING_KEY: ${{ secrets.CLI_SIGNING_KEY }}
-        run: ./scripts/sign-cli.sh
-
       - name: Notarize and package
         env:
           VERSION: ${{ steps.release.outputs.version }}

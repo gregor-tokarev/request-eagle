@@ -10,16 +10,10 @@ use super::request::RequestSettings;
 pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
     request: Entity<RequestSettings>,
-    cli: Entity<super::cli::CliSettings>,
     _subscription: Subscription,
 }
 
 impl GeneralSettings {
-    pub(crate) fn refresh_request(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.request = cx.new(|cx| RequestSettings::new(window, cx));
-        cx.notify();
-    }
-
     pub(crate) fn new(
         updater: Entity<Updater>,
         window: &mut Window,
@@ -27,10 +21,7 @@ impl GeneralSettings {
     ) -> Self {
         let subscription = cx.observe(&updater, |_, _, cx| cx.notify());
 
-        let version = updater.read(cx).current_version().to_owned();
-
         Self {
-            cli: cx.new(|cx| super::cli::CliSettings::new(&version, cx)),
             updater,
             request: cx.new(|cx| RequestSettings::new(window, cx)),
             _subscription: subscription,
@@ -85,13 +76,13 @@ impl Render for GeneralSettings {
             .w_full()
             .max_w(crate::geometry::PAGE_WIDTH)
             .gap_6()
+            .child(super::cli::install_section(cx))
             .child(
                 div()
                     .text_xl()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("General"),
             )
-            .child(self.cli.clone())
             .child(
                 h_flex()
                     .w_full()

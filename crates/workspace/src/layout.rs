@@ -1,4 +1,3 @@
-mod automation;
 pub(crate) mod bottom_panel;
 pub(crate) mod main_view;
 pub(crate) mod save_request;

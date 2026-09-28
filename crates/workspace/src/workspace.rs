@@ -15,9 +15,6 @@ use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use updater::Updater;
 
 pub(super) struct Layout {
-    pub(crate) updater: Entity<Updater>,
-    pub(crate) automation_task: Option<Task<()>>,
-    _automation_subscription: Option<Subscription>,
     top_panel: Entity<TopPanel>,
     pub(super) sidebar: Entity<CollectionPanel>,
     pub(super) main_view: Entity<MainView>,
@@ -53,7 +50,7 @@ impl Layout {
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
         let sidebar_visibility_subscription = cx.observe(&sidebar_visible, |_, _, cx| cx.notify());
 
-        let settings = cx.new(|cx| Settings::new(updater.clone(), window, cx));
+        let settings = cx.new(|cx| Settings::new(updater, window, cx));
         let settings_subscription = cx.subscribe_in(
             &settings,
             window,
@@ -62,8 +59,48 @@ impl Layout {
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
-            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| {
-                this.handle_collection_event(event, window, cx);
+            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::RequestRelocated {
+                    id,
+                    previous_path,
+                    path,
+                    name,
+                    collection,
+                    folders,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.relocate_request(
+                            previous_path,
+                            path,
+                            id,
+                            name.clone(),
+                            collection.clone(),
+                            folders.clone(),
+                            cx,
+                        );
+                    });
+                }
+                CollectionPanelEvent::OpenRequest {
+                    id,
+                    path,
+                    name,
+                    collection,
+                    folders,
+                    request,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_request(
+                            path,
+                            id.clone(),
+                            name.clone(),
+                            collection.clone(),
+                            folders.clone(),
+                            request,
+                            cx,
+                        );
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
             });
         window.focus(&sidebar.focus_handle(cx), cx);
 
@@ -94,9 +131,6 @@ impl Layout {
         );
 
         Self {
-            updater,
-            automation_task: None,
-            _automation_subscription: None,
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             main_view,
@@ -112,57 +146,6 @@ impl Layout {
             _new_request_save_subscription: new_request_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
-        }
-    }
-
-    pub(crate) fn handle_collection_event(
-        &mut self,
-        event: &CollectionPanelEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            CollectionPanelEvent::RequestRelocated {
-                id,
-                previous_path,
-                path,
-                name,
-                collection,
-                folders,
-            } => {
-                self.main_view.update(cx, |view, cx| {
-                    view.relocate_request(
-                        previous_path,
-                        path,
-                        id,
-                        name.clone(),
-                        collection.clone(),
-                        folders.clone(),
-                        cx,
-                    );
-                });
-            }
-            CollectionPanelEvent::OpenRequest {
-                id,
-                path,
-                name,
-                collection,
-                folders,
-                request,
-            } => {
-                self.main_view.update(cx, |view, cx| {
-                    view.open_request(
-                        path,
-                        id.clone(),
-                        name.clone(),
-                        collection.clone(),
-                        folders.clone(),
-                        request,
-                        cx,
-                    );
-                    view.prepare_active_tab(window, cx);
-                });
-            }
         }
     }
 
@@ -408,33 +391,6 @@ pub fn init(
     let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
     on_toggle_sidebar(&layout, cx);
     on_open_settings(&layout, window.window_handle(), cx);
-
-    layout.update(cx, |layout, cx| {
-        if cx.global::<settings_ui::CliAccess>().token.is_some() {
-            match crate::automation::start(&cx.entity(), window, cx) {
-                Ok(task) => layout.automation_task = Some(task),
-                Err(error) => cx.set_global(settings_ui::CliAccess {
-                    token: None,
-                    error: Some(error),
-                }),
-            }
-        }
-        layout._automation_subscription = Some(cx.observe_global_in::<settings_ui::CliAccess>(
-            window,
-            |layout, window, cx| {
-                layout.automation_task = None;
-                if cx.global::<settings_ui::CliAccess>().token.is_some() {
-                    match crate::automation::start(&cx.entity(), window, cx) {
-                        Ok(task) => layout.automation_task = Some(task),
-                        Err(error) => cx.set_global(settings_ui::CliAccess {
-                            token: None,
-                            error: Some(error),
-                        }),
-                    }
-                }
-            },
-        ));
-    });
 
     layout.into()
 }

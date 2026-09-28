@@ -22,10 +22,3 @@ if [[ "$CLI_TARGET" == aarch64-apple-darwin ]]; then
     --team-id "$APPLE_TEAM_ID" --wait
   rm "$CLI_NOTARY"
 fi
-
-python3 - "$CLI_BINARY" "$VERSION" "$CLI_TARGET" <<'PY'
-import hashlib, json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-manifest = {"version": sys.argv[2], "target": sys.argv[3], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-path.with_name(path.name + ".json").write_text(json.dumps(manifest) + "\n")
-PY

@@ -50,10 +50,6 @@ impl Updater {
         &self.status
     }
 
-    pub fn supports_app_updates(&self) -> bool {
-        cfg!(target_os = "macos") && install::current_app_bundle().is_ok()
-    }
-
     fn set_status(&mut self, status: UpdateStatus, cx: &mut Context<Self>) {
         self.status = status;
 
@@ -157,7 +153,7 @@ pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
     });
 
     // Bare cargo binaries cannot be replaced by the app-bundle installer.
-    if updater.read(cx).supports_app_updates() {
+    if install::current_app_bundle().is_ok() {
         updater.update(cx, |updater, cx| updater.check(cx));
     }
 

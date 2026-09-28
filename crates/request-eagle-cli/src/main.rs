@@ -1,216 +1,166 @@
-use request_eagle_automation::{
-    Call, Command, Connection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, failure, schema,
-    socket_directory, success, validate_directory, validate_socket,
-};
+mod collections;
+mod commands;
+mod execution;
+mod settings;
+
+use commands::{Command, FORMAT_VERSION, MAX_INPUT_BYTES};
 use serde_json::{Value, json};
-use smol::{future::FutureExt, net::unix::UnixStream};
 use std::{
-    fs,
-    io::{self, Read},
-    path::{Path, PathBuf},
-    time::Duration,
+    io::{self, Read, Write},
+    path::PathBuf,
 };
 
-const HELP: &str = "Request Eagle CLI — control the running app with JSON\n\nrequest-eagle-cli schema\nrequest-eagle-cli instances\nrequest-eagle-cli [--socket PATH] [--timeout-ms N] call JSON\nrequest-eagle-cli [--socket PATH] call - < command.json\n\nUse schema to discover commands and their exact inputs. Output is always JSON\nexcept help/version. Exit 0 means success; 1 means an operation/connection failed;\n2 means invalid CLI input. No interactive prompts. Multiple app instances require\n--socket. Enable CLI access in General settings and copy the session command\n(REQUEST_EAGLE_CLI_TOKEN) before connecting. Request execution is asynchronous: send, then poll responses.get.\n";
+const HELP: &str = "Request Eagle CLI — saved collections, requests and settings\n\nrequest-eagle-cli schema\nrequest-eagle-cli [--data-dir PATH] [--collections-dir PATH] call JSON\nrequest-eagle-cli call - < command.json\n\nUses ~/.request-eagle by default. REQUEST_EAGLE_COLLECTIONS_DIR can override\nthe collections directory. The desktop app does not need to be running.\nUse schema to discover commands and exact inputs. Run requests with requests.run;\nit waits for completion and returns the HTTP response, body and script results.\nOutput is JSON except help/version. Exit 0: success; 1: operation failed;\n2: invalid input. HTTP error statuses remain successful executions.\nQuit the desktop app before editing its files or settings; reopen it to reload.\n";
 
 fn main() {
-    std::process::exit(run());
-}
-
-fn run() -> i32 {
     let args = std::env::args_os()
         .skip(1)
         .map(|argument| {
             argument
                 .into_string()
-                .map_err(|_| (2, "CLI arguments must be valid UTF-8".to_owned()))
+                .map_err(|_| "CLI arguments must be valid UTF-8".to_owned())
         })
         .collect::<Result<Vec<_>, _>>();
 
-    match args.and_then(execute) {
-        Ok(value) => {
-            let ok = value["ok"] == true;
-            println!("{value}");
-            if ok { 0 } else { 1 }
+    let (code, output) = match args.and_then(parse) {
+        Ok(Action::Help) => (0, HELP.to_owned()),
+        Ok(Action::Version) => (
+            0,
+            format!(
+                "request-eagle-cli {} (format {FORMAT_VERSION})\n",
+                option_env!("REQUEST_EAGLE_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+            ),
+        ),
+        Ok(Action::Schema) => (0, success(commands::schema()).to_string()),
+        Ok(Action::Call {
+            data,
+            collections,
+            command,
+        }) => {
+            let preferences = preferences::PreferencesFile::new(&data);
+            match smol::block_on(async {
+                match *command {
+                    Command::RequestsRun {
+                        path,
+                        trust_scripts,
+                        variables,
+                        timeout_ms,
+                    } => {
+                        execution::run(
+                            &collections,
+                            &preferences,
+                            &path,
+                            trust_scripts,
+                            variables,
+                            timeout_ms,
+                        )
+                        .await
+                    }
+                    command @ (Command::SettingsGet {}
+                    | Command::SettingsRequest { .. }
+                    | Command::SettingsAppearance { .. }
+                    | Command::SettingsProxy { .. }) => {
+                        settings::dispatch(&preferences, command).await
+                    }
+                    command => collections::dispatch(&collections, command),
+                }
+            }) {
+                Ok(value) => (0, success(value).to_string()),
+                Err(error) => (
+                    1,
+                    failure("operation_failed", format!("{error:#}")).to_string(),
+                ),
+            }
         }
-        Err((code, message)) => {
-            println!(
-                "{}",
-                failure(
-                    if code == 2 {
-                        "invalid_input"
-                    } else {
-                        "connection_error"
-                    },
-                    message
-                )
-            );
-            code
-        }
-    }
+        Err(error) => (2, failure("invalid_input", error).to_string()),
+    };
+
+    // A closed pipe should not turn machine-readable output into a panic.
+    let result = writeln!(io::stdout().lock(), "{}", output.trim_end());
+    std::process::exit(if result.is_err() { 1 } else { code });
 }
 
-fn execute(mut args: Vec<String>) -> Result<Value, (i32, String)> {
+enum Action {
+    Help,
+    Version,
+    Schema,
+    Call {
+        data: PathBuf,
+        collections: PathBuf,
+        command: Box<Command>,
+    },
+}
+
+fn parse(mut args: Vec<String>) -> Result<Action, String> {
     if args.is_empty() || args == ["--help"] || args == ["help"] {
-        print!("{HELP}");
-        std::process::exit(0);
+        return Ok(Action::Help);
     }
     if args == ["--version"] {
-        println!(
-            "request-eagle-cli {} (protocol {})",
-            option_env!("REQUEST_EAGLE_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
-            PROTOCOL_VERSION
-        );
-        std::process::exit(0);
+        return Ok(Action::Version);
+    }
+    if args == ["schema"] {
+        return Ok(Action::Schema);
     }
 
-    let mut socket = None;
-    let mut timeout = Duration::from_secs(30);
+    let mut data = None;
+    let mut collections = None;
     while args.first().is_some_and(|arg| arg.starts_with("--")) {
         if args.len() < 2 {
-            return Err((2, "Option needs a value".into()));
+            return Err("Option needs a value".into());
         }
         let flag = args.remove(0);
         let value = args.remove(0);
         match flag.as_str() {
-            "--socket" => socket = Some(PathBuf::from(value)),
-            "--timeout-ms" => {
-                let millis: u64 = value.parse().map_err(|_| (2, "Invalid timeout".into()))?;
-                if millis == 0 {
-                    return Err((2, "Timeout must be positive".into()));
-                }
-                timeout = Duration::from_millis(millis);
-            }
-            _ => return Err((2, format!("Unknown option {flag}"))),
+            "--data-dir" => data = Some(PathBuf::from(value)),
+            "--collections-dir" => collections = Some(PathBuf::from(value)),
+            _ => return Err(format!("Unknown option {flag}")),
         }
     }
 
-    match args.as_slice() {
-        [command] if command == "schema" => Ok(success(schema())),
-        [command] if command == "instances" => Ok(success(json!(instances()?))),
-        [command, input] if command == "call" => {
-            let input = if input == "-" {
-                let mut bytes = Vec::new();
-                io::stdin()
-                    .take(MAX_MESSAGE_BYTES + 1)
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| (2, e.to_string()))?;
-                String::from_utf8(bytes).map_err(|e| (2, e.to_string()))?
-            } else {
-                input.clone()
-            };
-            if input.len() as u64 > MAX_MESSAGE_BYTES {
-                return Err((2, "Command exceeds message limit".into()));
-            }
-            let command: Command = serde_json::from_str(&input).map_err(|e| (2, e.to_string()))?;
-            let path = match socket {
-                Some(path) => path,
-                None => {
-                    let available = instances()?;
-                    if available.len() != 1 {
-                        return Err((
-                            1,
-                            format!(
-                                "Expected one running app, found {}. Start Request Eagle, enable CLI access in General settings, or use instances and --socket.",
-                                available.len()
-                            ),
-                        ));
-                    }
-                    PathBuf::from(available[0]["socket"].as_str().unwrap())
-                }
-            };
-            match call(&path, command, timeout) {
-                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-                    Ok(failure("unauthorized", error))
-                }
-                result => result.map_err(|error| (1, error.to_string())),
-            }
-        }
-        _ => Err((
-            2,
-            "Expected schema, instances, or call JSON (use --help)".into(),
-        )),
+    let [command, input] = args.as_slice() else {
+        return Err("Expected schema or call JSON (use --help)".into());
+    };
+    if command != "call" {
+        return Err("Expected call JSON (use --help)".into());
     }
+    let input = if input == "-" {
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take(MAX_INPUT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        String::from_utf8(bytes).map_err(|_| "Command input must be valid UTF-8".to_owned())?
+    } else {
+        input.clone()
+    };
+    if input.len() as u64 > MAX_INPUT_BYTES {
+        return Err("Command exceeds input limit".into());
+    }
+    let command = serde_json::from_str(&input).map_err(|e| format!("Invalid command: {e}"))?;
+
+    let data = data
+        .or_else(|| dirs::home_dir().map(|home| home.join(".request-eagle")))
+        .ok_or("Home directory unavailable; use --data-dir")?;
+    let data = std::path::absolute(data).map_err(|e| e.to_string())?;
+    let collections = collections
+        .or_else(|| std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| data.join("collections"));
+    let collections = std::path::absolute(collections).map_err(|e| e.to_string())?;
+    if data.to_str().is_none() || collections.to_str().is_none() {
+        return Err("Storage paths must be valid UTF-8".into());
+    }
+
+    Ok(Action::Call {
+        data,
+        collections,
+        command,
+    })
 }
 
-fn instances() -> Result<Vec<Value>, (i32, String)> {
-    let directory = socket_directory().map_err(|e| (1, e.to_string()))?;
-    if !directory.exists() {
-        return Ok(Vec::new());
-    }
-    validate_directory(&directory).map_err(|e| (1, e.to_string()))?;
-    let entries = fs::read_dir(directory).map_err(|e| (1, e.to_string()))?;
-    let mut instances = Vec::new();
-    for entry in entries {
-        let path = entry.map_err(|e| (1, e.to_string()))?.path();
-        if !path.extension().is_some_and(|ext| ext == "sock") {
-            continue;
-        }
-
-        let socket_name = path
-            .to_str()
-            .ok_or_else(|| (1, "Automation socket paths must be valid UTF-8".to_owned()))?;
-
-        // Discovery never reads credentials or sends handshake/application data.
-        // Even a counterfeit same-UID listener receives zero bytes.
-        let probe = validate_socket(&path).and_then(|_| {
-            smol::block_on(UnixStream::connect(&path).or(async {
-                smol::Timer::after(Duration::from_millis(500)).await;
-                Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Discovery timed out",
-                ))
-            }))
-        });
-        match probe {
-            Ok(_) => instances.push(json!({"socket": socket_name})),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-                ) =>
-            {
-                // Only a definitely absent listener is stale. A busy app may
-                // accept the connection but miss the short discovery deadline.
-            }
-            Err(error) => instances.push(json!({
-                "socket": socket_name,
-                "app": null,
-                "error": error.to_string(),
-            })),
-        }
-    }
-    instances.sort_by_key(|value| value["socket"].as_str().unwrap().to_owned());
-    Ok(instances)
+fn success(value: Value) -> Value {
+    json!({"version": FORMAT_VERSION, "ok": true, "result": value})
 }
 
-fn call(path: &Path, command: Command, timeout: Duration) -> io::Result<Value> {
-    validate_socket(path)?;
-    let token = std::env::var("REQUEST_EAGLE_CLI_TOKEN").unwrap_or_default();
-    smol::block_on(
-        async {
-            let stream = UnixStream::connect(path).await?;
-            let mut connection = Connection::client(stream, &token).await?;
-            let bytes = serde_json::to_vec(&Call {
-                version: PROTOCOL_VERSION,
-                command,
-            })?;
-            connection.send(&bytes).await?;
-            let reply = connection.receive().await?;
-            let value: Value = serde_json::from_slice(&reply)?;
-            if value["version"] != PROTOCOL_VERSION || !value["ok"].is_boolean() {
-                return Err(io::Error::other(
-                    "Incompatible automation protocol; install the CLI for this app version",
-                ));
-            }
-            Ok(value)
-        }
-        .or(async {
-            smol::Timer::after(timeout).await;
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "CLI connection timed out",
-            ))
-        }),
-    )
+fn failure(code: &str, message: String) -> Value {
+    json!({"version": FORMAT_VERSION, "ok": false, "error": {"code": code, "message": message}})
 }

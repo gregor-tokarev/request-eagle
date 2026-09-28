@@ -43,8 +43,8 @@ impl RequestDraft {
             Some(cx.new(|cx| {
                 VariableInput::new(VariableTarget::Editor(body.clone()), scope, window, cx)
             }));
-        self.body_subscription =
-            Some(cx.subscribe(&body, |this, input, event: &InputEvent, cx| {
+        self._subscriptions
+            .push(cx.subscribe(&body, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value();
                     this.request.body = (!value.is_empty()).then(|| value.as_bytes().to_vec());

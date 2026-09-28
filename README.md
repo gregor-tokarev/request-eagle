@@ -24,13 +24,11 @@ The project is in early development. macOS builds are available for Apple Silico
 
 ## Optional CLI for agents
 
-Install the separate **Request Eagle CLI** from the top of **Settings → General**
-to work with the running app using JSON commands. Agents can manage collections,
-edit and save request drafts, execute requests and scripts, inspect responses,
-and change settings. The CLI is downloaded only when requested and is not included
-in the desktop app bundle. Enable session access in General settings and copy the
-session command to authorize your agent. See the [CLI guide](docs/cli.md) for installation,
-command discovery, and examples.
+The separate **Request Eagle CLI** lets agents manage saved collections, edit
+requests, run them, and change settings using JSON commands. It works without
+the desktop app and is not included in the app bundle. **Settings → General**
+links to the optional download and installation instructions. See the
+[CLI guide](docs/cli.md) for installation, command discovery, and examples.
 
 ## Releases
 

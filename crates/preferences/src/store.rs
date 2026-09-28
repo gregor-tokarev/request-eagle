@@ -1,25 +1,14 @@
 use crate::credentials::{CredentialStore, NativeCredentialStore, ProxyCredentials};
-use crate::{AppearancePreferences, ProxyPreferences, RequestPreferences};
+use crate::file::{persist, read};
+use crate::{Preferences, ProxyPreferences};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use gpui_kit::{App, Global, Task};
-use serde::{Deserialize, Serialize};
 use std::{
-    fs,
-    io::Write as _,
     path::{Path, PathBuf},
     rc::Rc,
 };
 use uuid::Uuid;
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[serde(default)]
-pub struct Preferences {
-    pub appearance: AppearancePreferences,
-    pub request: RequestPreferences,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) proxy_credentials_id: Option<String>,
-}
 
 impl Global for Preferences {}
 
@@ -323,26 +312,6 @@ fn decode_credentials(result: Result<Option<Vec<u8>>>) -> Result<ProxyCredential
             "Saved proxy credentials could not be decoded. Enter them again in Settings > Proxy."
         )
     })
-}
-
-fn read(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
-    }
-}
-
-fn persist(path: &Path, preferences: &Preferences) -> Result<()> {
-    let parent = path.parent().context("Preferences path has no parent")?;
-    fs::create_dir_all(parent)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    temporary.write_all(&serde_json::to_vec_pretty(preferences)?)?;
-    temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .with_context(|| format!("Could not save {}", path.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]

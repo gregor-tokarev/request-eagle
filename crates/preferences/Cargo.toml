@@ -3,24 +3,35 @@ name = "preferences"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["ui"]
+ui = ["dep:gpui-kit", "dep:async-lock", "dep:futures-channel"]
+
 [[test]]
 name = "native_keyring"
 # GPUI's native application loop must run on the process's main thread.
 harness = false
+required-features = ["ui"]
 
 [dependencies]
 anyhow.workspace = true
-async-lock = "3"
-futures-channel = "0.3"
-gpui-kit.workspace = true
+async-lock = { version = "3", optional = true }
+futures-channel = { version = "0.3", optional = true }
+gpui-kit = { workspace = true, optional = true }
 request = { path = "../request" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+smol = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 oo7 = { version = "0.6", default-features = false, features = ["async-std", "native_crypto"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+security-framework-sys = "2"
+core-foundation = "0.10"
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }

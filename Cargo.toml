@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "crates/automation",
     "crates/request-eagle-cli",
     "crates/collection",
     "crates/collections_panel_ui",

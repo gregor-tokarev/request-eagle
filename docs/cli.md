@@ -1,193 +1,165 @@
 # Request Eagle CLI
 
-The optional `request-eagle-cli` binary gives agents JSON commands for the running
-Request Eagle app. It operates on the same collections, tabs, request drafts,
-responses, settings and credential store as the UI. There is no separate database.
-The app must be running; the CLI does not launch a headless copy or require a display
-server itself. Supported releases: Apple Silicon macOS, x86-64 Linux (glibc 2.35+),
-and ARM64 Linux (glibc 2.39+).
+`request-eagle-cli` is an optional standalone binary for AI agents. It manages
+saved collections and requests, executes HTTP requests, and edits application
+settings. It calls the same `collection`, `request`, and `preferences` backends as
+the desktop app. It works without launching the app or connecting to a display.
 
 ## Install
 
-Open **Settings → General → Request Eagle CLI → Install CLI**. This downloads the
-separate binary for the installed app version, verifies a signed release manifest
-and its SHA-256 checksum, and
-installs it at `~/.request-eagle/bin/request-eagle-cli`. It never requests root or
-modifies your shell configuration. Add it to PATH:
+**Settings → General → Request Eagle CLI** links to the release downloads and
+these instructions. The CLI is a separate release attachment and is never
+included in the desktop bundle or the default workspace build.
+
+Download the executable for your platform from the
+[releases page](https://github.com/gregor-tokarev/request-eagle/releases/latest):
+
+| Platform | Attachment |
+| --- | --- |
+| Apple Silicon macOS | `request-eagle-cli-aarch64-apple-darwin` |
+| x86-64 Linux (glibc 2.35+) | `request-eagle-cli-x86_64-unknown-linux-gnu` |
+| ARM64 Linux (glibc 2.39+) | `request-eagle-cli-aarch64-unknown-linux-gnu` |
+
+The macOS binary is signed and notarized. The release's `SHA256SUMS` includes the
+CLI attachments. After downloading, install the matching file into a directory
+on your PATH, for example:
 
 ```sh
-export PATH="$HOME/.request-eagle/bin:$PATH"
+mkdir -p ~/.local/bin
+# Replace TARGET with your platform from the table above.
+install -m 755 request-eagle-cli-TARGET ~/.local/bin/request-eagle-cli
+export PATH="$HOME/.local/bin:$PATH"
+request-eagle-cli --version
 ```
 
-The app bundle and normal `cargo build` do not include the CLI. To build it yourself:
+From a source checkout:
 
 ```sh
 cargo install --path crates/request-eagle-cli --locked
 ```
 
-The General section shows the installed version and offers an update when the app
-version changes. Development builds whose version has no CLI release can use the
-source installation command. Remove the installed binary and its adjacent `.json`
-receipt to uninstall; remove the PATH entry if you added it.
+No access token, socket, daemon, or running desktop application is required.
+Remove the installed executable to uninstall.
 
 ## Agent workflow
 
-In **Settings → General**, choose **Enable CLI access**, then **Copy session
-command** and run that command in the agent's shell. It sets
-`REQUEST_EAGLE_CLI_TOKEN` to a random credential valid for this app session.
-Access is off by default, independent of whether the CLI is installed. Disabling
-access or quitting the app revokes the token. Enabling it again creates a new one.
-Only share the token with agents you authorize to read and modify app data.
-
+Discover the complete command schema before constructing commands:
 
 ```sh
 request-eagle-cli schema
-request-eagle-cli instances
 request-eagle-cli call '{"command":"collections.list"}'
-request-eagle-cli call '{"command":"tabs.new"}'
-request-eagle-cli call '{"command":"drafts.get","tab":2}'
-request-eagle-cli call - <<'JSON'
-{"command":"drafts.set","tab":2,"request":{"method":"POST","url":"https://example.com/api","headers":[["Accept","application/json"]],"body":"{\"hello\":\"world\"}"}}
-JSON
-request-eagle-cli call '{"command":"requests.send","tab":2}'
-request-eagle-cli call '{"command":"responses.get","tab":2}'
+request-eagle-cli call '{"command":"requests.list","query":"health"}'
 ```
 
-Use returned tab IDs instead of assuming `2`. `schema` works without the app and
-returns JSON Schema for every command and input. Unknown fields are errors to
-catch misspelled arguments. `call -` reads one JSON command from stdin and avoids
-putting secrets in command-line arguments. The CLI never prompts.
+Use the absolute paths and IDs returned by the list/get commands. To enumerate
+folders and requests in a collection, use `collections.get` with its `path`.
 
-Every call prints one JSON object with `version`, `ok`, and either `result` or
-`error: {code, message}`. Exit status is 0 for success, 1 for application/connection
-failure, and 2 for malformed CLI input. `--help` and `--version` print plain text.
-Arguments, socket paths, and collection paths must be valid UTF-8; invalid
-encoding produces a structured error. Transport failures are ambiguous for mutations: inspect current state before
-retrying. A request's HTTP error status is a completed response, not a CLI error;
-inspect `status`, `failed`, and script test errors in `responses.get`.
+```sh
+request-eagle-cli call '{"command":"requests.get","path":"/absolute/path/Health.toml"}'
+request-eagle-cli call - <<'JSON'
+{
+  "command": "requests.update",
+  "path": "/absolute/path/Health.toml",
+  "expected_id": "ID returned by requests.get",
+  "request": {
+    "method": "GET",
+    "url": "{{base_url}}/health",
+    "headers": [["Accept", "application/json"]],
+    "query": [],
+    "body": null,
+    "pre_request": "",
+    "post_response": ""
+  }
+}
+JSON
+request-eagle-cli call '{"command":"requests.run","path":"/absolute/path/Health.toml","timeout_ms":10000}'
+```
 
-`requests.send` starts execution and returns immediately. Poll `responses.get`
-until `loading` is false. `requests.cancel` cancels that tab's execution. Script
-execution through the CLI needs `trust_scripts: true` on each scripted send after
-reading the current scripts in `drafts.get`. The desktop Send action runs scripts
-directly; the CLI keeps explicit approval in its noninteractive command contract.
-Scripts have the same sandbox, variables, limits, tests and console as UI sends.
+`requests.update` replaces the complete request, so read it first and preserve
+fields you do not intend to change. It retains the file's identity, comments,
+and unrelated TOML metadata. `expected_id` rejects replacement of a different
+request at that path; it is not a content revision or a merge mechanism.
 
-Response bodies are lossless base64, with byte offsets and `next_offset`; repeat
-`responses.get` until `next_offset` is null. The default chunk is 64 KiB, maximum
-256 KiB. Headers preserve repeated entries and include lossless `value_base64`.
-Responses also expose cookies, timings, sizes, script tests and console messages.
-Agents can decode, format, search, select and save the returned data with their
-usual tools. No truncation is silently accepted: oversized messages fail with
-`result_too_large`; use a narrower collection query or smaller response chunk.
+Create requests with `requests.create` (`parent`, `name`, `request`). Create
+collections and folders with `collections.create` and `folders.create`; these
+use the application's default names, which `entries.rename` can change. Delete
+any saved entry with `entries.delete` and `confirm: true`. Move entries with
+`entries.move`, a `target` path, and `placement: before`, `after`, or `inside`.
 
-## Capabilities
+## Data and settings
 
-| Area | Commands |
-| --- | --- |
-| Collections and search | `collections.list`, `collections.create` |
-| Folders and request creation | `folders.create`, `requests.create` |
-| Saved entries | `requests.get`, `requests.open`, `entries.rename`, `entries.move`, `entries.delete` |
-| Tabs | `tabs.list`, `tabs.new`, `tabs.select`, `tabs.close` |
-| Unsaved request drafts | `drafts.get`, `drafts.set`, `drafts.save` |
-| Execution and responses | `requests.send`, `requests.cancel`, `responses.get` |
-| Preferences | `settings.get`, `settings.request`, `settings.appearance`, `settings.proxy` |
-| Appearance catalogs | `themes.list`, `fonts.list` |
-| Shortcuts | `keybindings.list`, `keybindings.set`, `keybindings.reset` |
-| Workspace navigation | `ui.show`, `ui.sidebar`, `app.status` |
-| Application updates | `updates.check`, `updates.status`, `updates.download`, `updates.install` |
+By default the CLI uses `~/.request-eagle/collections` and
+`~/.request-eagle/preferences.json`. `--data-dir PATH` selects another data root.
+`--collections-dir PATH` overrides only the collection location; otherwise
+`REQUEST_EAGLE_COLLECTIONS_DIR` is honored, as in the desktop app. Explicit flags
+win over the environment. Put flags before `call`.
 
-App update commands apply only to installed macOS app bundles. On Linux and
-macOS source builds, `updates.status` returns `supported: false` with state
-`unsupported`; check/download/install commands fail without making a network
-request or changing updater state. Separate CLI installation remains available.
+```sh
+request-eagle-cli --data-dir /tmp/eagle-example call '{"command":"collections.create"}'
+request-eagle-cli call '{"command":"settings.get"}'
+request-eagle-cli call '{"command":"settings.request","timeout_ms":10000,"follow_all_redirects":false}'
+request-eagle-cli call '{"command":"settings.appearance","mode":"dark","interface_font_size":16}'
+request-eagle-cli call '{"command":"settings.proxy","mode":"disabled"}'
+```
 
-Paths returned by collection commands identify saved entries. Tab IDs identify
-open pages. `drafts.set` replaces a complete editable request without saving;
-`drafts.save` commits it. New drafts require `parent` and `name`; providing these
-for an existing draft performs Save As. Opening a saved request that is already
-open preserves its unsaved draft. Rename and move update the open tab's path and
-variable scope without replacing the draft. Deletion requires `confirm: true`,
-and closing a dirty tab requires `discard: true` or saving first. Deleting a saved
-file leaves an open draft available to save elsewhere.
+Settings commands patch only supplied fields. Request settings cover HTTP
+version, timeout, response size limit, certificate verification, and redirects.
+Appearance settings cover mode, theme names, editor font, and interface font
+size (12–24 px). Theme/font names use the desktop app's normal fallback behavior
+when unavailable. Proxy settings use the same validation and OS credential store
+as the desktop app. `settings.get` never returns proxy usernames, passwords, or
+credential references. Supply `username` and `password` together through stdin
+to replace credentials; both empty strings remove them. Changing the proxy host,
+port, or protocol without replacement credentials disables authentication and
+clears the previous reference. Keyring access may require unlocking the OS store.
 
-Proxy credential arguments are optional patches: omission preserves a credential
-only while the endpoint stays the same; an empty string clears it. Changing the
-host, port, or protocol clears stored credentials and disables authentication.
-Authenticating a new endpoint requires explicit `username`, `password`, and
-`authentication: true`. Unavailable keyring credentials can be retried or replaced at the same endpoint;
-changing that endpoint requires explicit, nonempty replacement credentials. Reads never return proxy
-passwords or usernames.
-Writes use the same encrypted OS credential store as Settings → Proxy.
-Collections, requests, responses and script output may contain secrets; avoid
-logging their contents when running agents.
+**Quit the desktop app before editing its collections or settings with the CLI,
+and reopen it to load the changes.** The current desktop app caches that data;
+there is no live synchronization. CLI commands use file locks to serialize their
+own edits. External editors and the desktop app do not participate in those
+locks. Unsaved drafts, open tabs, and previous desktop responses are outside the
+CLI's scope. Keybinding and app-update automation are also outside this interface.
 
-## Instances and local protocol
+## Execution and output
 
-After explicit session approval, an app instance creates
-`~/.request-eagle/automation/<pid>.sock` in a private 0700 directory, with a 0600
-Unix socket. There is no network listener. Every command, including status reads,
-requires a Noise channel authenticated by the approved session key before dispatch.
-The raw token never crosses the socket. Both commands and responses are encrypted;
-a counterfeit same-user listener cannot extract the key or read/alter commands. Disabling access closes the
-listener and rejects queued work. No token is persisted in the app's files.
-The socket permissions and authenticated session prevent accidental or unauthorized client
-access; they do not sandbox a malicious process that can inspect your user session's
-memory or steal credentials from an authorized agent.
+`requests.run` waits for one completed execution and returns status, repeated
+headers, elapsed time, body bytes as `body_base64`, and script logs/test results.
+There is no response polling or stored response state. Stop the CLI process to
+cancel a run. HTTP error statuses are completed responses, so they still exit 0;
+inspect `status` and script results for application-level success.
 
-`instances` lists candidate socket paths without sending credentials or app commands.
-Use an explicit socket and `app.status` to read an authenticated window title. If multiple apps are
-running, `call` requires `--socket PATH` before `call`; it never silently chooses
-one. Slow or incompatible listeners remain listed with an error and still count
-toward ambiguity. `--timeout-ms N` controls client I/O deadlines (default 30 seconds).
-`REQUEST_EAGLE_AUTOMATION_DIR` overrides discovery for isolated development runs;
-set it for both app and CLI. Label development windows with
-`REQUEST_EAGLE_WINDOW_TITLE='Request Eagle (CLI development)'`.
+Execution uses saved request preferences, including proxy credentials and TLS
+verification. `timeout_ms` on a run overrides the stored request deadline for
+that invocation; zero disables it. The stored response size limit also applies.
+Scripts have their own runtime limits. Read any saved scripts before opting in
+with `trust_scripts: true`. Run-local `variables` override values from the
+collection's `environment.toml`. Script environment changes last through the
+pre-request and post-response phases of that invocation; they are not written
+back to the environment file or shared with the desktop session.
 
-The Unix transport uses `Noise_NNpsk0_25519_ChaChaPoly_SHA256` with the session token
-decoded as a 32-byte PSK, and prologue `Request Eagle CLI protocol 1`. No app payload
-is sent before mutual authentication completes. Noise records have a two-byte
-big-endian length prefix. JSON messages are split into encrypted records of at
-most 60 KiB plaintext, followed by an authenticated empty record. One call and
-one response are exchanged per connection. The decrypted call is
-`{"version":1,"command":{"command":"tabs.list"}}`; the response uses the CLI
-output envelope. Messages are limited to 8 MiB and server connections time out
-in 30 seconds. Version mismatches fail explicitly. Requests execute on the app's
-UI thread; request network work and installer downloads remain asynchronous.
+Each command writes one JSON object to stdout:
 
-For explicitly launched automation sessions, set `REQUEST_EAGLE_AUTOMATION_TOKEN`
-to 64 cryptographically random hexadecimal characters when starting the app, and
-supply that same credential as `REQUEST_EAGLE_CLI_TOKEN` only to authorized clients.
-This is an alternative opt-in for test/agent launchers; ordinary launches stay off.
-Do not use a fixed example token or put credentials in logs.
+```json
+{"version":1,"ok":true,"result":{}}
+{"version":1,"ok":false,"error":{"code":"operation_failed","message":"details"}}
+```
 
-## Release signing
-
-CLI manifests bind the app version, platform target and executable SHA-256. The
-installer authenticates them with the RSA public key embedded in the app before
-trusting any release metadata. macOS additionally verifies the executable's Apple
-Developer signature and expected Team ID before replacing an installation.
-
-`scripts/package-cli.sh` produces the binaries and manifests. After macOS signing
-and notarization, `scripts/sign-cli.sh` signs every platform's manifest using the
-repository Actions secret `CLI_SIGNING_KEY`; it refuses a key that does not match
-`crates/updater/src/cli/signing-key.der`. The private key is never committed or
-published. A key rotation must ship a new embedded public key in the desktop app
-and update the Actions secret together. Publish each `.sig` alongside its binary
-and `.json`. Unsigned or incorrectly signed releases cannot be installed.
+Exit codes: 0 for success, 1 for an operation or execution failure, and 2 for
+invalid CLI input (`invalid_input`). Help and version output are plain text.
+Unknown command fields are rejected. Command input is limited to 8 MiB; paths
+must be valid UTF-8. `call -` reads JSON from stdin and avoids placing secrets in
+process arguments. Response bodies and raw header values use base64 to preserve
+arbitrary bytes; nothing is silently truncated.
 
 ## Development checks
 
-`cargo test --workspace` covers the command contract, CLI transport, shared app
-state, and installer validation. To exercise the compiled CLI against an isolated
-native app and loopback HTTP server on Linux:
-
 ```sh
-cargo build -p request-eagle -p request-eagle-cli
-xvfb-run -a ./scripts/check-cli.sh
+cargo build --locked -p request-eagle-cli
+cargo test --locked -p request-eagle-cli
 ```
 
-This covers missing/incorrect session credential rejection, unsaved drafts, saving and moving requests, script trust and execution,
-collection variables, lossless paginated binary responses, cookies, preference
-synchronization, and light/dark appearance at 12, 16 and 24 px. The launcher gives
-the test app its own home directory, collections, socket, and window title.
+Integration tests use temporary data directories and a loopback HTTP server,
+with display variables removed. They exercise collection editing, identity and
+metadata preservation, execution, scripts, binary responses, settings, and
+invalid-input handling. `scripts/check-linux-keyring.sh` additionally tests
+headless/desktop credential interoperability against an isolated KeePassXC store.

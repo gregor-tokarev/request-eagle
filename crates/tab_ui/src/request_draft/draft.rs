@@ -49,11 +49,7 @@ pub struct RequestDraft {
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
     address_view: Option<Entity<RequestAddress>>,
     configuration_view: Option<Entity<RequestConfiguration>>,
-    pub(super) url_subscription: Option<Subscription>,
-    pub(super) params_subscription: Option<Subscription>,
-    pub(super) headers_subscription: Option<Subscription>,
-    pub(super) body_subscription: Option<Subscription>,
-    pub(super) script_subscriptions: [Option<Subscription>; 2],
+    pub(super) _subscriptions: Vec<Subscription>,
 }
 
 impl Default for RequestDraft {
@@ -105,11 +101,7 @@ impl RequestDraft {
             executor: None,
             address_view: None,
             configuration_view: None,
-            url_subscription: None,
-            params_subscription: None,
-            headers_subscription: None,
-            body_subscription: None,
-            script_subscriptions: [None, None],
+            _subscriptions: Vec::new(),
         }
     }
 
@@ -240,14 +232,16 @@ impl RequestDraft {
                 self.url_completion = Some(cx.new(|cx| {
                     VariableInput::new(VariableTarget::Input(url.clone()), scope, window, cx)
                 }));
-                self.url_subscription =
-                    Some(cx.subscribe(&url, |this, input, event: &InputEvent, cx| {
+                self._subscriptions.push(cx.subscribe(
+                    &url,
+                    |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.path = input.read(cx).value().to_string();
                             this.refresh_generated_headers(cx);
                             cx.notify();
                         }
-                    }));
+                    },
+                ));
 
                 url
             })
@@ -290,11 +284,7 @@ impl RequestDraft {
 
                 cx.notify();
             });
-            if is_headers {
-                self.headers_subscription = Some(subscription);
-            } else {
-                self.params_subscription = Some(subscription);
-            }
+            self._subscriptions.push(subscription);
             *slot = Some(fields);
         }
 

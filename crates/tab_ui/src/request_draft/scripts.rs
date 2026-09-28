@@ -128,7 +128,7 @@ impl RequestDraft {
         self.script_signatures[index] =
             Some(cx.new(|cx| ScriptSignature::new(editor.clone(), phase, window, cx)));
         crate::script_intelligence::warm_up();
-        self.script_subscriptions[index] = Some(cx.subscribe(
+        self._subscriptions.push(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {

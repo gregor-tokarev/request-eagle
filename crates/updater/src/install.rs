@@ -208,25 +208,6 @@ fn verify_apple_signature(app: &Path) -> Result<(), String> {
         return Err("The update does not contain a valid Request Eagle app bundle.".into());
     }
 
-    verify_developer_signature(app)?;
-
-    let gatekeeper = Command::new("/usr/sbin/spctl")
-        .args(["--assess", "--type", "execute", "--verbose=2"])
-        .arg(app)
-        .output()
-        .map_err(|error| format!("Could not ask Gatekeeper to verify the update: {error}"))?;
-
-    if !gatekeeper.status.success() {
-        return Err(format!(
-            "Gatekeeper rejected the update: {}",
-            String::from_utf8_lossy(&gatekeeper.stderr).trim()
-        ));
-    }
-
-    Ok(())
-}
-
-pub(super) fn verify_developer_signature(app: &Path) -> Result<(), String> {
     let verify = Command::new("/usr/bin/codesign")
         .args(["--verify", "--deep", "--strict", "--verbose=2"])
         .arg(app)
@@ -251,6 +232,19 @@ pub(super) fn verify_developer_signature(app: &Path) -> Result<(), String> {
         || !details.contains("Authority=Developer ID Application:")
     {
         return Err("The update was not signed by the expected Apple Developer team.".into());
+    }
+
+    let gatekeeper = Command::new("/usr/sbin/spctl")
+        .args(["--assess", "--type", "execute", "--verbose=2"])
+        .arg(app)
+        .output()
+        .map_err(|error| format!("Could not ask Gatekeeper to verify the update: {error}"))?;
+
+    if !gatekeeper.status.success() {
+        return Err(format!(
+            "Gatekeeper rejected the update: {}",
+            String::from_utf8_lossy(&gatekeeper.stderr).trim()
+        ));
     }
 
     Ok(())
