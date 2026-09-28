@@ -80,15 +80,9 @@ impl CompletionProvider for ScriptCompletions {
         let phase = self.phase;
         let editor = self.editor.clone();
 
-        // GPUI retains the previous list while an asynchronous provider runs.
-        // Its edit ranges belong to the old text, so hide it before another
-        // keyboard or mouse event can accept a stale item. Keep the new query.
-        let pending_editor = editor.clone();
-        cx.defer(move |cx| {
-            let _ = pending_editor.update(cx, |editor, cx| {
-                editor.dismiss_completion_overlay(cx);
-            });
-        });
+        // Keep the current menu visible while TypeScript refreshes its items.
+        // The patched native menu checks its document/caret snapshot before
+        // accepting an item, so old edit ranges cannot modify newer text.
 
         cx.spawn(async move |cx| {
             let items = script_intelligence::completions(text.to_string(), offset, phase).await?;

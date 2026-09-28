@@ -1,5 +1,6 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, button::*, h_flex, progress::Progress, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, button::*, h_flex, progress::Progress,
+    switch::Switch, v_flex,
 };
 use gpui_kit::{prelude::*, *};
 
@@ -10,7 +11,8 @@ use super::request::RequestSettings;
 pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
     request: Entity<RequestSettings>,
-    _subscription: Subscription,
+    error: Option<String>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl GeneralSettings {
@@ -20,11 +22,13 @@ impl GeneralSettings {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscription = cx.observe(&updater, |_, _, cx| cx.notify());
+        let preferences = cx.observe_global::<preferences::Preferences>(|_, cx| cx.notify());
 
         Self {
             updater,
             request: cx.new(|cx| RequestSettings::new(window, cx)),
-            _subscription: subscription,
+            error: None,
+            _subscriptions: vec![subscription, preferences],
         }
     }
 }
@@ -189,6 +193,57 @@ impl Render for GeneralSettings {
                         this.child(
                             "Download verified. Quit and relaunch to finish installing the update.",
                         )
+                    }),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .child(div().pb_3().font_weight(FontWeight::SEMIBOLD).child("Editor"))
+                    .child(
+                        h_flex()
+                            .debug_selector(|| "vim-mode-row".into())
+                            .w_full()
+                            .items_start()
+                            .justify_between()
+                            .gap_4()
+                            .py_4()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .child(div().font_weight(FontWeight::MEDIUM).child("Vim mode"))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("Use Vim keybindings in request body and script editors."),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| "vim-mode".into())
+                                    .flex_shrink_0()
+                                    .child(
+                                        Switch::new("vim-mode")
+                                            .accessibility_label("Vim mode")
+                                            .checked(cx.global::<preferences::Preferences>().vim_mode)
+                                            .on_click(cx.listener(|this, checked, _, cx| {
+                                                this.error = preferences::update(cx, |preferences| {
+                                                    preferences.vim_mode = *checked;
+                                                })
+                                                .err()
+                                                .map(|error| format!("Could not save Vim mode: {error}"));
+
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .when_some(self.error.clone(), |this, error| {
+                        this.child(div().text_sm().text_color(cx.theme().danger).child(error))
                     }),
             )
             .child(self.request.clone())

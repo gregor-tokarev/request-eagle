@@ -22,6 +22,8 @@ impl Render for ScriptTestWindow {
 }
 
 fn script_draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
+    // Script assistance uses the shared TypeScript worker outside GPUI's test executor.
+    cx.executor().allow_parking();
     cx.update(|cx| {
         gpui_kit::init(cx);
         preferences::init(cx);
@@ -43,7 +45,90 @@ fn script_draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTe
 }
 
 #[gpui_kit::test]
+fn vim_scripts_accept_keyboard_input_after_clicking_the_editor(cx: &mut TestAppContext) {
+    let (draft, cx) = script_draft(cx);
+    cx.update(|_, cx| preferences::update(cx, |p| p.vim_mode = true).unwrap());
+    let scripts = element_bounds(cx, "request-section-Scripts").unwrap();
+    cx.simulate_click(scripts.center(), Modifiers::default());
+
+    for phase in ["Pre-request", "Post-response"] {
+        let phase_tab = element_bounds(
+            cx,
+            if phase == "Pre-request" {
+                "script-phase-Pre-request"
+            } else {
+                "script-phase-Post-response"
+            },
+        )
+        .unwrap();
+        cx.simulate_click(phase_tab.center(), Modifiers::default());
+        let bounds = element_bounds(cx, "script-editor").unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.simulate_keystrokes("h j k l i a b c escape 0 l l l x");
+        cx.read(|cx| {
+            let scripts = &draft.read(cx).request.scripts;
+            let value = if phase == "Pre-request" {
+                &scripts.pre_request
+            } else {
+                &scripts.post_response
+            };
+            assert_eq!(value, "ab", "{phase}");
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn vim_edits_update_body_and_both_script_drafts(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (draft, cx) = draft(cx);
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(collection::Method::Post, cx);
+            draft.section = RequestSection::Body;
+            draft
+                .body_state(window, cx)
+                .update(cx, |body, cx| body.focus(window, cx));
+            cx.notify();
+        });
+        preferences::update(cx, |p| p.vim_mode = true).unwrap();
+    });
+    cx.simulate_keystrokes("i");
+    cx.simulate_input("{\"ok\":true}");
+    cx.simulate_keystrokes("escape");
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).request.body.as_deref(),
+            Some(b"{\"ok\":true}".as_slice())
+        )
+    });
+
+    for phase in [ScriptPhase::PreRequest, ScriptPhase::PostResponse] {
+        cx.update(|window, cx| {
+            draft.update(cx, |draft, cx| {
+                draft.section = RequestSection::Scripts;
+                draft.script_phase = phase;
+                draft
+                    .script_state(window, cx)
+                    .update(cx, |editor, cx| editor.focus(window, cx));
+                cx.notify();
+            });
+        });
+        cx.simulate_keystrokes("i");
+        cx.simulate_input("console.log('vim');");
+        cx.simulate_keystrokes("escape 0 x");
+    }
+
+    cx.read(|cx| {
+        let draft = draft.read(cx);
+        assert!(draft.is_dirty());
+        assert_eq!(draft.request.scripts.pre_request, "onsole.log('vim');");
+        assert_eq!(draft.request.scripts.post_response, "onsole.log('vim');");
+    });
+}
+
+#[gpui_kit::test]
 fn script_editors_keep_independent_drafts_and_snippets(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
     let (draft, cx) = draft(cx);
     let scripts = element_bounds(cx, "request-section-Scripts").unwrap();
     cx.simulate_click(scripts.center(), Modifiers::default());
@@ -214,6 +299,7 @@ fn scripts_fit_zoom_themes_and_resizing(cx: &mut TestAppContext) {
     use gpui_kit::{px, size};
     let (draft, cx) = script_draft(cx);
     cx.update(|_, cx| {
+        preferences::update(cx, |p| p.vim_mode = true).unwrap();
         draft.update(cx, |draft, _| {
             draft.request.scripts.pre_request = "console.log('review');".into();
         });
@@ -234,6 +320,9 @@ fn scripts_fit_zoom_themes_and_resizing(cx: &mut TestAppContext) {
             let scripts = element_bounds(cx, "request-scripts").unwrap();
             let editor = element_bounds(cx, "script-editor").unwrap();
             let snippets = element_bounds(cx, "script-snippets").unwrap();
+            let mode = element_bounds(cx, "vim-mode-indicator").unwrap();
+            assert!(mode.right() <= scripts.right());
+            assert!(mode.bottom() <= scripts.bottom());
             assert!(
                 editor.size.width >= px(16. * font_size),
                 "editor: {editor:?}"

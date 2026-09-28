@@ -10,6 +10,7 @@ mod response_view;
 mod script_intelligence;
 mod variable_input;
 mod variables;
+mod vim;
 
 #[cfg(test)]
 mod test_allocator;

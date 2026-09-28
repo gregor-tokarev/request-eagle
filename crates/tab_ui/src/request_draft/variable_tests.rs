@@ -567,6 +567,96 @@ fn reopening_completion_reads_external_environment_changes(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
+fn variable_completion_follows_the_caret_on_the_first_frame(cx: &mut TestAppContext) {
+    use crate::variable_input::VariableTarget;
+    use gpui_kit::{
+        Background,
+        component::{ActiveTheme as _, Theme},
+        point, px, rems, size,
+    };
+
+    let (draft, cx, _directory) = setup(cx);
+    cx.simulate_resize(size(px(1440.), px(900.)));
+
+    for body in [false, true] {
+        let target = cx.update(|window, cx| {
+            draft.update(cx, |draft, cx| {
+                if body {
+                    draft.set_method(Method::Post, cx);
+                    draft.section = RequestSection::Body;
+                    let editor = draft.body_state(window, cx);
+                    editor.update(cx, |editor, cx| editor.focus(window, cx));
+                    cx.notify();
+                    VariableTarget::Editor(editor)
+                } else {
+                    let input = draft.url.clone().unwrap();
+                    input.update(cx, |input, cx| input.focus(window, cx));
+                    VariableTarget::Input(input)
+                }
+            })
+        });
+        cx.simulate_input("{{base_url");
+
+        for theme in ["Default Light", "Default Dark"] {
+            for font_size in [12., 16., 24.] {
+                cx.update(|_, cx| {
+                    assert!(request_eagle_theme::apply(theme, cx));
+                    Theme::global_mut(cx).font_size = px(font_size);
+                    Theme::sync_base(cx);
+                });
+                for offset in [3, 7, 5, 10] {
+                    cx.update(|window, cx| {
+                        match &target {
+                            VariableTarget::Input(input) => input.update(cx, |input, cx| {
+                                input.set_selected_range(offset..offset, cx)
+                            }),
+                            VariableTarget::Editor(editor) => editor.update(cx, |editor, cx| {
+                                editor.set_selected_range(offset..offset, cx)
+                            }),
+                        }
+                        window.refresh();
+                        // Inspect this draw before notifications can cause a catch-up frame.
+                        window.draw(cx).clear(cx);
+
+                        let (caret, height, scroll) = match &target {
+                            VariableTarget::Input(input) => {
+                                let input = input.read(cx);
+                                let (caret, height) = input.cursor_layout().unwrap();
+                                (caret, height, input.scroll_offset())
+                            }
+                            VariableTarget::Editor(editor) => {
+                                let editor = editor.read(cx);
+                                let (caret, height) = editor.cursor_layout().unwrap();
+                                (caret, height, editor.scroll_offset())
+                            }
+                        };
+                        let gap = rems(0.25).to_pixels(window.rem_size());
+                        let expected = window
+                            .pixel_snap_point(caret.origin + point(px(0.), scroll.y + height + gap))
+                            .scale(window.scale_factor());
+                        let background = Background::from(cx.theme().popover);
+                        let popovers = window
+                            .painted_quads()
+                            .iter()
+                            .filter(|quad| quad.background == background)
+                            .map(|quad| quad.bounds.origin)
+                            .collect::<Vec<_>>();
+                        let at_caret = popovers.iter().any(|origin| {
+                            (origin.x - expected.x).0.abs() <= 1.
+                                && (origin.y - expected.y).0.abs() <= 1.
+                        });
+                        assert!(
+                            at_caret,
+                            "body={body}, {theme}, {font_size}px, cursor {offset}: expected {expected:?}, got {popovers:?}"
+                        );
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
 async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
     cx: &mut TestAppContext,
 ) {

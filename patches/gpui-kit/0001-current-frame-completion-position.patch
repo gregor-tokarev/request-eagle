@@ -1,0 +1,448 @@
+diff --git a/crates/base/src/input/base/element.rs b/crates/base/src/input/base/element.rs
+index 6d2be4a..0d7d934 100644
+--- a/crates/base/src/input/base/element.rs
++++ b/crates/base/src/input/base/element.rs
+@@ -2176,6 +2176,32 @@ impl<M: InputModeKind> Element for TextElement<M> {
+             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
+         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
+ 
++        // Deferred overlays prepaint after the input and need this frame's
++        // caret and scroll geometry before positioning their hitboxes.
++        self.state.update(cx, |state, cx| {
++            let geometry_changed = state.last_bounds != Some(bounds)
++                || state.input_bounds != input_bounds
++                || state.scroll_size != scroll_size
++                || state.last_layout.as_ref().is_none_or(|layout| {
++                    layout.cursor_bounds != last_layout.cursor_bounds
++                        || layout.line_height != last_layout.line_height
++                });
++            state.last_layout = Some(last_layout.clone());
++            state.last_bounds = Some(bounds);
++            state.last_cursor = Some(state.cursor());
++            state.set_input_bounds(input_bounds, cx);
++            state.last_selected_range = Some(*state.active_selection());
++            state.scroll_size = scroll_size;
++            state.update_scroll_offset(Some(cursor_scroll_offset), cx);
++            state.deferred_scroll_offset = None;
++
++            // Layout consumers need changed geometry, not another notification
++            // for every paint of an unchanged input.
++            if geometry_changed {
++                cx.notify();
++            }
++        });
++
+         PrepaintState {
+             hitbox,
+             bounds,
+@@ -2208,13 +2234,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
+         window: &mut Window,
+         cx: &mut App,
+     ) {
+-        let (focus_handle, show_cursor, disabled, selected_range, editor_style, editor_paddings) = {
++        let (focus_handle, show_cursor, disabled, editor_style, editor_paddings) = {
+             let state = self.state.read(cx);
+             (
+                 state.focus_handle.clone(),
+                 state.show_cursor(window, cx),
+                 state.disabled,
+-                *state.active_selection(),
+                 state.editor_style.clone(),
+                 state.editor_paddings,
+             )
+@@ -2485,30 +2510,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
+             cx,
+         );
+ 
+-        self.state.update(cx, |state, cx| {
+-            let geometry_changed = state.last_bounds != Some(bounds)
+-                || state.input_bounds != input_bounds
+-                || state.scroll_size != prepaint.scroll_size
+-                || state.last_layout.as_ref().is_none_or(|layout| {
+-                    layout.cursor_bounds != prepaint.last_layout.cursor_bounds
+-                        || layout.line_height != prepaint.last_layout.line_height
+-                });
+-            state.last_layout = Some(prepaint.last_layout.clone());
+-            state.last_bounds = Some(bounds);
+-            state.last_cursor = Some(state.cursor());
+-            state.set_input_bounds(input_bounds, cx);
+-            state.last_selected_range = Some(selected_range);
+-            state.scroll_size = prepaint.scroll_size;
+-            state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
+-            state.deferred_scroll_offset = None;
+-
+-            // Layout consumers need changed geometry, not another notification
+-            // for every paint of an unchanged input.
+-            if geometry_changed {
+-                cx.notify();
+-            }
+-        });
+-
+         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref()
+             && !window.modifiers().alt
+         {
+@@ -2779,6 +2780,56 @@ fn split_runs_by_bg_segments(
+ mod tests {
+     use super::*;
+ 
++    #[gpui::test]
++    fn caret_geometry_is_current_when_deferred_overlays_prepaint(cx: &mut gpui::TestAppContext) {
++        use gpui::{
++            AppContext as _, ParentElement as _, Render, Styled as _, canvas, deferred, div,
++        };
++
++        struct Probe(Entity<crate::input::EditorState>);
++
++        impl Render for Probe {
++            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
++                let before = self.0.clone();
++                let after = self.0.clone();
++                div().size_full().child(self.0.clone()).child(deferred(
++                    canvas(
++                        move |_, _, cx| {
++                            let state = before.read(cx);
++                            (state.cursor_layout(), state.scroll_offset())
++                        },
++                        move |_, geometry, _, cx| {
++                            let state = after.read(cx);
++                            assert!(
++                                geometry.0.is_some(),
++                                "the initial frame needs a caret anchor"
++                            );
++                            assert_eq!(
++                                geometry,
++                                (state.cursor_layout(), state.scroll_offset()),
++                                "overlay geometry must match the caret painted in the same frame"
++                            );
++                        },
++                    )
++                    .absolute(),
++                ))
++            }
++        }
++
++        cx.update(crate::init);
++        let (probe, cx) = cx.add_window_view(|window, cx| {
++            Probe(cx.new(|cx| {
++                crate::input::EditorState::new(window, cx).default_value("first line\nsecond line")
++            }))
++        });
++        let editor = probe.read_with(cx, |probe, _| probe.0.clone());
++        for offset in [3, 15, 1, 8] {
++            editor.update(cx, |editor, cx| {
++                editor.set_selected_range(offset..offset, cx)
++            });
++        }
++    }
++
+     #[test]
+     fn test_plain_text_decorations_include_unstyled_gaps() {
+         let decoration = HighlightStyle {
+diff --git a/crates/base/src/input/editor/lsp/completions.rs b/crates/base/src/input/editor/lsp/completions.rs
+index 5e31131..0da5f81 100644
+--- a/crates/base/src/input/editor/lsp/completions.rs
++++ b/crates/base/src/input/editor/lsp/completions.rs
+@@ -181,6 +181,7 @@ impl InputBaseState<EditorMode> {
+ 
+         let provider_responses =
+             provider.completions(&self.text, new_offset, completion_context, window, cx);
++        let snapshot = (self.text.clone(), new_offset);
+         self.extras.context_menu_task = cx.spawn_in(window, async move |editor, cx| {
+             let mut completions: Vec<CompletionItem> = vec![];
+             if let Some(provider_responses) = provider_responses.await.ok() {
+@@ -194,6 +195,7 @@ impl InputBaseState<EditorMode> {
+                 editor.update(cx, |editor, cx| {
+                     editor.extras.context_menu_content.completion.open = false;
+                     editor.extras.context_menu_content.completion.items.clear();
++                    editor.extras.context_menu_content.completion.snapshot = None;
+                     editor.extras.context_menu_content.completion.bump();
+                     cx.notify();
+                 })?;
+@@ -207,6 +209,7 @@ impl InputBaseState<EditorMode> {
+                     }
+ 
+                     editor.extras.context_menu_content.completion.items = completions;
++                    editor.extras.context_menu_content.completion.snapshot = Some(snapshot);
+                     editor.extras.context_menu_content.completion.open = !editor
+                         .extras
+                         .context_menu_content
+@@ -225,6 +228,7 @@ impl InputBaseState<EditorMode> {
+ 
+     pub(crate) fn hide_context_menu(&mut self, cx: &mut Context<Self>) {
+         self.extras.context_menu_content.completion.open = false;
++        self.extras.context_menu_content.completion.snapshot = None;
+         self.extras.context_menu_content.code_action.open = false;
+         self.extras.context_menu_task = Task::ready(Ok(()));
+         cx.notify();
+@@ -241,6 +245,21 @@ impl InputBaseState<EditorMode> {
+         window: &mut Window,
+         cx: &mut Context<Self>,
+     ) -> bool {
++        let completion = &self.extras.context_menu_content.completion;
++        if crate::input::Enter::is_primary(&*action)
++            && completion.open
++            && !completion.snapshot.as_ref().is_some_and(|(text, offset)| {
++                *offset == self.cursor()
++                    && (ropey::extra::esoterica::ropes_are_instances(text, &self.text)
++                        || text == &self.text)
++            })
++        {
++            // Old suggestions remain visible during refresh, but Enter must
++            // never accept ranges produced for a different source or caret.
++            self.hide_context_menu(cx);
++            return false;
++        }
++
+         let closes_overlay =
+             crate::input::Enter::is_primary(&*action) || action.partial_eq(&crate::input::Escape);
+         let kind = if self.extras.context_menu_content.completion.open {
+@@ -257,7 +276,8 @@ impl InputBaseState<EditorMode> {
+         if handled && closes_overlay {
+             match kind {
+                 super::InputOverlayKind::Completion => {
+-                    self.extras.context_menu_content.completion.open = false
++                    self.extras.context_menu_content.completion.open = false;
++                    self.extras.context_menu_content.completion.snapshot = None;
+                 }
+                 super::InputOverlayKind::CodeAction => {
+                     self.extras.context_menu_content.code_action.open = false
+diff --git a/crates/base/src/input/editor/lsp/overlay.rs b/crates/base/src/input/editor/lsp/overlay.rs
+index bae1c9a..d9db70d 100644
+--- a/crates/base/src/input/editor/lsp/overlay.rs
++++ b/crates/base/src/input/editor/lsp/overlay.rs
+@@ -10,6 +10,7 @@ pub struct CompletionMenuState {
+     pub trigger_start_offset: Option<usize>,
+     pub query: String,
+     pub items: Vec<CompletionItem>,
++    pub(super) snapshot: Option<(ropey::Rope, usize)>,
+     revision: u64,
+ }
+ 
+@@ -77,8 +78,13 @@ impl InputBaseState<EditorMode> {
+             .trigger_start_offset = Some(trigger_start_offset);
+         self.extras.context_menu_content.completion.query = query.into();
+         self.extras.context_menu_content.completion.items = items;
++        self.extras.context_menu_content.completion.snapshot =
++            Some((self.text.clone(), self.cursor()));
+         self.extras.context_menu_content.completion.open =
+             !self.extras.context_menu_content.completion.items.is_empty();
++        if !self.extras.context_menu_content.completion.open {
++            self.extras.context_menu_content.completion.snapshot = None;
++        }
+         self.extras.context_menu_content.completion.bump();
+         cx.notify();
+     }
+@@ -152,6 +158,7 @@ impl InputBaseState<EditorMode> {
+     pub fn dismiss_completion_overlay(&mut self, cx: &mut Context<Self>) {
+         if self.extras.context_menu_content.completion.open {
+             self.extras.context_menu_content.completion.open = false;
++            self.extras.context_menu_content.completion.snapshot = None;
+             cx.notify();
+         }
+     }
+diff --git a/crates/component/src/input/popovers/completion_menu.rs b/crates/component/src/input/popovers/completion_menu.rs
+index dbf2701..28e2d51 100644
+--- a/crates/component/src/input/popovers/completion_menu.rs
++++ b/crates/component/src/input/popovers/completion_menu.rs
+@@ -3,10 +3,11 @@ use std::rc::Rc;
+ use gpui::{
+     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
+     Half as _, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels, Point,
+-    Render, RenderOnce, SharedString, Styled, StyledText, Subscription, WeakEntity, Window,
++    Render, RenderOnce, SharedString, Styled, StyledText, Subscription, WeakEntity, Window, canvas,
+     deferred, div, prelude::FluentBuilder, px, relative,
+ };
+ use lsp_types::CompletionItem;
++use ropey::{Rope, extra::esoterica::ropes_are_instances};
+ 
+ const MAX_MENU_HEIGHT: Pixels = px(240.);
+ const POPOVER_GAP: Pixels = px(4.);
+@@ -169,6 +170,7 @@ impl ListDelegate for ContextMenuDelegate {
+ /// A context menu for code completions and code actions.
+ pub struct CompletionMenu {
+     offset: usize,
++    text: Option<Rope>,
+     editor: WeakEntity<EditorState>,
+     list: Entity<ListState<ContextMenuDelegate>>,
+     open: bool,
+@@ -214,6 +216,7 @@ impl CompletionMenu {
+ 
+             Self {
+                 offset: 0,
++                text: None,
+                 editor: editor.downgrade(),
+                 list,
+                 open: false,
+@@ -225,6 +228,10 @@ impl CompletionMenu {
+     }
+ 
+     fn select_item(&mut self, item: &CompletionItem, window: &mut Window, cx: &mut Context<Self>) {
++        let Some(text) = self.text.clone() else {
++            return;
++        };
++        let offset = self.offset;
+         let item = item.clone();
+         let range = self.trigger_start_offset.unwrap_or(self.offset)..self.offset;
+ 
+@@ -232,7 +239,14 @@ impl CompletionMenu {
+ 
+         cx.spawn_in(window, async move |_, cx| {
+             editor.update_in(cx, |editor, window, cx| {
+-                editor.insert_completion(&item, range, window, cx);
++                // Another input event may run before this deferred insertion.
++                if editor.cursor() == offset
++                    && (ropes_are_instances(editor.text(), &text) || editor.text() == &text)
++                {
++                    editor.insert_completion(&item, range, window, cx);
++                } else {
++                    editor.focus(window, cx);
++                }
+             })
+         })
+         .detach();
+@@ -292,6 +306,7 @@ impl CompletionMenu {
+     /// Hide the completion menu and reset the trigger start offset.
+     pub(crate) fn hide(&mut self, cx: &mut Context<Self>) {
+         self.open = false;
++        self.text = None;
+         self.trigger_start_offset = None;
+         let editor = self.editor.clone();
+         cx.spawn(async move |_, cx| {
+@@ -318,6 +333,10 @@ impl CompletionMenu {
+     ) {
+         let items = items.into();
+         self.offset = offset;
++        self.text = self
++            .editor
++            .upgrade()
++            .map(|editor| editor.read(cx).text().clone());
+         self.open = true;
+         self.list.update(cx, |this, cx| {
+             let longest_ix = items
+@@ -349,14 +368,14 @@ impl CompletionMenu {
+         let scroll_origin = editor.scroll_offset();
+ 
+         Some(
+-            scroll_origin + cursor_origin - editor.input_bounds().origin
++            Point::new(px(0.), scroll_origin.y) + cursor_origin - editor.input_bounds().origin
+                 + Point::new(-px(4.), line_height + px(4.)),
+         )
+     }
+ }
+ 
+-impl Render for CompletionMenu {
+-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
++impl CompletionMenu {
++    fn render_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+         if !self.open {
+             return Empty.into_any_element();
+         }
+@@ -387,44 +406,71 @@ impl Render for CompletionMenu {
+             abs_pos.x + configured_max + POPOVER_GAP + configured_max + POPOVER_GAP
+                 > window.bounds().size.width;
+ 
+-        deferred(
+-            div()
+-                .absolute()
+-                .left(pos.x)
+-                .top(pos.y)
+-                .flex()
+-                .flex_row()
+-                .gap(POPOVER_GAP)
+-                .items_start()
+-                .when(vertical_layout, |this| this.flex_col())
+-                .child(
+-                    editor_popover("completion-menu", cx)
+-                        .max_w(max_width)
+-                        .min_w(px(120.))
+-                        .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT)),
+-                )
+-                .when_some(selected_documentation, |this, documentation| {
+-                    let mut doc = match documentation {
+-                        lsp_types::Documentation::String(s) => s.clone(),
+-                        lsp_types::Documentation::MarkupContent(mc) => mc.value.clone(),
+-                    };
+-                    if vertical_layout {
+-                        doc = doc.split("\n").next().unwrap_or_default().to_string();
+-                    }
+-
+-                    this.child(
+-                        div().child(
+-                            editor_popover("completion-menu", cx)
+-                                .w(configured_max)
+-                                .px_2()
+-                                .child(render_markdown("doc", doc, window, cx)),
+-                        ),
++        div()
++            .size_full()
++            .child(
++                div()
++                    .absolute()
++                    .left(abs_pos.x)
++                    .top(abs_pos.y)
++                    .flex()
++                    .flex_row()
++                    .gap(POPOVER_GAP)
++                    .items_start()
++                    .when(vertical_layout, |this| this.flex_col())
++                    .child(
++                        editor_popover("completion-menu", cx)
++                            .debug_selector(|| "completion-menu".into())
++                            .max_w(max_width)
++                            .min_w(px(120.))
++                            .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT)),
+                     )
+-                })
+-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+-                    this.hide(cx);
+-                })),
++                    .when_some(selected_documentation, |this, documentation| {
++                        let mut doc = match documentation {
++                            lsp_types::Documentation::String(s) => s.clone(),
++                            lsp_types::Documentation::MarkupContent(mc) => mc.value.clone(),
++                        };
++                        if vertical_layout {
++                            doc = doc.split("\n").next().unwrap_or_default().to_string();
++                        }
++
++                        this.child(
++                            div().child(
++                                editor_popover("completion-menu", cx)
++                                    .w(configured_max)
++                                    .px_2()
++                                    .child(render_markdown("doc", doc, window, cx)),
++                            ),
++                        )
++                    })
++                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
++                        this.hide(cx);
++                    })),
++            )
++            .into_any_element()
++    }
++}
++
++impl Render for CompletionMenu {
++    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
++        let menu = cx.entity();
++
++        // Build the popup after the input has laid out this frame's caret.
++        deferred(
++            canvas(
++                move |_, window, cx| {
++                    let mut popover = menu.update(cx, |menu, cx| menu.render_popover(window, cx));
++                    popover.prepaint_as_root(
++                        Point::default(),
++                        window.viewport_size().map(gpui::AvailableSpace::Definite),
++                        window,
++                        cx,
++                    );
++                    popover
++                },
++                |_, mut popover, window, cx| popover.paint(window, cx),
++            )
++            .absolute(),
+         )
+-        .into_any_element()
+     }
+ }
