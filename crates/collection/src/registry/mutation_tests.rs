@@ -473,3 +473,79 @@ query = [
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
 }
+
+#[test]
+fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let scripts = crate::RequestScripts {
+        pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
+        post_response: String::new(),
+    };
+
+    registry
+        .update_collection(
+            &collection,
+            [("base_url".into(), "https://api.test".into())].into(),
+            scripts.clone(),
+        )
+        .unwrap();
+    registry.rename(&collection, "Renamed API").unwrap();
+
+    let reloaded = CollectionRegistry::from_path(root).unwrap();
+    let collection = reloaded
+        .collections()
+        .iter()
+        .find(|collection| collection.path == root.join("Renamed API"))
+        .unwrap();
+    assert_eq!(collection.scripts(), &scripts);
+    assert_eq!(
+        collection.local_env().resolve("base_url"),
+        Some("https://api.test")
+    );
+    // Only the Users folder is an entry; the settings file is not a request.
+    assert_eq!(collection.entries.len(), 1);
+}
+
+#[test]
+fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let environment = collection.join("environment.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let variables = registry.collections()[0].local_env().entries.clone();
+    let scripts = crate::RequestScripts {
+        pre_request: String::new(),
+        post_response: "pm.test('ok', () => {});".into(),
+    };
+
+    registry
+        .update_collection(&collection, variables.clone(), scripts)
+        .unwrap();
+    let settings = fs::read_dir(&collection)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with("collection.toml"))
+        .expect("scripts are saved");
+    registry
+        .update_collection(&collection, variables, Default::default())
+        .unwrap();
+
+    assert!(!settings.exists());
+    // An unchanged environment keeps its original formatting.
+    assert_eq!(
+        fs::read_to_string(environment).unwrap(),
+        "base_url = 'https://example.com'\n"
+    );
+    assert!(matches!(
+        registry.update_collection(
+            &root.join("Missing"),
+            Default::default(),
+            Default::default()
+        ),
+        Err(CollectionEditError::NotFound)
+    ));
+}

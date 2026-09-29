@@ -30,6 +30,7 @@ impl CollectionRegistry {
                 path: path.join("environment.toml"),
                 entries: HashMap::new(),
             },
+            scripts: Default::default(),
         });
 
         Ok(path)

@@ -5,16 +5,27 @@ use std::{
 };
 
 use environment::Environment;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
 use uuid::Uuid;
 
-use crate::{DirEntry, Entry, FileEntry};
+use crate::{DirEntry, Entry, FileEntry, RequestScripts};
+
+/// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
+const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
 
 pub struct Collection {
     pub path: PathBuf,
     pub entries: Vec<Entry>,
     pub(crate) local_env: Environment,
+    pub(crate) scripts: RequestScripts,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct CollectionSettings {
+    #[serde(default, skip_serializing_if = "RequestScripts::is_empty")]
+    scripts: RequestScripts,
 }
 
 impl Collection {
@@ -34,13 +45,61 @@ impl Collection {
             });
         }
 
-        let entries = load_directory(path, Some(&local_env.path))?.entries;
+        let excluded = [local_env.path.clone(), path.join(SETTINGS_FILE_NAME)];
+        let entries = load_directory(path, &excluded)?.entries;
+        let scripts = Self::load_scripts(path)?;
 
         Ok(Self {
             path: path.to_path_buf(),
             entries,
             local_env,
+            scripts,
         })
+    }
+
+    /// Reads the scripts that run around every request in the collection at `path`.
+    pub fn load_scripts(path: &Path) -> Result<RequestScripts, CollectionLoadError> {
+        let path = path.join(SETTINGS_FILE_NAME);
+        let source = match fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(RequestScripts::default());
+            }
+            Err(source) => return Err(CollectionLoadError::Read { path, source }),
+        };
+
+        toml::from_str::<CollectionSettings>(&source)
+            .map(|settings| settings.scripts)
+            .map_err(|source| CollectionLoadError::Parse { path, source })
+    }
+
+    pub(crate) fn save_scripts(
+        &mut self,
+        scripts: RequestScripts,
+    ) -> Result<(), CollectionSaveError> {
+        let path = self.path.join(SETTINGS_FILE_NAME);
+        let settings = CollectionSettings { scripts };
+
+        if settings.scripts.is_empty() {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(source) => return Err(CollectionSaveError::Write { path, source }),
+            }
+        } else {
+            let content = toml::to_string_pretty(&settings).map_err(|source| {
+                CollectionSaveError::Serialize {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            write_file_atomically(&path, content.as_bytes())
+                .map_err(|source| CollectionSaveError::Write { path, source })?;
+        }
+
+        self.scripts = settings.scripts;
+
+        Ok(())
     }
 
     pub fn save_files(&mut self) -> Result<(), CollectionSaveError> {
@@ -59,12 +118,13 @@ impl Collection {
     pub fn local_env(&self) -> &Environment {
         &self.local_env
     }
+
+    pub fn scripts(&self) -> &RequestScripts {
+        &self.scripts
+    }
 }
 
-fn load_directory(
-    path: &Path,
-    excluded_path: Option<&Path>,
-) -> Result<DirEntry, CollectionLoadError> {
+fn load_directory(path: &Path, excluded: &[PathBuf]) -> Result<DirEntry, CollectionLoadError> {
     let directory = fs::read_dir(path).map_err(|source| CollectionLoadError::Read {
         path: path.to_path_buf(),
         source,
@@ -84,7 +144,7 @@ fn load_directory(
 
     let mut entries = Vec::new();
     for child_path in paths {
-        if excluded_path == Some(child_path.as_path()) {
+        if excluded.contains(&child_path) {
             continue;
         }
 
@@ -96,10 +156,7 @@ fn load_directory(
             .file_type();
 
         if file_type.is_dir() {
-            entries.push(Entry::Directory(load_directory(
-                &child_path,
-                excluded_path,
-            )?));
+            entries.push(Entry::Directory(load_directory(&child_path, excluded)?));
         } else if file_type.is_file()
             && child_path
                 .extension()

@@ -52,18 +52,42 @@ pub(crate) async fn pre_request_with_network(
     mut context: Option<crate::RequestVariables>,
     network: Option<NetworkOptions>,
 ) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
-    let has_script = !request.scripts.pre_request.trim().is_empty();
+    let collection = match context
+        .as_mut()
+        .map(|context| std::mem::replace(&mut context.collection_scripts, Ok(Default::default())))
+    {
+        Some(Ok(scripts)) => scripts,
+        Some(Err(message)) => {
+            let report = ScriptReport {
+                phase: ScriptPhase::PreRequest,
+                collection: true,
+                tests: Vec::new(),
+                logs: Vec::new(),
+                error: Some(message.clone()),
+            };
+            return Err(ExecutionError::Script {
+                message,
+                report: Box::new(report),
+            });
+        }
+        None => Default::default(),
+    };
+    // Like Postman, the collection's script runs first and shares the
+    // execution's variables with the request's own script.
+    let scripts: Vec<(bool, String)> = [
+        (true, collection.pre_request),
+        (false, request.scripts.pre_request.clone()),
+    ]
+    .into_iter()
+    .filter(|(_, source)| !source.trim().is_empty())
+    .collect();
+    let has_script = !scripts.is_empty();
     if context.is_none() && !has_script && !needs_variable_expansion(&request) {
         return Ok((request, Variables::default(), Vec::new()));
     }
 
     smol::unblock(move || {
-        let mut report = ScriptReport {
-            phase: ScriptPhase::PreRequest,
-            tests: Vec::new(),
-            logs: Vec::new(),
-            error: None,
-        };
+        let mut reports = Vec::new();
         let mut variables = Variables {
             environment: context
                 .as_mut()
@@ -74,51 +98,63 @@ pub(crate) async fn pre_request_with_network(
                 })
                 .unwrap_or_default(),
             session: context.as_mut().and_then(|context| context.session.take()),
+            collection_post_response: collection.post_response,
             ..Default::default()
         };
 
         let mut body_changed = false;
-        if has_script {
+        for (collection, source) in scripts {
             let input = input(&request, &variables);
             let mut body = request.body.take().map(Bytes::from);
-            let (output, script_report) = run(
-                &request.scripts.pre_request,
+            let (output, mut report) = run(
+                &source,
                 ScriptPhase::PreRequest,
                 input,
                 &mut body,
                 None,
                 cancelled.clone(),
-                network,
+                network.clone(),
             );
+            report.collection = collection;
             request.body = body.map(Vec::from);
-            report = script_report;
             if cancelled.load(Ordering::Relaxed) {
                 report.error = Some("Script cancelled".into());
             }
 
-            if let Some(message) = &report.error {
-                return Err(ExecutionError::Script {
-                    message: message.clone(),
-                    report: Box::new(report),
-                });
+            if let Some(message) = report.error.clone() {
+                return Err(after_earlier_scripts(
+                    reports,
+                    ExecutionError::Script {
+                        message,
+                        report: Box::new(report),
+                    },
+                ));
             }
 
             let mut output = output.expect("successful script output");
             output.variables.session = variables.session.take();
+            output.variables.collection_post_response =
+                std::mem::take(&mut variables.collection_post_response);
             if let Some(session) = &output.variables.session
                 && let Err(message) = session.apply(&output.environment_changes)
             {
                 report.error = Some(message.into());
-                return Err(ExecutionError::Script {
-                    message: message.into(),
-                    report: Box::new(report),
-                });
+                return Err(after_earlier_scripts(
+                    reports,
+                    ExecutionError::Script {
+                        message: message.into(),
+                        report: Box::new(report),
+                    },
+                ));
             }
             if let Some(reason) = output.skip_reason {
-                return Err(ExecutionError::Skipped {
-                    reason,
-                    report: Box::new(report),
-                });
+                return Err(after_earlier_scripts(
+                    reports,
+                    ExecutionError::Skipped {
+                        reason,
+                        report: Box::new(report),
+                    },
+                ));
             }
             request.method = output.method;
             request.path = output.url;
@@ -126,10 +162,11 @@ pub(crate) async fn pre_request_with_network(
             request.headers = output.headers;
             variables = output.variables;
 
-            body_changed = output.body_changed;
-            if body_changed {
+            if output.body_changed {
+                body_changed = true;
                 request.body = output.body.map(String::into_bytes);
             }
+            reports.push(report);
         }
 
         if (has_script || context.is_some()) && matches!(request.method, Method::Get | Method::Head)
@@ -144,7 +181,7 @@ pub(crate) async fn pre_request_with_network(
                 .chain(variables.values.iter())
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
-            context.resolve_owned(request, body_changed, &mut variables.generated)
+            context.resolve_owned(request, has_script, body_changed, &mut variables.generated)
         } else {
             expand_request(&mut request, &mut variables, body_changed).map(|()| request)
         };
@@ -153,14 +190,25 @@ pub(crate) async fn pre_request_with_network(
             Ok(request) => request,
             Err(message) => {
                 let message: String = message.chars().take(4096).collect();
-                if !has_script && context.is_some() {
-                    return Err(ExecutionError::Variables(message));
-                }
+                let mut report = match reports.pop() {
+                    Some(report) => report,
+                    None if context.is_some() => return Err(ExecutionError::Variables(message)),
+                    None => ScriptReport {
+                        phase: ScriptPhase::PreRequest,
+                        collection: false,
+                        tests: Vec::new(),
+                        logs: Vec::new(),
+                        error: None,
+                    },
+                };
                 report.error = Some(message.clone());
-                return Err(ExecutionError::Script {
-                    message,
-                    report: Box::new(report),
-                });
+                return Err(after_earlier_scripts(
+                    reports,
+                    ExecutionError::Script {
+                        message,
+                        report: Box::new(report),
+                    },
+                ));
             }
         };
 
@@ -168,10 +216,25 @@ pub(crate) async fn pre_request_with_network(
             request = request.prepare_for_send();
         }
 
-        let reports = if has_script { vec![report] } else { Vec::new() };
         Ok((request, variables, reports))
     })
     .await
+}
+
+/// Keep the reports of scripts that completed before a later one stopped the send.
+fn after_earlier_scripts(mut reports: Vec<ScriptReport>, error: ExecutionError) -> ExecutionError {
+    if reports.is_empty() {
+        return error;
+    }
+
+    if let ExecutionError::Script { report, .. } | ExecutionError::Skipped { report, .. } = &error {
+        reports.push((**report).clone());
+    }
+
+    ExecutionError::ScriptedRequest {
+        source: Box::new(error),
+        reports,
+    }
 }
 
 #[cfg(test)]
@@ -188,46 +251,65 @@ pub(super) async fn post_response(
 pub(crate) async fn post_response_with_network(
     request: HttpRequest,
     mut request_body: Option<Bytes>,
-    variables: Variables,
+    mut variables: Variables,
     mut execution: Execution,
     cancelled: Arc<AtomicBool>,
     network: Option<NetworkOptions>,
 ) -> Execution {
-    if request.scripts.post_response.trim().is_empty() {
+    let scripts: Vec<(bool, String)> = [
+        (
+            true,
+            std::mem::take(&mut variables.collection_post_response),
+        ),
+        (false, request.scripts.post_response.clone()),
+    ]
+    .into_iter()
+    .filter(|(_, source)| !source.trim().is_empty())
+    .collect();
+    if scripts.is_empty() {
         return execution;
     }
 
     smol::unblock(move || {
-        let mut input = input(&request, &variables);
-        let Response::Http(response) = &mut execution.response;
-        input["response"] = json!({
-            "code": response.status.as_u16(),
-            "status": response.status.canonical_reason().unwrap_or(""),
-            "responseTime": execution.elapsed.as_secs_f64() * 1000.,
-            "headers": response.headers.iter().map(|(key, value)| {
-                (key.as_str(), String::from_utf8_lossy(value.as_bytes()).into_owned())
-            }).collect::<Vec<_>>(),
-        });
-        let (output, mut report) = run(
-            &request.scripts.post_response,
-            ScriptPhase::PostResponse,
-            input,
-            &mut request_body,
-            Some(&mut response.body),
-            cancelled.clone(),
-            network,
-        );
-        if cancelled.load(Ordering::Relaxed) {
-            report.error = Some("Script cancelled".into());
+        // A failing collection script does not prevent the request's own tests.
+        for (collection, source) in scripts {
+            let mut input = input(&request, &variables);
+            let Response::Http(response) = &mut execution.response;
+            input["response"] = json!({
+                "code": response.status.as_u16(),
+                "status": response.status.canonical_reason().unwrap_or(""),
+                "responseTime": execution.elapsed.as_secs_f64() * 1000.,
+                "headers": response.headers.iter().map(|(key, value)| {
+                    (key.as_str(), String::from_utf8_lossy(value.as_bytes()).into_owned())
+                }).collect::<Vec<_>>(),
+            });
+            let (output, mut report) = run(
+                &source,
+                ScriptPhase::PostResponse,
+                input,
+                &mut request_body,
+                Some(&mut response.body),
+                cancelled.clone(),
+                network.clone(),
+            );
+            report.collection = collection;
+            if cancelled.load(Ordering::Relaxed) {
+                report.error = Some("Script cancelled".into());
+            }
+            if report.error.is_none()
+                && let Some(mut output) = output
+            {
+                if let Some(session) = &variables.session
+                    && let Err(message) = session.apply(&output.environment_changes)
+                {
+                    report.error = Some(message.into());
+                } else {
+                    output.variables.session = variables.session.take();
+                    variables = output.variables;
+                }
+            }
+            execution.scripts.push(report);
         }
-        if report.error.is_none()
-            && let Some(output) = output
-            && let Some(session) = &variables.session
-            && let Err(message) = session.apply(&output.environment_changes)
-        {
-            report.error = Some(message.into());
-        }
-        execution.scripts.push(report);
         execution
     })
     .await

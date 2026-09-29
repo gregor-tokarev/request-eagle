@@ -1,12 +1,16 @@
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
 };
 
+use environment::{Environment, EnvironmentSaveError};
 use thiserror::Error;
 
 use crate::collection::{load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request};
+use crate::{
+    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request, RequestScripts,
+};
 
 impl CollectionRegistry {
     /// Saves a request without replacing its identity or externally edited metadata.
@@ -36,6 +40,36 @@ impl CollectionRegistry {
         }
 
         Err(CollectionEditError::NotFound)
+    }
+
+    /// Saves the collection's variables to `environment.toml` and its scripts
+    /// to the settings file, leaving unchanged files as they are.
+    pub fn update_collection(
+        &mut self,
+        path: &Path,
+        variables: HashMap<String, String>,
+        scripts: RequestScripts,
+    ) -> Result<(), CollectionEditError> {
+        let collection = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.path == path)
+            .ok_or(CollectionEditError::NotFound)?;
+
+        if collection.local_env.entries != variables {
+            let environment = Environment {
+                path: collection.local_env.path.clone(),
+                entries: variables,
+            };
+            environment.save_file()?;
+            collection.local_env = environment;
+        }
+
+        if collection.scripts != scripts {
+            collection.save_scripts(scripts)?;
+        }
+
+        Ok(())
     }
 
     /// Request names live in TOML; collection and folder names live on disk.
@@ -217,4 +251,6 @@ pub enum CollectionEditError {
     Load(#[from] CollectionLoadError),
     #[error("{0}")]
     Save(#[from] CollectionSaveError),
+    #[error("{0}")]
+    Environment(#[from] EnvironmentSaveError),
 }
