@@ -122,6 +122,14 @@ impl CollectionPanel {
                         this.bg(theme.info.opacity(0.25))
                     })
                     .child(if branch {
+                        // Collections are the roots of the tree; folders only
+                        // group requests inside them.
+                        let icon = match (item.kind, expanded) {
+                            (ItemKind::Collection, _) => Icon::default().path("icons/package.svg"),
+                            (_, true) => Icon::new(IconName::FolderOpen),
+                            (_, false) => Icon::new(IconName::FolderClosed),
+                        };
+
                         h_flex()
                             .gap_1()
                             .flex_none()
@@ -134,7 +142,7 @@ impl CollectionPanel {
                                 })
                                 .size_3(),
                             )
-                            .child(Icon::new(IconName::Folder).size(rems(0.875)))
+                            .child(icon.size(rems(0.875)))
                             .into_any_element()
                     } else {
                         let ItemKind::Request(method) = item.kind else {
@@ -148,12 +156,19 @@ impl CollectionPanel {
                             _ => theme.danger,
                         };
 
+                        // A fixed lane keeps request names aligned regardless
+                        // of the method's length.
                         div()
                             .flex_none()
+                            .w(rems(2.5))
                             .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_weight(FontWeight::SEMIBOLD)
                             .text_color(color)
-                            .child(method)
+                            .child(match method {
+                                "DELETE" => "DEL",
+                                "OPTIONS" => "OPT",
+                                method => method,
+                            })
                             .into_any_element()
                     })
                     .child(if let Some(rename) = rename {

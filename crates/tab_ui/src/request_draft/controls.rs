@@ -4,6 +4,7 @@ use gpui_kit::component::{
     button::*,
     input::{Input, InputGroup, InputGroupAddon},
     menu::{DropdownMenu, PopupMenuItem},
+    tag::Tag,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -27,19 +28,11 @@ impl RequestDraft {
         h_flex()
             .flex_none()
             .h_10()
-            .gap_3()
+            .gap_2()
             .child(
-                v_flex()
+                Tag::secondary()
+                    .small()
                     .flex_none()
-                    .h_8()
-                    .px_2()
-                    .justify_center()
-                    .items_center()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(cx.theme().radius_tokens().md)
-                    .text_color(cx.theme().muted_foreground)
-                    .text_xs()
                     .font_weight(FontWeight::MEDIUM)
                     .child("HTTP"),
             )
@@ -85,6 +78,7 @@ impl RequestDraft {
                             .debug_selector(|| "request-name".into())
                             .min_w_0()
                             .text_ellipsis()
+                            .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.name.clone()),
                     ),
@@ -179,6 +173,8 @@ impl RequestDraft {
                                     .addon(
                                         InputGroupAddon::new("request-method-addon")
                                             .p_1()
+                                            .border_r_1()
+                                            .border_color(cx.theme().input)
                                             .child(method_button),
                                     ),
                             )),
@@ -188,8 +184,13 @@ impl RequestDraft {
                 Button::new("send-request")
                     .debug_selector(|| "send-request".into())
                     .primary()
-                    .min_w_20()
+                    .min_w_24()
                     .flex_none()
+                    .icon(if sending {
+                        Icon::new(IconName::Close)
+                    } else {
+                        Icon::default().path("icons/send-horizontal.svg")
+                    })
                     .label(if sending { "Cancel" } else { "Send" })
                     .accessibility_label(if sending {
                         "Cancel request"
@@ -260,12 +261,10 @@ impl RequestDraft {
                         .child(label)
                         .when(count > 0, |this| {
                             this.child(
-                                div()
+                                crate::section_count::section_count(count, selected, cx)
                                     .debug_selector(move || {
                                         format!("request-section-{label}-count-{count}")
-                                    })
-                                    .text_xs()
-                                    .child(count.to_string()),
+                                    }),
                             )
                         })
                         .when_some(section, |this, section| {

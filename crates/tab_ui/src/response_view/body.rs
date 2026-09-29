@@ -58,7 +58,7 @@ impl ResponseView {
                             .disabled(content.raw_only)
                             .ghost()
                             .small()
-                            .label(if self.pretty { "JSON" } else { "Raw" })
+                            .label(if self.pretty { "Pretty" } else { "Raw" })
                             .when(!content.raw_only, |button| {
                                 button.icon(IconName::ChevronDown)
                             })
@@ -79,7 +79,7 @@ impl ResponseView {
                                     },
                                 ))
                                 .item(
-                                    PopupMenuItem::new("JSON").disabled(!has_json).on_click(
+                                    PopupMenuItem::new("Pretty").disabled(!has_json).on_click(
                                         move |_, window, cx| {
                                             let _ = json_view.update(cx, |view, cx| {
                                                 view.set_pretty(true, window, cx)

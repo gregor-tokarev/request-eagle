@@ -351,7 +351,8 @@ impl Render for CollectionPanel {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("COLLECTIONS"),
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Collections"),
                     )
                     .child(
                         div()

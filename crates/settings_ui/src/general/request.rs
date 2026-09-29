@@ -183,6 +183,7 @@ impl Render for RequestSettings {
             .child(
                 div()
                     .pb_3()
+                    .text_lg()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("Request"),
             )

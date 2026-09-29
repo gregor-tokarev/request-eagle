@@ -6,10 +6,18 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 3] = [
+const LOCAL_ICONS: [(&str, &[u8]); 5] = [
     (
         "icons/keyboard.svg",
         include_bytes!("../assets/icons/keyboard.svg"),
+    ),
+    (
+        "icons/package.svg",
+        include_bytes!("../assets/icons/package.svg"),
+    ),
+    (
+        "icons/send-horizontal.svg",
+        include_bytes!("../assets/icons/send-horizontal.svg"),
     ),
     (
         "icons/layout-sidebar-filled.svg",

@@ -289,7 +289,7 @@ impl AppearanceSettings {
             .child(
                 v_flex()
                     .gap_3()
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Color mode"))
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("Color mode"))
                     .child(self.mode_buttons(cx))
                     .child(
                         div()
@@ -301,7 +301,7 @@ impl AppearanceSettings {
             .child(
                 v_flex()
                     .gap_3()
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Typography"))
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("Typography"))
                     .child(
                         h_flex()
                             .justify_between()
@@ -465,11 +465,12 @@ impl AppearanceSettings {
             PageRow::Heading(dark) => v_flex()
                 .gap_3()
                 .pt_3()
-                .child(div().font_weight(FontWeight::MEDIUM).child(if *dark {
-                    "Dark themes"
-                } else {
-                    "Light themes"
-                }))
+                .child(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(if *dark { "Dark themes" } else { "Light themes" }),
+                )
                 .child(
                     div()
                         .text_xs()

@@ -161,9 +161,14 @@ impl Render for RequestFields {
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
+            .rounded(cx.theme().radius_tokens().lg)
+            .overflow_hidden()
             .child(
                 h_flex()
                     .h_8()
+                    .bg(cx.theme().table_head)
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w_9().flex_none())
                     .children(["Key", "Value", "Description"].map(|label| {
@@ -225,9 +230,8 @@ impl Render for RequestFields {
                                             .when(column != "description", |cell| cell.border_r_1())
                                             .border_color(cx.theme().border)
                                             .cursor_text()
-                                            .when(column == "description", |view| {
-                                                view.text_color(cx.theme().muted_foreground)
-                                            })
+                                            // Generated headers are read-only.
+                                            .text_color(cx.theme().muted_foreground)
                                             .child(
                                                 SelectableText::new(column, text).document_order(
                                                     (index * 3 + column_index) as u64,
@@ -248,6 +252,7 @@ impl Render for RequestFields {
                     .h_8()
                     .border_t_1()
                     .border_color(cx.theme().border)
+                    .hover(|row| row.bg(cx.theme().table_hover))
                     .child(div().w_9().flex_none().flex().justify_center().when(
                         populated,
                         |this| {
