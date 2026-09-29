@@ -1,4 +1,4 @@
-use std::{cell::Cell, path::Path, rc::Rc};
+use std::{cell::Cell, rc::Rc};
 
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
@@ -8,11 +8,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{
-    dragging::DraggedItem,
-    panel::{CollectionPanel, CollectionPanelEvent},
-    tree::ItemKind,
-};
+use super::{dragging::DraggedItem, panel::CollectionPanel, tree::ItemKind};
 use collection::MovePlacement;
 
 impl CollectionPanel {
@@ -253,32 +249,8 @@ impl CollectionPanel {
 
                 if branch {
                     this.toggle(index, cx);
-                } else if let Some(file) = this.collections.file(&this.tree.items[index].path) {
-                    let item = &this.tree.items[index];
-                    let mut root = index;
-
-                    while let Some(parent) = this.tree.items[root].parent {
-                        root = parent;
-                    }
-
-                    cx.emit(CollectionPanelEvent::OpenRequest {
-                        id: file.id.clone().into(),
-                        path: item.path.clone(),
-                        name: item.label.clone(),
-                        collection: this.tree.items[root].label.clone(),
-                        folders: item
-                            .path
-                            .strip_prefix(&this.tree.items[root].path)
-                            .ok()
-                            .and_then(Path::parent)
-                            .map(|path| {
-                                path.iter()
-                                    .map(|part| part.to_string_lossy().into_owned().into())
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        request: file.request.clone(),
-                    });
+                } else {
+                    this.open_request(index, cx);
                 }
             }))
             .capture_any_mouse_down(
