@@ -75,7 +75,7 @@ impl Render for BottomPanel {
                 Button::new("open-settings")
                     .ghost()
                     .small()
-                    .icon(gpui_kit::component::IconName::Settings)
+                    .icon(gpui_kit::component::IconName::Settings2)
                     .accessibility_label("Settings")
                     .tooltip_with_action("Settings", &OpenSettings, None)
                     .on_click(|_, window, cx| {

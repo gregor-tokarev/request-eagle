@@ -156,19 +156,12 @@ impl CollectionPanel {
                             _ => theme.danger,
                         };
 
-                        // A fixed lane keeps request names aligned regardless
-                        // of the method's length.
                         div()
                             .flex_none()
-                            .w(rems(2.5))
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(color)
-                            .child(match method {
-                                "DELETE" => "DEL",
-                                "OPTIONS" => "OPT",
-                                method => method,
-                            })
+                            .child(method)
                             .into_any_element()
                     })
                     .child(if let Some(rename) = rename {

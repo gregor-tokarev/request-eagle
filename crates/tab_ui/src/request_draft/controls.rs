@@ -184,13 +184,8 @@ impl RequestDraft {
                 Button::new("send-request")
                     .debug_selector(|| "send-request".into())
                     .primary()
-                    .min_w_24()
+                    .min_w_20()
                     .flex_none()
-                    .icon(if sending {
-                        Icon::new(IconName::Close)
-                    } else {
-                        Icon::default().path("icons/send-horizontal.svg")
-                    })
                     .label(if sending { "Cancel" } else { "Send" })
                     .accessibility_label(if sending {
                         "Cancel request"
