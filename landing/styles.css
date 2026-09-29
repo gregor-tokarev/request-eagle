@@ -108,7 +108,9 @@ button:focus-visible {
   transition: height 0.3s var(--ease);
 }
 
-.nav.is-scrolled {
+/* Without the script nothing tracks the scroll, so the bar keeps its background throughout. */
+.nav.is-scrolled,
+html:not(.js) .nav {
   background: rgba(6, 9, 18, 0.78);
   backdrop-filter: blur(14px) saturate(140%);
   box-shadow: 0 1px 0 var(--line);

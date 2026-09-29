@@ -260,7 +260,19 @@ def main():
     parser.add_argument("--frames", help="directory for the screen each launch ended on")
     arguments = parser.parse_args()
 
-    apps = dict(app.split("=", 1) for app in arguments.apps)
+    apps = {}
+
+    for app in arguments.apps:
+        name, separator, command = app.partition("=")
+
+        if not (name and separator and command):
+            parser.error(f"expected NAME=COMMAND, got {app!r}")
+
+        if name in apps:
+            parser.error(f"the name {name!r} is given twice")
+
+        apps[name] = command
+
     runs = {name: [] for name in apps}
 
     # One unmeasured launch each, so every measured launch starts from a warm file cache.
