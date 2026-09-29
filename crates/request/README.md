@@ -8,8 +8,6 @@ serialized files remain compatible.
 TLS certificate verification is enabled by default. New profiles and preference
 files that omit `ssl_certificate_verification` verify server certificates. An
 explicit stored value is preserved, including `false` saved by older versions.
-Existing users can enable verification in Settings > General. Disabling it allows
-untrusted certificates and applies to subsequent requests.
 
 ```rust,no_run
 use request::{HttpRequest, RequestExecutor, RequestPreferences, Response};
@@ -32,10 +30,10 @@ println!("{}: {} bytes in {:?}", response.status, response.body.len(), execution
 The executor reuses its HTTP connection pool. Construct a new executor when
 preferences change. HTTP/HTTPS execution supports GET, POST, PUT, PATCH, DELETE,
 HEAD, and OPTIONS, repeated headers and query pairs, binary bodies, and HTTP
-version selection. The complete
-operation, including the response body, is bounded by the timeout. Dropping its
-future cancels the operation. Response limits apply to both downloaded and decompressed body bytes, including
-chunked responses; zero disables either limit. The stored size setting uses MiB.
+version selection. The complete operation, including the response body, is
+bounded by the timeout. Dropping its future cancels the operation. Response
+limits apply to both downloaded and decompressed body bytes, including chunked
+responses; zero disables either limit. The stored size setting uses MiB.
 
 Proxy preferences default to the system/environment proxy. Custom mode supports
 HTTP or HTTPS proxy servers, separate HTTP/HTTPS request selection, Basic proxy
@@ -46,8 +44,6 @@ directly. Disabled mode ignores all proxies. Proxy settings are saved with the
 other local preferences and apply to the next request. Credentials are held in
 memory by this crate; the preferences crate persists them in the OS keyring,
 with only a credential reference in the preferences file.
-In Settings > Proxy, pasting a full proxy URL into the host field fills the
-protocol, hostname, port, and authentication fields. Valid edits save automatically.
 
 HTTP redirects (301, 302, 303, 307, and 308) are followed by default, with a
 limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
