@@ -140,6 +140,62 @@ if (!reducedMotion) {
   boost.addEventListener("focusout", () => setSpeed(1));
 }
 
+// Race: each lane fills in the time its app took to start, so the wait is felt rather than read.
+
+const race = document.querySelector("[data-race]");
+
+const lanes = [...race.querySelectorAll("[data-lane]")].map((element) => ({
+  element,
+  fill: element.querySelector("[data-fill]"),
+  time: element.querySelector("[data-time]"),
+  duration: Number(element.dataset.ms),
+}));
+
+const seconds = (milliseconds) => `${(milliseconds / 1000).toFixed(2)} s`;
+
+function showLane(lane, elapsed) {
+  const shown = Math.min(elapsed, lane.duration);
+
+  lane.fill.style.transform = `scaleX(${shown / lane.duration})`;
+  lane.time.textContent = seconds(shown);
+  lane.element.classList.toggle("is-ready", shown === lane.duration);
+}
+
+let raceFrame = 0;
+
+function runRace() {
+  cancelAnimationFrame(raceFrame);
+
+  const started = performance.now();
+
+  const step = (now) => {
+    const elapsed = now - started;
+
+    lanes.forEach((lane) => showLane(lane, elapsed));
+
+    if (lanes.some((lane) => elapsed < lane.duration)) raceFrame = requestAnimationFrame(step);
+  };
+
+  raceFrame = requestAnimationFrame(step);
+}
+
+if (reducedMotion) {
+  race.querySelector("[data-again]").hidden = true;
+} else {
+  // The lanes wait at the start until the race scrolls into view.
+  lanes.forEach((lane) => showLane(lane, 0));
+
+  const raceWatcher = new IntersectionObserver(([entry]) => {
+    if (!entry.isIntersecting) return;
+
+    raceWatcher.disconnect();
+    runRace();
+  }, { threshold: 0.6 });
+
+  raceWatcher.observe(race.querySelector(".race__lanes"));
+  race.querySelector("[data-again]").addEventListener("click", runRace);
+}
+
 // Theme picker: the chosen capture fades in over the current one, then replaces it.
 
 const picker = document.querySelector("[data-picker]");

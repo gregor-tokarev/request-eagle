@@ -33,6 +33,7 @@
     </a>
 
     <nav aria-label="Sections">
+      <a href="#speed">Speed</a>
       <a href="#features">Features</a>
       <a href="#themes">Themes</a>
       <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
@@ -91,6 +92,63 @@
       <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
       <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
       <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
+    </div>
+  </section>
+
+  <section class="race" id="speed" data-race>
+    <div class="wrap">
+      <div class="race__intro">
+        <h2 class="display" data-reveal="left">Ready in<br>0.2 seconds.</h2>
+
+        <p data-reveal="left">
+          That is the time from launch until the request editor is on screen.
+          Postman takes 3.8 seconds, 17 times as long.
+        </p>
+      </div>
+
+      <p class="visually-hidden">
+        Request Eagle is ready 0.22 seconds after launch. Postman is ready after 3.76 seconds.
+      </p>
+
+      <!-- The lanes replay both launches in real time. The figures are medians from docs/startup-benchmark.md. -->
+      <div class="race__lanes" data-reveal aria-hidden="true">
+        <div class="lane lane--eagle is-ready" data-lane data-ms="218">
+          <div class="lane__head">
+            <span class="lane__name">Request Eagle</span>
+            <span class="lane__time" data-time>0.22 s</span>
+          </div>
+          <div class="lane__track"><div class="lane__fill" data-fill></div></div>
+        </div>
+
+        <div class="lane is-ready" data-lane data-ms="3758">
+          <div class="lane__head">
+            <span class="lane__name">Postman</span>
+            <span class="lane__time" data-time>3.76 s</span>
+          </div>
+          <div class="lane__track"><div class="lane__fill" data-fill></div></div>
+        </div>
+      </div>
+
+      <div class="race__foot" data-reveal>
+        <button type="button" class="race__again" data-again><span>Run it again</span></button>
+
+        <details class="method">
+          <summary>How this was measured</summary>
+
+          <p>
+            Both apps were launched ten times in turn on one machine while the screen was recorded
+            at 60 frames per second. The time runs from starting the process to the last frame in
+            which the window was still being drawn. The figures are medians: 218 ms for
+            Request Eagle 0.1.15, and 3,758 ms for Postman 12.30.3 used without an account.
+          </p>
+          <p>
+            Measured on 29 September 2026 on Ubuntu 26.04 with a Ryzen 5 7430U, with both apps
+            already in the file cache and drawing without a GPU. Times on a Mac will differ.
+            The <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/startup-benchmark.md">benchmark notes</a>
+            list every run and the script that produced them.
+          </p>
+        </details>
+      </div>
     </div>
   </section>
 
