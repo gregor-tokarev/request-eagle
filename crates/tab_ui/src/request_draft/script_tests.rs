@@ -106,7 +106,9 @@ fn vim_edits_update_body_and_both_script_drafts(cx: &mut TestAppContext) {
         cx.update(|window, cx| {
             draft.update(cx, |draft, cx| {
                 draft.section = RequestSection::Scripts;
-                draft.script_phase = phase;
+                draft
+                    .script_editor(cx)
+                    .update(cx, |scripts, cx| scripts.select_phase(phase, window, cx));
                 draft
                     .script_state(window, cx)
                     .update(cx, |editor, cx| editor.focus(window, cx));
@@ -163,14 +165,15 @@ fn script_editors_keep_independent_drafts_and_snippets(cx: &mut TestAppContext) 
     cx.read(|cx| {
         let draft = draft.read(cx);
         assert!(draft.is_dirty());
-        assert_eq!(draft.script_phase, ScriptPhase::PreRequest);
+        let scripts = draft.scripts.as_ref().unwrap().read(cx);
+        assert_eq!(scripts.phase, ScriptPhase::PreRequest);
         assert_eq!(
             draft.request.scripts.pre_request,
             "pm.variables.set('name', 'eagle');"
         );
         assert!(draft.request.scripts.post_response.starts_with("pm.test"));
         assert_eq!(
-            draft.script_editors[0].as_ref().unwrap().read(cx).value(),
+            scripts.editors[0].as_ref().unwrap().read(cx).value(),
             draft.request.scripts.pre_request
         );
     });

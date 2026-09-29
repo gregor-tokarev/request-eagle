@@ -2,12 +2,13 @@ use std::collections::BTreeMap;
 
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableValues};
 
-use crate::HttpRequest;
+use crate::{HttpRequest, RequestScripts};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
     pub(crate) values: VariableValues,
     pub(crate) session: Option<EnvironmentSession>,
+    pub(crate) collection_scripts: Result<RequestScripts, String>,
     environment_error: Option<String>,
 }
 
@@ -21,8 +22,16 @@ impl RequestVariables {
         Self {
             values,
             session: None,
+            collection_scripts: Ok(RequestScripts::default()),
             environment_error,
         }
+    }
+
+    /// Run the collection's scripts before the request's own script in each
+    /// phase. A failure to read them stops the send before any script runs.
+    pub fn with_collection_scripts(mut self, scripts: Result<RequestScripts, String>) -> Self {
+        self.collection_scripts = scripts;
+        self
     }
 
     /// Read the current session overlay while retaining file-read errors for
@@ -44,12 +53,15 @@ impl RequestVariables {
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
-        self.resolve_owned(request.clone(), false, &mut BTreeMap::new())
+        let scripted = !request.scripts.pre_request.trim().is_empty();
+        self.resolve_owned(request.clone(), scripted, false, &mut BTreeMap::new())
     }
 
+    /// `scripted` reports whether a collection or request pre-request script ran.
     pub(crate) fn resolve_owned(
         &self,
         request: HttpRequest,
+        scripted: bool,
         body_changed: bool,
         generated: &mut BTreeMap<String, String>,
     ) -> Result<HttpRequest, String> {
@@ -57,12 +69,12 @@ impl RequestVariables {
         for (name, value) in generated.iter() {
             resolver.override_generated(name.clone(), value.clone());
         }
-        if !request.scripts.is_empty() {
+        if scripted || !request.scripts.is_empty() {
             resolver.limit_output(32 * 1024 * 1024);
         }
         // Only scripts can introduce these reserved names; collection values
         // were filtered when this send snapshot was created.
-        if !request.scripts.pre_request.trim().is_empty() {
+        if scripted {
             for (name, value) in &self.values.environment {
                 if name.starts_with('$') {
                     resolver.override_generated(name.clone(), value.clone());

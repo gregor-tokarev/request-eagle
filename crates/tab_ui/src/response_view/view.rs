@@ -111,16 +111,26 @@ impl ResponseView {
                 self.error = false;
             }
             Err(error) => {
-                let skipped = matches!(&error, ExecutionError::Skipped { .. });
-                if let ExecutionError::Skipped { report, .. } = &error {
-                    self.scripts = vec![(**report).clone()];
-                    self.section = Section::Body;
+                // Earlier scripts' reports wrap a failure or skip in a later script.
+                let (source, reports) = match &error {
+                    ExecutionError::ScriptedRequest { source, reports } => {
+                        (&**source, Some(reports))
+                    }
+                    error => (error, None),
+                };
+                let skipped = matches!(source, ExecutionError::Skipped { .. });
+                match source {
+                    ExecutionError::Skipped { report, .. } => {
+                        self.scripts = vec![(**report).clone()];
+                        self.section = Section::Body;
+                    }
+                    ExecutionError::Script { report, .. } => {
+                        self.scripts = vec![(**report).clone()];
+                        self.section = Section::Tests;
+                    }
+                    _ => {}
                 }
-                if let ExecutionError::Script { report, .. } = &error {
-                    self.scripts = vec![(**report).clone()];
-                    self.section = Section::Tests;
-                }
-                if let ExecutionError::ScriptedRequest { reports, .. } = &error {
+                if let Some(reports) = reports {
                     self.scripts = reports.clone();
                 }
                 self.content = None;

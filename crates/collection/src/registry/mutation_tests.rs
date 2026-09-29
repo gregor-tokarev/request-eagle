@@ -473,3 +473,165 @@ query = [
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
 }
+
+#[test]
+fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let scripts = crate::RequestScripts {
+        pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
+        post_response: String::new(),
+    };
+
+    registry
+        .update_collection(
+            &collection,
+            [("base_url".into(), "https://api.test".into())].into(),
+            scripts.clone(),
+        )
+        .unwrap();
+    registry.rename(&collection, "Renamed API").unwrap();
+
+    let reloaded = CollectionRegistry::from_path(root).unwrap();
+    let collection = reloaded
+        .collections()
+        .iter()
+        .find(|collection| collection.path == root.join("Renamed API"))
+        .unwrap();
+    assert_eq!(collection.scripts(), &scripts);
+    assert_eq!(
+        collection.local_env().resolve("base_url"),
+        Some("https://api.test")
+    );
+    // Only the Users folder is an entry; the settings file is not a request.
+    assert_eq!(collection.entries.len(), 1);
+}
+
+#[test]
+fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let environment = collection.join("environment.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let variables = registry.collections()[0].local_env().entries.clone();
+    let scripts = crate::RequestScripts {
+        pre_request: String::new(),
+        post_response: "pm.test('ok', () => {});".into(),
+    };
+
+    registry
+        .update_collection(&collection, variables.clone(), scripts)
+        .unwrap();
+    let settings = fs::read_dir(&collection)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with("collection.toml"))
+        .expect("scripts are saved");
+    registry
+        .update_collection(&collection, variables, Default::default())
+        .unwrap();
+
+    assert!(!settings.exists());
+    // An unchanged environment keeps its original formatting.
+    assert_eq!(
+        fs::read_to_string(environment).unwrap(),
+        "base_url = 'https://example.com'\n"
+    );
+    assert!(matches!(
+        registry.update_collection(
+            &root.join("Missing"),
+            Default::default(),
+            Default::default()
+        ),
+        Err(CollectionEditError::NotFound)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_variable_save_restores_the_previous_scripts() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let environment = collection.join("environment.toml");
+    let settings = collection.join(".request-eagle-collection.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let variables = registry
+        .collections()
+        .iter()
+        .find(|entry| entry.path == collection)
+        .unwrap()
+        .local_env()
+        .entries
+        .clone();
+    let scripts = |source: &str| crate::RequestScripts {
+        pre_request: source.into(),
+        post_response: String::new(),
+    };
+    registry
+        .update_collection(&collection, variables, scripts("console.log('saved');"))
+        .unwrap();
+    let saved = fs::read_to_string(&settings).unwrap();
+    fs::set_permissions(&environment, fs::Permissions::from_mode(0o444)).unwrap();
+
+    let result = registry.update_collection(
+        &collection,
+        [("token".into(), "secret".into())].into(),
+        scripts("console.log('edited');"),
+    );
+    fs::set_permissions(&environment, fs::Permissions::from_mode(0o644)).unwrap();
+
+    result.unwrap_err();
+    assert_eq!(fs::read_to_string(&settings).unwrap(), saved);
+    let current = registry
+        .collections()
+        .iter()
+        .find(|entry| entry.path == collection)
+        .unwrap();
+    assert_eq!(current.scripts().pre_request, "console.log('saved');");
+    assert!(current.local_env().resolve("token").is_none());
+}
+
+#[test]
+fn collection_settings_files_cannot_be_replaced_by_entries() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let folder = collection.join("Users");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let request = Request::Http(HttpRequest::default());
+
+    for (name, file) in [
+        (
+            ".request-eagle-collection",
+            ".request-eagle-collection 2.toml",
+        ),
+        ("ENVIRONMENT", "ENVIRONMENT 2.toml"),
+    ] {
+        let path = registry
+            .create_request_with(&collection, name, request.clone())
+            .unwrap();
+        assert_eq!(path, collection.join(file));
+    }
+    assert!(!collection.join(".request-eagle-collection.toml").exists());
+
+    // Inside folders these are ordinary names, but they cannot move to the root.
+    let nested = registry
+        .create_request_with(&folder, ".request-eagle-collection", request)
+        .unwrap();
+    assert_eq!(nested, folder.join(".request-eagle-collection.toml"));
+    assert!(matches!(
+        registry.move_entry(&nested, &collection, crate::MovePlacement::Inside),
+        Err(CollectionEditError::ReservedName)
+    ));
+    assert!(matches!(
+        registry.rename(&folder, "environment.toml"),
+        Err(CollectionEditError::ReservedName)
+    ));
+    assert!(folder.is_dir());
+}

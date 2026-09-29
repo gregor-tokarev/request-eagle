@@ -6,13 +6,12 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::ScriptPhase;
+use request::{RequestScripts, ScriptPhase};
 use std::rc::Rc;
 
 use super::{
-    RequestDraft,
-    script_completions::{ScriptCompletions, capture_completion_action},
-    script_signature::ScriptSignature,
+    completions::{ScriptCompletions, capture_completion_action},
+    signature::ScriptSignature,
 };
 
 const PRE_SNIPPETS: &[(&str, &str)] = &[
@@ -85,38 +84,117 @@ const POST_SNIPPETS: &[(&str, &str)] = &[
     ),
 ];
 
-impl RequestDraft {
-    pub(super) fn script_state(
+/// Whose scripts the editor changes. This only affects its guidance text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScriptTarget {
+    Request,
+    Collection,
+}
+
+impl ScriptTarget {
+    fn description(self, phase: ScriptPhase) -> &'static str {
+        match (self, phase) {
+            (Self::Request, ScriptPhase::PreRequest) => "Runs before this request is sent.",
+            (Self::Request, ScriptPhase::PostResponse) => "Runs after the response is received.",
+            (Self::Collection, ScriptPhase::PreRequest) => {
+                "Runs before every request in this collection, ahead of the request's own script."
+            }
+            (Self::Collection, ScriptPhase::PostResponse) => {
+                "Runs after every response in this collection, ahead of the request's own script."
+            }
+        }
+    }
+
+    fn placeholder(self, phase: ScriptPhase) -> &'static str {
+        match (self, phase) {
+            (Self::Request, ScriptPhase::PreRequest) => {
+                "// Write JavaScript to run before this request"
+            }
+            (Self::Request, ScriptPhase::PostResponse) => {
+                "// Write tests to run after the response"
+            }
+            (Self::Collection, ScriptPhase::PreRequest) => {
+                "// Write JavaScript to run before every request in this collection"
+            }
+            (Self::Collection, ScriptPhase::PostResponse) => {
+                "// Write tests to run after every response in this collection"
+            }
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Request => "Send to run scripts",
+            Self::Collection => "Save, then send a request in this collection to run scripts",
+        }
+    }
+}
+
+/// The edited scripts, emitted after every change.
+pub(crate) struct ScriptsChanged(pub RequestScripts);
+
+/// Pre-request and post-response editors with completion, signature help and
+/// Vim mode. Each phase's editor is created when it is first shown.
+pub(crate) struct ScriptEditor {
+    target: ScriptTarget,
+    scripts: RequestScripts,
+    pub(crate) phase: ScriptPhase,
+    pub(crate) editors: [Option<Entity<EditorState>>; 2],
+    vim: [Option<Entity<crate::vim::Vim>>; 2],
+    pub(super) signatures: [Option<Entity<ScriptSignature>>; 2],
+    _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<ScriptsChanged> for ScriptEditor {}
+
+impl ScriptEditor {
+    pub(crate) fn new(scripts: RequestScripts, target: ScriptTarget) -> Self {
+        Self {
+            target,
+            scripts,
+            phase: ScriptPhase::PreRequest,
+            editors: [None, None],
+            vim: [None, None],
+            signatures: [None, None],
+            _subscriptions: Vec::new(),
+        }
+    }
+
+    pub(crate) fn select_phase(
+        &mut self,
+        phase: ScriptPhase,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.phase = phase;
+        self.editor(window, cx);
+        cx.notify();
+    }
+
+    /// The selected phase's editor.
+    pub(crate) fn editor(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<EditorState> {
-        let phase = self.script_phase;
-        let index = if phase == ScriptPhase::PreRequest {
-            0
-        } else {
-            1
-        };
+        let phase = self.phase;
+        let index = usize::from(phase == ScriptPhase::PostResponse);
 
-        if let Some(editor) = &self.script_editors[index] {
+        if let Some(editor) = &self.editors[index] {
             return editor.clone();
         }
 
         let value = if index == 0 {
-            &self.request.scripts.pre_request
+            &self.scripts.pre_request
         } else {
-            &self.request.scripts.post_response
+            &self.scripts.post_response
         };
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("javascript")
                 .line_number(true)
                 .soft_wrap(true)
-                .placeholder(if index == 0 {
-                    "// Write JavaScript to run before this request"
-                } else {
-                    "// Write tests to run after the response"
-                })
+                .placeholder(self.target.placeholder(phase))
                 .default_value(value.clone())
         });
         let completions = Rc::new(ScriptCompletions::new(phase, &editor));
@@ -125,7 +203,7 @@ impl RequestDraft {
             editor.lsp_mut().hover_provider = Some(completions);
             editor.lsp_mut().completion_menu.max_width = rems(40.).to_pixels(window.rem_size());
         });
-        self.script_signatures[index] =
+        self.signatures[index] =
             Some(cx.new(|cx| ScriptSignature::new(editor.clone(), phase, window, cx)));
         crate::script_intelligence::warm_up();
         self._subscriptions.push(cx.subscribe(
@@ -134,21 +212,24 @@ impl RequestDraft {
                 if matches!(event, InputEvent::Change) {
                     let value = editor.read(cx).value().to_string();
                     if phase == ScriptPhase::PreRequest {
-                        this.request.scripts.pre_request = value;
+                        this.scripts.pre_request = value;
                     } else {
-                        this.request.scripts.post_response = value;
+                        this.scripts.post_response = value;
                     }
+                    cx.emit(ScriptsChanged(this.scripts.clone()));
                     cx.notify();
                 }
             },
         ));
-        self.script_vim[index] = Some(cx.new(|cx| crate::vim::Vim::new(editor.clone(), cx)));
-        self.script_editors[index] = Some(editor.clone());
+        self.vim[index] = Some(cx.new(|cx| crate::vim::Vim::new(editor.clone(), cx)));
+        self.editors[index] = Some(editor.clone());
         editor
     }
+}
 
-    pub(super) fn scripts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let editor = self.script_state(window, cx);
+impl Render for ScriptEditor {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let editor = self.editor(window, cx);
         editor.update(cx, |editor, _| {
             // GPUI's completion popover uses a local cursor x-coordinate when
             // limiting its width. Account for the editor's window position.
@@ -165,10 +246,10 @@ impl RequestDraft {
                 .to_pixels(window.rem_size())
                 .min(available.max(px(120.)));
         });
-        let phase = self.script_phase;
+        let phase = self.phase;
         let index = usize::from(phase == ScriptPhase::PostResponse);
-        let signature = self.script_signatures[index].as_ref().unwrap().clone();
-        let mouse_vim = self.script_vim[index].as_ref().unwrap().clone();
+        let signature = self.signatures[index].as_ref().unwrap().clone();
+        let mouse_vim = self.vim[index].as_ref().unwrap().clone();
         let escape_editor = editor.clone();
         let escape_signature = signature.clone();
         let snippets = if phase == ScriptPhase::PreRequest {
@@ -176,10 +257,14 @@ impl RequestDraft {
         } else {
             POST_SNIPPETS
         };
-        let draft = cx.entity().downgrade();
+        let view = cx.entity().downgrade();
+        let target = self.target;
 
         h_flex()
-            .debug_selector(|| "request-scripts".into())
+            .debug_selector(move || match target {
+                ScriptTarget::Request => "request-scripts".into(),
+                ScriptTarget::Collection => "collection-scripts".into(),
+            })
             .size_full()
             .min_h_0()
             .min_w_0()
@@ -199,9 +284,9 @@ impl RequestDraft {
                             .into_iter()
                             .map(|option| {
                                 let present = if option == ScriptPhase::PreRequest {
-                                    !self.request.scripts.pre_request.is_empty()
+                                    !self.scripts.pre_request.is_empty()
                                 } else {
-                                    !self.request.scripts.post_response.is_empty()
+                                    !self.scripts.post_response.is_empty()
                                 };
                                 Tab::new(option.label())
                                     .debug_selector(move || {
@@ -220,9 +305,7 @@ impl RequestDraft {
                                     .child(option.label())
                                     .when(present, |tab| tab.child(div().text_xs().child("•")))
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.script_phase = option;
-                                        this.script_state(window, cx);
-                                        cx.notify();
+                                        this.select_phase(option, window, cx);
                                     }))
                             }),
                     ),
@@ -241,17 +324,13 @@ impl RequestDraft {
                             .gap_2()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(div().flex_1().min_w_0().child(
-                                if phase == ScriptPhase::PreRequest {
-                                    "Runs before this request is sent."
-                                } else {
-                                    "Runs after the response is received."
-                                },
-                            ))
-                            .children(
-                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
-                                    .clone(),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(self.target.description(phase)),
                             )
+                            .children(self.vim[index].clone())
                             .child("JavaScript"),
                     )
                     .child(
@@ -275,12 +354,7 @@ impl RequestDraft {
                             })
                             .capture_action(capture_completion_action::<MoveUp>(&editor))
                             .capture_action(capture_completion_action::<MoveDown>(&editor))
-                            .track_focus(
-                                &self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
-                                    .as_ref()
-                                    .unwrap()
-                                    .focus_handle(cx),
-                            )
+                            .track_focus(&self.vim[index].as_ref().unwrap().focus_handle(cx))
                             .flex_1()
                             .min_h_0()
                             .child(
@@ -297,11 +371,7 @@ impl RequestDraft {
                                     .text_sm()
                                     .aria_label(format!("{} script", phase.label())),
                             )
-                            .child(crate::vim::cursor(
-                                self.script_vim[usize::from(phase == ScriptPhase::PostResponse)]
-                                    .as_ref()
-                                    .unwrap(),
-                            ))
+                            .child(crate::vim::cursor(self.vim[index].as_ref().unwrap()))
                             .child(signature),
                     )
                     .child(
@@ -315,7 +385,7 @@ impl RequestDraft {
                                     .min_w_0()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Send to run scripts"),
+                                    .child(self.target.hint()),
                             )
                             .child(
                                 Button::new("script-snippets")
@@ -326,11 +396,11 @@ impl RequestDraft {
                                     .icon(IconName::ChevronDown)
                                     .dropdown_menu(move |mut menu, _, _| {
                                         for &(label, code) in snippets {
-                                            let draft = draft.clone();
+                                            let view = view.clone();
                                             menu = menu.item(PopupMenuItem::new(label).on_click(
                                                 move |_, window, cx| {
-                                                    let _ = draft.update(cx, |draft, cx| {
-                                                        let editor = draft.script_state(window, cx);
+                                                    let _ = view.update(cx, |view, cx| {
+                                                        let editor = view.editor(window, cx);
                                                         editor.update(cx, |editor, cx| {
                                                             let existing = editor.value();
                                                             let text = if existing.is_empty() {
@@ -353,6 +423,5 @@ impl RequestDraft {
                             ),
                     ),
             )
-            .into_any_element()
     }
 }

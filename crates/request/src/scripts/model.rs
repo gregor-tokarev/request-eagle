@@ -32,9 +32,21 @@ impl ScriptPhase {
 #[derive(Clone, Debug)]
 pub struct ScriptReport {
     pub phase: ScriptPhase,
+    /// Whether the collection's script produced this report, not the request's.
+    pub collection: bool,
     pub tests: Vec<ScriptTest>,
     pub logs: Vec<ScriptLog>,
     pub error: Option<String>,
+}
+
+impl ScriptReport {
+    pub fn label(&self) -> String {
+        if self.collection {
+            format!("Collection {}", self.phase.label().to_lowercase())
+        } else {
+            self.phase.label().to_owned()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

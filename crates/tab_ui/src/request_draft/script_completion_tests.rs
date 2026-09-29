@@ -6,10 +6,8 @@ use lsp_types::{CompletionItem, CompletionTextEdit};
 use request::ScriptPhase;
 use ropey::Rope;
 
-use super::{
-    script_completions::completion_items,
-    tests::{draft, element_bounds},
-};
+use super::tests::{draft, element_bounds};
+use crate::script_editor::completion_items;
 
 fn complete(source: &str, phase: ScriptPhase) -> Vec<CompletionItem> {
     let offset = source.find('|').unwrap();
@@ -204,7 +202,7 @@ fn edits_replace_the_entire_member_and_preserve_unicode_and_surrounding_code() {
     }
 }
 
-pub(super) fn script_editor(
+pub(crate) fn script_editor(
     cx: &mut TestAppContext,
     post: bool,
 ) -> (
@@ -230,7 +228,7 @@ pub(super) fn script_editor(
     (draft, editor, cx)
 }
 
-pub(super) async fn wait_for(
+pub(crate) async fn wait_for(
     cx: &mut VisualTestContext,
     mut ready: impl FnMut(&mut VisualTestContext) -> bool,
 ) {

@@ -42,7 +42,7 @@ impl ResponseView {
                         .child(
                             div()
                                 .text_color(cx.theme().danger)
-                                .child(format!("{} script error", report.phase.label())),
+                                .child(format!("{} script error", report.label())),
                         )
                         .child(SelectableText::new(
                             ("script-error", phase_index),
@@ -64,7 +64,7 @@ impl ResponseView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{} · {}", report.phase.label(), log.level)),
+                                    .child(format!("{} · {}", report.label(), log.level)),
                             )
                             .child(SelectableText::new(
                                 ("script-log", phase_index * 500 + index),
@@ -108,7 +108,7 @@ impl ResponseView {
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(report.phase.label()),
+                                            .child(report.label()),
                                     ),
                             )
                             .when_some(test.error.clone(), |row, error| {

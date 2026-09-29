@@ -41,7 +41,13 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
         Command::CollectionsGet { path } => {
             let collection = registry.collections().iter().find(|entry| entry.path == path)
                 .context("Unknown collection path")?;
-            return Ok(json!({"path": path, "entries": entries(&collection.entries)}));
+            let scripts = collection.scripts();
+            return Ok(json!({
+                "path": path,
+                "variables": collection.local_env().entries,
+                "scripts": {"pre_request": scripts.pre_request, "post_response": scripts.post_response},
+                "entries": entries(&collection.entries),
+            }));
         }
         Command::RequestsList { collection, query } => {
             if let Some(path) = &collection

@@ -4,6 +4,8 @@ pub(crate) mod save_request;
 pub(crate) mod top_panel;
 
 #[cfg(test)]
+mod collection_tab_tests;
+#[cfg(test)]
 mod main_view_tests;
 
 #[cfg(test)]

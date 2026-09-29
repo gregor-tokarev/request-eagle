@@ -8,7 +8,7 @@ use collection::{CollectionRegistry, Method};
 use gpui_kit::{Modifiers, TestAppContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-use tab_ui::RequestDraft;
+use tab_ui::{CollectionPage, RequestDraft};
 
 #[gpui_kit::test]
 async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
@@ -201,14 +201,14 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
 
 static NEXT_SAVED_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
-struct SavedRequestFixture {
-    directory: std::path::PathBuf,
-    file: std::path::PathBuf,
+pub(super) struct SavedRequestFixture {
+    pub(super) directory: std::path::PathBuf,
+    pub(super) file: std::path::PathBuf,
     original: String,
 }
 
 impl SavedRequestFixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
             "request-eagle-save-{}-{}-{}",
             std::process::id(),
@@ -238,7 +238,7 @@ path = "https://example.com/original"
         }
     }
 
-    fn open<'a>(
+    pub(super) fn open<'a>(
         &self,
         cx: &'a mut TestAppContext,
     ) -> (
@@ -277,7 +277,7 @@ impl Drop for SavedRequestFixture {
     }
 }
 
-fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+pub(super) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
     cx.update(|window, _| window.refresh());
     let bounds = cx
         .debug_bounds(selector)
@@ -286,7 +286,7 @@ fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
     cx.simulate_click(bounds.center(), Modifiers::default());
 }
 
-fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
+pub(super) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
     click(cx, "request-url");
     cx.simulate_keystrokes("secondary-a");
     cx.simulate_input(url);
@@ -409,19 +409,30 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
 
-    // Collections have no page of their own, so Enter leaves them as they are.
+    // Enter opens a collection's own page.
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
+    cx.read(|cx| {
+        let tabs = tabs.read(cx);
+        assert_eq!(tabs.tabs.len(), 2);
+        assert_eq!(tabs.tabs[1].title, "API");
+        assert!(
+            tabs.tabs[1]
+                .page
+                .view()
+                .downcast::<CollectionPage>()
+                .is_ok()
+        );
+    });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
     cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
     cx.read(|cx| {
         let tabs = tabs.read(cx);
-        assert_eq!(tabs.tabs.len(), 2);
-        assert_eq!(tabs.selected, Some(1));
-        assert_eq!(tabs.tabs[1].request_path.as_ref(), Some(&fixture.file));
+        assert_eq!(tabs.tabs.len(), 3);
+        assert_eq!(tabs.selected, Some(2));
+        assert_eq!(tabs.tabs[2].request_path.as_ref(), Some(&fixture.file));
     });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
@@ -433,8 +444,8 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.read(|cx| {
         let tabs = tabs.read(cx);
-        assert_eq!(tabs.tabs.len(), 2);
-        assert_eq!(tabs.tabs[1].title, "Renamed");
+        assert_eq!(tabs.tabs.len(), 3);
+        assert_eq!(tabs.tabs[2].title, "Renamed");
     });
 }
 
@@ -445,8 +456,9 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     let (tabs, draft, cx) = fixture.open(cx);
     edit_url(cx, "https://example.com/edited-before-rename");
 
-    click(cx, "collection-row-0");
-    cx.simulate_keystrokes("f2");
+    // Select the collection without opening its tab, so Save targets the request.
+    click(cx, "collection-row-1");
+    cx.simulate_keystrokes("up f2");
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
     let renamed = fixture.directory.join("Renamed API/example.toml");
@@ -461,8 +473,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
         collection::FileEntry::from_path(&renamed).unwrap().request;
     assert_eq!(saved.path, "https://example.com/edited-before-rename");
 
-    // Expand the renamed collection, then drag the open request to another one.
-    click(cx, "collection-row-0");
+    // Drag the open request to another collection.
     let source = cx.debug_bounds("collection-row-1").unwrap().center();
     let target = cx.debug_bounds("collection-row-2").unwrap().center();
     cx.simulate_event(gpui_kit::MouseDownEvent {
