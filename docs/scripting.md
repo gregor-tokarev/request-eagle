@@ -6,8 +6,12 @@ available APIs. Scripts run immediately when you send the request. Test results
 and console output appear in the response panel.
 
 The editor uses a bundled TypeScript language service for JavaScript completion.
-It suggests object fields inside calls such as `pm.sendRequest({ ... })`, infers
-local variables and callback response types, and displays types when you hover.
+It suggests object fields inside calls such as `pm.sendRequest({ ... })`, common
+header names wherever a header is named, type names for `pm.expect(value).to.be.a()`,
+and JSON Schema formats. It also infers local variables and callback response
+types, and displays types when you hover. For a value declared before the call,
+add a JSDoc type such as `/** @type {RequestEagle.RequestOptions} */` or
+`/** @type {RequestEagle.RequestHeaders} */` to get the same suggestions.
 Function parameter hints highlight the current argument as you type or move the
 caret; Escape dismisses them. No Node.js installation is needed. Scripts still
 execute as JavaScript; TypeScript type annotations are not executable script syntax.

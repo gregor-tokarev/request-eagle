@@ -137,8 +137,25 @@
             ts.isClassDeclaration(parent)
         )) return [];
 
+        // A string value such as 'Content-T' has a prefix that includes
+        // characters outside identifiers. Match it from the opening quote.
+        const tokenStart = token.getStart(file);
+        const typed = ts.isStringLiteralLike(token) && tokenStart < position &&
+            (position < token.end || token.isUnterminated)
+            ? source.slice(tokenStart + 1, position) : before;
+
+        // Property names that are not identifiers, such as "Content-Type",
+        // arrive quoted. Match and order them by the name the user types.
+        const unquoted = name => name.replace(/^(["'])(.*)\1$/s, "$2");
+
         return result.entries
-            .filter(entry => !entry.isSnippet && entry.name.startsWith(before))
+            // Without a typed prefix, only offer suggestions from the context.
+            // Every global and keyword is valid after `{` or `(`, but listing
+            // them hides the fields and values the API expects.
+            .filter(entry => !entry.isSnippet && unquoted(entry.name).startsWith(typed) &&
+                (typed || entry.sortText < ts.Completions.SortText.GlobalsOrKeywords))
+            .sort((left, right) => left.sortText.localeCompare(right.sortText) ||
+                unquoted(left.name).localeCompare(unquoted(right.name)))
             .slice(0, 100)
             .map(entry => {
                 cancellationToken.throwIfCancellationRequested();
@@ -152,7 +169,7 @@
                     sortText: entry.sortText,
                     // GPUI's menu uses this as the highlighted prefix and does
                     // no filtering itself. Filtering is performed above.
-                    filterText: before,
+                    filterText: typed,
                     textEdit: {range: range(span), newText: entry.insertText || entry.name},
                 };
             });
