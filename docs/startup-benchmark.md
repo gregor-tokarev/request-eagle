@@ -1,7 +1,7 @@
 # Startup benchmark
 
 The landing page says Request Eagle is ready in 0.2 seconds and that Postman
-takes 17 times as long. This page records where those figures come from.
+takes 18 times as long. This page records where those figures come from.
 
 ## Result
 
@@ -9,11 +9,11 @@ Measured on 29 September 2026. Times are milliseconds from launch.
 
 | App | First paint (median) | Ready (median) | Ready (fastest to slowest) |
 | --- | ---: | ---: | ---: |
-| Request Eagle 0.1.15 | 218 | 218 | 216 to 282 |
-| Postman 12.30.3 | 582 | 3758 | 3716 to 4936 |
+| Request Eagle 0.1.15 | 216 | 216 | 214 to 449 |
+| Postman 12.30.3 | 598 | 3859 | 3815 to 3932 |
 
-Postman's median is 17.2 times Request Eagle's. Comparing Postman's
-fastest launch with Request Eagle's slowest still gives 13.2 times.
+Postman's median is 17.9 times Request Eagle's. Comparing Postman's
+fastest launch with Request Eagle's slowest still gives 8.5 times.
 
 Request Eagle draws its complete window in its first frame, so its first paint
 and ready times are the same. Postman shows an empty window, then a loading
@@ -26,15 +26,20 @@ display and records that display at 60 frames per second.
 
 - **First paint** is the first frame that shows a window.
 - **Ready** is the frame of the last visible change before the screen stays
-  unchanged for two seconds. Changes smaller than 300 pixels are ignored, so a
-  blinking caret does not count.
+  unchanged for three seconds. Changes smaller than 300 pixels are ignored, so
+  a blinking caret does not count.
 
 Each app is launched once without being measured, then ten times. The apps take
-turns, so background load affects both alike.
+turns, and each launch waits until the machine is idle.
+
+A stalled app can look like a finished one. The script therefore rejects the
+whole result unless every launch of an app ends on the same screen. An earlier
+run, made while other work loaded the machine, recorded Postman as ready after
+0.8 seconds because its loading indicator had stalled; that run was discarded
+and led to this check.
 
 A separate recording of every change during a Postman launch confirmed that
-its ready time is the moment the request editor appears, not a later cosmetic
-update.
+its ready time is the moment the request editor appears.
 
 ## Conditions
 
@@ -53,8 +58,8 @@ update.
 - **No GPU.** Xvfb has none, so both apps drew in software.
 - **Warm starts.** Both apps were already in the file cache. A first launch
   after a restart is slower for both.
-- **One machine.** Background load rose during runs 5 to 8, which shows in the
-  slowest times.
+- **One machine, shared.** Other work ran on it between launches. Request
+  Eagle's first launch took 449 ms, twice its usual time.
 - **Postman without an account.** Signed in, Postman also loads workspaces and
   syncs, which this did not measure.
 - **Ready is a visual measure.** It is the moment the window stops being drawn,
@@ -64,16 +69,16 @@ update.
 
 | Run | Eagle first paint | Eagle ready | Postman first paint | Postman ready | Load |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 217 | 217 | 582 | 3716 | 0.56 |
-| 2 | 216 | 216 | 583 | 3718 | 0.38 |
-| 3 | 218 | 218 | 582 | 3766 | 0.39 |
-| 4 | 216 | 216 | 567 | 3718 | 0.44 |
-| 5 | 218 | 218 | 600 | 3734 | 3.70 |
-| 6 | 282 | 282 | 1267 | 4936 | 6.80 |
-| 7 | 250 | 250 | 583 | 3800 | 5.58 |
-| 8 | 234 | 234 | 565 | 3750 | 3.17 |
-| 9 | 217 | 217 | 651 | 3887 | 2.12 |
-| 10 | 216 | 216 | 566 | 3767 | 1.65 |
+| 1 | 449 | 449 | 598 | 3898 | 1.90 |
+| 2 | 214 | 214 | 567 | 3850 | 1.24 |
+| 3 | 217 | 217 | 582 | 3815 | 0.99 |
+| 4 | 216 | 216 | 615 | 3916 | 1.14 |
+| 5 | 222 | 222 | 601 | 3884 | 1.17 |
+| 6 | 214 | 214 | 598 | 3932 | 1.56 |
+| 7 | 215 | 215 | 584 | 3850 | 1.47 |
+| 8 | 233 | 233 | 600 | 3817 | 3.04 |
+| 9 | 234 | 234 | 600 | 3868 | 1.47 |
+| 10 | 216 | 216 | 567 | 3833 | 0.98 |
 
 ## Reproduce
 

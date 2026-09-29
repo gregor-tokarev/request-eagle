@@ -35,8 +35,8 @@ in the copy use the macOS modifier (⌘).
 
 ## Claims to keep current
 
-- The startup figures in the race: 0.22 s for Request Eagle, 3.76 s for
-  Postman, and "17 times". They come from [the startup benchmark](startup-benchmark.md).
+- The startup figures in the race: 0.22 s for Request Eagle, 3.86 s for
+  Postman, and "18 times". They come from [the startup benchmark](startup-benchmark.md).
 - Eleven theme families, and the seven themes offered by the picker.
 - Interface sizes from 12 to 24 px.
 - The macOS build targets Apple Silicon; Linux builds from source.
