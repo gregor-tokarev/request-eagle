@@ -13,10 +13,16 @@ python3 -m http.server 4173 --directory landing
 ## Deploy
 
 The page is hosted on Cloudflare Pages as the `requesteagle` project, with
-`requesteagle.tokarev.work` as its custom domain.
+`requesteagle.tokarev.work` as its custom domain. The project is connected to
+this repository and serves `landing/` as it is, without a build command.
+
+Cloudflare deploys by itself when a push to `main` changes a file under
+`landing/`. Other branches and pull requests are not deployed.
+
+To deploy `main` again without a change, with the [Cloudflare CLI](https://www.npmjs.com/package/cf):
 
 ```sh
-wrangler pages deploy landing --project-name requesteagle --branch main
+cf pages projects deployments create requesteagle --branch main
 ```
 
 ## Motion
@@ -24,6 +30,12 @@ wrangler pages deploy landing --project-name requesteagle --branch main
 `script.js` drives the scroll-linked and pointer-driven motion; CSS handles the
 rest. The page stays complete without scripts, and `prefers-reduced-motion`
 turns every animation off. Pointer effects only attach on devices that hover.
+
+## Fonts
+
+Archivo and Geist Mono are self-hosted in `assets/fonts/` under the SIL Open
+Font License. Their licence texts sit beside them and are published with the
+page, as the licence requires.
 
 ## Screenshots
 

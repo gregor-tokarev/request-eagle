@@ -44,7 +44,8 @@ SAME_SCREEN = 0.02
 # Load per processor above which a launch would be timed against other work.
 IDLE_LOAD = 0.15
 IDLE_WAIT = 1800.0
-# The capture delivers its first frames within this long, or it has failed.
+# The display and the capture are ready within this long, or they have failed.
+DISPLAY_START = 15.0
 CAPTURE_START = 15.0
 
 
@@ -91,6 +92,10 @@ def start_display():
 
     # Xvfb writes the display number once it is ready, or closes the pipe if it fails.
     with os.fdopen(reader) as pipe:
+        if not select.select([pipe], [], [], DISPLAY_START)[0]:
+            stop(server)
+            raise RuntimeError(f"Xvfb was not ready within {DISPLAY_START:.0f} s.")
+
         number = pipe.readline().strip()
 
     if not number:
@@ -100,17 +105,32 @@ def start_display():
     return server, f":{number}"
 
 
+def signal_group(process, number):
+    """Signal a process's whole group, and report whether the group still exists."""
+    try:
+        os.killpg(process.pid, number)
+    except ProcessLookupError:
+        return False
+
+    return True
+
+
 def stop(process):
-    if process.poll() is not None:
+    """Stop a process and its group. A launcher may exit and leave the app it started."""
+    if not signal_group(process, signal.SIGTERM):
         return
 
-    os.killpg(process.pid, signal.SIGTERM)
+    deadline = time.monotonic() + 10
 
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+    # Polling reaps the leader, which would otherwise keep an empty group alive.
+    while process.poll() is None or signal_group(process, 0):
+        if time.monotonic() > deadline:
+            signal_group(process, signal.SIGKILL)
+            break
+
+        time.sleep(0.1)
+
+    process.wait()
 
 
 def wait_until_idle():
@@ -223,10 +243,19 @@ def summarize(runs, key):
     return {"median": round(statistics.median(values)), "min": min(values), "max": max(values)}
 
 
+def at_least_one(text):
+    count = int(text)
+
+    if count < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+
+    return count
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("apps", nargs="+", metavar="NAME=COMMAND")
-    parser.add_argument("--runs", type=int, default=10)
+    parser.add_argument("--runs", type=at_least_one, default=10)
     parser.add_argument("--out", help="write the results as JSON")
     parser.add_argument("--frames", help="directory for the screen each launch ended on")
     arguments = parser.parse_args()
