@@ -173,7 +173,7 @@ fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut Test
     cx.run_until_parked();
     assert!(cx.debug_bounds("collection-row-1").is_some());
 
-    cx.simulate_keystrokes("down right enter");
+    cx.simulate_keystrokes("down right f2");
     cx.run_until_parked();
     assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
     cx.simulate_keystrokes("escape");

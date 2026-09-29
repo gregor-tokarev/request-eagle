@@ -2,26 +2,65 @@
 declare namespace RequestEagle {
     type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
-    interface KeyValue {
-        key: string;
+    /** Common HTTP header names. Any other header name is also accepted. */
+    type CommonHeaderName =
+        | "Accept"
+        | "Accept-Encoding"
+        | "Accept-Language"
+        | "Access-Control-Allow-Origin"
+        | "Authorization"
+        | "Cache-Control"
+        | "Connection"
+        | "Content-Disposition"
+        | "Content-Encoding"
+        | "Content-Length"
+        | "Content-Type"
+        | "Cookie"
+        | "Date"
+        | "ETag"
+        | "Expires"
+        | "If-Match"
+        | "If-Modified-Since"
+        | "If-None-Match"
+        | "Last-Modified"
+        | "Location"
+        | "Origin"
+        | "Referer"
+        | "Retry-After"
+        | "Server"
+        | "Set-Cookie"
+        | "User-Agent"
+        | "Vary"
+        | "WWW-Authenticate"
+        | "X-Api-Key"
+        | "X-Request-Id"
+        | "X-Requested-With";
+
+    /** `string & {}` keeps the common names as suggestions without restricting other names. */
+    type HeaderName = CommonHeaderName | (string & {});
+
+    interface KeyValue<Name extends string = string> {
+        key: Name;
         value: string;
     }
 
     /** Header names are case-insensitive; query parameter names are case-sensitive. */
-    interface Entries {
+    interface Entries<Name extends string = string> {
         /** Return the first matching value, or undefined when absent. */
-        get(name: string): string | undefined;
-        has(name: string): boolean;
+        get(name: Name): string | undefined;
+        has(name: Name): boolean;
         /** Append an entry, preserving existing entries with the same name. */
-        add(entry: KeyValue): void;
+        add(entry: KeyValue<Name>): void;
         /** Remove all entries with this name. */
-        remove(name: string): void;
+        remove(name: Name): void;
         /** Replace all matching entries with this one. */
-        upsert(entry: KeyValue): void;
+        upsert(entry: KeyValue<Name>): void;
         clear(): void;
         /** Copy the entries, including repeated names. */
-        toJSON(): KeyValue[];
+        toJSON(): KeyValue<Name>[];
     }
+
+    type Headers = Entries<HeaderName>;
 
     interface RequestURL {
         /** Query parameters from both the URL and the Params editor. */
@@ -47,11 +86,14 @@ declare namespace RequestEagle {
         /** Read the URL object, or assign a string to replace the URL. */
         get url(): RequestURL;
         set url(value: string | RequestURL);
-        readonly headers: Entries;
+        readonly headers: Headers;
         readonly body: RequestBody;
     }
 
-    type RequestHeaders = Record<string, string> | [string, string][] | KeyValue[];
+    /** Header names mapped to values. Common names are suggested; any name is accepted. */
+    type HeaderObject = {[Name in CommonHeaderName]?: string} & Record<string, string>;
+
+    type RequestHeaders = HeaderObject | [HeaderName, string][] | KeyValue<HeaderName>[];
 
     interface RawBody {
         mode: "raw";
@@ -137,6 +179,27 @@ declare namespace RequestEagle {
 
     type SchemaType = "null" | "boolean" | "object" | "array" | "number" | "integer" | "string";
     type JSONSchema = boolean | Schema;
+    type SchemaFormat =
+        | "date"
+        | "date-time"
+        | "duration"
+        | "email"
+        | "hostname"
+        | "idn-email"
+        | "idn-hostname"
+        | "ipv4"
+        | "ipv6"
+        | "iri"
+        | "iri-reference"
+        | "json-pointer"
+        | "regex"
+        | "relative-json-pointer"
+        | "time"
+        | "uri"
+        | "uri-reference"
+        | "uri-template"
+        | "uuid"
+        | (string & {});
 
     /** JSON Schema. External, cyclic, dynamic, and recursive references are not supported. */
     interface Schema {
@@ -171,7 +234,7 @@ declare namespace RequestEagle {
         /** Regular expression without lookaround or backreferences. */
         pattern?: string;
         /** Supported JSON Schema formats are validated. */
-        format?: string;
+        format?: SchemaFormat;
         properties?: Record<string, JSONSchema>;
         patternProperties?: Record<string, JSONSchema>;
         additionalProperties?: JSONSchema;
@@ -238,7 +301,7 @@ declare namespace RequestEagle {
         /** Assert that the parsed JSON response matches a schema. */
         jsonSchema(schema: JSONSchema): void;
         /** Assert that a header exists; optionally compare its first value. */
-        header(name: string, value?: string): void;
+        header(name: HeaderName, value?: string): void;
     }
 
     interface ResponseBeAssertions {
@@ -262,7 +325,7 @@ declare namespace RequestEagle {
         readonly status: string;
         /** Elapsed response time in milliseconds. */
         readonly responseTime: number;
-        readonly headers: Entries;
+        readonly headers: Headers;
         text(): string;
         /** Parse the response body as JSON. Invalid JSON throws. */
         json(): any;
@@ -274,6 +337,26 @@ declare namespace RequestEagle {
 
     type PropertyName = string | number | symbol;
 
+    /** Lowercase type names reported by Object.prototype.toString. Matching is case-insensitive. */
+    type TypeName =
+        | "array"
+        | "bigint"
+        | "boolean"
+        | "date"
+        | "error"
+        | "function"
+        | "map"
+        | "null"
+        | "number"
+        | "object"
+        | "promise"
+        | "regexp"
+        | "set"
+        | "string"
+        | "symbol"
+        | "undefined"
+        | (string & {});
+
     interface IncludeAssertion extends Assertion {
         /** Assert string/array inclusion or a nonempty plain-object subset. */
         (expected: unknown, message?: string): Assertion;
@@ -281,7 +364,7 @@ declare namespace RequestEagle {
 
     interface TypeAssertion extends Assertion {
         /** Assert the JavaScript type name, such as string, array, object, date, or null. */
-        (type: string, message?: string): Assertion;
+        (type: TypeName, message?: string): Assertion;
     }
 
     interface LengthAssertion extends Assertion {

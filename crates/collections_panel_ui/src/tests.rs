@@ -368,12 +368,15 @@ fn keyboard_browses_collections_from_initial_focus(cx: &mut TestAppContext) {
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&2)));
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
+    assert!(sidebar.read_with(cx, |sidebar, _| sidebar.rename.is_none()));
+    cx.simulate_keystrokes("f2");
+    cx.run_until_parked();
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         let editor = sidebar
             .rename
             .as_ref()
-            .expect("Enter should rename the selected folder");
+            .expect("F2 should rename the selected folder");
         assert_eq!(editor.input.read(cx).value(), "Comments");
         assert!(sidebar.collapsed.contains(&2));
     });
