@@ -801,7 +801,7 @@ html:not(.js) .picker { display: none; }
 
 .footer a:hover { text-decoration: underline; }
 
-/* Reveal on scroll. Only scripted documents hide content first. */
+/* Reveal on scroll. script.js marks the document, so content is never hidden without it. */
 
 .js [data-reveal] {
   opacity: 0;

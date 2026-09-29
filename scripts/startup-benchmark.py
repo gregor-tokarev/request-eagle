@@ -29,7 +29,6 @@ from PIL import Image, ImageChops
 
 WIDTH, HEIGHT = 1280, 800
 FRAME_BYTES = WIDTH * HEIGHT
-DISPLAY = ":98"
 
 # A change smaller than this is a caret or a hover, not the app drawing itself.
 CHANGED_PIXELS = 300
@@ -54,6 +53,30 @@ def read_frame(capture):
     return Image.frombytes("L", (WIDTH, HEIGHT), data), time.monotonic()
 
 
+def start_display():
+    """Start Xvfb on a display it picks itself, and wait until it accepts clients."""
+    reader, writer = os.pipe()
+
+    server = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(writer), "-screen", "0", f"{WIDTH}x{HEIGHT}x24", "-nolisten", "tcp"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=[writer],
+        start_new_session=True,
+    )
+    os.close(writer)
+
+    # Xvfb writes the display number once it is ready, or closes the pipe if it fails.
+    with os.fdopen(reader) as pipe:
+        number = pipe.readline().strip()
+
+    if not number:
+        server.wait()
+        raise RuntimeError(f"Xvfb did not start (exit code {server.returncode}).")
+
+    return server, f":{number}"
+
+
 def stop(process):
     if process.poll() is not None:
         return
@@ -69,19 +92,13 @@ def stop(process):
 
 def measure(command, frame_path=None):
     """Launch one app on a fresh display and time its first paint and readiness."""
-    server = subprocess.Popen(
-        ["Xvfb", DISPLAY, "-screen", "0", f"{WIDTH}x{HEIGHT}x24", "-nolisten", "tcp"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    time.sleep(1.0)
+    server, display = start_display()
 
     capture = subprocess.Popen(
         [
             "ffmpeg", "-loglevel", "error", "-fflags", "nobuffer",
             "-f", "x11grab", "-framerate", "60", "-draw_mouse", "0",
-            "-video_size", f"{WIDTH}x{HEIGHT}", "-i", DISPLAY,
+            "-video_size", f"{WIDTH}x{HEIGHT}", "-i", display,
             "-pix_fmt", "gray", "-f", "rawvideo", "-flush_packets", "1", "-",
         ],
         stdout=subprocess.PIPE,
@@ -95,7 +112,7 @@ def measure(command, frame_path=None):
         for _ in range(10):
             empty, _ = read_frame(capture)
 
-        environment = dict(os.environ, DISPLAY=DISPLAY)
+        environment = dict(os.environ, DISPLAY=display)
         environment.pop("WAYLAND_DISPLAY", None)
 
         launched = time.monotonic()
@@ -118,6 +135,10 @@ def measure(command, frame_path=None):
 
             if seen - launched > TIMEOUT:
                 raise RuntimeError(f"No quiet screen within {TIMEOUT:.0f} s.")
+
+            # A closing window would otherwise pass for the last change before a quiet screen.
+            if app.poll() is not None:
+                raise RuntimeError(f"The app exited during startup (exit code {app.returncode}): {command}")
 
             if first_paint is None:
                 if changed_pixels(empty, frame) < FRAME_BYTES * WINDOW_SHARE:

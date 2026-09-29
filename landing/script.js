@@ -1,3 +1,6 @@
+// Styles only hide content for reveal once this script is running to show it again.
+document.documentElement.classList.add("js");
+
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
