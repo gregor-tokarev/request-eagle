@@ -65,7 +65,8 @@ impl CollectionPanel {
     }
 
     /// Environments whose collection or variable names contain the query.
-    /// Collections without environment variables or a file are skipped.
+    /// Uses the variables loaded with the collections, so it never reads the
+    /// disk; collections without environment variables are skipped.
     pub fn find_environments(&self, query: &str, limit: usize) -> Vec<EnvironmentMatch> {
         let query = query.to_lowercase();
 
@@ -74,6 +75,10 @@ impl CollectionPanel {
             .iter()
             .filter_map(|collection| {
                 let environment = collection.local_env();
+                if environment.entries.is_empty() {
+                    return None;
+                }
+
                 let name = collection
                     .path
                     .file_name()
@@ -87,11 +92,7 @@ impl CollectionPanel {
                         .keys()
                         .any(|variable| variable.to_lowercase().contains(&query));
 
-                // Check the file only for matches, which the limit bounds.
-                let exists =
-                    matches && (!environment.entries.is_empty() || environment.path.is_file());
-
-                exists.then(|| EnvironmentMatch {
+                matches.then(|| EnvironmentMatch {
                     path: environment.path.clone(),
                     name: name.into(),
                     variable_count: environment.entries.len(),

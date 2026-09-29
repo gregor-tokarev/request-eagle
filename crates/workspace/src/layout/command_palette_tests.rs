@@ -48,6 +48,19 @@ fn palette_open(layout: &Entity<Layout>, cx: &mut VisualTestContext) -> bool {
     })
 }
 
+/// Open the palette and deliver the frame that shows its rows.
+fn open_palette(cx: &mut VisualTestContext) {
+    cx.simulate_keystrokes("secondary-k");
+    next_frame(cx);
+}
+
+fn next_frame(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        window.simulate_next_frame(cx);
+    });
+    cx.run_until_parked();
+}
+
 fn tab_titles(layout: &Entity<Layout>, cx: &mut VisualTestContext) -> Vec<String> {
     cx.read(|cx| {
         layout
@@ -66,7 +79,7 @@ fn shortcut_toggles_the_palette_and_restores_focus(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
     let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     assert!(palette_open(&layout, cx));
     assert!(cx.debug_bounds("command-palette").is_some());
     cx.update(|window, _| assert!(!sidebar_focus.is_focused(window)));
@@ -75,11 +88,9 @@ fn shortcut_toggles_the_palette_and_restores_focus(cx: &mut TestAppContext) {
     assert!(!palette_open(&layout, cx));
     cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
 
-    // Escape clears the query first, then closes the palette.
-    cx.simulate_keystrokes("secondary-k");
+    // Escape closes the palette, even with a query.
+    open_palette(cx);
     cx.simulate_input("tab");
-    cx.simulate_keystrokes("escape");
-    assert!(palette_open(&layout, cx));
     cx.simulate_keystrokes("escape");
     assert!(!palette_open(&layout, cx));
     cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
@@ -90,7 +101,7 @@ fn runs_commands_where_the_palette_was_opened(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
     assert_eq!(tab_titles(&layout, cx).len(), 1);
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("new tab");
     cx.simulate_keystrokes("enter");
 
@@ -98,14 +109,14 @@ fn runs_commands_where_the_palette_was_opened(cx: &mut TestAppContext) {
     assert_eq!(tab_titles(&layout, cx).len(), 2);
 
     // Commands that only apply elsewhere, such as closing settings, are not listed.
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("close settings");
     cx.simulate_keystrokes("enter");
     assert!(palette_open(&layout, cx));
     cx.read(|cx| assert!(!layout.read(cx).settings_visible));
 
-    cx.simulate_keystrokes("escape escape");
-    cx.simulate_keystrokes("secondary-k");
+    cx.simulate_keystrokes("escape");
+    open_palette(cx);
     cx.simulate_input("toggle sidebar");
     cx.simulate_keystrokes("enter");
     assert!(!palette_open(&layout, cx));
@@ -116,7 +127,7 @@ fn runs_commands_where_the_palette_was_opened(cx: &mut TestAppContext) {
 fn opens_requests_and_reveals_collections(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("resource 1");
     // Requests are searched in the background.
     cx.run_until_parked();
@@ -134,7 +145,7 @@ fn opens_requests_and_reveals_collections(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("secondary-b");
     cx.read(|cx| assert!(!*layout.read(cx).sidebar_visible.read(cx)));
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("collection-00");
     cx.simulate_keystrokes("enter");
 
@@ -147,19 +158,27 @@ fn opens_requests_and_reveals_collections(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn shortcut_returns_from_settings_to_the_workspace(cx: &mut TestAppContext) {
+fn opens_over_settings_with_workspace_commands(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
 
     cx.update(|window, cx| layout.update(cx, |layout, cx| layout.open_settings(window, cx)));
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings").is_some());
 
-    // The palette itself opens on the next platform frame, once the
-    // workspace commands are rendered; test windows do not deliver frames.
+    // The workspace is drawn again before the palette reads its commands.
     cx.simulate_keystrokes("secondary-k");
-    cx.run_until_parked();
     cx.read(|cx| assert!(!layout.read(cx).settings_visible));
     assert!(cx.debug_bounds("main-view").is_some());
+    next_frame(cx);
+    assert!(!palette_open(&layout, cx));
+    next_frame(cx);
+    assert!(palette_open(&layout, cx));
+    next_frame(cx);
+
+    cx.simulate_input("new tab");
+    cx.simulate_keystrokes("enter");
+    assert!(!palette_open(&layout, cx));
+    assert_eq!(tab_titles(&layout, cx).len(), 2);
 }
 
 #[gpui_kit::test]
@@ -173,7 +192,7 @@ fn runs_workspace_commands_after_hiding_the_focused_sidebar(cx: &mut TestAppCont
     cx.run_until_parked();
     cx.read(|cx| assert!(!*layout.read(cx).sidebar_visible.read(cx)));
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("new tab");
     cx.simulate_keystrokes("enter");
 
@@ -185,7 +204,7 @@ fn runs_workspace_commands_after_hiding_the_focused_sidebar(cx: &mut TestAppCont
 fn clears_request_results_while_a_new_query_is_searched(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
 
-    cx.simulate_keystrokes("secondary-k");
+    open_palette(cx);
     cx.simulate_input("resource");
     cx.run_until_parked();
 
@@ -197,13 +216,19 @@ fn clears_request_results_while_a_new_query_is_searched(cx: &mut TestAppContext)
             .and_then(|palette| palette.upgrade())
             .unwrap()
     });
-    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 2));
+    let request_count =
+        |cx: &mut VisualTestContext| cx.read(|cx| palette.read(cx).delegate().request_count());
+    assert_eq!(request_count(cx), 2);
 
     // Enter must not open a request for the previous query before the new
     // results arrive.
-    cx.update(|_, cx| palette.update(cx, |palette, cx| palette.search("resource 1", cx)));
-    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 0));
+    cx.update(|window, cx| {
+        palette.update(cx, |palette, cx| {
+            palette.set_query("resource 1", window, cx)
+        })
+    });
+    assert_eq!(request_count(cx), 0);
 
     cx.run_until_parked();
-    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 1));
+    assert_eq!(request_count(cx), 1);
 }

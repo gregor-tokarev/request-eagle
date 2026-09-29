@@ -30,7 +30,7 @@ pub(super) struct Layout {
     pub(super) settings_visible: bool,
     previous_focus: Option<FocusHandle>,
 
-    pub(super) command_palette: Option<WeakEntity<CommandPalette>>,
+    pub(super) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
