@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod actions;
 mod creation;
 mod dragging;
 mod editing;
@@ -18,6 +19,7 @@ mod search_tests;
 #[cfg(test)]
 mod tests;
 
+pub use actions::init;
 pub use panel::{CollectionPanel, CollectionPanelEvent};
 
 #[cfg(test)]

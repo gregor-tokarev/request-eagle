@@ -8,7 +8,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{dragging::DraggedItem, panel::CollectionPanel, tree::ItemKind};
+use super::{
+    actions::{DeleteItem, RenameItem},
+    dragging::DraggedItem,
+    panel::CollectionPanel,
+    tree::ItemKind,
+};
 use collection::MovePlacement;
 
 impl CollectionPanel {
@@ -33,6 +38,7 @@ impl CollectionPanel {
             owner: cx.entity_id(),
         };
         let path = item.path.clone();
+        let focus = self.focus.clone();
         let rename = self
             .rename
             .as_ref()
@@ -270,6 +276,9 @@ impl CollectionPanel {
                 }),
             )
             .context_menu(move |menu, _, _| {
+                // Resolve shortcuts in the tree's key context. Clicks still run
+                // the item handlers, which target the clicked row's path.
+                let menu = menu.action_context(focus.clone());
                 let rename_view = view.clone();
                 let delete_view = view.clone();
                 let path = path.clone();
@@ -309,19 +318,23 @@ impl CollectionPanel {
                     menu
                 };
 
-                menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
-                    let view = rename_view.clone();
-                    let path = rename_path.clone();
-                    window.defer(cx, move |window, cx| {
-                        let _ = view.update(cx, |this, cx| {
-                            if let Some(index) =
-                                this.tree.items.iter().position(|item| item.path == path)
-                            {
-                                this.begin_rename(index, window, cx);
-                            }
-                        });
-                    });
-                }))
+                menu.item(
+                    PopupMenuItem::new("Rename")
+                        .action(Box::new(RenameItem))
+                        .on_click(move |_, window, cx| {
+                            let view = rename_view.clone();
+                            let path = rename_path.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    if let Some(index) =
+                                        this.tree.items.iter().position(|item| item.path == path)
+                                    {
+                                        this.begin_rename(index, window, cx);
+                                    }
+                                });
+                            });
+                        }),
+                )
                 .item(
                     PopupMenuItem::new("Open in Finder")
                         .on_click(move |_, _, cx| cx.reveal_path(&path)),
@@ -331,19 +344,21 @@ impl CollectionPanel {
                 }))
                 .separator()
                 .item(
-                    PopupMenuItem::new(delete_label).on_click(move |_, window, cx| {
-                        let view = delete_view.clone();
-                        let path = delete_path.clone();
-                        window.defer(cx, move |window, cx| {
-                            let _ = view.update(cx, |this, cx| {
-                                if let Some(index) =
-                                    this.tree.items.iter().position(|item| item.path == path)
-                                {
-                                    this.request_delete(index, window, cx);
-                                }
+                    PopupMenuItem::new(delete_label)
+                        .action(Box::new(DeleteItem))
+                        .on_click(move |_, window, cx| {
+                            let view = delete_view.clone();
+                            let path = delete_path.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    if let Some(index) =
+                                        this.tree.items.iter().position(|item| item.path == path)
+                                    {
+                                        this.request_delete(index, window, cx);
+                                    }
+                                });
                             });
-                        });
-                    }),
+                        }),
                 )
             })
             .into_any_element()

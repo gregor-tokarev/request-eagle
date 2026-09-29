@@ -13,7 +13,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{editing::RenameEditor, tree::CollectionTree};
+use super::{
+    actions::{DeleteItem, RenameItem},
+    editing::RenameEditor,
+    tree::CollectionTree,
+};
 
 pub enum CollectionPanelEvent {
     RequestRelocated {
@@ -275,13 +279,7 @@ impl CollectionPanel {
             "up" => self.select_row(row.saturating_sub(1), cx),
             "home" => self.select_row(0, cx),
             "end" => self.select_row(self.visible.len() - 1, cx),
-            "backspace" => {
-                if self.selected_row.is_some() {
-                    self.request_delete(index, window, cx);
-                }
-            }
             "enter" => self.open_request(index, cx),
-            "f2" => self.begin_rename(index, window, cx),
             "space" => self.toggle(index, cx),
             "right" => {
                 if self.collapsed.contains(&index) {
@@ -309,6 +307,23 @@ impl CollectionPanel {
         }
 
         cx.stop_propagation();
+    }
+
+    fn rename_selected(&mut self, _: &RenameItem, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(&index) = self.visible.get(self.selected_row.unwrap_or(0)) {
+            self.begin_rename(index, window, cx);
+        }
+    }
+
+    fn delete_selected(&mut self, _: &DeleteItem, window: &mut Window, cx: &mut Context<Self>) {
+        // Repeating the shortcut in an open prompt must not confirm it.
+        if self.pending_delete.is_some() {
+            return;
+        }
+
+        if let Some(&index) = self.selected_row.and_then(|row| self.visible.get(row)) {
+            self.request_delete(index, window, cx);
+        }
     }
 
     fn on_search_key_down(
@@ -424,6 +439,9 @@ impl Render for CollectionPanel {
                     .min_h_0()
                     .overflow_hidden()
                     .track_focus(&self.focus)
+                    .key_context("CollectionsSidebar")
+                    .on_action(cx.listener(Self::rename_selected))
+                    .on_action(cx.listener(Self::delete_selected))
                     .capture_key_down(cx.listener(Self::on_delete_key_down))
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(if self.visible.is_empty() {

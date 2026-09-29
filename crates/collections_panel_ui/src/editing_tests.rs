@@ -48,6 +48,7 @@ pub(super) fn sidebar<'a>(
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
+        crate::init(cx);
     });
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
