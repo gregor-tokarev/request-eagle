@@ -541,8 +541,6 @@ html:not(.js) .race__again { display: none; }
 
 .method p { max-width: 74ch; margin: 10px 0 0; line-height: 1.65; }
 
-.method a { color: var(--sky); text-decoration: underline; text-underline-offset: 4px; }
-
 /* Features */
 
 .features { padding: 30px 0 0; }
