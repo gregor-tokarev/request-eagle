@@ -2,12 +2,9 @@ mod body;
 mod controls;
 mod draft;
 mod execution;
-mod script_completions;
-mod script_signature;
-mod scripts;
 
 #[cfg(test)]
-mod script_completion_tests;
+pub(crate) mod script_completion_tests;
 #[cfg(test)]
 mod script_tests;
 
@@ -16,7 +13,7 @@ mod header_tests;
 #[cfg(test)]
 mod performance;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 mod variable_tests;
 #[cfg(test)]

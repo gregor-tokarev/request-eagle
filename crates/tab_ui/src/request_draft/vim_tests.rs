@@ -26,7 +26,9 @@ fn body_and_script_clicks_cancel_pending_vim_commands(cx: &mut TestAppContext) {
                 let mut draft = RequestDraft::new();
                 draft.request.method = collection::Method::Post;
                 draft.section = section;
-                draft.script_phase = phase;
+                draft
+                    .script_editor(cx)
+                    .update(cx, |scripts, _| scripts.phase = phase);
                 draft.prepare(window, cx);
                 let state = if section == RequestSection::Body {
                     draft.body_state(window, cx)
