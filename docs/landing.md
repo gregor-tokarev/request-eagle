@@ -12,10 +12,11 @@ python3 -m http.server 4173 --directory landing
 
 ## Deploy
 
-The page is hosted on Cloudflare Pages as the `request-eagle` project.
+The page is hosted on Cloudflare Pages as the `requesteagle` project, with
+`requesteagle.tokarev.work` as its custom domain.
 
 ```sh
-wrangler pages deploy landing --project-name request-eagle --branch main
+wrangler pages deploy landing --project-name requesteagle --branch main
 ```
 
 ## Motion

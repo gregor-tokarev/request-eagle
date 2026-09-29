@@ -179,16 +179,23 @@ async function showTheme(button) {
   next.classList.remove("is-shown");
 }
 
-// The captures rotate while the stage is on screen, until someone picks a theme.
+// The captures rotate once through while the stage is on screen. Reaching for the
+// picker ends the rotation, so its buttons never change under a pointer or focus.
 let rotation = 0;
+let rotationsLeft = choices.length;
 
-function stopRotation() {
+function pauseRotation() {
   clearInterval(rotation);
   rotation = 0;
 }
 
+function endRotation() {
+  stageWatcher.disconnect();
+  pauseRotation();
+}
+
 const stageWatcher = new IntersectionObserver(([entry]) => {
-  stopRotation();
+  pauseRotation();
 
   if (!entry.isIntersecting) return;
 
@@ -196,15 +203,19 @@ const stageWatcher = new IntersectionObserver(([entry]) => {
     const pressed = choices.findIndex((button) => button.getAttribute("aria-pressed") === "true");
 
     showTheme(choices[(pressed + 1) % choices.length]);
+
+    if (--rotationsLeft === 0) endRotation();
   }, ROTATE_EVERY);
 }, { threshold: 0.4 });
 
 if (!reducedMotion) stageWatcher.observe(themeStage);
 
+picker.addEventListener("pointerenter", endRotation);
+picker.addEventListener("focusin", endRotation);
+
 for (const button of choices) {
   button.addEventListener("click", () => {
-    stageWatcher.disconnect();
-    stopRotation();
+    endRotation();
     showTheme(button);
   });
 }

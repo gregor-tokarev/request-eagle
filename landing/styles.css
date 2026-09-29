@@ -35,6 +35,9 @@
   --page: min(1240px, 100% - 56px);
   --slant: 5vw;
   --hero-top: 176px;
+
+  /* Height of the two headline lines: the column width times the type scale. */
+  --headline: calc(min(1240px, 100vw - 56px) * 0.13 * 0.88 * 2);
   --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
 }
 
@@ -71,7 +74,12 @@ button:focus-visible {
 .band a:focus-visible,
 .footer a:focus-visible { outline-color: var(--ink); }
 
-.wrap { width: var(--page); margin-inline: auto; }
+/* The column is a size container, so headlines scale with it and never outgrow it. */
+.wrap {
+  container-type: inline-size;
+  width: var(--page);
+  margin-inline: auto;
+}
 
 /* Display type: wide, heavy, leaning forward. */
 .display {
@@ -226,9 +234,9 @@ button:focus-visible {
 
 /* Hero streaks run above, between and below the headline lines, clear of the body copy. */
 .streaks i:nth-child(1) { top: calc(var(--hero-top) - 44px); --w: 34%; --d: 3.8s; --delay: -0.6s; }
-.streaks i:nth-child(2) { top: calc(var(--hero-top) + 10vw); --w: 52%; --h: 4px; --d: 2.9s; --delay: -1.9s; }
-.streaks i:nth-child(3) { top: calc(var(--hero-top) + 20.5vw + 14px); --w: 26%; --d: 4.6s; --delay: -3.1s; --o: 0.6; }
-.streaks i:nth-child(4) { top: calc(var(--hero-top) + 20vw + 254px); --w: 20%; --d: 5.4s; --delay: -1.2s; --o: 0.4; }
+.streaks i:nth-child(2) { top: calc(var(--hero-top) + var(--headline) * 0.5); --w: 52%; --h: 4px; --d: 2.9s; --delay: -1.9s; }
+.streaks i:nth-child(3) { top: calc(var(--hero-top) + var(--headline) + 16px); --w: 26%; --d: 4.6s; --delay: -3.1s; --o: 0.6; }
+.streaks i:nth-child(4) { top: calc(var(--hero-top) + var(--headline) + 254px); --w: 20%; --d: 5.4s; --delay: -1.2s; --o: 0.4; }
 
 /* Takeoff streaks pass behind the icon and the headline, and skip the paragraph and buttons. */
 .streaks--wide i:nth-child(1) { top: 8%; --w: 40%; --d: 3.4s; --delay: -0.4s; }
@@ -258,7 +266,9 @@ button:focus-visible {
 
 h1 {
   margin: 0;
-  font-size: clamp(36px, 11.4vw, 176px);
+  font-size: clamp(36px, 11.4vw, 160px);
+  font-size: 13cqw;
+  white-space: nowrap;
 }
 
 /* Lines rise out of a mask; the padding keeps italic overhang from being clipped. */
@@ -536,7 +546,7 @@ pre .k { color: var(--sky); }
 pre .s { color: #aad84c; }
 pre .n { color: #d2a6ff; }
 pre .h { color: #feb454; }
-pre .c { color: #66728b; }
+pre .c { color: #8a97b0; }
 
 /* Theme picker */
 
@@ -619,8 +629,10 @@ html:not(.js) .picker { display: none; }
 
 .takeoff h2 {
   margin-top: 48px;
-  font-size: clamp(46px, 9vw, 136px);
+  font-size: clamp(34px, 9vw, 130px);
+  font-size: 10.6cqw;
   line-height: 0.88;
+  white-space: nowrap;
 }
 
 .takeoff p {
@@ -647,7 +659,11 @@ html:not(.js) .picker { display: none; }
   font-weight: 500;
 }
 
-.footer__mark { font-size: min(7.8vw, 112px); white-space: nowrap; }
+.footer__mark {
+  font-size: min(7.8vw, 112px);
+  font-size: 9.1cqw;
+  white-space: nowrap;
+}
 
 .footer__row {
   display: flex;
@@ -699,7 +715,11 @@ html:not(.js) .picker { display: none; }
 }
 
 @media (max-width: 560px) {
-  :root { --page: calc(100% - 36px); --slant: 8vw; }
+  :root {
+    --page: calc(100% - 36px);
+    --slant: 8vw;
+    --headline: calc((100vw - 36px) * 0.13 * 0.88 * 2);
+  }
   body { font-size: 16px; }
   h1 .line > .outline { -webkit-text-stroke-width: 1.5px; }
   .band__row--outline { -webkit-text-stroke-width: 1.5px; }
@@ -713,6 +733,13 @@ html:not(.js) .picker { display: none; }
   .takeoff__icon, .takeoff__icon img { width: 116px; height: auto; }
   .takeoff p { font-size: 17px; }
   .footer nav { margin-left: 0; }
+}
+
+/* Paper has no scroll position, so nothing may wait to be revealed. */
+@media print {
+  .js [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .nav { position: absolute; }
+  .streaks { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
