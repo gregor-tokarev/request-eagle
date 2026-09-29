@@ -215,7 +215,137 @@ fn typescript_completes_contextual_options_nested_headers_and_raw_body() {
     assert_eq!(methods, ["PATCH", "POST", "PUT"]);
 
     // TypeScript supplies recovery completions even while a comma is missing.
-    assert!(!complete("pm.sendRequest({body: {}}|)", phase).is_empty());
+    assert_eq!(
+        labels(&complete("pm.sendRequest({body: {} u|})", phase)),
+        ["url"]
+    );
+}
+
+#[test]
+fn typescript_suggests_header_names_wherever_headers_are_named() {
+    let pre = ScriptPhase::PreRequest;
+    let post = ScriptPhase::PostResponse;
+
+    let names = labels(&complete("pm.sendRequest({url: '', headers: {|}})", pre))
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"Authorization".into()));
+    assert!(names.contains(&"\"Content-Type\"".into()));
+    assert!(names.contains(&"Accept".into()));
+
+    // Quoted names are matched by the name the user types.
+    let items = complete("pm.sendRequest({url: '', headers: {Cont|}})", pre);
+    assert_eq!(
+        labels(&items),
+        [
+            "\"Content-Disposition\"",
+            "\"Content-Encoding\"",
+            "\"Content-Length\"",
+            "\"Content-Type\"",
+        ]
+    );
+    let Some(CompletionTextEdit::Edit(edit)) = &items[3].text_edit else {
+        panic!("expected a text edit");
+    };
+    assert_eq!(edit.new_text, "\"Content-Type\"");
+
+    assert!(
+        !labels(&complete(
+            "pm.sendRequest({url: '', headers: {Accept: '', |}})",
+            pre
+        ))
+        .contains(&"Accept")
+    );
+    for (source, phase) in [
+        ("pm.sendRequest({url: '', headers: {'Content-T|'}})", pre),
+        ("pm.sendRequest({url: '', header: [['Content-T|']]})", pre),
+        (
+            "pm.sendRequest({url: '', headers: [{key: 'Content-T|'}]})",
+            pre,
+        ),
+        ("pm.request.headers.upsert({key: 'Content-T|'})", pre),
+        ("pm.request.headers.get('Content-T|')", pre),
+        ("pm.request.headers.get('Content-T|", pre),
+        ("pm.response.headers.has('Content-T|')", post),
+        ("pm.response.to.have.header('Content-T|')", post),
+        (
+            "/** @type {RequestEagle.RequestHeaders} */ const headers = {'Content-T|'};",
+            pre,
+        ),
+    ] {
+        assert_eq!(
+            labels(&complete(source, phase)),
+            ["Content-Type"],
+            "{source}"
+        );
+    }
+
+    // Query parameter names are free-form and have no suggestions.
+    assert!(complete("pm.request.url.query.get('|')", pre).is_empty());
+}
+
+#[test]
+fn typescript_suggests_type_names_and_schema_formats() {
+    let phase = ScriptPhase::PreRequest;
+    assert_eq!(
+        labels(&complete("pm.expect([]).to.be.an('ar|')", phase)),
+        ["array"]
+    );
+    assert_eq!(
+        labels(&complete("pm.expect(1).to.be.a('n|')", phase)),
+        ["null", "number"]
+    );
+    assert_eq!(
+        labels(&complete(
+            "pm.schema.validate({}, {type: 'string', format: 'date|'})",
+            phase
+        )),
+        ["date", "date-time"]
+    );
+}
+
+#[test]
+fn empty_prefixes_offer_contextual_suggestions_without_every_global() {
+    let phase = ScriptPhase::PreRequest;
+    for source in [
+        "const options = {|}",
+        "pm.sendRequest({url: '', headers: {Accept: ''}, body: |})",
+        "pm.crypto.sha256(|)",
+    ] {
+        assert!(complete(source, phase).is_empty(), "{source}");
+    }
+    assert_eq!(
+        labels(&complete(
+            "pm.response.to.have.status(|)",
+            ScriptPhase::PostResponse
+        )),
+        Vec::<&str>::new()
+    );
+
+    let methods = complete("pm.sendRequest({url: '', method: |})", phase);
+    assert_eq!(
+        labels(&methods),
+        [
+            "\"DELETE\"",
+            "\"GET\"",
+            "\"HEAD\"",
+            "\"OPTIONS\"",
+            "\"PATCH\"",
+            "\"POST\"",
+            "\"PUT\""
+        ]
+    );
+    assert_eq!(
+        labels(&complete(
+            "const address = 'https://example.com'; pm.sendRequest({url: |})",
+            phase
+        )),
+        ["address"]
+    );
+
+    // A typed prefix still reaches globals and keywords.
+    assert!(labels(&complete("pm.sendRequest({url: '', body: JS|})", phase)).contains(&"JSON"));
 }
 
 #[test]
