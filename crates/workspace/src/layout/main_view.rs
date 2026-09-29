@@ -541,7 +541,7 @@ impl MainView {
             .px_2()
             .gap_2()
             .rounded(cx.theme().radius_tokens().md)
-            .text_xs()
+            .text_sm()
             .text_color(cx.theme().tab_foreground)
             .when(selected, |this| {
                 this.bg(cx.theme().tokens.tab_active.background)

@@ -1,10 +1,16 @@
 use gpui_kit::base::{ElementExt as _, Tab, Tabs, TextSelectionScopeId};
-use gpui_kit::component::{input::EditorState, *};
+use gpui_kit::component::{
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
+    input::EditorState,
+    kbd::Kbd,
+    *,
+};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ExecutionError;
 
 use super::body::ResponseBodyEditor;
 use super::content::ResponseContent;
+use crate::actions::SendRequest;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -167,20 +173,25 @@ impl ResponseView {
                         ]
                         .into_iter()
                         .map(|(section, label, count)| {
+                            let selected = self.section == section;
+
                             Tab::new(label)
                                 .debug_selector(move || format!("response-section-{label}"))
-                                .selected(self.section == section)
+                                .selected(selected)
                                 .h_8()
                                 .px_2()
-                                .gap_2()
+                                .gap_1()
                                 .rounded(cx.theme().radius_tokens().md)
                                 .text_color(cx.theme().muted_foreground)
-                                .when(self.section == section, |tab| {
+                                .when(selected, |tab| {
                                     tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
                                 })
+                                .hover(|tab| tab.bg(cx.theme().muted))
                                 .child(label)
                                 .when(count > 0, |tab| {
-                                    tab.child(div().text_xs().child(count.to_string()))
+                                    tab.child(crate::section_count::section_count(
+                                        count, selected, cx,
+                                    ))
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.section = section;
@@ -195,7 +206,7 @@ impl ResponseView {
 }
 
 impl Render for ResponseView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = if self.section == Section::Tests
             && !self.loading
             && (self.content.is_some() || !self.scripts.is_empty())
@@ -214,27 +225,50 @@ impl Render for ResponseView {
                 Section::Tests | Section::Console => unreachable!(),
             }
         } else {
-            v_flex()
+            let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
+            let header =
+                if self.loading {
+                    EmptyHeader::new()
+                        .media(media.child(Icon::new(IconName::Loader).with_animation(
+                            "response-loading",
+                            Animation::new(std::time::Duration::from_secs(1)).repeat(),
+                            |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+                        )))
+                        .title(EmptyTitle::new().child(self.message.clone()))
+                } else if self.error {
+                    EmptyHeader::new()
+                        .media(media.child(
+                            Icon::new(IconName::TriangleAlert).text_color(cx.theme().danger),
+                        ))
+                        .title(EmptyTitle::new().child("Request failed"))
+                        .description(EmptyDescription::new().child(self.message.clone()))
+                } else {
+                    EmptyHeader::new()
+                        .media(media.child(Icon::default().path("icons/send-horizontal.svg")))
+                        .title(EmptyTitle::new().child(self.message.clone()))
+                        .when_some(
+                            Kbd::binding_for_action(&SendRequest, Some("Workspace"), window),
+                            |header, kbd| {
+                                header.description(
+                                    EmptyDescription::new().child(
+                                        h_flex()
+                                            .justify_center()
+                                            .gap_1()
+                                            .child("Press")
+                                            .child(kbd)
+                                            .child("to send"),
+                                    ),
+                                )
+                            },
+                        )
+                };
+
+            div()
                 .debug_selector(|| "response-empty".into())
+                .flex()
                 .flex_1()
                 .min_h_0()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .px_6()
-                .text_color(if self.error {
-                    cx.theme().danger
-                } else {
-                    cx.theme().muted_foreground
-                })
-                .when(self.loading, |view| {
-                    view.child(Icon::new(IconName::Loader).size_5().with_animation(
-                        "response-loading",
-                        Animation::new(std::time::Duration::from_secs(1)).repeat(),
-                        |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
-                    ))
-                })
-                .child(self.message.clone())
+                .child(Empty::new().header(header))
                 .into_any_element()
         };
 

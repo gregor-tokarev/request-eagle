@@ -296,24 +296,8 @@ impl RequestDraft {
     }
 
     fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let fields = self.fields_state(window, cx);
-        let is_headers = self.section == RequestSection::Headers;
-
-        v_flex()
-            .gap_2()
-            .child(
-                h_flex()
-                    .h_6()
-                    .gap_2()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if is_headers {
-                        "Headers"
-                    } else {
-                        "Query Params"
-                    }),
-            )
-            .child(fields)
-            .into_any_element()
+        // The selected section tab already names the table.
+        self.fields_state(window, cx).into_any_element()
     }
 }
 

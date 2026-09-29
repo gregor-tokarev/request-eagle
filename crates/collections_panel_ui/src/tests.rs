@@ -147,6 +147,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
+        crate::init(cx);
     });
 
     let (sidebar, cx) =
@@ -221,6 +222,7 @@ fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
+        crate::init(cx);
     });
 
     let mut sidebar = None;
@@ -258,6 +260,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
+        crate::init(cx);
     });
 
     let mut sidebar = None;
@@ -336,6 +339,7 @@ fn keyboard_browses_collections_from_initial_focus(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
+        crate::init(cx);
     });
 
     let mut sidebar = None;

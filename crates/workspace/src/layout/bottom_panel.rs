@@ -63,7 +63,8 @@ impl Render for BottomPanel {
                             .ghost()
                             .small()
                             .icon(icon)
-                            .tooltip_with_action("Toggle Sidebar", &ToggleLeftSidebar, None)
+                            .accessibility_label("Toggle sidebar")
+                            .tooltip_with_action("Toggle sidebar", &ToggleLeftSidebar, None)
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(ToggleLeftSidebar.boxed_clone(), cx);
                             }),
@@ -75,6 +76,7 @@ impl Render for BottomPanel {
                     .ghost()
                     .small()
                     .icon(gpui_kit::component::IconName::Settings2)
+                    .accessibility_label("Settings")
                     .tooltip_with_action("Settings", &OpenSettings, None)
                     .on_click(|_, window, cx| {
                         window.dispatch_action(OpenSettings.boxed_clone(), cx);

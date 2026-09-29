@@ -197,5 +197,6 @@ pub(crate) fn init(cx: &mut App) {
     )
     .expect("default settings keybinding should be valid");
 
+    collections_panel_ui::init(cx);
     settings_ui::init(cx);
 }

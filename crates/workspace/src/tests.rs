@@ -149,6 +149,7 @@ fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut Test
         gpui_kit::init(cx);
         preferences::init(cx);
         request_eagle_theme::init(cx);
+        collections_panel_ui::init(cx);
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
