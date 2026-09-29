@@ -318,7 +318,7 @@ impl VariableInput {
             return Empty.into_any_element();
         };
         let margin = rems(0.5).to_pixels(window.rem_size());
-        let width = rems(24.)
+        let width = rems(18.)
             .to_pixels(window.rem_size())
             .min((window.bounds().size.width - margin * 2.).max(px(0.)));
 
@@ -379,7 +379,7 @@ impl VariableInput {
                             .py_1()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("↑ ↓ to navigate · Enter / Tab to insert · Esc to dismiss"),
+                            .child("↑↓ Navigate · Enter Insert · Esc Close"),
                     ),
             )
             .into_any_element()
