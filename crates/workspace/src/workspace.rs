@@ -201,10 +201,13 @@ impl Layout {
         if self.settings_visible {
             self.close_settings(window, cx);
 
-            // Commands are read from the rendered workspace, so open once it
-            // is drawn again.
-            cx.on_next_frame(window, |this, window, cx| {
-                this.open_command_palette(window, cx)
+            // Commands are read from the rendered workspace. Next-frame
+            // callbacks run before that frame is drawn, so open the palette
+            // one frame later, once the workspace is drawn again.
+            cx.on_next_frame(window, |_, window, cx| {
+                cx.on_next_frame(window, |this, window, cx| {
+                    this.open_command_palette(window, cx)
+                });
             });
             return;
         }
