@@ -4,6 +4,7 @@ mod actions;
 mod creation;
 mod dragging;
 mod editing;
+mod lookup;
 mod panel;
 mod rows;
 mod save_request;
@@ -13,6 +14,8 @@ mod tree;
 #[cfg(test)]
 mod editing_tests;
 #[cfg(test)]
+mod lookup_tests;
+#[cfg(test)]
 mod saving_tests;
 #[cfg(test)]
 mod search_tests;
@@ -20,6 +23,7 @@ mod search_tests;
 mod tests;
 
 pub use actions::init;
+pub use lookup::{CollectionMatch, RequestMatch};
 pub use panel::{CollectionPanel, CollectionPanelEvent};
 
 #[cfg(test)]

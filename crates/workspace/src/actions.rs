@@ -6,6 +6,7 @@ actions!(
     workspace,
     [
         ToggleLeftSidebar,
+        ToggleCommandPalette,
         FocusSidebarSearch,
         OpenSettings,
         OpenGeneralSettings,
@@ -173,6 +174,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default sidebar keybinding should be valid");
+
+    keybindings_service::register(
+        ToggleCommandPalette,
+        "Command palette",
+        "Run a command, or find a request, collection, or environment by name.",
+        "Workspace",
+        Some("secondary-k"),
+        None,
+        cx,
+    )
+    .expect("default command palette keybinding should be valid");
 
     keybindings_service::register(
         FocusSidebarSearch,

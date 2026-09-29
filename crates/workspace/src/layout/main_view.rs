@@ -40,7 +40,7 @@ pub(crate) struct MainView {
     pending_close: Option<u64>,
     save_error: Option<String>,
     variable_sessions: environment::EnvironmentSessions,
-    environments: Entity<Environments>,
+    pub(super) environments: Entity<Environments>,
     environment_picker: Entity<EnvironmentPicker>,
     _environment_subscriptions: [Subscription; 2],
 }
