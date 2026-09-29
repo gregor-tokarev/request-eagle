@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -10,7 +11,7 @@ use thiserror::Error;
 use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
 use uuid::Uuid;
 
-use crate::{DirEntry, Entry, FileEntry, RequestScripts};
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
 const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
@@ -73,33 +74,65 @@ impl Collection {
             .map_err(|source| CollectionLoadError::Parse { path, source })
     }
 
-    pub(crate) fn save_scripts(
+    /// Saves variables and scripts together. If the second file cannot be
+    /// written, the first is restored, so a failed save changes nothing.
+    pub(crate) fn save_settings(
         &mut self,
+        variables: HashMap<String, String>,
         scripts: RequestScripts,
-    ) -> Result<(), CollectionSaveError> {
-        let path = self.path.join(SETTINGS_FILE_NAME);
-        let settings = CollectionSettings { scripts };
-
-        if settings.scripts.is_empty() {
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(source) => return Err(CollectionSaveError::Write { path, source }),
+    ) -> Result<(), CollectionEditError> {
+        let scripts_path = self.path.join(SETTINGS_FILE_NAME);
+        let scripts_changed = self.scripts != scripts;
+        let variables_changed = self.local_env.entries != variables;
+        let previous_scripts = if scripts_changed && variables_changed {
+            match fs::read(&scripts_path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
             }
         } else {
-            let content = toml::to_string_pretty(&settings).map_err(|source| {
-                CollectionSaveError::Serialize {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            write_file_atomically(&path, content.as_bytes())
-                .map_err(|source| CollectionSaveError::Write { path, source })?;
+            None
+        };
+
+        if scripts_changed {
+            write_scripts(&scripts_path, &scripts)?;
         }
 
-        self.scripts = settings.scripts;
+        if variables_changed {
+            let environment = Environment {
+                path: self.local_env.path.clone(),
+                entries: variables,
+            };
+
+            if let Err(error) = environment.save_file() {
+                if scripts_changed
+                    && let Err(restore) = restore_file(&scripts_path, previous_scripts)
+                {
+                    return Err(io::Error::other(format!(
+                        "{error}; could not restore the collection scripts: {restore}"
+                    ))
+                    .into());
+                }
+
+                return Err(error.into());
+            }
+
+            self.local_env = environment;
+        }
+
+        if scripts_changed {
+            self.scripts = scripts;
+        }
 
         Ok(())
+    }
+
+    /// The collection's own files, which requests and folders cannot replace.
+    pub(crate) fn reserved_paths(&self) -> [PathBuf; 2] {
+        [
+            self.local_env.path.clone(),
+            self.path.join(SETTINGS_FILE_NAME),
+        ]
     }
 
     pub fn save_files(&mut self) -> Result<(), CollectionSaveError> {
@@ -122,6 +155,55 @@ impl Collection {
     pub fn scripts(&self) -> &RequestScripts {
         &self.scripts
     }
+}
+
+fn write_scripts(path: &Path, scripts: &RequestScripts) -> Result<(), CollectionSaveError> {
+    if scripts.is_empty() {
+        return restore_file(path, None).map_err(|source| CollectionSaveError::Write {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+
+    let settings = CollectionSettings {
+        scripts: scripts.clone(),
+    };
+    let content =
+        toml::to_string_pretty(&settings).map_err(|source| CollectionSaveError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    write_file_atomically(path, content.as_bytes()).map_err(|source| CollectionSaveError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Writes `content`, or removes the file when there is none.
+fn restore_file(path: &Path, content: Option<Vec<u8>>) -> io::Result<()> {
+    match content {
+        Some(content) => write_file_atomically(path, &content),
+        None => match fs::remove_file(path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// Whether `path` names one of the `reserved` files. Filesystems can ignore
+/// case, so the comparison does too.
+pub(crate) fn is_reserved(reserved: &[PathBuf], path: &Path) -> bool {
+    reserved.iter().any(|reserved| {
+        reserved.parent() == path.parent()
+            && reserved
+                .file_name()
+                .zip(path.file_name())
+                .is_some_and(|(a, b)| {
+                    a.to_string_lossy()
+                        .eq_ignore_ascii_case(&b.to_string_lossy())
+                })
+    })
 }
 
 fn load_directory(path: &Path, excluded: &[PathBuf]) -> Result<DirEntry, CollectionLoadError> {

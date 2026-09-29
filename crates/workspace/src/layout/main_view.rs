@@ -232,6 +232,14 @@ impl MainView {
         })
     }
 
+    /// Close a deleted collection's tab, so a later collection at the same
+    /// path cannot reuse its stale settings.
+    pub(crate) fn close_collection(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if let Some(index) = self.collection_tab(path, cx) {
+            self.remove_tab(index, cx);
+        }
+    }
+
     /// Follow a collection renamed in the sidebar.
     pub(crate) fn relocate_collection(
         &mut self,

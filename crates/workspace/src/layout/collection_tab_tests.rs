@@ -98,3 +98,25 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
     );
     cx.read(|cx| assert!(draft.read(cx).request.headers.is_empty()));
 }
+
+#[gpui_kit::test]
+fn deleting_a_collection_closes_its_tab(cx: &mut TestAppContext) {
+    let fixture = SavedRequestFixture::new();
+    let (tabs, _, cx) = fixture.open(cx);
+
+    click(cx, "collection-row-0");
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 3));
+    cx.simulate_keystrokes("backspace");
+    click(cx, "confirm-sidebar-delete");
+
+    assert!(!fixture.directory.join("API").exists());
+    cx.read(|cx| {
+        let tabs = tabs.read(cx);
+        assert_eq!(tabs.tabs.len(), 2);
+        assert!(
+            tabs.tabs
+                .iter()
+                .all(|tab| tab.page.view().downcast::<CollectionPage>().is_err())
+        );
+    });
+}

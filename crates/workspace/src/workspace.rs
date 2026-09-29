@@ -78,6 +78,10 @@ impl Layout {
                         view.prepare_active_tab(window, cx);
                     });
                 }
+                CollectionPanelEvent::CollectionDeleted { path } => {
+                    this.main_view
+                        .update(cx, |view, cx| view.close_collection(path, cx));
+                }
                 CollectionPanelEvent::CollectionRenamed {
                     previous_path,
                     path,

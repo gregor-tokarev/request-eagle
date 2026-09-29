@@ -31,6 +31,9 @@ pub enum CollectionPanelEvent {
         path: PathBuf,
         name: SharedString,
     },
+    CollectionDeleted {
+        path: PathBuf,
+    },
     RequestRelocated {
         id: SharedString,
         previous_path: PathBuf,

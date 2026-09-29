@@ -157,9 +157,17 @@ impl CollectionPanel {
             return;
         };
         let row = self.selected_row.unwrap_or(0);
+        let collection = self
+            .collections
+            .collections()
+            .iter()
+            .any(|collection| collection.path == path);
 
         match self.collections.delete(&path) {
             Ok(()) => {
+                if collection {
+                    cx.emit(CollectionPanelEvent::CollectionDeleted { path });
+                }
                 self.pending_delete = None;
                 self.rename = None;
                 self.error = None;
