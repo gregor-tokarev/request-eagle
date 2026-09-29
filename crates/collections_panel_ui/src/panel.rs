@@ -216,6 +216,38 @@ impl CollectionPanel {
         }
     }
 
+    /// Open a request row in a tab; collection and folder rows have no page yet.
+    pub(super) fn open_request(&mut self, index: usize, cx: &mut Context<Self>) {
+        let item = &self.tree.items[index];
+        let Some(file) = self.collections.file(&item.path) else {
+            return;
+        };
+
+        let mut root = index;
+        while let Some(parent) = self.tree.items[root].parent {
+            root = parent;
+        }
+
+        cx.emit(CollectionPanelEvent::OpenRequest {
+            id: file.id.clone().into(),
+            path: item.path.clone(),
+            name: item.label.clone(),
+            collection: self.tree.items[root].label.clone(),
+            folders: item
+                .path
+                .strip_prefix(&self.tree.items[root].path)
+                .ok()
+                .and_then(Path::parent)
+                .map(|path| {
+                    path.iter()
+                        .map(|part| part.to_string_lossy().into_owned().into())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            request: file.request.clone(),
+        });
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !(self.focus.is_focused(window) || self.delete_focus.is_focused(window))
             || self.visible.is_empty()
@@ -248,7 +280,8 @@ impl CollectionPanel {
                     self.request_delete(index, window, cx);
                 }
             }
-            "enter" => self.begin_rename(index, window, cx),
+            "enter" => self.open_request(index, cx),
+            "f2" => self.begin_rename(index, window, cx),
             "space" => self.toggle(index, cx),
             "right" => {
                 if self.collapsed.contains(&index) {

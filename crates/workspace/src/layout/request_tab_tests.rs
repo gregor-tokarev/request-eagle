@@ -393,6 +393,52 @@ fn reverting_an_edit_clears_dirty_state_and_closes_without_prompt(cx: &mut TestA
 }
 
 #[gpui_kit::test]
+fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
+    let fixture = SavedRequestFixture::new();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+        crate::actions::init(cx);
+    });
+    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
+    let (layout, cx) = cx.add_window_view(|window, cx| {
+        crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+    });
+    let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+
+    // Collections have no page of their own, so Enter leaves them as they are.
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    cx.read(|cx| {
+        let tabs = tabs.read(cx);
+        assert_eq!(tabs.tabs.len(), 2);
+        assert_eq!(tabs.selected, Some(1));
+        assert_eq!(tabs.tabs[1].request_path.as_ref(), Some(&fixture.file));
+    });
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
+
+    cx.simulate_keystrokes("f2");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
+    cx.simulate_input("Renamed");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    cx.read(|cx| {
+        let tabs = tabs.read(cx);
+        assert_eq!(tabs.tabs.len(), 2);
+        assert_eq!(tabs.tabs[1].title, "Renamed");
+    });
+}
+
+#[gpui_kit::test]
 fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
     fs::create_dir_all(fixture.directory.join("Other")).unwrap();
@@ -400,7 +446,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     edit_url(cx, "https://example.com/edited-before-rename");
 
     click(cx, "collection-row-0");
-    cx.simulate_keystrokes("enter");
+    cx.simulate_keystrokes("f2");
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
     let renamed = fixture.directory.join("Renamed API/example.toml");
@@ -604,7 +650,7 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     assert!(arrow.right() > method.right() - gpui_kit::px(20.));
 
     click(cx, "collection-row-1");
-    cx.simulate_keystrokes("enter");
+    cx.simulate_keystrokes("f2");
     cx.simulate_input("Renamed folder");
     cx.simulate_keystrokes("enter");
     cx.read(|cx| {
