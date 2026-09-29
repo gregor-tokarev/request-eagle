@@ -118,6 +118,8 @@ fn opens_requests_and_reveals_collections(cx: &mut TestAppContext) {
 
     cx.simulate_keystrokes("secondary-k");
     cx.simulate_input("resource 1");
+    // Requests are searched in the background.
+    cx.run_until_parked();
     cx.simulate_keystrokes("enter");
 
     assert!(!palette_open(&layout, cx));

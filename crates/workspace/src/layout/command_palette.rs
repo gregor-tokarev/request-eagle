@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use collections_panel_ui::CollectionPanel;
+use collections_panel_ui::{CollectionPanel, RequestMatch};
 use gpui_kit::component::{
     command::{Command, CommandGroup, CommandItem, CommandState},
     kbd::Kbd,
@@ -29,6 +29,26 @@ struct PaletteCommand {
     action: Box<dyn Action>,
 }
 
+struct Group {
+    heading: &'static str,
+    items: Vec<CommandItem>,
+    targets: Vec<Target>,
+}
+
+impl Group {
+    fn new(heading: &'static str) -> Self {
+        Self {
+            heading,
+            items: Vec::new(),
+            targets: Vec::new(),
+        }
+    }
+
+    fn set(&mut self, results: impl IntoIterator<Item = (CommandItem, Target)>) {
+        (self.items, self.targets) = results.into_iter().unzip();
+    }
+}
+
 /// Searches commands, requests, collections and environments.
 pub(crate) struct CommandPalette {
     state: Entity<CommandState>,
@@ -41,10 +61,17 @@ pub(crate) struct CommandPalette {
     origin: Option<FocusHandle>,
     commands: Vec<PaletteCommand>,
 
-    /// Each group's targets, indexed like the palette's sections.
-    groups: Vec<CommandGroup>,
-    targets: Vec<Vec<Target>>,
+    /// Results in display order. Empty groups are hidden, so palette
+    /// sections index the non-empty groups.
+    groups: [Group; 4],
+    /// Replacing the search cancels one still running for an older query.
+    request_search: Task<()>,
 }
+
+const COMMANDS: usize = 0;
+const REQUESTS: usize = 1;
+const COLLECTIONS: usize = 2;
+const ENVIRONMENTS: usize = 3;
 
 impl CommandPalette {
     /// Open the palette as a dialog. Call while focus is still in the
@@ -82,8 +109,13 @@ impl CommandPalette {
                 sidebar_visible,
                 origin: window.focused(cx),
                 commands,
-                groups: Vec::new(),
-                targets: Vec::new(),
+                groups: [
+                    Group::new("Commands"),
+                    Group::new("Requests"),
+                    Group::new("Collections"),
+                    Group::new("Environments"),
+                ],
+                request_search: Task::ready(()),
             };
             palette.search("", cx);
 
@@ -109,61 +141,40 @@ impl CommandPalette {
         let query = query.trim().to_lowercase();
         let words: Vec<_> = query.split_whitespace().collect();
 
-        self.groups.clear();
-        self.targets.clear();
-
-        let commands = self.commands.iter().filter(|command| {
-            let text = format!("{} {}", command.label, command.category).to_lowercase();
-            words.iter().all(|word| text.contains(word))
-        });
-        let items = commands
+        let commands = self
+            .commands
+            .iter()
+            .filter(|command| {
+                let text = format!("{} {}", command.label, command.category).to_lowercase();
+                words.iter().all(|word| text.contains(word))
+            })
             .map(|command| {
                 (
-                    self.command_item(command),
+                    command_item(command, self.origin.clone()),
                     Target::Command(command.action.boxed_clone()),
                 )
             })
-            .collect();
-        self.add_group("Commands", items);
+            .collect::<Vec<_>>();
+        self.groups[COMMANDS].set(commands);
+
+        // Keep the previous request results until the new ones arrive, so the
+        // list does not flicker while typing.
+        let requests = self
+            .sidebar
+            .read(cx)
+            .find_requests(&query, REQUEST_LIMIT, cx);
+        self.request_search = cx.spawn(async move |this, cx| {
+            let requests = requests.await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.groups[REQUESTS].set(requests.into_iter().map(request_result));
+                cx.notify();
+            });
+        });
 
         let sidebar = self.sidebar.read(cx);
 
-        let items = sidebar
-            .find_requests(&query, REQUEST_LIMIT)
-            .into_iter()
-            .map(|request| {
-                let item = CommandItem::new()
-                    .label(request.name.clone())
-                    .child(move |_, cx| {
-                        let theme = cx.theme();
-                        let color = match request.method {
-                            "GET" => theme.success,
-                            "POST" => theme.warning,
-                            "PUT" | "PATCH" => theme.info,
-                            "HEAD" | "OPTIONS" => theme.muted_foreground,
-                            _ => theme.danger,
-                        };
-
-                        row()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(rems(3.5))
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(color)
-                                    .child(request.method),
-                            )
-                            .child(label(request.name.clone()))
-                            .child(detail(request.location.clone(), cx))
-                    });
-
-                (item, Target::Request(request.path))
-            })
-            .collect();
-        self.add_group("Requests", items);
-
-        let items = sidebar
+        let collections = sidebar
             .find_collections(&query)
             .into_iter()
             .map(|collection| {
@@ -186,11 +197,10 @@ impl CommandPalette {
                     });
 
                 (item, Target::Collection(collection.path))
-            })
-            .collect();
-        self.add_group("Collections", items);
+            });
+        let collections = collections.collect::<Vec<_>>();
 
-        let items = sidebar
+        let environments = sidebar
             .find_environments(&query)
             .into_iter()
             .map(|environment| {
@@ -214,50 +224,23 @@ impl CommandPalette {
 
                 (item, Target::Environment(environment.path))
             })
-            .collect();
-        self.add_group("Environments", items);
+            .collect::<Vec<_>>();
+
+        self.groups[COLLECTIONS].set(collections);
+        self.groups[ENVIRONMENTS].set(environments);
 
         cx.notify();
     }
 
-    fn command_item(&self, command: &PaletteCommand) -> CommandItem {
-        let label_text = command.label;
-        let category = command.category;
-        let action = command.action.boxed_clone();
-        let origin = self.origin.clone();
-
-        CommandItem::new()
-            .label(label_text)
-            .child(move |window, cx| {
-                // Show the shortcut that applies where the command will run.
-                let binding = match &origin {
-                    Some(origin) => Kbd::binding_for_action_in(action.as_ref(), origin, window),
-                    None => Kbd::binding_for_action(action.as_ref(), None, window),
-                };
-
-                row()
-                    .child(label(label_text.into()))
-                    .child(detail(category.into(), cx))
-                    .when_some(binding, |row, binding| row.child(binding))
-            })
-    }
-
-    fn add_group(&mut self, heading: &'static str, items: Vec<(CommandItem, Target)>) {
-        if items.is_empty() {
-            return;
-        }
-
-        let (items, targets): (Vec<_>, Vec<_>) = items.into_iter().unzip();
-        self.groups
-            .push(CommandGroup::new().label(heading).items(items));
-        self.targets.push(targets);
+    fn visible_groups(&self) -> impl Iterator<Item = &Group> {
+        self.groups.iter().filter(|group| !group.items.is_empty())
     }
 
     fn confirm(&mut self, index: IndexPath, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self
-            .targets
-            .get(index.section)
-            .and_then(|targets| targets.get(index.row))
+            .visible_groups()
+            .nth(index.section)
+            .and_then(|group| group.targets.get(index.row))
         else {
             return;
         };
@@ -284,6 +267,59 @@ impl CommandPalette {
             Target::Environment(path) => cx.open_with_system(path),
         }
     }
+}
+
+fn command_item(command: &PaletteCommand, origin: Option<FocusHandle>) -> CommandItem {
+    let label_text = command.label;
+    let category = command.category;
+    let action = command.action.boxed_clone();
+
+    CommandItem::new()
+        .label(label_text)
+        .child(move |window, cx| {
+            // Show the shortcut that applies where the command will run.
+            let binding = match &origin {
+                Some(origin) => Kbd::binding_for_action_in(action.as_ref(), origin, window),
+                None => Kbd::binding_for_action(action.as_ref(), None, window),
+            };
+
+            row()
+                .child(label(label_text.into()))
+                .child(detail(category.into(), cx))
+                .when_some(binding, |row, binding| row.child(binding))
+        })
+}
+
+fn request_result(request: RequestMatch) -> (CommandItem, Target) {
+    let name = request.name.clone();
+    let method = request.method;
+    let location = request.location.clone();
+
+    let item = CommandItem::new().label(request.name).child(move |_, cx| {
+        let theme = cx.theme();
+        let color = match method {
+            "GET" => theme.success,
+            "POST" => theme.warning,
+            "PUT" | "PATCH" => theme.info,
+            "HEAD" | "OPTIONS" => theme.muted_foreground,
+            _ => theme.danger,
+        };
+
+        row()
+            .child(
+                div()
+                    .flex_none()
+                    .w(rems(3.5))
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(color)
+                    .child(method),
+            )
+            .child(label(name.clone()))
+            .child(detail(location.clone(), cx))
+    });
+
+    (item, Target::Request(request.path))
 }
 
 impl Render for CommandPalette {
@@ -316,10 +352,13 @@ impl Render for CommandPalette {
                         .update(cx, |palette, cx| palette.confirm(index, window, cx));
                 })
                 .map(|command| {
-                    self.groups
-                        .iter()
-                        .cloned()
-                        .fold(command, |command, group| command.group(group))
+                    self.visible_groups().fold(command, |command, group| {
+                        command.group(
+                            CommandGroup::new()
+                                .label(group.heading)
+                                .items(group.items.iter().cloned()),
+                        )
+                    })
                 }),
         )
     }

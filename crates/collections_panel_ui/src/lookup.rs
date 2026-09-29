@@ -3,9 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use gpui_kit::{Context, Focusable as _, SharedString, Window};
+use gpui_kit::{App, Context, Focusable as _, SharedString, Task, Window};
 
-use super::{CollectionPanel, tree::ItemKind};
+use super::{
+    CollectionPanel,
+    tree::{CollectionTree, ItemKind},
+};
 
 pub struct CollectionMatch {
     pub path: PathBuf,
@@ -49,35 +52,14 @@ impl CollectionPanel {
     }
 
     /// Match request names, methods and URLs like the sidebar filter, in tree
-    /// order. The sidebar's index keeps this fast in very large collections.
-    pub fn find_requests(&self, query: &str, limit: usize) -> Vec<RequestMatch> {
-        self.tree
-            .search
-            .matching_rows(query)
-            .into_iter()
-            .filter_map(|index| {
-                let item = &self.tree.items[index];
-                let ItemKind::Request(method) = item.kind else {
-                    return None;
-                };
+    /// order. A broad query can match most of a very large collection, so
+    /// search off the UI thread like the sidebar; drop the task to cancel it.
+    pub fn find_requests(&self, query: &str, limit: usize, cx: &App) -> Task<Vec<RequestMatch>> {
+        let tree = self.tree.clone();
+        let query = query.to_owned();
 
-                let mut folders = Vec::new();
-                let mut parent = item.parent;
-                while let Some(index) = parent {
-                    folders.push(self.tree.items[index].label.as_ref());
-                    parent = self.tree.items[index].parent;
-                }
-                folders.reverse();
-
-                Some(RequestMatch {
-                    path: item.path.clone(),
-                    name: item.label.clone(),
-                    method,
-                    location: folders.join(" › ").into(),
-                })
-            })
-            .take(limit)
-            .collect()
+        cx.background_executor()
+            .spawn(async move { request_matches(&tree, &query, limit) })
     }
 
     /// Environments whose collection or variable names contain the query.
@@ -133,10 +115,11 @@ impl CollectionPanel {
         self.search
             .update(cx, |search, cx| search.set_value("", window, cx));
 
-        let mut parent = self.tree.items[index].parent;
-        while let Some(ancestor) = parent {
-            self.collapsed.remove(&ancestor);
-            parent = self.tree.items[ancestor].parent;
+        // Expand the row itself too, so a revealed collection shows its requests.
+        let mut row = Some(index);
+        while let Some(expanded) = row {
+            self.collapsed.remove(&expanded);
+            row = self.tree.items[expanded].parent;
         }
 
         self.rows_task = None;
@@ -150,4 +133,33 @@ impl CollectionPanel {
 
         window.focus(&self.focus_handle(cx), cx);
     }
+}
+
+fn request_matches(tree: &CollectionTree, query: &str, limit: usize) -> Vec<RequestMatch> {
+    tree.search
+        .matching_rows(query)
+        .into_iter()
+        .filter_map(|index| {
+            let item = &tree.items[index];
+            let ItemKind::Request(method) = item.kind else {
+                return None;
+            };
+
+            let mut folders = Vec::new();
+            let mut parent = item.parent;
+            while let Some(index) = parent {
+                folders.push(tree.items[index].label.as_ref());
+                parent = tree.items[index].parent;
+            }
+            folders.reverse();
+
+            Some(RequestMatch {
+                path: item.path.clone(),
+                name: item.label.clone(),
+                method,
+                location: folders.join(" › ").into(),
+            })
+        })
+        .take(limit)
+        .collect()
 }
