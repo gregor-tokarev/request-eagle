@@ -33,9 +33,10 @@ pub struct EnvironmentMatch {
 
 /// Lookups for callers outside the sidebar, such as the command palette.
 /// Queries are matched case-insensitively; an empty query matches every
-/// collection and environment, but no requests.
+/// collection and environment, but no requests. Each returns at most `limit`
+/// matches, in tree order.
 impl CollectionPanel {
-    pub fn find_collections(&self, query: &str) -> Vec<CollectionMatch> {
+    pub fn find_collections(&self, query: &str, limit: usize) -> Vec<CollectionMatch> {
         let query = query.to_lowercase();
 
         self.tree
@@ -48,6 +49,7 @@ impl CollectionPanel {
                 name: item.label.clone(),
                 request_count: item.request_count,
             })
+            .take(limit)
             .collect()
     }
 
@@ -64,7 +66,7 @@ impl CollectionPanel {
 
     /// Environments whose collection or variable names contain the query.
     /// Collections without environment variables or a file are skipped.
-    pub fn find_environments(&self, query: &str) -> Vec<EnvironmentMatch> {
+    pub fn find_environments(&self, query: &str, limit: usize) -> Vec<EnvironmentMatch> {
         let query = query.to_lowercase();
 
         self.collections
@@ -72,10 +74,6 @@ impl CollectionPanel {
             .iter()
             .filter_map(|collection| {
                 let environment = collection.local_env();
-                if environment.entries.is_empty() && !environment.path.is_file() {
-                    return None;
-                }
-
                 let name = collection
                     .path
                     .file_name()
@@ -89,12 +87,17 @@ impl CollectionPanel {
                         .keys()
                         .any(|variable| variable.to_lowercase().contains(&query));
 
-                matches.then(|| EnvironmentMatch {
+                // Check the file only for matches, which the limit bounds.
+                let exists =
+                    matches && (!environment.entries.is_empty() || environment.path.is_file());
+
+                exists.then(|| EnvironmentMatch {
                     path: environment.path.clone(),
                     name: name.into(),
                     variable_count: environment.entries.len(),
                 })
             })
+            .take(limit)
             .collect()
     }
 

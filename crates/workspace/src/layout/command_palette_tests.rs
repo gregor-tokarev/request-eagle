@@ -180,3 +180,30 @@ fn runs_workspace_commands_after_hiding_the_focused_sidebar(cx: &mut TestAppCont
     assert!(!palette_open(&layout, cx));
     assert_eq!(tab_titles(&layout, cx).len(), 2);
 }
+
+#[gpui_kit::test]
+fn clears_request_results_while_a_new_query_is_searched(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+
+    cx.simulate_keystrokes("secondary-k");
+    cx.simulate_input("resource");
+    cx.run_until_parked();
+
+    let palette = cx.read(|cx| {
+        layout
+            .read(cx)
+            .command_palette
+            .as_ref()
+            .and_then(|palette| palette.upgrade())
+            .unwrap()
+    });
+    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 2));
+
+    // Enter must not open a request for the previous query before the new
+    // results arrive.
+    cx.update(|_, cx| palette.update(cx, |palette, cx| palette.search("resource 1", cx)));
+    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 0));
+
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(palette.read(cx).request_count(), 1));
+}

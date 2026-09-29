@@ -11,9 +11,10 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::main_view::MainView;
 use crate::actions::ToggleCommandPalette;
 
-/// Requests appear only for a query, capped so each keystroke lays out a
-/// short list even in very large collections.
-const REQUEST_LIMIT: usize = 50;
+/// Each group is capped, so opening the palette and every keystroke lay out
+/// a short list even with thousands of collections or requests. Requests
+/// appear only for a query.
+const RESULT_LIMIT: usize = 50;
 
 /// What confirming a row does.
 enum Target {
@@ -137,7 +138,7 @@ impl CommandPalette {
         palette
     }
 
-    fn search(&mut self, query: &str, cx: &mut Context<Self>) {
+    pub(super) fn search(&mut self, query: &str, cx: &mut Context<Self>) {
         let query = query.trim().to_lowercase();
         let words: Vec<_> = query.split_whitespace().collect();
 
@@ -157,12 +158,13 @@ impl CommandPalette {
             .collect::<Vec<_>>();
         self.groups[COMMANDS].set(commands);
 
-        // Keep the previous request results until the new ones arrive, so the
-        // list does not flicker while typing.
+        // Clear results for the previous query, so Enter cannot open a request
+        // that no longer matches while the new search runs.
+        self.groups[REQUESTS].set([]);
         let requests = self
             .sidebar
             .read(cx)
-            .find_requests(&query, REQUEST_LIMIT, cx);
+            .find_requests(&query, RESULT_LIMIT, cx);
         self.request_search = cx.spawn(async move |this, cx| {
             let requests = requests.await;
 
@@ -175,7 +177,7 @@ impl CommandPalette {
         let sidebar = self.sidebar.read(cx);
 
         let collections = sidebar
-            .find_collections(&query)
+            .find_collections(&query, RESULT_LIMIT)
             .into_iter()
             .map(|collection| {
                 let count = match collection.request_count {
@@ -201,7 +203,7 @@ impl CommandPalette {
         let collections = collections.collect::<Vec<_>>();
 
         let environments = sidebar
-            .find_environments(&query)
+            .find_environments(&query, RESULT_LIMIT)
             .into_iter()
             .map(|environment| {
                 let count = match environment.variable_count {
@@ -230,6 +232,11 @@ impl CommandPalette {
         self.groups[ENVIRONMENTS].set(environments);
 
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(super) fn request_count(&self) -> usize {
+        self.groups[REQUESTS].items.len()
     }
 
     fn visible_groups(&self) -> impl Iterator<Item = &Group> {

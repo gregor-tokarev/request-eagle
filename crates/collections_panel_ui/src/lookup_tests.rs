@@ -35,16 +35,16 @@ fn finds_collections_requests_and_environments_by_name(cx: &mut TestAppContext) 
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
 
-        let collections = sidebar.find_collections("");
+        let collections = sidebar.find_collections("", 10);
         let names: Vec<_> = collections.iter().map(|c| c.name.as_ref()).collect();
         assert_eq!(names, ["Example API", "Status API"]);
         assert_eq!(collections[0].request_count, 25);
 
-        let collections = sidebar.find_collections("status");
+        let collections = sidebar.find_collections("status", 10);
         assert_eq!(collections.len(), 1);
         assert_eq!(collections[0].name, "Status API");
 
-        let environments = sidebar.find_environments("");
+        let environments = sidebar.find_environments("", 10);
         assert_eq!(environments.len(), 2);
         assert_eq!(environments[0].name, "Example API");
         assert_eq!(environments[0].variable_count, 1);
@@ -55,8 +55,12 @@ fn finds_collections_requests_and_environments_by_name(cx: &mut TestAppContext) 
         );
 
         // Variable names find the environment that defines them.
-        assert_eq!(sidebar.find_environments("BASE_URL").len(), 2);
-        assert!(sidebar.find_environments("token").is_empty());
+        assert_eq!(sidebar.find_environments("BASE_URL", 10).len(), 2);
+        assert!(sidebar.find_environments("token", 10).is_empty());
+
+        // Limits apply to every group, not only requests.
+        assert_eq!(sidebar.find_collections("", 1).len(), 1);
+        assert_eq!(sidebar.find_environments("", 1).len(), 1);
     });
 
     assert!(find_requests(&sidebar, "", 10, cx).is_empty());
@@ -97,7 +101,11 @@ fn reveals_and_opens_rows_by_path(cx: &mut TestAppContext) {
     });
 
     let request = find_requests(&sidebar, "Not found", 1, cx)[0].path.clone();
-    let status = cx.read(|cx| sidebar.read(cx).find_collections("Status")[0].path.clone());
+    let status = cx.read(|cx| {
+        sidebar.read(cx).find_collections("Status", 1)[0]
+            .path
+            .clone()
+    });
 
     // Filter and collapse the tree so the target row starts hidden.
     let search = cx.read(|cx| sidebar.read(cx).search.clone());
