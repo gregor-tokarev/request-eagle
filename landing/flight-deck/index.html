@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request Eagle — a native API client for macOS</title>
+<meta name="description" content="Request Eagle is a native API client built in Rust. Requests live as TOML files on your disk, with variables, scripts, tests, Vim mode and a CLI for agents.">
+<meta property="og:title" content="Request Eagle — zero-friction API client">
+<meta property="og:description" content="A native Postman alternative built in Rust. Requests live as TOML files on your disk.">
+<meta property="og:image" content="../assets/social-preview.png">
+<link rel="icon" href="../assets/favicon.png">
+<link rel="preload" href="../assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+
+<style>
+@font-face {
+  font-family: "Geist";
+  src: url("../assets/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../assets/fonts/geist-mono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  --bg: #090b10;
+  --surface: #0d1016;
+  --raised: #12151c;
+  --line: #1f232b;
+  --line-strong: #2d323c;
+  --text: #e9e7e2;
+  --muted: #9a9894;
+  --faint: #6d6c69;
+  --accent: #5ac1fe;
+  --accent-ink: #06202f;
+  --green: #aad84c;
+  --yellow: #feb454;
+  --red: #ef7177;
+  --purple: #d2a6ff;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --page: min(1180px, 100% - 48px);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+img { display: block; max-width: 100%; height: auto; }
+
+a { color: inherit; text-decoration: none; }
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.wrap { width: var(--page); margin-inline: auto; }
+
+/* Navigation */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.nav__inner {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 64px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand img { width: 30px; height: 30px; }
+
+.nav__links {
+  display: flex;
+  gap: 28px;
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.nav__links a:hover { color: var(--text); }
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font: 500 15px/1 var(--sans);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.button:active { transform: translateY(1px); }
+
+.button--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 1px #8ad4ff inset, 0 10px 40px -12px rgba(90, 193, 254, 0.7);
+}
+
+.button--primary:hover { background: #7bcfff; }
+
+.button--ghost {
+  border-color: var(--line-strong);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.button--ghost:hover { border-color: #444a56; background: rgba(255, 255, 255, 0.05); }
+
+.button--small { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 8px; }
+
+.button svg { width: 17px; height: 17px; flex: none; }
+
+/* Hero */
+
+.hero {
+  position: relative;
+  padding: 88px 0 0;
+  text-align: center;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -200px 0 auto;
+  height: 900px;
+  background:
+    radial-gradient(60% 50% at 50% 0%, rgba(90, 193, 254, 0.16), transparent 70%),
+    radial-gradient(30% 30% at 78% 22%, rgba(210, 166, 255, 0.08), transparent 70%);
+  pointer-events: none;
+}
+
+.pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pill b {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(90, 193, 254, 0.14);
+  color: var(--accent);
+  font: 500 12px/1.5 var(--mono);
+}
+
+.pill:hover { color: var(--text); }
+
+h1 {
+  position: relative;
+  margin: 28px auto 0;
+  max-width: 15ch;
+  font-size: clamp(42px, 7.2vw, 84px);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+h1 em {
+  font-style: normal;
+  background: linear-gradient(95deg, #ffffff 0%, #b9e5ff 40%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lede {
+  position: relative;
+  max-width: 600px;
+  margin: 24px auto 0;
+  font-size: clamp(17px, 1.6vw, 20px);
+  line-height: 1.55;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.cta {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.cta__note {
+  position: relative;
+  margin-top: 16px;
+  font: 13px/1.5 var(--mono);
+  color: var(--faint);
+}
+
+/* App window */
+
+.stage {
+  position: relative;
+  margin-top: 72px;
+  padding-bottom: 96px;
+}
+
+/* Speed streaks echo the three bars of the app icon. */
+.streaks {
+  position: absolute;
+  inset: 12% -10% auto;
+  height: 46%;
+  pointer-events: none;
+}
+
+.streaks i {
+  position: absolute;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 45%, transparent);
+  opacity: 0.55;
+  animation: streak 7s linear infinite;
+}
+
+.streaks i:nth-child(1) { top: 12%; left: -20%; width: 46%; animation-delay: -1s; }
+.streaks i:nth-child(2) { top: 44%; left: -30%; width: 62%; animation-delay: -4s; opacity: 0.8; }
+.streaks i:nth-child(3) { top: 76%; left: -10%; width: 38%; animation-delay: -2.5s; }
+
+@keyframes streak {
+  from { transform: translateX(-40vw); }
+  to { transform: translateX(140vw); }
+}
+
+.window {
+  position: relative;
+  container-type: inline-size;
+  margin: 0;
+  border-radius: clamp(8px, 1vw, 14px);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 50px 120px -30px rgba(0, 0, 0, 0.9),
+    0 0 140px -30px rgba(90, 193, 254, 0.28);
+}
+
+.window img { width: 100%; }
+
+/* The captures come from the Linux build; macOS draws its window controls here. */
+.window__lights {
+  position: absolute;
+  top: 1.146cqw;
+  left: 0.9cqw;
+  display: flex;
+  gap: 0.556cqw;
+  transform: translateY(-50%);
+}
+
+.window__lights i {
+  width: 0.834cqw;
+  height: 0.834cqw;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+
+.window__lights i:nth-child(2) { background: #febc2e; }
+.window__lights i:nth-child(3) { background: #28c840; }
+
+.stage::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: min(260px, 38%);
+  background: linear-gradient(transparent, var(--bg) 78%);
+  pointer-events: none;
+}
+
+/* Facts strip */
+
+.facts {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: -40px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.fact {
+  padding: 26px 28px;
+  border-left: 1px solid var(--line);
+}
+
+.fact:first-child { border-left: 0; }
+
+.fact dt {
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.fact dd {
+  margin: 12px 0 0;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.fact dd span { display: block; margin-top: 2px; font-size: 14px; font-weight: 400; color: var(--muted); }
+
+/* Sections */
+
+section { padding: 120px 0 0; }
+
+.eyebrow {
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h2 {
+  margin: 18px 0 0;
+  max-width: 20ch;
+  font-size: clamp(30px, 4.2vw, 50px);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.section-lede {
+  max-width: 560px;
+  margin: 18px 0 0;
+  font-size: 18px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* Bento */
+
+.bento {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+  margin-top: 56px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  grid-column: span 3;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--raised), var(--surface));
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.card:hover { border-color: var(--line-strong); }
+
+.card--wide { grid-column: span 4; }
+.card--narrow { grid-column: span 2; }
+.card--full { grid-column: span 6; }
+
+.card__text { padding: 30px 30px 26px; }
+
+.card h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.card p {
+  margin: 8px 0 0;
+  max-width: 52ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.card code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  font: 13px var(--mono);
+  color: var(--text);
+}
+
+.card__media {
+  margin: auto 0 0 30px;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-top-left-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.card__media img {
+  width: 100%;
+  height: 300px;
+  object-fit: cover;
+  object-position: left top;
+}
+
+.card--full {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  align-items: center;
+}
+
+.card--full .card__media { margin: 40px 0 0 30px; align-self: end; }
+
+.card--full .card__media img { height: 340px; object-position: left bottom; }
+
+.code {
+  margin: auto 0 0;
+  padding: 24px 30px 30px;
+  border-top: 1px solid var(--line);
+  background: #0a0c11;
+  font: 13.5px/1.75 var(--mono);
+  color: #c9c7c2;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.code .k { color: var(--accent); }
+.code .s { color: var(--green); }
+.code .n { color: var(--purple); }
+.code .c { color: var(--faint); }
+.code .y { color: var(--yellow); }
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px 30px;
+  border-top: 1px solid var(--line);
+  font: 12.5px/1 var(--mono);
+  color: var(--faint);
+}
+
+.file-tab + .code { margin-top: 0; }
+
+.file-tab::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--yellow);
+}
+
+.themes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: auto;
+  padding: 0 30px 30px;
+}
+
+.themes img {
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: left top;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.keys {
+  display: grid;
+  gap: 2px;
+  margin-top: auto;
+  padding: 0 30px 30px;
+}
+
+.keys div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+  color: var(--muted);
+}
+
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  font: 500 12.5px/1 var(--sans);
+  color: var(--text);
+}
+
+.methods { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; font: 500 12px/1 var(--mono); }
+
+.methods span { padding: 6px 9px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); }
+
+/* Scripting split */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 64px;
+  align-items: center;
+  margin-top: 56px;
+}
+
+.checks { display: grid; gap: 22px; margin: 0; padding: 0; list-style: none; }
+
+.checks li { display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
+
+.checks svg { width: 22px; height: 22px; margin-top: 2px; color: var(--green); }
+
+.checks strong { display: block; font-weight: 500; letter-spacing: -0.01em; }
+
+.checks span { display: block; margin-top: 2px; font-size: 15px; color: var(--muted); }
+
+.shot {
+  margin: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 40px 90px -30px rgba(0, 0, 0, 0.9);
+}
+
+/* CLI */
+
+.terminal {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #07090d;
+  overflow: hidden;
+}
+
+.terminal__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  font: 12.5px/1 var(--mono);
+  color: var(--faint);
+}
+
+.terminal__bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--line-strong); }
+
+.terminal__bar span { margin-left: 8px; }
+
+.terminal .code { border: 0; background: transparent; padding: 24px; }
+
+/* Closing */
+
+.closing {
+  position: relative;
+  margin-top: 140px;
+  padding: 110px 0 120px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  overflow: hidden;
+}
+
+.closing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(50% 80% at 50% 110%, rgba(90, 193, 254, 0.2), transparent 70%);
+  pointer-events: none;
+}
+
+.closing img { position: relative; width: 96px; margin: 0 auto; filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.6)); }
+
+.closing h2 { position: relative; margin: 28px auto 0; }
+
+.closing p { position: relative; max-width: 520px; margin: 16px auto 0; color: var(--muted); font-size: 18px; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding: 28px 0 40px;
+  font-size: 14px;
+  color: var(--faint);
+}
+
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+
+footer nav { display: flex; gap: 24px; margin-left: auto; }
+
+footer a:hover { color: var(--text); }
+
+@media (max-width: 920px) {
+  .nav__links { display: none; }
+  .nav__inner .button { margin-left: auto; }
+  .facts { grid-template-columns: repeat(2, 1fr); }
+  .fact:nth-child(3) { border-left: 0; }
+  .fact:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .card, .card--wide, .card--narrow { grid-column: span 6; }
+  .card--full { display: flex; }
+  .card--full .card__media { margin-top: auto; align-self: stretch; }
+  .split { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  section { padding-top: 88px; }
+}
+
+@media (max-width: 560px) {
+  :root { --page: calc(100% - 32px); }
+  .hero { padding-top: 56px; }
+  .stage { margin-top: 48px; padding-bottom: 64px; }
+  .facts { grid-template-columns: 1fr; }
+  .fact { border-left: 0; border-top: 1px solid var(--line); }
+  .fact:first-child { border-top: 0; }
+  .card__text { padding: 24px 22px 20px; }
+  .card__media { margin-left: 22px; }
+  .code { padding: 20px 22px 24px; font-size: 12.5px; }
+  .file-tab { padding-inline: 22px; }
+  .themes, .keys { padding-inline: 22px; }
+  .themes { grid-template-columns: repeat(2, 1fr); }
+  footer nav { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .streaks i { animation: none; }
+}
+</style>
+</head>
+
+<body>
+
+<header class="nav">
+  <div class="wrap nav__inner">
+    <a class="brand" href="#top">
+      <img src="../assets/icon.png" alt="" width="30" height="30">
+      Request Eagle
+    </a>
+
+    <nav class="nav__links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#scripting">Scripting</a>
+      <a href="#cli">CLI</a>
+      <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
+    </nav>
+
+    <a class="button button--primary button--small" href="https://github.com/gregor-tokarev/request-eagle/releases/latest">Download</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <div class="hero">
+    <div class="wrap">
+      <a class="pill" href="https://github.com/gregor-tokarev/request-eagle/releases/latest">
+        <b>v0.1.15</b> Early development, new builds most days
+      </a>
+
+      <h1>The API client that <em>gets out of the way.</em></h1>
+
+      <p class="lede">
+        Request Eagle is a native Postman alternative built in Rust. Your requests live as
+        TOML files on your disk, and the app never asks you to sign in.
+      </p>
+
+      <div class="cta">
+        <a class="button button--primary" href="https://github.com/gregor-tokarev/request-eagle/releases/latest">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.78c.03 2.9 2.54 3.87 2.57 3.88-.02.07-.4 1.38-1.32 2.72-.8 1.17-1.62 2.33-2.93 2.35-1.28.03-1.69-.76-3.16-.76-1.46 0-1.92.74-3.13.79-1.26.05-2.22-1.26-3.02-2.42C3.73 16.95 2.48 12.6 4.17 9.67c.84-1.46 2.34-2.38 3.97-2.4 1.24-.03 2.4.83 3.16.83.76 0 2.18-1.03 3.67-.88.63.03 2.38.25 3.51 1.9-.09.06-2.1 1.23-2.08 3.66M13.97 5.7c.67-.81 1.12-1.94 1-3.06-.97.04-2.13.64-2.82 1.45-.62.72-1.16 1.87-1.02 2.97 1.08.08 2.17-.55 2.84-1.36"/></svg>
+          Download for macOS
+        </a>
+
+        <a class="button button--ghost" href="https://github.com/gregor-tokarev/request-eagle">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85V21c0 .27.18.58.69.48A10 10 0 0 0 12 2"/></svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <p class="cta__note">Apple Silicon · 19 MB · Linux builds from source</p>
+
+      <div class="stage">
+        <div class="streaks" aria-hidden="true"><i></i><i></i><i></i></div>
+
+        <figure class="window">
+          <div class="window__lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="../assets/shots/hero-dark.webp" width="2400" height="1500"
+               alt="Request Eagle showing a collection sidebar, a GET request with headers, and a formatted JSON response with a 200 OK status.">
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <dl class="facts">
+      <div class="fact">
+        <dt>Engine</dt>
+        <dd>Rust and GPUI <span>GPU-rendered, no web view</span></dd>
+      </div>
+      <div class="fact">
+        <dt>Storage</dt>
+        <dd>TOML files <span>In a folder you control</span></dd>
+      </div>
+      <div class="fact">
+        <dt>Account</dt>
+        <dd>None <span>No sign-in, no cloud workspace</span></dd>
+      </div>
+      <div class="fact">
+        <dt>Download</dt>
+        <dd>19 MB <span>Signed and notarized</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="eyebrow">Features</div>
+      <h2>Everything for the request. Nothing else.</h2>
+      <p class="section-lede">
+        Collections, environments, scripts and tests, in an interface that draws every frame on the GPU.
+      </p>
+
+      <div class="bento">
+
+        <article class="card card--wide">
+          <div class="card__text">
+            <h3>Requests are files</h3>
+            <p>
+              Every request is a TOML file inside <code>~/.request-eagle/collections</code>.
+              Commit them, review them in a pull request, or edit them by hand.
+            </p>
+          </div>
+
+          <div class="file-tab">Flight API / Flights / List flights.toml</div>
+<pre class="code"><span class="k">name</span> = <span class="s">"List flights"</span>
+<span class="k">schema_version</span> = <span class="n">1</span>
+
+<span class="y">[request]</span>
+<span class="k">type</span> = <span class="s">"http"</span>
+<span class="k">method</span> = <span class="s">"GET"</span>
+<span class="k">path</span> = <span class="s">"{{base_url}}/v1/flights"</span>
+<span class="k">headers</span> = [[<span class="s">"Authorization"</span>, <span class="s">"Bearer {{token}}"</span>]]
+<span class="k">query</span> = [[<span class="s">"status"</span>, <span class="s">"airborne"</span>], [<span class="s">"limit"</span>, <span class="s">"25"</span>]]</pre>
+        </article>
+
+        <article class="card card--narrow">
+          <div class="card__text">
+            <h3>Collections and folders</h3>
+            <p>Nest folders as deep as your API goes. Filter by name, method or URL.</p>
+            <div class="methods" aria-hidden="true">
+              <span style="color: var(--green)">GET</span>
+              <span style="color: var(--yellow)">POST</span>
+              <span style="color: #7aa2c9">PATCH</span>
+              <span style="color: var(--red)">DELETE</span>
+            </div>
+          </div>
+
+          <div class="card__media">
+            <img src="../assets/shots/crop-sidebar.webp" width="608" height="1192" loading="lazy"
+                 alt="Sidebar with two collections and nested folders of requests.">
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card__text">
+            <h3>Variables that complete themselves</h3>
+            <p>
+              Type <code>{{</code> in a URL, header, query or JSON body. Pick from the collection's
+              <code>environment.toml</code> or generated values such as <code>{{$guid}}</code>.
+            </p>
+          </div>
+
+          <div class="card__media">
+            <img src="../assets/shots/crop-variables.webp" width="1520" height="760" loading="lazy"
+                 alt="Variable completion menu listing environment and generated variables.">
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card__text">
+            <h3>Vim mode</h3>
+            <p>
+              Motions, operators, counts, Visual mode and <code>/</code> search in the body and
+              script editors. Off by default, one switch in Settings.
+            </p>
+          </div>
+
+          <div class="card__media">
+            <img src="../assets/shots/crop-vim.webp" width="1520" height="1140" loading="lazy"
+                 alt="JSON body editor in Vim Normal mode with a block cursor.">
+          </div>
+        </article>
+
+        <article class="card card--narrow">
+          <div class="card__text">
+            <h3>Keyboard first</h3>
+            <p>Every shortcut can be rebound in Settings.</p>
+          </div>
+
+          <div class="keys">
+            <div>Send request <span><kbd>⌘</kbd> <kbd>↵</kbd></span></div>
+            <div>New tab <span><kbd>⌘</kbd> <kbd>T</kbd></span></div>
+            <div>Search collections <span><kbd>⌘</kbd> <kbd>F</kbd></span></div>
+            <div>Jump to tab <span><kbd>⌘</kbd> <kbd>1</kbd>–<kbd>9</kbd></span></div>
+          </div>
+        </article>
+
+        <article class="card card--wide">
+          <div class="card__text">
+            <h3>Eleven theme families</h3>
+            <p>
+              Ayu, Catppuccin, Gruvbox, Everforest, Flexoki, Solarized and more, each in light and dark.
+              Follow the system appearance or pin one.
+            </p>
+          </div>
+
+          <div class="themes">
+            <img src="../assets/shots/theme-catppuccin.webp" width="1600" height="1000" loading="lazy" alt="Catppuccin Mocha theme">
+            <img src="../assets/shots/theme-flexoki.webp" width="1600" height="1000" loading="lazy" alt="Flexoki Light theme">
+            <img src="../assets/shots/theme-gruvbox.webp" width="1600" height="1000" loading="lazy" alt="Gruvbox Dark theme">
+          </div>
+        </article>
+
+        <article class="card card--full">
+          <div class="card__text">
+            <h3>Responses of any size</h3>
+            <p>
+              Bodies past 10 MiB still scroll and search in full. Hover the status, time or size for
+              a breakdown of where the milliseconds went.
+            </p>
+          </div>
+
+          <div class="card__media">
+            <img src="../assets/shots/crop-response.webp" width="1520" height="1420" loading="lazy"
+                 alt="Response panel with body, cookies, headers, test results and console tabs.">
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="scripting">
+    <div class="wrap">
+      <div class="eyebrow">Scripting</div>
+      <h2>Scripts you already know how to write.</h2>
+      <p class="section-lede">
+        Pre-request and post-response JavaScript with a familiar <code style="font-family: var(--mono); font-size: 0.9em;">pm.*</code> API.
+      </p>
+
+      <div class="split">
+        <ul class="checks">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <div>
+              <strong>Chain requests</strong>
+              <span>Await <code style="font-family: var(--mono); font-size: 13px;">pm.sendRequest</code> to fetch a token, then attach it to the request being sent.</span>
+            </div>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <div>
+              <strong>Test every response</strong>
+              <span>Assertions and JSON Schema checks, reported beside the response.</span>
+            </div>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <div>
+              <strong>Sign and encode</strong>
+              <span>SHA-256, HMAC and Base64 helpers for signed APIs.</span>
+            </div>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <div>
+              <strong>Typed completion</strong>
+              <span>A bundled TypeScript service suggests APIs and parameters. No Node.js required.</span>
+            </div>
+          </li>
+        </ul>
+
+        <figure class="shot">
+          <img src="../assets/shots/crop-scripts.webp" width="1520" height="1140" loading="lazy"
+               alt="Pre-request script that logs in before the request, with two passing tests shown below.">
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="cli">
+    <div class="wrap">
+      <div class="eyebrow">Agent CLI</div>
+      <h2>Hand your collections to an agent.</h2>
+      <p class="section-lede">
+        An optional standalone binary lets AI agents list, edit and run saved requests with JSON
+        commands. It needs no token, daemon or running app.
+      </p>
+
+      <div class="split" style="grid-template-columns: minmax(0, 1fr);">
+        <div class="terminal">
+          <div class="terminal__bar"><i></i><i></i><i></i><span>request-eagle-cli</span></div>
+<pre class="code"><span class="c"># Discover every command and its schema</span>
+<span class="k">$</span> request-eagle-cli schema
+
+<span class="c"># Find a saved request</span>
+<span class="k">$</span> request-eagle-cli call <span class="s">'{"command":"requests.list","query":"health"}'</span>
+
+<span class="c"># Run it</span>
+<span class="k">$</span> request-eagle-cli call <span class="s">'{"command":"requests.run","path":"/absolute/path/Health.toml","timeout_ms":10000}'</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="closing">
+    <div class="wrap">
+      <img src="../assets/icon.png" alt="" width="96" height="96">
+      <h2>Send your first request in a minute.</h2>
+      <p>Download, open, type a URL. There is nothing to set up.</p>
+
+      <div class="cta">
+        <a class="button button--primary" href="https://github.com/gregor-tokarev/request-eagle/releases/latest">Download for macOS</a>
+        <a class="button button--ghost" href="https://github.com/gregor-tokarev/request-eagle#build-from-source">Build from source</a>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Request Eagle</span>
+
+    <nav aria-label="Footer">
+      <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
+      <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/scripting.md">Scripting guide</a>
+      <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md">CLI guide</a>
+      <a href="https://github.com/gregor-tokarev/request-eagle/issues">Feedback</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
