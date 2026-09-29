@@ -41,6 +41,7 @@ pub struct RequestDraft {
     pub(super) variable_scope: Option<Entity<VariableScope>>,
     variable_path: Option<std::path::PathBuf>,
     variable_sessions: environment::EnvironmentSessions,
+    environments: Option<Entity<crate::Environments>>,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
@@ -92,6 +93,7 @@ impl RequestDraft {
             variable_scope: None,
             variable_path: None,
             variable_sessions: environment::EnvironmentSessions::default(),
+            environments: None,
             url_completion: None,
             body_completion: None,
             response: None,
@@ -159,6 +161,18 @@ impl RequestDraft {
         }
     }
 
+    /// Use the workspace's active global environment when resolving variables.
+    pub fn set_environments(&mut self, environments: Entity<crate::Environments>, cx: &mut App) {
+        self.environments = Some(environments.clone());
+
+        if let Some(scope) = &self.variable_scope {
+            scope.update(cx, |scope, cx| {
+                scope.environments = Some(environments);
+                cx.notify();
+            });
+        }
+    }
+
     pub(super) fn variables(&mut self, cx: &mut Context<Self>) -> Entity<VariableScope> {
         self.variable_scope
             .get_or_insert_with(|| {
@@ -167,6 +181,7 @@ impl RequestDraft {
                     session: self
                         .variable_sessions
                         .for_path(self.variable_path.as_deref()),
+                    environments: self.environments.clone(),
                 })
             })
             .clone()

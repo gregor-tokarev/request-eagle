@@ -32,6 +32,11 @@ Other requests in the same collection can then use `Bearer {{token}}`. Session
 values last until the workspace closes and are never written to
 `environment.toml`.
 
+File values come from the collection's `environment.toml` and from the global
+environment selected in the tab bar. The selected environment's values take
+precedence. Global environments are stored in
+`~/.request-eagle/environments/<name>.toml`.
+
 | API | Behavior |
 | --- | --- |
 | `pm.environment.get(name)` / `.has(name)` | Read the environment file values plus session changes. |

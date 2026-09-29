@@ -287,7 +287,7 @@ async fn unresolved_variables_block_send_and_collection_scope_changes_with_the_r
                 draft
                     .variables(cx)
                     .read(cx)
-                    .values()
+                    .values(cx)
                     .unwrap()
                     .environment
                     .is_empty()
@@ -474,7 +474,7 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
             draft.set_variable_environment(&a.join("request.toml"), 0, cx);
 
             assert_eq!(
-                draft.variables(cx).read(cx).values().unwrap().environment["base_url"],
+                draft.variables(cx).read(cx).values(cx).unwrap().environment["base_url"],
                 "updated"
             );
 
@@ -487,7 +487,7 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
                 reopened
                     .variables(cx)
                     .read(cx)
-                    .values()
+                    .values(cx)
                     .unwrap()
                     .environment["base_url"],
                 "reopened"
@@ -724,7 +724,7 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
             draft.request.path = format!("http://{address}/protected");
             draft.request.headers = vec![("Authorization".into(), "Bearer {{token}}".into())];
             let scope = draft.variables(cx);
-            let values = scope.read(cx).values().unwrap();
+            let values = scope.read(cx).values(cx).unwrap();
             assert_eq!(values.environment["token"], "response-token");
             assert!(!values.environment.contains_key("scratch"));
             draft.send(window, cx);
@@ -757,4 +757,53 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
     assert!(cx.debug_bounds("variable-suggestion-0").is_some());
     cx.simulate_keystrokes("enter");
     cx.read(|cx| assert_eq!(login.read(cx).request.path, "{{token}}"));
+}
+
+#[gpui_kit::test]
+fn the_active_global_environment_overrides_collection_values(cx: &mut TestAppContext) {
+    let (draft, cx, directory) = setup(cx);
+    let catalog = environment::GlobalEnvironments::new(directory.path().join("environments"));
+    catalog.create("Staging").unwrap();
+    std::fs::write(
+        catalog.path("Staging"),
+        "base_url = 'https://staging.example.com'\ntoken = 'staging'\n",
+    )
+    .unwrap();
+
+    cx.update(|_, cx| {
+        let environments = cx.new(|_| crate::Environments::new(catalog, None));
+        let scope = draft.update(cx, |draft, cx| {
+            draft.set_environments(environments.clone(), cx);
+            draft.variables(cx)
+        });
+
+        let values = scope.read(cx).values(cx).unwrap();
+        assert_eq!(values.environment["base_url"], "https://example.com");
+        assert!(!values.environment.contains_key("token"));
+
+        environments.update(cx, |environments, cx| {
+            environments.set_active(Some("Staging".into()), cx)
+        });
+        let values = scope.read(cx).values(cx).unwrap();
+        assert_eq!(
+            values.environment["base_url"],
+            "https://staging.example.com"
+        );
+        assert_eq!(values.environment["message"], "hello");
+        assert_eq!(values.environment["token"], "staging");
+
+        let request = request::HttpRequest {
+            path: "{{base_url}}/users".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            scope
+                .read(cx)
+                .request_variables(cx)
+                .resolve(&request)
+                .unwrap()
+                .path,
+            "https://staging.example.com/users"
+        );
+    });
 }

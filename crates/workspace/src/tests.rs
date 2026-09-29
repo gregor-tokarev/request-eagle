@@ -5,6 +5,17 @@ use collection::CollectionRegistry;
 use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
 use settings_ui::CloseSettings;
 
+/// A catalog in a missing directory, for tests that do not use global environments.
+pub(crate) fn no_environments() -> environment::GlobalEnvironments {
+    environment::GlobalEnvironments::new("/nonexistent/request-eagle/environments")
+}
+
+pub(crate) fn environments(cx: &mut gpui_kit::App) -> gpui_kit::Entity<tab_ui::Environments> {
+    use gpui_kit::AppContext as _;
+
+    cx.new(|_| tab_ui::Environments::new(no_environments(), None))
+}
+
 #[gpui_kit::test]
 fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     cx.update(|cx| {
@@ -19,6 +30,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
             CollectionRegistry::new(),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -79,6 +91,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
             CollectionRegistry::new(),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -155,6 +168,7 @@ fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut Test
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
             crate::performance::collections(2),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,

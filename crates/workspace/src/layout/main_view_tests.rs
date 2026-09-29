@@ -21,6 +21,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext
     cx.add_window_view(|window, cx| {
         Layout::new(
             collection::CollectionRegistry::new(),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -595,6 +596,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
     let (layout, cx) = cx.add_window_view(|window, cx| {
         Layout::new(
             crate::performance::collections(2),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -652,7 +654,8 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (view, cx) = cx.add_window_view(|_, cx| MainView::new(cx));
+    let (view, cx) =
+        cx.add_window_view(|window, cx| MainView::new(crate::tests::environments(cx), window, cx));
     let first_path = Path::new("/collection/first.toml");
     let second_path = Path::new("/collection/second.toml");
 
@@ -748,7 +751,8 @@ impl Render for StatefulPage {
 #[gpui_kit::test]
 fn switching_keeps_page_entities_and_renders_only_the_active_page(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (view, cx) = cx.add_window_view(|_, cx| MainView::new(cx));
+    let (view, cx) =
+        cx.add_window_view(|window, cx| MainView::new(crate::tests::environments(cx), window, cx));
     let page = cx.new(|_| StatefulPage(7));
 
     cx.update(|_, cx| {

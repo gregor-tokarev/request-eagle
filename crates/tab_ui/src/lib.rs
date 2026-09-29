@@ -4,6 +4,8 @@
 
 mod actions;
 mod collection_page;
+mod environment_editor;
+mod environments;
 mod page;
 mod request_draft;
 mod request_fields;
@@ -16,11 +18,15 @@ mod variables;
 mod vim;
 
 #[cfg(test)]
+mod environment_editor_tests;
+#[cfg(test)]
 mod test_allocator;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
 pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
+pub use environment_editor::EnvironmentEditor;
+pub use environments::{Environments, EnvironmentsEvent};
 pub use page::{TabBadge, TabBadgeTone, TabPage, TabState, TabView};
 pub use request_draft::RequestDraft;
