@@ -1,8 +1,9 @@
 //! Tab content and its workspace interface. HTTP editing and response rendering
 //! live here; the workspace owns tab selection, closing, and collection storage.
-//! Collection, gRPC, and WebSocket pages can implement `TabPage` independently.
+//! Collection, gRPC, and WebSocket pages implement `TabPage` independently.
 
 mod actions;
+mod collection_page;
 mod page;
 mod request_draft;
 mod request_fields;
@@ -20,5 +21,6 @@ mod test_allocator;
 pub mod test_support;
 
 pub use actions::SendRequest;
+pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
 pub use page::{TabBadge, TabBadgeTone, TabPage, TabState, TabView};
 pub use request_draft::RequestDraft;

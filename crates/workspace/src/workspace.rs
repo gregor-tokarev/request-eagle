@@ -31,6 +31,7 @@ pub(super) struct Layout {
     _sidebar_subscription: Subscription,
     _request_save_subscription: Subscription,
     _new_request_save_subscription: Subscription,
+    _collection_save_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -60,6 +61,32 @@ impl Layout {
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::OpenCollection {
+                    path,
+                    name,
+                    variables,
+                    scripts,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_collection(
+                            path,
+                            name.clone(),
+                            variables.clone(),
+                            scripts.clone(),
+                            cx,
+                        );
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+                CollectionPanelEvent::CollectionRenamed {
+                    previous_path,
+                    path,
+                    name,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.relocate_collection(previous_path, path, name.clone(), window, cx);
+                    });
+                }
                 CollectionPanelEvent::RequestRelocated {
                     id,
                     previous_path,
@@ -130,6 +157,26 @@ impl Layout {
             },
         );
 
+        let collection_save_subscription = cx.subscribe_in(
+            &main_view,
+            window,
+            |this, view, event: &crate::layout::main_view::CollectionSaveRequested, window, cx| {
+                let settings = &event.settings;
+                let result = this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.save_collection(
+                        &event.path,
+                        &settings.name,
+                        settings.variables.iter().cloned().collect(),
+                        settings.scripts.clone(),
+                        cx,
+                    )
+                });
+                view.update(cx, |view, cx| {
+                    view.finish_collection_save(event, result, window, cx)
+                });
+            },
+        );
+
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
@@ -144,6 +191,7 @@ impl Layout {
             _sidebar_subscription: sidebar_subscription,
             _request_save_subscription: request_save_subscription,
             _new_request_save_subscription: new_request_save_subscription,
+            _collection_save_subscription: collection_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }

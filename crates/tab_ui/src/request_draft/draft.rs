@@ -448,6 +448,7 @@ impl crate::TabPage for RequestDraft {
                     _ => TabBadgeTone::Danger,
                 },
             }),
+            icon: None,
             dirty: self.is_dirty(),
         }
     }

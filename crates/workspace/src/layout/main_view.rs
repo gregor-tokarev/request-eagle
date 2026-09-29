@@ -1,11 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewTab, SaveRequest};
-use tab_ui::{RequestDraft, TabBadge, TabBadgeTone, TabPage, TabView};
+use tab_ui::{
+    CollectionPage, CollectionSettings, RequestDraft, SaveCollection, TabBadge, TabBadgeTone,
+    TabPage, TabView,
+};
 
 // Rendering and virtualization share the same relative geometry at every zoom.
 const TAB_WIDTH: Rems = rems(12.);
@@ -17,9 +23,10 @@ pub(super) struct PageTab {
     pub(super) request_path: Option<PathBuf>,
     pub(super) request_id: Option<SharedString>,
     pub(super) badge: Option<TabBadge>,
+    icon: Option<&'static str>,
     dirty: bool,
     pub(super) page: TabView,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 pub(crate) struct MainView {
@@ -46,8 +53,15 @@ pub(crate) struct NewRequestSaveRequested {
     pub(crate) request: collection::HttpRequest,
 }
 
+pub(crate) struct CollectionSaveRequested {
+    pub(crate) tab_id: u64,
+    pub(crate) path: PathBuf,
+    pub(crate) settings: CollectionSettings,
+}
+
 impl EventEmitter<RequestSaveRequested> for MainView {}
 impl EventEmitter<NewRequestSaveRequested> for MainView {}
+impl EventEmitter<CollectionSaveRequested> for MainView {}
 
 impl MainView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
@@ -95,9 +109,10 @@ impl MainView {
             request_path: None,
             request_id: None,
             badge: state.badge,
+            icon: state.icon,
             dirty: state.dirty,
             page: TabView::new(page),
-            _subscription: subscription,
+            _subscriptions: vec![subscription],
         });
         self.next_id += 1;
 
@@ -181,6 +196,63 @@ impl MainView {
             }
             cx.notify();
         }
+    }
+
+    pub(crate) fn open_collection(
+        &mut self,
+        path: &Path,
+        name: SharedString,
+        variables: HashMap<String, String>,
+        scripts: collection::RequestScripts,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self.collection_tab(path, cx) {
+            self.select_tab(index, cx);
+            return;
+        }
+
+        let page = cx
+            .new(|_| CollectionPage::new(path.to_path_buf(), name.to_string(), variables, scripts));
+        let index = self.open_tab(name, page.clone(), cx);
+        let id = self.tabs[index].id;
+        let subscription = cx.subscribe(&page, move |this, _, _: &SaveCollection, cx| {
+            if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
+                this.save_tab(index, cx);
+            }
+        });
+        self.tabs[index]._subscriptions.push(subscription);
+    }
+
+    fn collection_tab(&self, path: &Path, cx: &App) -> Option<usize> {
+        self.tabs.iter().position(|tab| {
+            tab.page
+                .view()
+                .downcast::<CollectionPage>()
+                .is_ok_and(|page| page.read(cx).path == path)
+        })
+    }
+
+    /// Follow a collection renamed in the sidebar.
+    pub(crate) fn relocate_collection(
+        &mut self,
+        previous_path: &Path,
+        path: &Path,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.collection_tab(previous_path, cx) else {
+            return;
+        };
+        let tab = &mut self.tabs[index];
+        tab.title = name.clone();
+
+        if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+            page.update(cx, |page, cx| {
+                page.relocate(path.to_path_buf(), name.to_string(), window, cx)
+            });
+        }
+        cx.notify();
     }
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
@@ -280,9 +352,33 @@ impl MainView {
     }
 
     pub(crate) fn save_active_request(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self.selected.and_then(|index| self.tabs.get(index)) else {
+        if let Some(index) = self.selected {
+            self.save_tab(index, cx);
+        }
+    }
+
+    fn save_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(index) else {
             return;
         };
+
+        if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+            let page = page.read(cx);
+            match page.settings() {
+                Ok(settings) => {
+                    self.save_error = None;
+                    cx.emit(CollectionSaveRequested {
+                        tab_id: tab.id,
+                        path: page.path.clone(),
+                        settings,
+                    });
+                }
+                Err(error) => self.save_error = Some(format!("Could not save collection: {error}")),
+            }
+            cx.notify();
+            return;
+        }
+
         let Ok(draft) = tab.page.view().downcast::<RequestDraft>() else {
             return;
         };
@@ -369,6 +465,40 @@ impl MainView {
                 }
             }
             Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn finish_collection_save(
+        &mut self,
+        event: &CollectionSaveRequested,
+        result: Result<PathBuf, collection::CollectionEditError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == event.tab_id) else {
+            return;
+        };
+
+        match result {
+            Ok(path) => {
+                let tab = &mut self.tabs[index];
+                tab.title = event.settings.name.clone().into();
+                if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+                    page.update(cx, |page, cx| {
+                        page.mark_saved(path, event.settings.clone(), cx)
+                    });
+                    tab.dirty = page.read(cx).is_dirty();
+                }
+                self.save_error = None;
+
+                if self.pending_close == Some(event.tab_id) && !self.tabs[index].dirty {
+                    self.remove_tab(index, cx);
+                    self.focus(window, cx);
+                }
+            }
+            Err(error) => self.save_error = Some(format!("Could not save collection: {error}")),
         }
 
         cx.notify();
@@ -553,6 +683,15 @@ impl MainView {
                 } else {
                     this.bg(cx.theme().muted)
                 }
+            })
+            .when_some(tab.icon, |this, icon| {
+                this.child(
+                    Icon::default()
+                        .path(icon)
+                        .size(rems(0.875))
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground),
+                )
             })
             .when_some(tab.badge, |this, badge| {
                 let color = match badge.tone {
