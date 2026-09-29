@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use crate::actions::*;
-use crate::layout::{bottom_panel::BottomPanel, main_view::MainView, top_panel::TopPanel};
+use crate::layout::{
+    bottom_panel::BottomPanel, command_palette::CommandPalette, main_view::MainView,
+    top_panel::TopPanel,
+};
 use collection::CollectionRegistry;
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use gpui_kit::base::motion::{self, Transition};
@@ -26,6 +29,8 @@ pub(super) struct Layout {
     pub(super) settings: Entity<Settings>,
     pub(super) settings_visible: bool,
     previous_focus: Option<FocusHandle>,
+
+    pub(super) command_palette: Option<WeakEntity<CommandPalette>>,
 
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
@@ -140,6 +145,7 @@ impl Layout {
             settings,
             settings_visible: false,
             previous_focus: None,
+            command_palette: None,
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
             _request_save_subscription: request_save_subscription,
@@ -175,6 +181,47 @@ impl Layout {
         }
 
         cx.notify();
+    }
+
+    pub(super) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .command_palette
+            .as_ref()
+            .is_some_and(|palette| palette.upgrade().is_some())
+        {
+            window.close_dialog(cx);
+            return;
+        }
+
+        // Leave other dialogs, such as saving a request, uninterrupted.
+        if window.has_active_dialog(cx) {
+            return;
+        }
+
+        if self.settings_visible {
+            self.close_settings(window, cx);
+
+            // Commands are read from the rendered workspace, so open once it
+            // is drawn again.
+            cx.on_next_frame(window, |this, window, cx| {
+                this.open_command_palette(window, cx)
+            });
+            return;
+        }
+
+        self.open_command_palette(window, cx);
+    }
+
+    fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let palette = CommandPalette::open(
+            self.sidebar.clone(),
+            self.main_view.clone(),
+            self.sidebar_visible.clone(),
+            window,
+            cx,
+        );
+
+        self.command_palette = Some(palette.downgrade());
     }
 
     pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -228,6 +275,24 @@ fn on_open_settings(layout: &Entity<Layout>, window: AnyWindowHandle, cx: &mut A
                 let _ = layout.update(cx, |this, cx| this.open_settings(window, cx));
 
                 window.activate_window();
+            });
+        });
+    });
+}
+
+pub(super) fn on_toggle_command_palette(
+    layout: &Entity<Layout>,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let layout = layout.downgrade();
+
+    cx.on_action(move |_: &ToggleCommandPalette, cx| {
+        let layout = layout.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = layout.update(cx, |this, cx| this.toggle_command_palette(window, cx));
             });
         });
     });
@@ -391,6 +456,7 @@ pub fn init(
     let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
     on_toggle_sidebar(&layout, cx);
     on_open_settings(&layout, window.window_handle(), cx);
+    on_toggle_command_palette(&layout, window.window_handle(), cx);
 
     layout.into()
 }
