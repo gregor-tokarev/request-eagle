@@ -162,25 +162,26 @@ impl CollectionPanel {
         scripts: RequestScripts,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, collection::CollectionEditError> {
+        // Rename first: an invalid or taken name then fails before any file
+        // changes. The rename event keeps the tab in step if a later write fails.
+        let destination = if path.file_name().is_some_and(|current| current == name) {
+            path.to_path_buf()
+        } else {
+            let destination = self.collections.rename(path, name)?;
+            let selected = self.selected.map(|index| {
+                let selected = &self.tree.items[index].path;
+                match selected.strip_prefix(path) {
+                    Ok(relative) => destination.join(relative),
+                    Err(_) => selected.clone(),
+                }
+            });
+            self.rebuild_tree(selected.as_deref(), Some((path, &destination)), cx);
+
+            destination
+        };
+
         self.collections
-            .update_collection(path, variables, scripts)?;
-
-        if path
-            .file_name()
-            .is_some_and(|current| current == name.trim())
-        {
-            return Ok(path.to_path_buf());
-        }
-
-        let destination = self.collections.rename(path, name)?;
-        let selected = self.selected.map(|index| {
-            let selected = &self.tree.items[index].path;
-            match selected.strip_prefix(path) {
-                Ok(relative) => destination.join(relative),
-                Err(_) => selected.clone(),
-            }
-        });
-        self.rebuild_tree(selected.as_deref(), Some((path, &destination)), cx);
+            .update_collection(&destination, variables, scripts)?;
 
         Ok(destination)
     }

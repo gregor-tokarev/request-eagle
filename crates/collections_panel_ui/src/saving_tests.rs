@@ -92,3 +92,50 @@ fn saving_updates_method_name_and_search_without_rebuilding_browsing_rows(cx: &m
         assert_eq!(panel.selected_row, Some(2));
     });
 }
+
+#[gpui_kit::test]
+fn rejected_collection_names_leave_its_settings_unsaved(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (sidebar, cx) = sidebar(&fixture, cx);
+    let collection = fixture.0.join("API");
+    let variables: std::collections::HashMap<_, _> =
+        [("token".to_owned(), "secret".to_owned())].into();
+
+    sidebar.update(cx, |panel, cx| {
+        for name in ["Other", "bad/name"] {
+            panel
+                .save_collection(&collection, name, variables.clone(), Default::default(), cx)
+                .unwrap_err();
+        }
+    });
+
+    assert!(!collection.join("environment.toml").exists());
+    assert!(collection.is_dir());
+}
+
+#[gpui_kit::test]
+fn unchanged_names_with_surrounding_spaces_do_not_rename(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let collection = fixture.0.join(" Spaced ");
+    fs::create_dir_all(&collection).unwrap();
+    let (sidebar, cx) = sidebar(&fixture, cx);
+
+    let saved = sidebar.update(cx, |panel, cx| {
+        panel
+            .save_collection(
+                &collection,
+                " Spaced ",
+                [("token".to_owned(), "secret".to_owned())].into(),
+                Default::default(),
+                cx,
+            )
+            .unwrap()
+    });
+
+    assert_eq!(saved, collection);
+    assert!(
+        fs::read_to_string(collection.join("environment.toml"))
+            .unwrap()
+            .contains("secret")
+    );
+}
