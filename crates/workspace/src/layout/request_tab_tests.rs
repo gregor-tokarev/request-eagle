@@ -62,7 +62,13 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         crate::actions::init(cx);
     });
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+        crate::workspace::Layout::new(
+            collections,
+            crate::tests::no_environments(),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        )
     });
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let row = cx.debug_bounds("collection-row-2").unwrap();
@@ -254,7 +260,13 @@ path = "https://example.com/original"
         });
         let registry = CollectionRegistry::from_path(&self.directory).unwrap();
         let (layout, cx) = cx.add_window_view(|window, cx| {
-            crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+            crate::workspace::Layout::new(
+                registry,
+                crate::tests::no_environments(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
         });
         let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
         click(cx, "collection-row-1");
@@ -403,7 +415,13 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     });
     let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+        crate::workspace::Layout::new(
+            registry,
+            crate::tests::no_environments(),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        )
     });
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     cx.update(|window, _| window.activate_window());
@@ -615,7 +633,13 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     });
     let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+        crate::workspace::Layout::new(
+            registry,
+            crate::tests::no_environments(),
+            updater::init("1.2.3", cx),
+            window,
+            cx,
+        )
     });
     click(cx, "collection-row-3");
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());

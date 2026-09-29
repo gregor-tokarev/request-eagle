@@ -371,10 +371,6 @@ impl Render for CollectionPanel {
         v_flex()
             .debug_selector(|| "collections-sidebar".into())
             .size_full()
-            .bg(cx.theme().sidebar)
-            .text_color(cx.theme().sidebar_foreground)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
             .child(
                 div()
                     .debug_selector(|| "collections-search".into())

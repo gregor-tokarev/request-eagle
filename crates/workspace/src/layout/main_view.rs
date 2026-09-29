@@ -4,8 +4,12 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
+use super::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
 use crate::actions::{CloseTab, NewTab, SaveRequest};
-use tab_ui::{RequestDraft, TabBadge, TabBadgeTone, TabPage, TabView};
+use tab_ui::{
+    EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft, TabBadge, TabBadgeTone,
+    TabPage, TabView,
+};
 
 // Rendering and virtualization share the same relative geometry at every zoom.
 const TAB_WIDTH: Rems = rems(12.);
@@ -32,6 +36,9 @@ pub(crate) struct MainView {
     pending_close: Option<u64>,
     save_error: Option<String>,
     variable_sessions: environment::EnvironmentSessions,
+    environments: Entity<Environments>,
+    environment_picker: Entity<EnvironmentPicker>,
+    _environment_subscriptions: [Subscription; 2],
 }
 
 pub(crate) struct RequestSaveRequested {
@@ -50,7 +57,25 @@ impl EventEmitter<RequestSaveRequested> for MainView {}
 impl EventEmitter<NewRequestSaveRequested> for MainView {}
 
 impl MainView {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        environments: Entity<Environments>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let environment_picker =
+            cx.new(|cx| EnvironmentPicker::new(environments.clone(), window, cx));
+        let picker_subscription = cx.subscribe_in(
+            &environment_picker,
+            window,
+            |this, _, event: &EnvironmentPickerEvent, window, cx| match event {
+                EnvironmentPickerEvent::Open(name) => {
+                    this.open_environment(name.clone(), window, cx);
+                }
+                EnvironmentPickerEvent::Create => this.create_environment(window, cx),
+            },
+        );
+        let environments_subscription = cx.subscribe(&environments, Self::on_environments_event);
+
         let mut view = Self {
             tabs: Vec::new(),
             selected: None,
@@ -61,6 +86,9 @@ impl MainView {
             pending_close: None,
             save_error: None,
             variable_sessions: environment::EnvironmentSessions::default(),
+            environments,
+            environment_picker,
+            _environment_subscriptions: [picker_subscription, environments_subscription],
         };
 
         view.new_tab(cx);
@@ -195,8 +223,85 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> usize {
         draft.set_variable_sessions(self.variable_sessions.clone(), cx);
+        draft.set_environments(self.environments.clone(), cx);
         let page = cx.new(|_| draft);
         self.open_tab(title, page, cx)
+    }
+
+    fn environment_tab(&self, name: &str, cx: &App) -> Option<(usize, Entity<EnvironmentEditor>)> {
+        self.tabs.iter().enumerate().find_map(|(index, tab)| {
+            let editor = tab.page.view().downcast::<EnvironmentEditor>().ok()?;
+            (editor.read(cx).name == name).then_some((index, editor))
+        })
+    }
+
+    /// Show a global environment's editor, reusing its tab when it is open.
+    pub(crate) fn open_environment(
+        &mut self,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EnvironmentEditor> {
+        let editor = if let Some((index, editor)) = self.environment_tab(&name, cx) {
+            self.select_tab(index, cx);
+            editor
+        } else {
+            let environments = self.environments.clone();
+            let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
+            self.open_tab(name, editor.clone(), cx);
+            editor
+        };
+
+        self.focus(window, cx);
+        editor
+    }
+
+    /// Open the environment's editor with its name selected for renaming.
+    pub(crate) fn rename_environment(
+        &mut self,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = self.open_environment(name, window, cx);
+        editor.update(cx, |editor, cx| editor.focus_name(window, cx));
+    }
+
+    pub(crate) fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(name) = self
+            .environments
+            .update(cx, |environments, cx| environments.create(cx))
+        {
+            self.rename_environment(name, window, cx);
+        }
+    }
+
+    fn on_environments_event(
+        &mut self,
+        _: Entity<Environments>,
+        event: &EnvironmentsEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            EnvironmentsEvent::Renamed { from, to } => {
+                // The editor that renamed the environment may already use the new name.
+                for tab in &mut self.tabs {
+                    if let Ok(editor) = tab.page.view().downcast::<EnvironmentEditor>()
+                        && [from, to].contains(&&editor.read(cx).name)
+                    {
+                        editor.update(cx, |editor, _| editor.name = to.clone());
+                        tab.title = to.clone();
+                    }
+                }
+            }
+            EnvironmentsEvent::Deleted(name) => {
+                if let Some((index, _)) = self.environment_tab(name, cx) {
+                    self.remove_tab(index, cx);
+                }
+            }
+        }
+
+        cx.notify();
     }
 
     /// Select by zero-based position. Missing positions leave selection unchanged.
@@ -280,9 +385,26 @@ impl MainView {
     }
 
     pub(crate) fn save_active_request(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self.selected.and_then(|index| self.tabs.get(index)) else {
+        let Some(index) = self.selected else {
             return;
         };
+        let tab = &self.tabs[index];
+
+        if let Ok(editor) = tab.page.view().downcast::<EnvironmentEditor>() {
+            let id = tab.id;
+            // The editor shows its own save errors next to the variables.
+            let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
+            self.tabs[index].dirty = editor.read(cx).is_dirty();
+            self.save_error = None;
+
+            if saved && self.pending_close == Some(id) {
+                self.remove_tab(index, cx);
+            }
+
+            cx.notify();
+            return;
+        }
+
         let Ok(draft) = tab.page.view().downcast::<RequestDraft>() else {
             return;
         };
@@ -664,7 +786,9 @@ impl Render for MainView {
                                 this.new_tab(cx);
                                 this.focus(window, cx);
                             })),
-                    ),
+                    )
+                    .child(div().flex_1())
+                    .child(self.environment_picker.clone()),
             )
             .when(self.pending_close.is_some(), |this| {
                 this.child(self.close_confirmation(cx))

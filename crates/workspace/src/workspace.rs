@@ -1,22 +1,38 @@
 use std::time::Duration;
 
 use crate::actions::*;
-use crate::layout::{bottom_panel::BottomPanel, main_view::MainView, top_panel::TopPanel};
+use crate::layout::{
+    bottom_panel::BottomPanel,
+    environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
+    main_view::MainView,
+    top_panel::TopPanel,
+};
 use collection::CollectionRegistry;
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
+use environment::GlobalEnvironments;
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
     resizable::{ResizableState, h_resizable, resizable_panel},
+    tab::{Tab, TabBar},
     *,
 };
 use gpui_kit::*;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
+use tab_ui::Environments;
 use updater::Updater;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SidebarSection {
+    Collections,
+    Environments,
+}
 
 pub(super) struct Layout {
     top_panel: Entity<TopPanel>,
     pub(super) sidebar: Entity<CollectionPanel>,
+    pub(super) environment_panel: Entity<EnvironmentPanel>,
+    pub(super) sidebar_section: SidebarSection,
     pub(super) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -29,6 +45,7 @@ pub(super) struct Layout {
 
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
+    _environment_panel_subscription: Subscription,
     _request_save_subscription: Subscription,
     _new_request_save_subscription: Subscription,
     _settings_subscription: Subscription,
@@ -38,6 +55,7 @@ pub(super) struct Layout {
 impl Layout {
     pub(super) fn new(
         collections: CollectionRegistry,
+        environments: GlobalEnvironments,
         updater: Entity<Updater>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -104,7 +122,28 @@ impl Layout {
             });
         window.focus(&sidebar.focus_handle(cx), cx);
 
-        let main_view = cx.new(MainView::new);
+        let active_environment = cx
+            .try_global::<preferences::Preferences>()
+            .and_then(|preferences| preferences.active_environment.clone());
+        let environments = cx.new(|_| Environments::new(environments, active_environment));
+        let environment_panel = cx.new(|cx| EnvironmentPanel::new(environments.clone(), cx));
+        let environment_panel_subscription = cx.subscribe_in(
+            &environment_panel,
+            window,
+            |this, _, event: &EnvironmentPanelEvent, window, cx| {
+                this.main_view.update(cx, |view, cx| match event {
+                    EnvironmentPanelEvent::Open(name) => {
+                        view.open_environment(name.clone(), window, cx);
+                    }
+                    EnvironmentPanelEvent::Rename(name) => {
+                        view.rename_environment(name.clone(), window, cx)
+                    }
+                    EnvironmentPanelEvent::Create => view.create_environment(window, cx),
+                });
+            },
+        );
+
+        let main_view = cx.new(|cx| MainView::new(environments, window, cx));
         main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
         let request_save_subscription = cx.subscribe_in(
             &main_view,
@@ -133,6 +172,8 @@ impl Layout {
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
+            environment_panel,
+            sidebar_section: SidebarSection::Collections,
             main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -142,6 +183,7 @@ impl Layout {
             previous_focus: None,
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
+            _environment_panel_subscription: environment_panel_subscription,
             _request_save_subscription: request_save_subscription,
             _new_request_save_subscription: new_request_save_subscription,
             _settings_subscription: settings_subscription,
@@ -183,6 +225,74 @@ impl Layout {
 
             cx.notify();
         });
+    }
+
+    pub(super) fn show_sidebar_section(
+        &mut self,
+        section: SidebarSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_section = section;
+
+        match section {
+            SidebarSection::Collections => window.focus(&self.sidebar.focus_handle(cx), cx),
+            SidebarSection::Environments => {
+                window.focus(&self.environment_panel.focus_handle(cx), cx)
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let content = match self.sidebar_section {
+            SidebarSection::Collections => self
+                .sidebar
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            SidebarSection::Environments => self
+                .environment_panel
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+        };
+
+        v_flex()
+            .size_full()
+            .bg(cx.theme().sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .border_r_1()
+            .border_color(cx.theme().sidebar_border)
+            .child(
+                div()
+                    .debug_selector(|| "sidebar-sections".into())
+                    .flex_none()
+                    .px_2()
+                    .pt_2()
+                    .child(
+                        TabBar::new("sidebar-sections")
+                            .segmented()
+                            .small()
+                            .w_full()
+                            .selected_index(match self.sidebar_section {
+                                SidebarSection::Collections => 0,
+                                SidebarSection::Environments => 1,
+                            })
+                            .on_click(cx.listener(|this, index: &usize, window, cx| {
+                                let section = if *index == 0 {
+                                    SidebarSection::Collections
+                                } else {
+                                    SidebarSection::Environments
+                                };
+                                this.show_sidebar_section(section, window, cx);
+                            }))
+                            .child(Tab::new().flex_1().label("Collections"))
+                            .child(Tab::new().flex_1().label("Environments")),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(content))
     }
 
     fn update_tabs(
@@ -285,6 +395,7 @@ impl Render for Layout {
                     *visible = true;
                     cx.notify();
                 });
+                this.sidebar_section = SidebarSection::Collections;
 
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
@@ -356,11 +467,7 @@ impl Render for Layout {
                                     rems(14.).to_pixels(window.rem_size())
                                         ..rems(30.).to_pixels(window.rem_size()),
                                 )
-                                .child(
-                                    self.sidebar
-                                        .clone()
-                                        .cached(StyleRefinement::default().size_full()),
-                                ),
+                                .child(self.sidebar(cx)),
                         )
                         .child(self.main_view.clone().into_any_element()),
                 ),
@@ -382,13 +489,14 @@ impl Render for Layout {
 
 pub fn init(
     collections: CollectionRegistry,
+    environments: GlobalEnvironments,
     updater: Entity<Updater>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
     crate::actions::init(cx);
 
-    let layout = cx.new(|cx| Layout::new(collections, updater, window, cx));
+    let layout = cx.new(|cx| Layout::new(collections, environments, updater, window, cx));
     on_toggle_sidebar(&layout, cx);
     on_open_settings(&layout, window.window_handle(), cx);
 

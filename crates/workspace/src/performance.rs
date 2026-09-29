@@ -50,7 +50,13 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
 
         let collections = collections(request_count);
         let (layout, cx) = cx.add_window_view(|window, cx| {
-            Layout::new(collections, updater::init("1.2.3", cx), window, cx)
+            Layout::new(
+                collections,
+                crate::tests::no_environments(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
         });
 
         if let Some(page) = page {
@@ -214,6 +220,7 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
             let view = cx.new(|cx| {
                 Layout::new(
                     CollectionRegistry::new(),
+                    crate::tests::no_environments(),
                     updater::init("1.2.3", cx),
                     window,
                     cx,

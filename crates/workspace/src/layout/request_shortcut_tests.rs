@@ -52,6 +52,7 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
         let view = cx.new(|cx| {
             crate::workspace::Layout::new(
                 collection::CollectionRegistry::new(),
+                crate::tests::no_environments(),
                 updater::init("1.2.3", cx),
                 window,
                 cx,

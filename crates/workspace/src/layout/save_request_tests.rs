@@ -42,7 +42,13 @@ fn setup<'a>(
     let mut main = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let layout = cx.new(|cx| {
-            crate::workspace::Layout::new(registry, updater::init("1.2.3", cx), window, cx)
+            crate::workspace::Layout::new(
+                registry,
+                crate::tests::no_environments(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
         });
         main = Some(layout.read(cx).main_view.clone());
         Root::new(layout, window, cx)

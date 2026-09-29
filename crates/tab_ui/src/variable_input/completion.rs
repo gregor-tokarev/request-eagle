@@ -152,7 +152,7 @@ impl VariableInput {
             if !was_open {
                 let scope = self.scope.read(cx);
                 self.environment_names = scope
-                    .values()
+                    .values(cx)
                     .unwrap_or_else(|_| {
                         scope.session.values(environment::VariableValues::default())
                     })
