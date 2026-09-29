@@ -213,6 +213,12 @@ impl Layout {
     }
 
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Focus can stay on a row of the hidden sidebar, where workspace
+        // commands do nothing. Run them from the tabs instead.
+        if !window.is_action_available(&NewTab, cx) {
+            self.main_view.update(cx, |view, cx| view.focus(window, cx));
+        }
+
         let palette = CommandPalette::open(
             self.sidebar.clone(),
             self.main_view.clone(),

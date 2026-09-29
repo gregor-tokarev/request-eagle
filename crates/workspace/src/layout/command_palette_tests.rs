@@ -161,3 +161,22 @@ fn shortcut_returns_from_settings_to_the_workspace(cx: &mut TestAppContext) {
     cx.read(|cx| assert!(!layout.read(cx).settings_visible));
     assert!(cx.debug_bounds("main-view").is_some());
 }
+
+#[gpui_kit::test]
+fn runs_workspace_commands_after_hiding_the_focused_sidebar(cx: &mut TestAppContext) {
+    let (layout, cx) = workspace(cx);
+    let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
+    cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
+
+    // Focus stays on the sidebar, which is no longer rendered.
+    cx.simulate_keystrokes("secondary-b");
+    cx.run_until_parked();
+    cx.read(|cx| assert!(!*layout.read(cx).sidebar_visible.read(cx)));
+
+    cx.simulate_keystrokes("secondary-k");
+    cx.simulate_input("new tab");
+    cx.simulate_keystrokes("enter");
+
+    assert!(!palette_open(&layout, cx));
+    assert_eq!(tab_titles(&layout, cx).len(), 2);
+}

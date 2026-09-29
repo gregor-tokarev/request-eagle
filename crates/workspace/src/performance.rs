@@ -5,7 +5,11 @@ use gpui_kit::{
     TouchPhase, component::Root, point, px, size,
 };
 use settings_ui::SettingsPage;
-use std::{fs, time::Instant};
+use std::{
+    fs,
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
@@ -158,10 +162,13 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
     }
 
     // Load synthetic requests through the real parser, outside the timed region.
-    // Never load or modify the user's collections or preferences.
+    // Never load or modify the user's collections or preferences. Tests run in
+    // parallel, so each call gets its own directory.
+    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
     let directory = std::env::temp_dir().join(format!(
-        "request-eagle-page-benchmark-{}-{request_count}",
-        std::process::id()
+        "request-eagle-page-benchmark-{}-{request_count}-{}",
+        std::process::id(),
+        NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
     ));
     for index in 0..request_count {
         let folder = directory.join(format!(
