@@ -442,6 +442,7 @@ impl crate::TabPage for EnvironmentEditor {
     fn tab_state(&self) -> crate::TabState {
         crate::TabState {
             badge: None,
+            icon: Some("icons/globe.svg"),
             dirty: self.is_dirty(),
         }
     }

@@ -862,6 +862,7 @@ impl tab_ui::TabPage for ProtocolPage {
                 label: "RPC",
                 tone: tab_ui::TabBadgeTone::Info,
             }),
+            icon: None,
             dirty: self.sends > 0,
         }
     }

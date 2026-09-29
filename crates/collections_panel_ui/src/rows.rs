@@ -263,9 +263,8 @@ impl CollectionPanel {
 
                 if branch {
                     this.toggle(index, cx);
-                } else {
-                    this.open_request(index, cx);
                 }
+                this.open(index, cx);
             }))
             .capture_any_mouse_down(
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {

@@ -69,7 +69,8 @@ impl RequestExecutor {
                         scripts = reports;
 
                         let sent_at = Instant::now();
-                        let has_post_script = !request.scripts.post_response.trim().is_empty();
+                        let has_post_script = !request.scripts.post_response.trim().is_empty()
+                            || !variables.collection_post_response.trim().is_empty();
                         let body = request.body.take().map(bytes::Bytes::from);
                         let post_body = if has_post_script { body.clone() } else { None };
                         let response = executor.http.execute(&request, body).await?;

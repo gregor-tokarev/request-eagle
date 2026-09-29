@@ -8,7 +8,7 @@ use super::{RequestDraft, draft::RequestSection};
 
 // Debug selectors are collected only during layout, not replayed from cached
 // controls. Refresh before querying geometry; interactions still use real input.
-pub(super) fn element_bounds(
+pub(crate) fn element_bounds(
     cx: &mut VisualTestContext,
     selector: &'static str,
 ) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {

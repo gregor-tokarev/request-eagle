@@ -54,7 +54,8 @@ script results.
 - `requests.update` replaces the complete request. Read it first and preserve
   the fields you do not intend to change.
 - `call -` reads JSON from stdin, which keeps secrets out of process arguments.
-- Saved scripts run only with `trust_scripts: true`. Read them first.
+- Saved scripts run only with `trust_scripts: true`. Read them first, including
+  the collection's scripts from `collections.get`, which run before the request's.
 - Response bodies and raw header values are Base64.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

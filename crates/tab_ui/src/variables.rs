@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use collection::{Collection, RequestScripts};
 use environment::{Environment, EnvironmentLoadError, EnvironmentSession, VariableValues};
 use gpui_kit::{App, Entity};
 
@@ -40,6 +41,17 @@ impl VariableScope {
         };
 
         request::RequestVariables::with_environment_session(values, error, self.session.clone())
+            .with_collection_scripts(self.collection_scripts())
+    }
+
+    /// Reload the collection's scripts so saved edits apply to the next send.
+    fn collection_scripts(&self) -> Result<RequestScripts, String> {
+        match self.path.as_deref().and_then(Path::parent) {
+            Some(collection) => {
+                Collection::load_scripts(collection).map_err(|error| error.to_string())
+            }
+            None => Ok(RequestScripts::default()),
+        }
     }
 }
 

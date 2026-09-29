@@ -9,6 +9,7 @@ use environment::Environment;
 use uuid::Uuid;
 
 use super::mutations::find_entry;
+use crate::collection::is_reserved;
 use crate::{
     Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
     FileEntry, HttpRequest, Method, Request,
@@ -30,6 +31,7 @@ impl CollectionRegistry {
                 path: path.join("environment.toml"),
                 entries: HashMap::new(),
             },
+            scripts: Default::default(),
         });
 
         Ok(path)
@@ -76,6 +78,7 @@ impl CollectionRegistry {
             return Err(CollectionEditError::InvalidName);
         }
         let base_name = name;
+        let reserved = self.reserved_paths();
         let entries = self
             .entries_mut(parent)
             .ok_or(CollectionEditError::NotFound)?;
@@ -89,6 +92,9 @@ impl CollectionRegistry {
             };
             let filename = name.replace(['/', '\\', ':'], "-");
             let path = parent.join(format!("{filename}.toml"));
+            if is_reserved(&reserved, &path) {
+                continue;
+            }
             let mut entry = FileEntry {
                 path: path.clone(),
                 raw_content: String::new(),
@@ -123,6 +129,14 @@ impl CollectionRegistry {
         }
 
         unreachable!()
+    }
+
+    /// Every collection's own files, which entries cannot replace.
+    pub(super) fn reserved_paths(&self) -> Vec<PathBuf> {
+        self.collections
+            .iter()
+            .flat_map(Collection::reserved_paths)
+            .collect()
     }
 
     pub(super) fn entries_mut(&mut self, parent: &Path) -> Option<&mut Vec<Entry>> {

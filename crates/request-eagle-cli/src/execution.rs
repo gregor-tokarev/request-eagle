@@ -18,20 +18,23 @@ pub async fn run(
     let registry = crate::collections::load(root)?;
     let file = registry.file(path).context("Unknown saved request path")?;
     let request::Request::Http(request) = file.request.clone();
-    if !request.scripts.is_empty() && !trust_scripts {
-        bail!("Read the saved request scripts, then set trust_scripts=true to approve this run");
-    }
-
     let collection = registry
         .collections()
         .iter()
         .find(|collection| path.starts_with(&collection.path))
         .context("Unknown collection")?;
+    if (!request.scripts.is_empty() || !collection.scripts().is_empty()) && !trust_scripts {
+        bail!(
+            "Read the saved request and collection scripts, then set trust_scripts=true to approve this run"
+        );
+    }
+
     let mut values = VariableValues {
         environment: collection.local_env().entries.clone(),
     };
     values.environment.extend(variables);
-    let variables = RequestVariables::with_environment_session(values, None, Default::default());
+    let variables = RequestVariables::with_environment_session(values, None, Default::default())
+        .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
@@ -45,6 +48,7 @@ pub async fn run(
     })).collect::<Vec<_>>();
     let scripts = execution.scripts.iter().map(|report| json!({
         "phase": match report.phase { request::ScriptPhase::PreRequest => "pre_request", request::ScriptPhase::PostResponse => "post_response" },
+        "collection": report.collection,
         "error": report.error,
         "tests": report.tests.iter().map(|test| json!({"name": test.name, "passed": test.error.is_none(), "error": test.error})).collect::<Vec<_>>(),
         "logs": report.logs.iter().map(|log| json!({"level": log.level, "message": log.message})).collect::<Vec<_>>(),

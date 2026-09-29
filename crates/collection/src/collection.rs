@@ -1,20 +1,32 @@
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
 };
 
 use environment::Environment;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
 use uuid::Uuid;
 
-use crate::{DirEntry, Entry, FileEntry};
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry, RequestScripts};
+
+/// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
+const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
 
 pub struct Collection {
     pub path: PathBuf,
     pub entries: Vec<Entry>,
     pub(crate) local_env: Environment,
+    pub(crate) scripts: RequestScripts,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct CollectionSettings {
+    #[serde(default, skip_serializing_if = "RequestScripts::is_empty")]
+    scripts: RequestScripts,
 }
 
 impl Collection {
@@ -34,13 +46,93 @@ impl Collection {
             });
         }
 
-        let entries = load_directory(path, Some(&local_env.path))?.entries;
+        let excluded = [local_env.path.clone(), path.join(SETTINGS_FILE_NAME)];
+        let entries = load_directory(path, &excluded)?.entries;
+        let scripts = Self::load_scripts(path)?;
 
         Ok(Self {
             path: path.to_path_buf(),
             entries,
             local_env,
+            scripts,
         })
+    }
+
+    /// Reads the scripts that run around every request in the collection at `path`.
+    pub fn load_scripts(path: &Path) -> Result<RequestScripts, CollectionLoadError> {
+        let path = path.join(SETTINGS_FILE_NAME);
+        let source = match fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(RequestScripts::default());
+            }
+            Err(source) => return Err(CollectionLoadError::Read { path, source }),
+        };
+
+        toml::from_str::<CollectionSettings>(&source)
+            .map(|settings| settings.scripts)
+            .map_err(|source| CollectionLoadError::Parse { path, source })
+    }
+
+    /// Saves variables and scripts together. If the second file cannot be
+    /// written, the first is restored, so a failed save changes nothing.
+    pub(crate) fn save_settings(
+        &mut self,
+        variables: HashMap<String, String>,
+        scripts: RequestScripts,
+    ) -> Result<(), CollectionEditError> {
+        let scripts_path = self.path.join(SETTINGS_FILE_NAME);
+        let scripts_changed = self.scripts != scripts;
+        let variables_changed = self.local_env.entries != variables;
+        let previous_scripts = if scripts_changed && variables_changed {
+            match fs::read(&scripts_path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            None
+        };
+
+        if scripts_changed {
+            write_scripts(&scripts_path, &scripts)?;
+        }
+
+        if variables_changed {
+            let environment = Environment {
+                path: self.local_env.path.clone(),
+                entries: variables,
+            };
+
+            if let Err(error) = environment.save_file() {
+                if scripts_changed
+                    && let Err(restore) = restore_file(&scripts_path, previous_scripts)
+                {
+                    return Err(io::Error::other(format!(
+                        "{error}; could not restore the collection scripts: {restore}"
+                    ))
+                    .into());
+                }
+
+                return Err(error.into());
+            }
+
+            self.local_env = environment;
+        }
+
+        if scripts_changed {
+            self.scripts = scripts;
+        }
+
+        Ok(())
+    }
+
+    /// The collection's own files, which requests and folders cannot replace.
+    pub(crate) fn reserved_paths(&self) -> [PathBuf; 2] {
+        [
+            self.local_env.path.clone(),
+            self.path.join(SETTINGS_FILE_NAME),
+        ]
     }
 
     pub fn save_files(&mut self) -> Result<(), CollectionSaveError> {
@@ -59,12 +151,62 @@ impl Collection {
     pub fn local_env(&self) -> &Environment {
         &self.local_env
     }
+
+    pub fn scripts(&self) -> &RequestScripts {
+        &self.scripts
+    }
 }
 
-fn load_directory(
-    path: &Path,
-    excluded_path: Option<&Path>,
-) -> Result<DirEntry, CollectionLoadError> {
+fn write_scripts(path: &Path, scripts: &RequestScripts) -> Result<(), CollectionSaveError> {
+    if scripts.is_empty() {
+        return restore_file(path, None).map_err(|source| CollectionSaveError::Write {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+
+    let settings = CollectionSettings {
+        scripts: scripts.clone(),
+    };
+    let content =
+        toml::to_string_pretty(&settings).map_err(|source| CollectionSaveError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    write_file_atomically(path, content.as_bytes()).map_err(|source| CollectionSaveError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Writes `content`, or removes the file when there is none.
+fn restore_file(path: &Path, content: Option<Vec<u8>>) -> io::Result<()> {
+    match content {
+        Some(content) => write_file_atomically(path, &content),
+        None => match fs::remove_file(path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// Whether `path` names one of the `reserved` files. Filesystems can ignore
+/// case, so the comparison does too.
+pub(crate) fn is_reserved(reserved: &[PathBuf], path: &Path) -> bool {
+    reserved.iter().any(|reserved| {
+        reserved.parent() == path.parent()
+            && reserved
+                .file_name()
+                .zip(path.file_name())
+                .is_some_and(|(a, b)| {
+                    a.to_string_lossy()
+                        .eq_ignore_ascii_case(&b.to_string_lossy())
+                })
+    })
+}
+
+fn load_directory(path: &Path, excluded: &[PathBuf]) -> Result<DirEntry, CollectionLoadError> {
     let directory = fs::read_dir(path).map_err(|source| CollectionLoadError::Read {
         path: path.to_path_buf(),
         source,
@@ -84,7 +226,7 @@ fn load_directory(
 
     let mut entries = Vec::new();
     for child_path in paths {
-        if excluded_path == Some(child_path.as_path()) {
+        if excluded.contains(&child_path) {
             continue;
         }
 
@@ -96,10 +238,7 @@ fn load_directory(
             .file_type();
 
         if file_type.is_dir() {
-            entries.push(Entry::Directory(load_directory(
-                &child_path,
-                excluded_path,
-            )?));
+            entries.push(Entry::Directory(load_directory(&child_path, excluded)?));
         } else if file_type.is_file()
             && child_path
                 .extension()

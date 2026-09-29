@@ -12,6 +12,10 @@ pub(crate) struct Variables {
     pub generated: BTreeMap<String, String>,
     #[serde(skip)]
     pub session: Option<environment::EnvironmentSession>,
+    /// Carried from the pre-request phase so the collection's script runs
+    /// before the request's own post-response script.
+    #[serde(skip)]
+    pub collection_post_response: String,
 }
 
 pub(super) use environment::generate_variable as dynamic_variable;

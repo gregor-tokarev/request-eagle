@@ -8,6 +8,19 @@ Scripts run against a snapshot: their request edits affect that send without
 changing the request draft or saved file. An uncaught pre-request error
 prevents the request; a failed `pm.test` does not.
 
+## Collection scripts
+
+Click a collection in the sidebar to open its tab. There you can rename it,
+edit the variables in its `environment.toml`, and write scripts that run for
+every request in the collection. Save with the **Save** button or the save
+shortcut.
+
+In each phase the collection's script runs first, then the request's own
+script. Both scripts share `pm.variables` for that send. If the collection's
+pre-request script fails, the request is not sent. If its post-response script
+fails, the request's own tests still run. The tab stores the scripts in the
+collection's `.request-eagle-collection.toml`.
+
 ## Reuse a response value
 
 ```js
