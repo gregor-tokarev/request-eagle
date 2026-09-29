@@ -59,13 +59,13 @@ pub fn run() {
             }
 
             editor_highlighting.await;
-            cx.update(open_workspace);
+            cx.update(|cx| open_workspace(&home, cx));
         })
         .detach();
     });
 }
 
-fn open_workspace(cx: &mut App) {
+fn open_workspace(home: &std::path::Path, cx: &mut App) {
     request_eagle_theme::init(cx);
 
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
@@ -76,10 +76,12 @@ fn open_workspace(cx: &mut App) {
         None => collection::CollectionRegistry::load(),
     }
     .expect("Failed to load collections");
+    let environments =
+        environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
-        let workspace = workspace::init(collections, updater, window, cx);
+        let workspace = workspace::init(collections, environments, updater, window, cx);
         let view = cx.new(|_| ApplicationView { workspace });
 
         cx.new(|cx| Root::new(view, window, cx))

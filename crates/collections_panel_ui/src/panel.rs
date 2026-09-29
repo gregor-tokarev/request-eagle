@@ -1,10 +1,10 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use collection::{CollectionRegistry, MovePlacement, Request};
+use collection::{CollectionRegistry, MovePlacement, Request, RequestScripts};
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
@@ -16,10 +16,24 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{
     actions::{DeleteItem, RenameItem},
     editing::RenameEditor,
-    tree::CollectionTree,
+    tree::{CollectionTree, ItemKind},
 };
 
 pub enum CollectionPanelEvent {
+    OpenCollection {
+        path: PathBuf,
+        name: SharedString,
+        variables: HashMap<String, String>,
+        scripts: RequestScripts,
+    },
+    CollectionRenamed {
+        previous_path: PathBuf,
+        path: PathBuf,
+        name: SharedString,
+    },
+    CollectionDeleted {
+        path: PathBuf,
+    },
     RequestRelocated {
         id: SharedString,
         previous_path: PathBuf,
@@ -141,6 +155,40 @@ impl CollectionPanel {
         Ok(())
     }
 
+    /// Save a collection tab's edits, renaming its directory when the name
+    /// changed. Returns the collection's path after the save.
+    pub fn save_collection(
+        &mut self,
+        path: &Path,
+        name: &str,
+        variables: HashMap<String, String>,
+        scripts: RequestScripts,
+        cx: &mut Context<Self>,
+    ) -> Result<PathBuf, collection::CollectionEditError> {
+        // Rename first: an invalid or taken name then fails before any file
+        // changes. The rename event keeps the tab in step if a later write fails.
+        let destination = if path.file_name().is_some_and(|current| current == name) {
+            path.to_path_buf()
+        } else {
+            let destination = self.collections.rename(path, name)?;
+            let selected = self.selected.map(|index| {
+                let selected = &self.tree.items[index].path;
+                match selected.strip_prefix(path) {
+                    Ok(relative) => destination.join(relative),
+                    Err(_) => selected.clone(),
+                }
+            });
+            self.rebuild_tree(selected.as_deref(), Some((path, &destination)), cx);
+
+            destination
+        };
+
+        self.collections
+            .update_collection(&destination, variables, scripts)?;
+
+        Ok(destination)
+    }
+
     pub(super) fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {
         self.rows_task = None;
 
@@ -220,8 +268,35 @@ impl CollectionPanel {
         }
     }
 
-    /// Open a request row in a tab; collection and folder rows have no page yet.
-    pub(super) fn open_request(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// Open a collection or request row in a tab; folder rows have no page.
+    pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
+        match self.tree.items[index].kind {
+            ItemKind::Collection => self.open_collection(index, cx),
+            ItemKind::Folder => {}
+            ItemKind::Request(_) => self.open_request(index, cx),
+        }
+    }
+
+    fn open_collection(&mut self, index: usize, cx: &mut Context<Self>) {
+        let item = &self.tree.items[index];
+        let Some(collection) = self
+            .collections
+            .collections()
+            .iter()
+            .find(|collection| collection.path == item.path)
+        else {
+            return;
+        };
+
+        cx.emit(CollectionPanelEvent::OpenCollection {
+            path: item.path.clone(),
+            name: item.label.clone(),
+            variables: collection.local_env().entries.clone(),
+            scripts: collection.scripts().clone(),
+        });
+    }
+
+    fn open_request(&mut self, index: usize, cx: &mut Context<Self>) {
         let item = &self.tree.items[index];
         let Some(file) = self.collections.file(&item.path) else {
             return;
@@ -279,7 +354,7 @@ impl CollectionPanel {
             "up" => self.select_row(row.saturating_sub(1), cx),
             "home" => self.select_row(0, cx),
             "end" => self.select_row(self.visible.len() - 1, cx),
-            "enter" => self.open_request(index, cx),
+            "enter" => self.open(index, cx),
             "space" => self.toggle(index, cx),
             "right" => {
                 if self.collapsed.contains(&index) {
@@ -371,10 +446,6 @@ impl Render for CollectionPanel {
         v_flex()
             .debug_selector(|| "collections-sidebar".into())
             .size_full()
-            .bg(cx.theme().sidebar)
-            .text_color(cx.theme().sidebar_foreground)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
             .child(
                 div()
                     .debug_selector(|| "collections-search".into())

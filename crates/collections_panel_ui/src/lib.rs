@@ -23,7 +23,7 @@ mod search_tests;
 mod tests;
 
 pub use actions::init;
-pub use lookup::{CollectionMatch, EnvironmentMatch, RequestMatch};
+pub use lookup::{CollectionMatch, RequestMatch};
 pub use panel::{CollectionPanel, CollectionPanelEvent};
 
 #[cfg(test)]

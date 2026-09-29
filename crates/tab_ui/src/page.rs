@@ -19,6 +19,8 @@ pub struct TabBadge {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct TabState {
     pub badge: Option<TabBadge>,
+    /// An icon asset shown before the title.
+    pub icon: Option<&'static str>,
     pub dirty: bool,
 }
 

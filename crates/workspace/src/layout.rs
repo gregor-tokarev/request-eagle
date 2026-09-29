@@ -1,11 +1,17 @@
 pub(crate) mod bottom_panel;
 pub(crate) mod command_palette;
+pub(crate) mod environment_panel;
+pub(crate) mod environment_picker;
 pub(crate) mod main_view;
 pub(crate) mod save_request;
 pub(crate) mod top_panel;
 
 #[cfg(test)]
+mod collection_tab_tests;
+#[cfg(test)]
 mod command_palette_tests;
+#[cfg(test)]
+mod environment_tests;
 #[cfg(test)]
 mod main_view_tests;
 

@@ -10,6 +10,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::main_view::MainView;
 use crate::actions::ToggleCommandPalette;
+use tab_ui::Environments;
 
 /// Each group is capped, so a query never builds thousands of rows. The list
 /// only lays out the rows in view. Requests appear only for a query.
@@ -44,9 +45,8 @@ enum Row {
         detail: SharedString,
     },
     Environment {
-        path: PathBuf,
         name: SharedString,
-        detail: SharedString,
+        active: bool,
     },
 }
 
@@ -55,7 +55,7 @@ enum Row {
 pub(crate) struct CommandPalette {
     sidebar: Entity<CollectionPanel>,
     main_view: Entity<MainView>,
-    sidebar_visible: Entity<bool>,
+    environments: Entity<Environments>,
 
     /// Commands available where focus was when the palette opened. Closing
     /// the palette returns focus there, and commands run there.
@@ -77,7 +77,6 @@ impl CommandPalette {
     pub(crate) fn open(
         sidebar: Entity<CollectionPanel>,
         main_view: Entity<MainView>,
-        sidebar_visible: Entity<bool>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<ListState<Self>> {
@@ -106,10 +105,11 @@ impl CommandPalette {
             .collect();
         commands.sort_by_key(|command| command.label);
 
+        let environments = main_view.read(cx).environments.clone();
         let mut palette = Self {
             sidebar,
             main_view,
-            sidebar_visible,
+            environments,
             commands,
             groups: Default::default(),
             selected: None,
@@ -189,16 +189,15 @@ impl CommandPalette {
             })
             .collect();
 
-        self.groups[ENVIRONMENTS] = sidebar
-            .find_environments(&query, RESULT_LIMIT)
-            .into_iter()
-            .map(|environment| Row::Environment {
-                path: environment.path,
-                name: environment.name,
-                detail: match environment.variable_count {
-                    1 => "1 variable".into(),
-                    count => format!("{count} variables").into(),
-                },
+        let environments = self.environments.read(cx);
+        self.groups[ENVIRONMENTS] = environments
+            .names()
+            .iter()
+            .filter(|name| name.to_lowercase().contains(&query))
+            .take(RESULT_LIMIT)
+            .map(|name| Row::Environment {
+                name: name.clone(),
+                active: environments.active() == Some(name),
             })
             .collect();
     }
@@ -262,12 +261,10 @@ impl CommandPalette {
                 )
                 .child(label(name.clone()))
                 .child(detail(text.clone(), cx)),
-            Row::Environment {
-                name, detail: text, ..
-            } => content
+            Row::Environment { name, active } => content
                 .child(Icon::new(IconName::Globe).size_4().text_color(muted))
                 .child(label(name.clone()))
-                .child(detail(text.clone(), cx)),
+                .when(*active, |row| row.child(detail("Active".into(), cx))),
         }
     }
 }
@@ -409,21 +406,16 @@ impl ListDelegate for CommandPalette {
             Row::Command(index) => {
                 window.dispatch_action(self.commands[*index].action.boxed_clone(), cx)
             }
-            Row::Request(request) => {
+            Row::Request(RequestMatch { path, .. }) | Row::Collection { path, .. } => {
                 self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open_request_at(&request.path, cx));
+                    .update(cx, |sidebar, cx| sidebar.open_at(path, cx));
                 self.main_view.update(cx, |view, cx| view.focus(window, cx));
             }
-            Row::Collection { path, .. } => {
-                self.sidebar_visible.update(cx, |visible, cx| {
-                    *visible = true;
-                    cx.notify();
+            Row::Environment { name, .. } => {
+                self.main_view.update(cx, |view, cx| {
+                    view.open_environment(name.clone(), window, cx)
                 });
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.reveal(path, window, cx));
             }
-            // Environments have no page yet; edit the file where it is kept.
-            Row::Environment { path, .. } => cx.open_with_system(path),
         }
     }
 }

@@ -1,5 +1,6 @@
 use super::super::request_fields::{FieldsChanged, RequestFields};
 use crate::{
+    script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -36,13 +37,11 @@ pub struct RequestDraft {
     pub(super) body_vim: Option<Entity<crate::vim::Vim>>,
     pub(super) body_json_valid: bool,
     pub(super) body_task: Option<Task<()>>,
-    pub(super) script_editors: [Option<Entity<EditorState>>; 2],
-    pub(super) script_vim: [Option<Entity<crate::vim::Vim>>; 2],
-    pub(super) script_signatures: [Option<Entity<super::script_signature::ScriptSignature>>; 2],
-    pub(super) script_phase: request::ScriptPhase,
+    pub(crate) scripts: Option<Entity<ScriptEditor>>,
     pub(super) variable_scope: Option<Entity<VariableScope>>,
     variable_path: Option<std::path::PathBuf>,
     variable_sessions: environment::EnvironmentSessions,
+    environments: Option<Entity<crate::Environments>>,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
@@ -90,13 +89,11 @@ impl RequestDraft {
             body_vim: None,
             body_json_valid: false,
             body_task: None,
-            script_editors: [None, None],
-            script_vim: [None, None],
-            script_signatures: [None, None],
-            script_phase: request::ScriptPhase::PreRequest,
+            scripts: None,
             variable_scope: None,
             variable_path: None,
             variable_sessions: environment::EnvironmentSessions::default(),
+            environments: None,
             url_completion: None,
             body_completion: None,
             response: None,
@@ -164,6 +161,18 @@ impl RequestDraft {
         }
     }
 
+    /// Use the workspace's active global environment when resolving variables.
+    pub fn set_environments(&mut self, environments: Entity<crate::Environments>, cx: &mut App) {
+        self.environments = Some(environments.clone());
+
+        if let Some(scope) = &self.variable_scope {
+            scope.update(cx, |scope, cx| {
+                scope.environments = Some(environments);
+                cx.notify();
+            });
+        }
+    }
+
     pub(super) fn variables(&mut self, cx: &mut Context<Self>) -> Entity<VariableScope> {
         self.variable_scope
             .get_or_insert_with(|| {
@@ -172,6 +181,7 @@ impl RequestDraft {
                     session: self
                         .variable_sessions
                         .for_path(self.variable_path.as_deref()),
+                    environments: self.environments.clone(),
                 })
             })
             .clone()
@@ -250,6 +260,35 @@ impl RequestDraft {
                 url
             })
             .clone()
+    }
+
+    pub(super) fn script_editor(&mut self, cx: &mut Context<Self>) -> Entity<ScriptEditor> {
+        self.scripts
+            .get_or_insert_with(|| {
+                let scripts = cx.new(|_| {
+                    ScriptEditor::new(self.request.scripts.clone(), ScriptTarget::Request)
+                });
+                self._subscriptions.push(cx.subscribe(
+                    &scripts,
+                    |this, _, event: &ScriptsChanged, cx| {
+                        this.request.scripts = event.0.clone();
+                        cx.notify();
+                    },
+                ));
+
+                scripts
+            })
+            .clone()
+    }
+
+    /// The editor of the selected script phase.
+    pub(super) fn script_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
+        self.script_editor(cx)
+            .update(cx, |scripts, cx| scripts.editor(window, cx))
     }
 
     fn fields_state(
@@ -382,7 +421,7 @@ impl Render for RequestConfiguration {
                 let content = match draft.section {
                     RequestSection::Headers | RequestSection::Params => draft.fields(window, cx),
                     RequestSection::Body => draft.body(window, cx),
-                    RequestSection::Scripts => draft.scripts(window, cx),
+                    RequestSection::Scripts => draft.script_editor(cx).into_any_element(),
                 };
 
                 v_flex()
@@ -424,6 +463,7 @@ impl crate::TabPage for RequestDraft {
                     _ => TabBadgeTone::Danger,
                 },
             }),
+            icon: None,
             dirty: self.is_dirty(),
         }
     }

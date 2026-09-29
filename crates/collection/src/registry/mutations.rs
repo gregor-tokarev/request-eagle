@@ -1,12 +1,16 @@
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
 };
 
+use environment::EnvironmentSaveError;
 use thiserror::Error;
 
-use crate::collection::{load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request};
+use crate::collection::{is_reserved, load_file, save_file};
+use crate::{
+    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request, RequestScripts,
+};
 
 impl CollectionRegistry {
     /// Saves a request without replacing its identity or externally edited metadata.
@@ -38,6 +42,21 @@ impl CollectionRegistry {
         Err(CollectionEditError::NotFound)
     }
 
+    /// Saves the collection's variables to `environment.toml` and its scripts
+    /// to the settings file, leaving unchanged files as they are.
+    pub fn update_collection(
+        &mut self,
+        path: &Path,
+        variables: HashMap<String, String>,
+        scripts: RequestScripts,
+    ) -> Result<(), CollectionEditError> {
+        self.collections
+            .iter_mut()
+            .find(|collection| collection.path == path)
+            .ok_or(CollectionEditError::NotFound)?
+            .save_settings(variables, scripts)
+    }
+
     /// Request names live in TOML; collection and folder names live on disk.
     pub fn rename(&mut self, path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
         let name = name.trim();
@@ -46,6 +65,7 @@ impl CollectionRegistry {
         }
 
         for collection in &mut self.collections {
+            let reserved = collection.reserved_paths();
             if collection.path == path {
                 let destination = rename_directory(path, name)?;
                 rebase_entries(&mut collection.entries, path, &destination);
@@ -65,6 +85,9 @@ impl CollectionRegistry {
                         return Ok(path.to_path_buf());
                     }
                     Entry::Directory(folder) => {
+                        if is_reserved(&reserved, &path.with_file_name(name)) {
+                            return Err(CollectionEditError::ReservedName);
+                        }
                         let destination = rename_directory(path, name)?;
                         rebase_entries(&mut folder.entries, path, &destination);
                         folder.path = destination.clone();
@@ -205,6 +228,8 @@ pub enum CollectionEditError {
     InvalidName,
     #[error("An item with that name already exists.")]
     AlreadyExists,
+    #[error("That name is reserved for the collection's settings.")]
+    ReservedName,
     #[error("This item is no longer in the collection.")]
     NotFound,
     #[error("This request was replaced by a different request. Your edits have not been saved.")]
@@ -217,4 +242,6 @@ pub enum CollectionEditError {
     Load(#[from] CollectionLoadError),
     #[error("{0}")]
     Save(#[from] CollectionSaveError),
+    #[error("{0}")]
+    Environment(#[from] EnvironmentSaveError),
 }

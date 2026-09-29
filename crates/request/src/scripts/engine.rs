@@ -109,6 +109,7 @@ pub(super) fn run(
     });
     let report = Arc::new(Mutex::new(ScriptReport {
         phase,
+        collection: false,
         tests: Vec::new(),
         logs: Vec::new(),
         error: None,

@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::mutations::rebase_entries;
-use crate::{CollectionEditError, CollectionRegistry, order};
+use crate::{CollectionEditError, CollectionRegistry, collection::is_reserved, order};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MovePlacement {
@@ -23,6 +23,7 @@ impl CollectionRegistry {
         if source == target {
             return Err(CollectionEditError::InvalidMove);
         }
+        let reserved = self.reserved_paths();
         let source_parent = source.parent().ok_or(CollectionEditError::NotFound)?;
         let source_entries = self
             .entries_mut(source_parent)
@@ -59,6 +60,9 @@ impl CollectionRegistry {
             }
         };
         let destination = parent.join(source.file_name().ok_or(CollectionEditError::NotFound)?);
+        if is_reserved(&reserved, &destination) {
+            return Err(CollectionEditError::ReservedName);
+        }
         if destination != source {
             match fs::symlink_metadata(&destination) {
                 Ok(_) => return Err(CollectionEditError::AlreadyExists),

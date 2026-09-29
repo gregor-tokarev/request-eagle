@@ -31,7 +31,9 @@ pub fn valid_variable_name(name: &str) -> bool {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum VariableError {
-    #[error("Unknown variable {{{{{0}}}}}. Check the name and collection environment.")]
+    #[error(
+        "Unknown variable {{{{{0}}}}}. Check the name, the active environment, and the collection variables."
+    )]
     Unknown(String),
     #[error("Unclosed variable. Complete the reference with }}}} before sending.")]
     Unclosed,

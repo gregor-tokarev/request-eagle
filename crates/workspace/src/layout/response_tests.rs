@@ -33,6 +33,7 @@ fn search_shortcut_preserves_response_search(cx: &mut TestAppContext) {
     let (layout, cx) = cx.add_window_view(|window, cx| {
         crate::workspace::Layout::new(
             collection::CollectionRegistry::new(),
+            crate::tests::no_environments(),
             updater::init("1.2.3", cx),
             window,
             cx,
@@ -97,6 +98,7 @@ fn minimum_workspace_keeps_request_fields_and_response_visible_at_each_zoom(
         let view = cx.new(|cx| {
             crate::workspace::Layout::new(
                 collection::CollectionRegistry::new(),
+                crate::tests::no_environments(),
                 updater::init("1.2.3", cx),
                 window,
                 cx,

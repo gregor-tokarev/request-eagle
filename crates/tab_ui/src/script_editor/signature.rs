@@ -259,12 +259,21 @@ mod tests {
     use core::prelude::v1::test;
     use lsp_types::ParameterInformation;
 
+    fn script_signature(
+        draft: &Entity<crate::RequestDraft>,
+        index: usize,
+        cx: &App,
+    ) -> Entity<ScriptSignature> {
+        let scripts = draft.read(cx).scripts.as_ref().unwrap();
+        scripts.read(cx).signatures[index].clone().unwrap()
+    }
+
     #[gpui_kit::test]
     async fn signature_stays_visible_while_typing_and_updates_after_refresh(
         cx: &mut TestAppContext,
     ) {
         let (draft, editor, cx) = script_editor(cx, true);
-        let signature = cx.read(|cx| draft.read(cx).script_signatures[1].clone().unwrap());
+        let signature = cx.read(|cx| script_signature(&draft, 1, cx));
         cx.simulate_input("pm.test('");
         wait_for(cx, |cx| {
             cx.read(|cx| signature.read(cx).help.is_some() && signature.read(cx).task.is_none())
@@ -304,7 +313,7 @@ mod tests {
     #[gpui_kit::test]
     async fn signature_dismissal_cancels_pending_refresh(cx: &mut TestAppContext) {
         let (draft, editor, cx) = script_editor(cx, false);
-        let signature = cx.read(|cx| draft.read(cx).script_signatures[0].clone().unwrap());
+        let signature = cx.read(|cx| script_signature(&draft, 0, cx));
 
         for dismiss in ["escape", "selection", "blur"] {
             cx.update(|window, cx| {
@@ -411,7 +420,7 @@ mod tests {
     #[gpui_kit::test]
     async fn signature_follows_horizontal_scroll_and_hides_offscreen(cx: &mut TestAppContext) {
         let (draft, editor, cx) = script_editor(cx, true);
-        let signature = cx.read(|cx| draft.read(cx).script_signatures[1].clone().unwrap());
+        let signature = cx.read(|cx| script_signature(&draft, 1, cx));
         cx.simulate_resize(size(px(2400.), px(1000.)));
         let source = format!("{}pm.test('{}');", "// line\n".repeat(80), "s".repeat(500));
         let cursor = source.len() - 303;

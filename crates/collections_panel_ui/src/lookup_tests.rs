@@ -1,6 +1,6 @@
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
-use gpui_kit::{Entity, Focusable, TestAppContext, VisualTestContext};
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 
 use super::{CollectionPanel, CollectionPanelEvent, RequestMatch, tests::collections};
 
@@ -23,7 +23,7 @@ fn find_requests(
 }
 
 #[gpui_kit::test]
-fn finds_collections_requests_and_environments_by_name(cx: &mut TestAppContext) {
+fn finds_collections_and_requests_by_name(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -44,23 +44,8 @@ fn finds_collections_requests_and_environments_by_name(cx: &mut TestAppContext) 
         assert_eq!(collections.len(), 1);
         assert_eq!(collections[0].name, "Status API");
 
-        let environments = sidebar.find_environments("", 10);
-        assert_eq!(environments.len(), 2);
-        assert_eq!(environments[0].name, "Example API");
-        assert_eq!(environments[0].variable_count, 1);
-        assert!(
-            environments[0]
-                .path
-                .ends_with("Example API/environment.toml")
-        );
-
-        // Variable names find the environment that defines them.
-        assert_eq!(sidebar.find_environments("BASE_URL", 10).len(), 2);
-        assert!(sidebar.find_environments("token", 10).is_empty());
-
-        // Limits apply to every group, not only requests.
+        // Limits apply to collections, not only requests.
         assert_eq!(sidebar.find_collections("", 1).len(), 1);
-        assert_eq!(sidebar.find_environments("", 1).len(), 1);
     });
 
     assert!(find_requests(&sidebar, "", 10, cx).is_empty());
@@ -80,7 +65,7 @@ fn finds_collections_requests_and_environments_by_name(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
-fn reveals_and_opens_rows_by_path(cx: &mut TestAppContext) {
+fn opens_collections_and_requests_by_path(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -92,11 +77,16 @@ fn reveals_and_opens_rows_by_path(cx: &mut TestAppContext) {
     let opened = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
     cx.update(|_, cx| {
         let opened = opened.clone();
-        cx.subscribe(&sidebar, move |_, event: &CollectionPanelEvent, _| {
-            if let CollectionPanelEvent::OpenRequest { path, .. } = event {
-                opened.borrow_mut().push(path.clone());
-            }
-        })
+        cx.subscribe(
+            &sidebar,
+            move |_, event: &CollectionPanelEvent, _| match event {
+                CollectionPanelEvent::OpenRequest { path, .. }
+                | CollectionPanelEvent::OpenCollection { path, .. } => {
+                    opened.borrow_mut().push(path.clone())
+                }
+                _ => {}
+            },
+        )
         .detach();
     });
 
@@ -107,61 +97,13 @@ fn reveals_and_opens_rows_by_path(cx: &mut TestAppContext) {
             .clone()
     });
 
-    // Filter and collapse the tree so the target row starts hidden.
-    let search = cx.read(|cx| sidebar.read(cx).search.clone());
-    cx.update(|window, cx| search.update(cx, |input, cx| input.focus(window, cx)));
-    cx.simulate_input("comment");
-    cx.run_until_parked();
     cx.update(|_, cx| {
         sidebar.update(cx, |sidebar, cx| {
-            let index = sidebar.tree.roots[1];
-            sidebar.collapsed.insert(index);
-            sidebar.unfiltered_rows = None;
-            sidebar.refresh_rows(false, cx);
+            sidebar.open_at(&request, cx);
+            sidebar.open_at(&status, cx);
+            // Paths outside the tree open nothing.
+            sidebar.open_at(&status.join("missing.toml"), cx);
         })
     });
-    cx.run_until_parked();
-
-    cx.update(|window, cx| sidebar.update(cx, |sidebar, cx| sidebar.reveal(&request, window, cx)));
-    cx.run_until_parked();
-
-    cx.update(|window, cx| {
-        let panel = sidebar.read(cx);
-        let selected = panel.selected.unwrap();
-
-        assert_eq!(panel.tree.items[selected].path, request);
-        assert!(panel.visible.contains(&selected));
-        assert!(panel.query.is_empty());
-        assert!(panel.search.read(cx).value().is_empty());
-        assert!(panel.focus_handle(cx).is_focused(window));
-    });
-
-    // A collapsed collection is expanded when it is revealed.
-    cx.update(|_, cx| {
-        sidebar.update(cx, |sidebar, cx| {
-            let index = sidebar.tree.roots[1];
-            sidebar.collapsed.insert(index);
-            sidebar.unfiltered_rows = None;
-            sidebar.refresh_rows(false, cx);
-        })
-    });
-    cx.run_until_parked();
-    cx.update(|window, cx| sidebar.update(cx, |sidebar, cx| sidebar.reveal(&status, window, cx)));
-    cx.read(|cx| {
-        let panel = sidebar.read(cx);
-        let selected = panel.selected.unwrap();
-
-        assert_eq!(panel.tree.items[selected].path, status);
-        assert!(!panel.collapsed.contains(&selected));
-        assert!(panel.visible.contains(&(selected + 1)));
-    });
-
-    cx.update(|_, cx| {
-        sidebar.update(cx, |sidebar, cx| {
-            sidebar.open_request_at(&request, cx);
-            // Collection rows have no page to open.
-            sidebar.open_request_at(&status, cx);
-        })
-    });
-    assert_eq!(*opened.borrow(), [request]);
+    assert_eq!(*opened.borrow(), [request, status]);
 }

@@ -100,7 +100,7 @@ impl RequestDraft {
 
         let scope = self.variables(cx);
         let request = self.request.clone();
-        let variables = scope.read(cx).request_variables();
+        let variables = scope.read(cx).request_variables(cx);
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())

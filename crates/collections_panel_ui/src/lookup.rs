@@ -1,9 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Path, PathBuf};
 
-use gpui_kit::{App, Context, Focusable as _, SharedString, Task, Window};
+use gpui_kit::{App, Context, SharedString, Task};
 
 use super::{
     CollectionPanel,
@@ -24,17 +21,10 @@ pub struct RequestMatch {
     pub location: SharedString,
 }
 
-/// A collection's `environment.toml`, named after its collection.
-pub struct EnvironmentMatch {
-    pub path: PathBuf,
-    pub name: SharedString,
-    pub variable_count: usize,
-}
-
 /// Lookups for callers outside the sidebar, such as the command palette.
 /// Queries are matched case-insensitively; an empty query matches every
-/// collection and environment, but no requests. Each returns at most `limit`
-/// matches, in tree order.
+/// collection, but no requests. Each returns at most `limit` matches, in tree
+/// order.
 impl CollectionPanel {
     pub fn find_collections(&self, query: &str, limit: usize) -> Vec<CollectionMatch> {
         let query = query.to_lowercase();
@@ -64,78 +54,11 @@ impl CollectionPanel {
             .spawn(async move { request_matches(&tree, &query, limit) })
     }
 
-    /// Environments whose collection or variable names contain the query.
-    /// Uses the variables loaded with the collections, so it never reads the
-    /// disk; collections without environment variables are skipped.
-    pub fn find_environments(&self, query: &str, limit: usize) -> Vec<EnvironmentMatch> {
-        let query = query.to_lowercase();
-
-        self.collections
-            .collections()
-            .iter()
-            .filter_map(|collection| {
-                let environment = collection.local_env();
-                if environment.entries.is_empty() {
-                    return None;
-                }
-
-                let name = collection
-                    .path
-                    .file_name()
-                    .unwrap_or(collection.path.as_os_str())
-                    .to_string_lossy()
-                    .into_owned();
-
-                let matches = name.to_lowercase().contains(&query)
-                    || environment
-                        .entries
-                        .keys()
-                        .any(|variable| variable.to_lowercase().contains(&query));
-
-                matches.then(|| EnvironmentMatch {
-                    path: environment.path.clone(),
-                    name: name.into(),
-                    variable_count: environment.entries.len(),
-                })
-            })
-            .take(limit)
-            .collect()
-    }
-
-    /// Open a request in a tab, as if its row were activated.
-    pub fn open_request_at(&mut self, path: &Path, cx: &mut Context<Self>) {
+    /// Open a collection or request in a tab, as if its row were activated.
+    pub fn open_at(&mut self, path: &Path, cx: &mut Context<Self>) {
         if let Some(index) = self.tree.items.iter().position(|item| item.path == path) {
-            self.open_request(index, cx);
+            self.open(index, cx);
         }
-    }
-
-    /// Clear the filter, expand the row's ancestors, then select and focus it.
-    pub fn reveal(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.tree.items.iter().position(|item| item.path == path) else {
-            return;
-        };
-
-        self.query.clear();
-        self.search
-            .update(cx, |search, cx| search.set_value("", window, cx));
-
-        // Expand the row itself too, so a revealed collection shows its requests.
-        let mut row = Some(index);
-        while let Some(expanded) = row {
-            self.collapsed.remove(&expanded);
-            row = self.tree.items[expanded].parent;
-        }
-
-        self.rows_task = None;
-        let rows = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
-        self.unfiltered_rows = Some(rows.clone());
-        self.apply_rows(rows, false, cx);
-
-        if let Ok(row) = self.visible.binary_search(&index) {
-            self.select_row(row, cx);
-        }
-
-        window.focus(&self.focus_handle(cx), cx);
     }
 }
 

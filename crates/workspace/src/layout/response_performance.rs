@@ -58,7 +58,15 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
     let header_count = headers.len();
     let collections = crate::performance::collections(1_000);
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let layout = cx.new(|cx| Layout::new(collections, updater::init("1.2.3", cx), window, cx));
+        let layout = cx.new(|cx| {
+            Layout::new(
+                collections,
+                crate::tests::no_environments(),
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
         let tabs = layout.read(cx).main_view.clone();
         let draft = tabs.read(cx).tabs[0]
             .page

@@ -507,3 +507,110 @@ fn cancellation_during_script_http_does_not_commit_environment_or_send_main() {
             .any(|request| request.starts_with("GET /main"))
     );
 }
+
+fn collection_scripts(pre: &str, post: &str) -> Result<crate::RequestScripts, String> {
+    Ok(crate::RequestScripts {
+        pre_request: pre.into(),
+        post_response: post.into(),
+    })
+}
+
+#[test]
+fn collection_scripts_run_before_the_request_scripts_in_each_phase() {
+    let server = Server::new();
+    let session = EnvironmentSession::default();
+    let request = server.request(
+        "pm.test('sees collection values', () => pm.expect(pm.variables.get('order')).to.equal('collection'));
+         pm.variables.set('order', 'request');",
+        "pm.test('sees collection token', () => pm.expect(pm.environment.get('token')).to.equal('session-token'));",
+    );
+    let variables = variables(&session).with_collection_scripts(collection_scripts(
+        "pm.variables.set('order', 'collection');
+         pm.request.headers.upsert({key: 'X-Collection', value: '{{order}}'});",
+        "pm.environment.set('token', pm.response.json().token);",
+    ));
+
+    let execution = smol::block_on(
+        server
+            .executor()
+            .execute_with_variables(&request, variables),
+    )
+    .unwrap();
+
+    let labels: Vec<_> = execution
+        .scripts
+        .iter()
+        .map(|report| report.label())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Collection pre-request",
+            "Pre-request",
+            "Collection post-response",
+            "Post-response"
+        ]
+    );
+    assert!(execution.scripts.iter().all(
+        |report| report.error.is_none() && report.tests.iter().all(|test| test.error.is_none())
+    ));
+    // The request script's value replaces the collection's before variables resolve.
+    assert!(
+        server.requests.lock().unwrap()[0]
+            .to_lowercase()
+            .contains("x-collection: request")
+    );
+}
+
+#[test]
+fn a_failing_request_script_keeps_the_collection_report_and_sends_nothing() {
+    let server = Server::new();
+    let request = server.request("throw new Error('request failed');", "");
+    let variables = RequestVariables::new(VariableValues::default(), None)
+        .with_collection_scripts(collection_scripts("console.log('collection ran');", ""));
+
+    let error = smol::block_on(
+        server
+            .executor()
+            .execute_with_variables(&request, variables),
+    )
+    .unwrap_err();
+
+    let ExecutionError::ScriptedRequest { source, reports } = error else {
+        panic!("expected both script reports, got {error}");
+    };
+    assert!(matches!(*source, ExecutionError::Script { .. }));
+    assert_eq!(reports.len(), 2);
+    assert!(reports[0].collection);
+    assert_eq!(reports[0].logs[0].message, "collection ran");
+    assert!(!reports[1].collection);
+    assert!(
+        reports[1]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("request failed")
+    );
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unreadable_collection_scripts_stop_the_send() {
+    let server = Server::new();
+    let variables = RequestVariables::new(VariableValues::default(), None)
+        .with_collection_scripts(Err("Could not read the collection scripts".into()));
+
+    let error = smol::block_on(
+        server
+            .executor()
+            .execute_with_variables(server.request("", ""), variables),
+    )
+    .unwrap_err();
+
+    let ExecutionError::Script { message, report } = error else {
+        panic!("expected a script error, got {error}");
+    };
+    assert_eq!(message, "Could not read the collection scripts");
+    assert_eq!(report.label(), "Collection pre-request");
+    assert!(server.requests.lock().unwrap().is_empty());
+}

@@ -8,6 +8,19 @@ Scripts run against a snapshot: their request edits affect that send without
 changing the request draft or saved file. An uncaught pre-request error
 prevents the request; a failed `pm.test` does not.
 
+## Collection scripts
+
+Click a collection in the sidebar to open its tab. There you can rename it,
+edit the variables in its `environment.toml`, and write scripts that run for
+every request in the collection. Save with the **Save** button or the save
+shortcut.
+
+In each phase the collection's script runs first, then the request's own
+script. Both scripts share `pm.variables` for that send. If the collection's
+pre-request script fails, the request is not sent. If its post-response script
+fails, the request's own tests still run. The tab stores the scripts in the
+collection's `.request-eagle-collection.toml`.
+
 ## Reuse a response value
 
 ```js
@@ -18,6 +31,11 @@ pm.environment.set("token", pm.response.json().token);
 Other requests in the same collection can then use `Bearer {{token}}`. Session
 values last until the workspace closes and are never written to
 `environment.toml`.
+
+File values come from the collection's `environment.toml` and from the global
+environment selected in the tab bar. The selected environment's values take
+precedence. Global environments are stored in
+`~/.request-eagle/environments/<name>.toml`.
 
 | API | Behavior |
 | --- | --- |

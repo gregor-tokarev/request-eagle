@@ -220,6 +220,67 @@ fn runs_saved_requests_with_variables_scripts_and_lossless_responses() {
 }
 
 #[test]
+fn collection_scripts_are_listed_and_need_trust_to_run() {
+    let cli = Cli::new();
+    cli.call(json!({"command":"settings.proxy","mode":"disabled"}));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut received = Vec::new();
+        let mut buffer = [0; 1024];
+        while !received.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).unwrap();
+            assert_ne!(count, 0);
+            received.extend_from_slice(&buffer[..count]);
+        }
+        assert!(
+            String::from_utf8(received)
+                .unwrap()
+                .to_lowercase()
+                .contains("x-collection: shared")
+        );
+        socket
+            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+            .unwrap();
+    });
+    let collection = cli.collection();
+    let directory = Path::new(collection.as_str().unwrap());
+    fs::write(
+        directory.join("environment.toml"),
+        format!("base = {url:?}\n"),
+    )
+    .unwrap();
+    fs::write(
+        directory.join(".request-eagle-collection.toml"),
+        "[scripts]\npre_request = \"pm.request.headers.add({key: 'X-Collection', value: 'shared'});\"\n",
+    )
+    .unwrap();
+    let created = cli.create(&collection, json!({"method":"GET", "url":"{{base}}/plain"}));
+
+    let details = cli.call(json!({"command":"collections.get","path":collection}));
+    assert!(
+        details["scripts"]["pre_request"]
+            .as_str()
+            .unwrap()
+            .contains("X-Collection")
+    );
+    assert_eq!(details["variables"]["base"], url);
+    // The settings file is not listed as a request.
+    assert_eq!(details["entries"].as_array().unwrap().len(), 1);
+
+    let (code, _) = cli.raw(&json!({"command":"requests.run","path":created["path"]}).to_string());
+    assert_eq!(code, 1);
+    let response = cli.call(json!({"command":"requests.run","path":created["path"],"trust_scripts":true,"timeout_ms":5000}));
+    server.join().unwrap();
+    assert_eq!(response["status"], 204);
+    assert_eq!(response["scripts"][0]["collection"], true);
+}
+
+#[test]
 fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
     let cli = Cli::new();
     cli.call(json!({"command":"settings.request","timeout_ms":1200,"follow_all_redirects":false}));

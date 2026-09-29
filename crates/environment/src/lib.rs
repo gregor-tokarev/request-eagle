@@ -1,8 +1,11 @@
 mod environment;
+mod global;
 mod registry;
 mod session;
 mod variables;
 
+#[cfg(test)]
+mod global_tests;
 #[cfg(test)]
 mod session_tests;
 #[cfg(test)]
@@ -11,6 +14,7 @@ mod tests;
 mod variable_tests;
 
 pub use environment::{Environment, EnvironmentLoadError, EnvironmentSaveError};
+pub use global::{GlobalEnvironmentError, GlobalEnvironments};
 pub use registry::EnvironmentRegistry;
 pub use session::{EnvironmentSession, EnvironmentSessions};
 pub use variables::{
