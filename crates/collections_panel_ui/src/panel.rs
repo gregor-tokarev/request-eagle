@@ -7,7 +7,6 @@ use std::{
 use collection::{CollectionRegistry, MovePlacement};
 
 use gpui_kit::component::{
-    button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     scroll::Scrollbar,
     *,
@@ -129,6 +128,15 @@ impl CollectionPanel {
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
         }
+    }
+
+    pub fn collection_count(&self) -> usize {
+        self.tree.roots.len()
+    }
+
+    /// Whether focus is in the search field or the tree.
+    pub fn contains_focus(&self, window: &Window, cx: &App) -> bool {
+        self.focus.contains_focused(window, cx) || self.search.focus_handle(cx).is_focused(window)
     }
 
     pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -387,7 +395,8 @@ impl Render for CollectionPanel {
                 div()
                     .debug_selector(|| "collections-search".into())
                     .flex_none()
-                    .p_2()
+                    .px_2()
+                    .pb_2()
                     // Input actions consume these keys, so transfer focus in capture phase.
                     .capture_key_down(cx.listener(Self::on_search_key_down))
                     .child(
@@ -395,38 +404,6 @@ impl Render for CollectionPanel {
                             .small()
                             .prefix(IconName::Search)
                             .cleanable(true),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h_8()
-                    .px_4()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Collections"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.tree.roots.len().to_string()),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("new-collection")
-                            .debug_selector(|| "new-collection".into())
-                            .icon(IconName::Plus)
-                            .tooltip("New Collection")
-                            .ghost()
-                            .xsmall()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.create_collection(window, cx)
-                            })),
                     ),
             )
             .when_some(self.error.clone(), |this, error| {

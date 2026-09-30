@@ -10,7 +10,6 @@ use tab_ui::Environments;
 pub(crate) enum EnvironmentPanelEvent {
     Open(SharedString),
     Rename(SharedString),
-    Create,
 }
 
 /// The sidebar section that lists global environments.
@@ -318,39 +317,6 @@ impl Render for EnvironmentPanel {
         v_flex()
             .debug_selector(|| "environments-sidebar".into())
             .size_full()
-            .pt_2()
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h_8()
-                    .px_4()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Environments"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(names.len().to_string()),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("new-environment")
-                            .debug_selector(|| "new-environment".into())
-                            .icon(IconName::Plus)
-                            .tooltip("New Environment")
-                            .ghost()
-                            .xsmall()
-                            .on_click(
-                                cx.listener(|_, _, _, cx| cx.emit(EnvironmentPanelEvent::Create)),
-                            ),
-                    ),
-            )
             .when_some(error, |this, error| {
                 this.child(
                     div()

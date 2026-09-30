@@ -2,8 +2,8 @@ use std::fs;
 
 use collection::CollectionRegistry;
 use gpui_kit::{
-    AppContext, Entity, Focusable, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, TestAppContext, VisualTestContext, component::Root, px, size,
+    AppContext, Entity, Focusable, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+    TestAppContext, VisualTestContext, component::Root, px, size,
 };
 
 use tempfile::TempDir;
@@ -258,16 +258,7 @@ fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAp
     let fixture = fixture();
     fs::remove_dir_all(fixture.path()).unwrap();
     let (sidebar, cx) = sidebar(&fixture, cx);
-    cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
-    cx.simulate_keystrokes("tab");
-    cx.run_until_parked();
-    let keystroke = Keystroke::parse("enter").unwrap();
-    cx.simulate_event(KeyDownEvent {
-        keystroke: keystroke.clone(),
-        is_held: false,
-        prefer_character_input: false,
-    });
-    cx.simulate_event(KeyUpEvent { keystroke });
+    cx.update(|window, cx| sidebar.update(cx, |sidebar, cx| sidebar.create_collection(window, cx)));
     cx.run_until_parked();
     assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
     cx.update(|window, cx| {

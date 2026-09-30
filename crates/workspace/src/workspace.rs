@@ -14,11 +14,11 @@ use environment::GlobalEnvironments;
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
+    button::{Button, ButtonVariants},
     resizable::{ResizableState, h_resizable, resizable_panel},
-    tab::{Tab, TabBar},
     *,
 };
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use tab_ui::{Environments, RequestLocation};
 use updater::Updater;
@@ -33,7 +33,10 @@ pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
     pub(crate) sidebar: Entity<CollectionPanel>,
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
-    sidebar_section: SidebarSection,
+    collections_open: bool,
+    environments_open: bool,
+    pub(crate) collections_header: FocusHandle,
+    environments_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -164,7 +167,6 @@ impl Workspace {
                     EnvironmentPanelEvent::Rename(name) => {
                         view.rename_environment(name.clone(), window, cx)
                     }
-                    EnvironmentPanelEvent::Create => view.create_environment(window, cx),
                 });
             },
         );
@@ -176,7 +178,10 @@ impl Workspace {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
-            sidebar_section: SidebarSection::Collections,
+            collections_open: true,
+            environments_open: true,
+            collections_header: cx.focus_handle(),
+            environments_header: cx.focus_handle(),
             main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -274,72 +279,195 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(crate) fn show_sidebar_section(
+    pub(crate) fn toggle_sidebar_section(
         &mut self,
         section: SidebarSection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar_section = section;
+        let (open, contains_focus, header) = match section {
+            SidebarSection::Collections => {
+                self.collections_open = !self.collections_open;
 
-        match section {
-            SidebarSection::Collections => window.focus(&self.sidebar.focus_handle(cx), cx),
-            SidebarSection::Environments => {
-                window.focus(&self.environment_panel.focus_handle(cx), cx)
+                (
+                    self.collections_open,
+                    self.sidebar.read(cx).contains_focus(window, cx),
+                    &self.collections_header,
+                )
             }
+            SidebarSection::Environments => {
+                self.environments_open = !self.environments_open;
+
+                (
+                    self.environments_open,
+                    self.environment_panel
+                        .focus_handle(cx)
+                        .contains_focused(window, cx),
+                    &self.environments_header,
+                )
+            }
+        };
+
+        // Keys must not go to the rows of a folded section. Its header can
+        // open it again.
+        if !open && contains_focus {
+            window.focus(header, cx);
         }
 
         cx.notify();
     }
 
-    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let content = match self.sidebar_section {
-            SidebarSection::Collections => self
-                .sidebar
-                .clone()
-                .cached(StyleRefinement::default().size_full())
-                .into_any_element(),
-            SidebarSection::Environments => self
-                .environment_panel
-                .clone()
-                .cached(StyleRefinement::default().size_full())
-                .into_any_element(),
+    fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The new collection is named in the tree, so it must be visible.
+        self.collections_open = true;
+        cx.notify();
+
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
+    }
+
+    fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.environments_open = true;
+        cx.notify();
+
+        self.main_view
+            .update(cx, |view, cx| view.create_environment(window, cx));
+    }
+
+    fn section_header(
+        &self,
+        section: SidebarSection,
+        count: usize,
+        new_button: Button,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        let (id, label, open, focus) = match section {
+            SidebarSection::Collections => (
+                "collections-section",
+                "Collections",
+                self.collections_open,
+                &self.collections_header,
+            ),
+            SidebarSection::Environments => (
+                "environments-section",
+                "Environments",
+                self.environments_open,
+                &self.environments_header,
+            ),
         };
+        let focus_visible = focus.is_focused(window) && window.last_input_was_keyboard();
+
+        div().flex_none().h_8().w_full().px_2().child(
+            h_flex()
+                .size_full()
+                .rounded(theme.radius_tokens().md)
+                .pr_1()
+                .hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
+                .child(
+                    gpui_kit::base::Button::new(id)
+                        .debug_selector(move || id.into())
+                        .track_focus(focus)
+                        .accessibility_label(label)
+                        .aria_expanded(open)
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .justify_start()
+                        .pl_2()
+                        .gap_2()
+                        .rounded(theme.radius_tokens().md)
+                        .cursor_default()
+                        .when(focus_visible, |this| this.focus_ring_style(window, cx))
+                        // Clicking keeps focus where it is, like other buttons.
+                        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.toggle_sidebar_section(section, window, cx)
+                        }))
+                        .child(
+                            Icon::new(if open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size_3p5()
+                            .flex_none(),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(label.to_uppercase()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(count.to_string()),
+                        ),
+                )
+                .child(new_button.ghost().xsmall()),
+        )
+    }
+
+    fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let collection_count = self.sidebar.read(cx).collection_count();
+        let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+
+        // Open sections share the height, like the sections of an editor sidebar.
+        let section_body = StyleRefinement::default().w_full().flex_1().min_h_0();
 
         v_flex()
             .size_full()
+            .pt_1()
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .child(
-                div()
-                    .debug_selector(|| "sidebar-sections".into())
-                    .flex_none()
-                    .px_2()
-                    .pt_2()
-                    .child(
-                        TabBar::new("sidebar-sections")
-                            .segmented()
-                            .small()
-                            .w_full()
-                            .selected_index(match self.sidebar_section {
-                                SidebarSection::Collections => 0,
-                                SidebarSection::Environments => 1,
-                            })
-                            .on_click(cx.listener(|this, index: &usize, window, cx| {
-                                let section = if *index == 0 {
-                                    SidebarSection::Collections
-                                } else {
-                                    SidebarSection::Environments
-                                };
-                                this.show_sidebar_section(section, window, cx);
-                            }))
-                            .child(Tab::new().flex_1().label("Collections"))
-                            .child(Tab::new().flex_1().label("Environments")),
-                    ),
+                self.section_header(
+                    SidebarSection::Collections,
+                    collection_count,
+                    Button::new("new-collection")
+                        .debug_selector(|| "new-collection".into())
+                        .icon(IconName::Plus)
+                        .tooltip("New Collection")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.create_collection(window, cx)),
+                        ),
+                    window,
+                    cx,
+                ),
             )
-            .child(div().flex_1().min_h_0().child(content))
+            .when(self.collections_open, |this| {
+                this.child(self.sidebar.clone().cached(section_body.clone()))
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .mx_2()
+                    .h(px(1.))
+                    .bg(cx.theme().sidebar_border),
+            )
+            .child(
+                self.section_header(
+                    SidebarSection::Environments,
+                    environment_count,
+                    Button::new("new-environment")
+                        .debug_selector(|| "new-environment".into())
+                        .icon(IconName::Plus)
+                        .tooltip("New Environment")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.create_environment(window, cx)),
+                        ),
+                    window,
+                    cx,
+                ),
+            )
+            .when(self.environments_open, |this| {
+                this.child(self.environment_panel.clone().cached(section_body))
+            })
     }
 
     fn update_tabs(
@@ -460,7 +588,7 @@ impl Render for Workspace {
                     *visible = true;
                     cx.notify();
                 });
-                this.sidebar_section = SidebarSection::Collections;
+                this.collections_open = true;
                 cx.notify();
 
                 this.sidebar
@@ -533,7 +661,7 @@ impl Render for Workspace {
                                     rems(14.).to_pixels(window.rem_size())
                                         ..rems(30.).to_pixels(window.rem_size()),
                                 )
-                                .child(self.sidebar(cx)),
+                                .child(self.sidebar(window, cx)),
                         )
                         .child(self.main_view.clone().into_any_element()),
                 ),
