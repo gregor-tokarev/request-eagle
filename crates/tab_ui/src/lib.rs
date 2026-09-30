@@ -8,7 +8,6 @@ mod environment_editor;
 mod environments;
 mod page;
 mod request_draft;
-mod request_fields;
 mod response_view;
 mod script_editor;
 mod script_intelligence;

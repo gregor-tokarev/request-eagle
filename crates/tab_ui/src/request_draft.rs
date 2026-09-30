@@ -2,6 +2,7 @@ mod body;
 mod controls;
 mod draft;
 mod execution;
+mod fields;
 
 #[cfg(test)]
 pub(crate) mod script_completion_tests;

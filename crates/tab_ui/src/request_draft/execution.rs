@@ -121,7 +121,7 @@ impl RequestDraft {
             let result = executor
                 .execute_with_variables(request, variables)
                 .await
-                .map(super::super::response_view::ResponseContent::new);
+                .map(crate::response_view::ResponseContent::new);
 
             (Some((preferences, executor)), result)
         });
