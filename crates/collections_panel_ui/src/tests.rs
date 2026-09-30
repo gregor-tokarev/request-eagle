@@ -361,7 +361,7 @@ fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
-fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext) {
+fn keyboard_can_tab_through_the_header_buttons_into_the_tree(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -383,7 +383,8 @@ fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
 
-    cx.simulate_keystrokes("tab tab");
+    // New Collection and Import come before the tree.
+    cx.simulate_keystrokes("tab tab tab");
     cx.run_until_parked();
     cx.update(|window, cx| {
         assert!(sidebar.focus_handle(cx).is_focused(window));
@@ -392,7 +393,7 @@ fn keyboard_can_tab_through_new_collection_into_the_tree(cx: &mut TestAppContext
     cx.simulate_keystrokes("down");
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(1)));
 
-    cx.simulate_keystrokes("shift-tab shift-tab");
+    cx.simulate_keystrokes("shift-tab shift-tab shift-tab");
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });

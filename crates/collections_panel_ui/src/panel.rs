@@ -427,6 +427,17 @@ impl Render for CollectionPanel {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.create_collection(window, cx)
                             })),
+                    )
+                    .child(
+                        Button::new("import-collection")
+                            .debug_selector(|| "import-collection".into())
+                            .icon(Icon::default().path("icons/import.svg"))
+                            .tooltip("Import Collection")
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_import_dialog(window, cx)
+                            })),
                     ),
             )
             .when_some(self.error.clone(), |this, error| {
