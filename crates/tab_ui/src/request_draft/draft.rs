@@ -38,7 +38,7 @@ pub struct RequestLocation {
 
 impl RequestLocation {
     /// The collection environment that the request's variables resolve from.
-    fn environment_path(&self) -> Option<PathBuf> {
+    pub(crate) fn environment_path(&self) -> Option<PathBuf> {
         self.path
             .ancestors()
             .nth(self.folders.len() + 1)
@@ -359,7 +359,11 @@ impl Render for RequestAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(draft.header(cx))
+                    .child(super::controls::request_header(
+                        "HTTP",
+                        draft.location.as_ref(),
+                        cx,
+                    ))
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

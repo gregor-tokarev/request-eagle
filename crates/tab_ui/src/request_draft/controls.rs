@@ -10,87 +10,90 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::Method;
 use request_eagle_theme::method_color;
 
-use super::draft::{RequestDraft, RequestSection};
+use super::draft::{RequestDraft, RequestLocation, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
 
-impl RequestDraft {
-    pub(super) fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let location = self.location.as_ref();
-
-        h_flex()
-            .flex_none()
-            .h_10()
-            .gap_2()
-            .child(
-                Tag::secondary()
-                    .small()
-                    .flex_none()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("HTTP"),
-            )
-            .child(
-                h_flex()
-                    .debug_selector(|| "request-breadcrumbs".into())
-                    .min_w_0()
-                    .gap_1()
-                    .text_sm()
-                    .overflow_hidden()
-                    .when_some(
-                        location.map(|location| location.collection.clone()),
-                        |row, collection| {
-                            row.child(
-                                div()
-                                    .debug_selector(|| "request-collection".into())
-                                    .flex_none()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(collection),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronRight)
-                                    .size_3()
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                        },
-                    )
-                    .children(
-                        location
-                            .into_iter()
-                            .flat_map(|location| &location.folders)
-                            .enumerate()
-                            .map(|(index, folder)| {
-                                h_flex()
-                                    .flex_none()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .debug_selector(move || {
-                                                format!("request-folder-{index}")
-                                            })
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(folder.clone()),
-                                    )
-                                    .child(
-                                        Icon::new(IconName::ChevronRight)
-                                            .size_3()
-                                            .text_color(cx.theme().muted_foreground),
-                                    )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "request-name".into())
-                            .min_w_0()
-                            .text_ellipsis()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(location.map_or("Untitled Request".into(), |location| {
+/// The request's protocol and where it is saved.
+pub(crate) fn request_header(
+    protocol: &'static str,
+    location: Option<&RequestLocation>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    h_flex()
+        .flex_none()
+        .h_10()
+        .gap_2()
+        .child(
+            Tag::secondary()
+                .small()
+                .flex_none()
+                .font_weight(FontWeight::MEDIUM)
+                .child(protocol),
+        )
+        .child(
+            h_flex()
+                .debug_selector(|| "request-breadcrumbs".into())
+                .min_w_0()
+                .gap_1()
+                .text_sm()
+                .overflow_hidden()
+                .when_some(
+                    location.map(|location| location.collection.clone()),
+                    |row, collection| {
+                        row.child(
+                            div()
+                                .debug_selector(|| "request-collection".into())
+                                .flex_none()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(collection),
+                        )
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size_3()
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                    },
+                )
+                .children(
+                    location
+                        .into_iter()
+                        .flat_map(|location| &location.folders)
+                        .enumerate()
+                        .map(|(index, folder)| {
+                            h_flex()
+                                .flex_none()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .debug_selector(move || format!("request-folder-{index}"))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(folder.clone()),
+                                )
+                                .child(
+                                    Icon::new(IconName::ChevronRight)
+                                        .size_3()
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                        }),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "request-name".into())
+                        .min_w_0()
+                        .text_ellipsis()
+                        .text_base()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(
+                            location.map_or("Untitled Request".into(), |location| {
                                 location.name.clone()
-                            })),
-                    ),
-            )
-    }
+                            }),
+                        ),
+                ),
+        )
+}
 
+impl RequestDraft {
     pub(super) fn url_bar(
         &mut self,
         window: &mut Window,

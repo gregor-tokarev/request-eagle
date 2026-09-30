@@ -56,7 +56,9 @@ request_custom = "keep me too"
     let [Entry::File(request)] = users.entries.as_slice() else {
         panic!("expected request file");
     };
-    let Request::Http(mut request) = request.request.clone();
+    let Request::Http(mut request) = request.request.clone() else {
+        panic!("expected an HTTP request");
+    };
 
     assert!(matches!(request.method, Method::Get));
 
@@ -72,7 +74,9 @@ request_custom = "keep me too"
     assert!(saved.contains("path = \"/v2/users\""));
 
     let reloaded = CollectionRegistry::from_path(&root).unwrap();
-    let Request::Http(request) = &reloaded.file(&request_path).unwrap().request;
+    let Request::Http(request) = &reloaded.file(&request_path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
 
     assert_eq!(request.path, "/v2/users");
 

@@ -6,7 +6,6 @@ use std::{
 use collection::{CollectionRegistry, Entry, FileEntry};
 
 use gpui_kit::SharedString;
-use request::Request;
 
 use super::search::SearchIndex;
 
@@ -220,10 +219,12 @@ fn add_entries(
     items[parent].end = items.len();
 }
 
-/// A request row's method and the text the sidebar filter matches.
+/// A request row's method or protocol and the text the sidebar filter matches.
 fn request_row(file: &FileEntry) -> (&'static str, String) {
-    let Request::Http(request) = &file.request;
-    let method = request.method.as_str();
+    let label = file.request.label();
 
-    (method, format!("{method} {} {}", file.name, request.path))
+    (
+        label,
+        format!("{label} {} {}", file.name, file.request.url()),
+    )
 }

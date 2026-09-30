@@ -12,15 +12,15 @@ pub(crate) fn open(
     main: Entity<MainView>,
     sidebar: Entity<CollectionPanel>,
     tab_id: u64,
-    request: request::HttpRequest,
+    request: request::Request,
     window: &mut Window,
     cx: &mut App,
 ) {
     let dialog = cx.new(|cx| {
-        let suggested = if request.path.trim().is_empty() {
+        let suggested = if request.url().trim().is_empty() {
             "New Request"
         } else {
-            request.path.trim()
+            request.url().trim()
         };
         let name = cx.new(|cx| InputState::new(window, cx).default_value(suggested));
         let filter = cx
@@ -65,7 +65,7 @@ struct SaveRequestDialog {
     main: Entity<MainView>,
     sidebar: Entity<CollectionPanel>,
     tab_id: u64,
-    request: request::HttpRequest,
+    request: request::Request,
     name: Entity<InputState>,
     filter: Entity<InputState>,
     destinations: Vec<SaveDestination>,
@@ -94,13 +94,7 @@ impl SaveRequestDialog {
         };
         let name = self.name.read(cx).value().to_string();
         let result = self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.save_new_request(
-                &destination.path,
-                &name,
-                self.request.clone().into(),
-                window,
-                cx,
-            )
+            sidebar.save_new_request(&destination.path, &name, self.request.clone(), window, cx)
         });
         match result {
             Ok(file) => {

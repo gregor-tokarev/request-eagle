@@ -30,6 +30,8 @@ mod response_tests;
 mod save_request_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod websocket_tab_tests;
 
 pub use actions::{OpenGeneralSettings, OpenSettings};
 pub use workspace::init;

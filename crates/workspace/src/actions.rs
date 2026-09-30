@@ -12,6 +12,7 @@ actions!(
         OpenGeneralSettings,
         SaveRequest,
         NewTab,
+        NewWebSocketTab,
         CloseTab,
         PreviousTab,
         NextTab,
@@ -78,6 +79,16 @@ pub(crate) fn init(cx: &mut App) {
         "secondary-t",
         cx,
     );
+    keybindings_service::register(
+        NewWebSocketTab,
+        "New WebSocket tab",
+        "Open an empty WebSocket request.",
+        "Tabs",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("the WebSocket tab action should register");
     register_tab_action(
         CloseTab,
         "Close tab",

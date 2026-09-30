@@ -92,7 +92,9 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
     let Entry::File(file) = &folder.entries[0] else {
         panic!("expected a request");
     };
-    let Request::Http(http) = &file.request;
+    let Request::Http(http) = &file.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(http.method, Method::Post);
     assert_eq!(http.path, "{{base_url}}/pets/1");
 }

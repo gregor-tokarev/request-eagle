@@ -53,6 +53,9 @@ script results.
   changes. There is no live synchronization.
 - `requests.update` replaces the complete request. Read it first and preserve
   the fields you do not intend to change.
+- WebSocket requests appear with a `websocket` object instead of `request`.
+  The CLI can read, move, rename and delete them, but only the app connects
+  to them or edits them.
 - `call -` reads JSON from stdin, which keeps secrets out of process arguments.
 - Saved scripts run only with `trust_scripts: true`. Read them first, including
   the collection's scripts from `collections.get`, which run before the request's.

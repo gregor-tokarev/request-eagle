@@ -20,7 +20,9 @@ mod variable_tests;
 #[cfg(test)]
 mod vim_tests;
 
+pub(crate) use controls::request_header;
 pub use draft::{RequestDraft, RequestLocation};
+pub(crate) use fields::{FieldsChanged, RequestFields};
 
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
