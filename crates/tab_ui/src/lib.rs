@@ -10,7 +10,6 @@ mod page;
 mod request_draft;
 mod response_view;
 mod script_editor;
-mod script_intelligence;
 mod section_count;
 mod variable_input;
 mod variable_table;

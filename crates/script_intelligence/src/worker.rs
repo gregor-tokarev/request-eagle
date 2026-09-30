@@ -142,7 +142,7 @@ fn worker() -> Result<&'static Arc<Queue>> {
 }
 
 /// Start parsing the bundled compiler/libraries while the editor becomes visible.
-pub(crate) fn warm_up() {
+pub fn warm_up() {
     let _ = worker();
 }
 
@@ -182,7 +182,7 @@ async fn query(
         .map_err(anyhow::Error::msg)
 }
 
-pub(crate) async fn completions(
+pub async fn completions(
     source: String,
     offset: usize,
     phase: ScriptPhase,
@@ -192,7 +192,7 @@ pub(crate) async fn completions(
     serde_json::from_str(&result).context("Invalid TypeScript completion response")
 }
 
-pub(crate) async fn signature_help(
+pub async fn signature_help(
     source: String,
     offset: usize,
     phase: ScriptPhase,
@@ -202,11 +202,7 @@ pub(crate) async fn signature_help(
     serde_json::from_str(&result).context("Invalid TypeScript signature response")
 }
 
-pub(crate) async fn hover(
-    source: String,
-    offset: usize,
-    phase: ScriptPhase,
-) -> Result<Option<Hover>> {
+pub async fn hover(source: String, offset: usize, phase: ScriptPhase) -> Result<Option<Hover>> {
     let result = query(source, offset, phase, "hover").await?;
 
     serde_json::from_str(&result).context("Invalid TypeScript hover response")
