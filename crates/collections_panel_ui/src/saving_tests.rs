@@ -4,15 +4,15 @@ use collection::{Method, Request};
 use gpui_kit::TestAppContext;
 
 use super::{
-    editing_tests::{Fixture, sidebar},
+    editing_tests::{fixture, sidebar},
     tree::ItemKind,
 };
 
 #[gpui_kit::test]
 fn saving_body_keeps_tree_and_browsing_state(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
-    let path = fixture.0.join("API/Users/list.toml");
+    let path = fixture.path().join("API/Users/list.toml");
 
     sidebar.update(cx, |panel, cx| {
         panel.toggle(1, cx);
@@ -40,9 +40,9 @@ fn saving_body_keeps_tree_and_browsing_state(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn saving_updates_method_name_and_search_without_rebuilding_browsing_rows(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
-    let path = fixture.0.join("API/Users/list.toml");
+    let path = fixture.path().join("API/Users/list.toml");
     let browsing = cx.read(|cx| sidebar.read(cx).unfiltered_rows.clone().unwrap());
     let old_tree = cx.read(|cx| sidebar.read(cx).tree.clone());
 
@@ -68,7 +68,7 @@ fn saving_updates_method_name_and_search_without_rebuilding_browsing_rows(cx: &m
     sidebar.update(cx, |panel, cx| {
         assert!(panel.visible.is_empty());
         assert_eq!(panel.selected, Some(2));
-        assert_eq!(panel.selected_row, None);
+        assert_eq!(panel.selected_row(), None);
         assert!(panel.collapsed.contains(&1));
         assert!(Arc::ptr_eq(
             &browsing,
@@ -89,15 +89,15 @@ fn saving_updates_method_name_and_search_without_rebuilding_browsing_rows(cx: &m
     cx.read(|cx| {
         let panel = sidebar.read(cx);
         assert_eq!(*panel.visible, vec![0, 1, 2]);
-        assert_eq!(panel.selected_row, Some(2));
+        assert_eq!(panel.selected_row(), Some(2));
     });
 }
 
 #[gpui_kit::test]
 fn rejected_collection_names_leave_its_settings_unsaved(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
-    let collection = fixture.0.join("API");
+    let collection = fixture.path().join("API");
     let variables: std::collections::HashMap<_, _> =
         [("token".to_owned(), "secret".to_owned())].into();
 
@@ -115,8 +115,8 @@ fn rejected_collection_names_leave_its_settings_unsaved(cx: &mut TestAppContext)
 
 #[gpui_kit::test]
 fn unchanged_names_with_surrounding_spaces_do_not_rename(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
-    let collection = fixture.0.join(" Spaced ");
+    let fixture = fixture();
+    let collection = fixture.path().join(" Spaced ");
     fs::create_dir_all(&collection).unwrap();
     let (sidebar, cx) = sidebar(&fixture, cx);
 

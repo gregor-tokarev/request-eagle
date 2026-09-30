@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use collection::CollectionEditError;
 use gpui_kit::{
     component::input::{InputEvent, InputState},
     *,
@@ -21,6 +22,58 @@ pub(super) struct RenameEditor {
 }
 
 impl CollectionPanel {
+    pub(super) fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let result = self.collections.create_collection();
+        self.finish_creation(result, window, cx);
+    }
+
+    pub(super) fn create_request(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self.collections.create_request(parent);
+        self.finish_creation(result, window, cx);
+    }
+
+    pub(super) fn create_folder(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self.collections.create_folder(parent);
+        self.finish_creation(result, window, cx);
+    }
+
+    fn finish_creation(
+        &mut self,
+        result: Result<PathBuf, CollectionEditError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(path) => {
+                self.rename = None;
+                self.pending_delete = None;
+                self.error = None;
+                self.reveal(&path, None, window, cx);
+
+                if let Some(row) = self.selected_row() {
+                    self.scroll_handle
+                        .scroll_to_item(row, ScrollStrategy::Nearest);
+                }
+                if let Some(index) = self.selected {
+                    self.begin_rename(index, window, cx);
+                }
+            }
+            Err(error) => self.error = Some(format!("Could not create item: {error}")),
+        }
+
+        cx.notify();
+    }
+
     pub(super) fn begin_rename(
         &mut self,
         index: usize,
@@ -36,7 +89,6 @@ impl CollectionPanel {
         self.pending_delete = None;
         self.error = None;
         self.selected = Some(index);
-        self.selected_row = self.visible.binary_search(&index).ok();
 
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx).default_value(name);
@@ -156,7 +208,7 @@ impl CollectionPanel {
         let Some(path) = self.pending_delete.clone() else {
             return;
         };
-        let row = self.selected_row.unwrap_or(0);
+        let row = self.selected_row().unwrap_or(0);
         let collection = self
             .collections
             .collections()
@@ -180,6 +232,25 @@ impl CollectionPanel {
             Err(error) => self.error = Some(format!("Could not delete: {error}")),
         }
         cx.notify();
+    }
+
+    /// Clear the filter and expand the ancestors of a created or moved item so
+    /// that it is visible, then select it. The item keeps its own collapsed state.
+    pub(super) fn reveal(
+        &mut self,
+        path: &Path,
+        renamed: Option<(&Path, &Path)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.query.clear();
+        self.search
+            .update(cx, |search, cx| search.set_value("", window, cx));
+        self.collapsed.retain(|&index| {
+            let item = &self.tree.items[index].path;
+            item == path || !path.starts_with(item)
+        });
+        self.rebuild_tree(Some(path), renamed, cx);
     }
 
     pub(super) fn rebuild_tree(
@@ -211,8 +282,7 @@ impl CollectionPanel {
             .enumerate()
             .filter_map(|(index, item)| collapsed.contains(&item.path).then_some(index))
             .collect();
-        self.selected =
-            selected.and_then(|path| self.tree.items.iter().position(|item| item.path == path));
+        self.selected = selected.and_then(|path| self.tree.index_of(path));
         let browsing = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
         self.unfiltered_rows = Some(browsing.clone());
         let rows = if self.query.is_empty() {
@@ -237,28 +307,21 @@ impl CollectionPanel {
                 });
             }
 
-            for item in &self.tree.items {
+            for (index, item) in self.tree.items.iter().enumerate() {
                 if item.is_branch() {
                     continue;
                 }
                 let Ok(relative) = item.path.strip_prefix(destination) else {
                     continue;
                 };
-                let Some(collection) = self
-                    .collections
-                    .collections()
-                    .iter()
-                    .find(|collection| item.path.starts_with(&collection.path))
-                else {
-                    continue;
-                };
-
                 let Some(file) = self.collections.file(&item.path) else {
                     continue;
                 };
+                let (collection, folders) = self.tree.location(index);
 
                 cx.emit(CollectionPanelEvent::RequestRelocated {
                     id: file.id.clone().into(),
+                    // Joining an empty path would add a trailing separator.
                     previous_path: if relative.as_os_str().is_empty() {
                         previous.to_path_buf()
                     } else {
@@ -266,24 +329,8 @@ impl CollectionPanel {
                     },
                     path: item.path.clone(),
                     name: item.label.clone(),
-                    folders: item
-                        .path
-                        .strip_prefix(&collection.path)
-                        .ok()
-                        .and_then(Path::parent)
-                        .map(|path| {
-                            path.iter()
-                                .map(|part| part.to_string_lossy().into_owned().into())
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    collection: collection
-                        .path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned()
-                        .into(),
+                    collection,
+                    folders,
                 });
             }
         }

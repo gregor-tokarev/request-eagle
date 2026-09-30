@@ -1,16 +1,15 @@
-#![recursion_limit = "256"]
-
 mod actions;
-mod creation;
 mod dragging;
 mod editing;
 mod lookup;
 mod panel;
 mod rows;
-mod save_request;
+mod saving;
 mod search;
 mod tree;
 
+#[cfg(test)]
+mod dragging_tests;
 #[cfg(test)]
 mod editing_tests;
 #[cfg(test)]
@@ -25,8 +24,5 @@ mod tests;
 pub use actions::init;
 pub use lookup::{CollectionMatch, RequestMatch};
 pub use panel::{CollectionPanel, CollectionPanelEvent};
-
-#[cfg(test)]
-mod dragging_tests;
-
-pub use save_request::SaveDestination;
+pub use rows::method_color;
+pub use saving::SaveDestination;
