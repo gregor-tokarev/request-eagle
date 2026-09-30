@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
-    time::Duration,
 };
 
 use collection::{CollectionRegistry, MovePlacement};
@@ -21,10 +20,6 @@ use super::{
     editing::RenameEditor,
     tree::{CollectionTree, ItemKind},
 };
-
-/// How long a clicked collection waits for a second click before it
-/// expands or collapses.
-pub(super) const DOUBLE_CLICK_WAIT: Duration = Duration::from_millis(250);
 
 pub enum CollectionPanelEvent {
     OpenCollection {
@@ -71,13 +66,10 @@ pub struct CollectionPanel {
     pub(super) unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
-    /// The branch the last click targeted. Its toggle can scroll another row
-    /// under the pointer, so a second click still belongs to it unless the
-    /// list is scrolled in between.
+    /// The branch the last click expanded or collapsed. That can scroll
+    /// another row under the pointer, so a double click keeps this target
+    /// unless the list is scrolled in between.
     pub(super) clicked: Option<PathBuf>,
-    /// A clicked collection waits briefly before it expands or collapses,
-    /// so a double click can open it without toggling it.
-    pending_toggle: Option<(PathBuf, Task<()>)>,
     pub(super) search: Entity<InputState>,
     pub(super) query: String,
     pub(super) scroll_handle: UniformListScrollHandle,
@@ -128,7 +120,6 @@ impl CollectionPanel {
             collapsed: HashSet::new(),
             selected: None,
             clicked: None,
-            pending_toggle: None,
             search,
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
@@ -228,70 +219,6 @@ impl CollectionPanel {
         }
     }
 
-    /// A click selects a row. Branches expand or collapse and requests open.
-    pub(super) fn click(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Ok(row) = self.visible.binary_search(&index) else {
-            return;
-        };
-        let item = &self.tree.items[index];
-        let (kind, path) = (item.kind, item.path.clone());
-
-        window.focus(&self.focus, cx);
-        self.select_row(row, cx);
-
-        match kind {
-            ItemKind::Collection => {
-                self.toggle_later(path.clone(), cx);
-                self.clicked = Some(path);
-            }
-            ItemKind::Folder => {
-                self.toggle(index, cx);
-                self.clicked = Some(path);
-            }
-            ItemKind::Request(_) => self.open(index, cx),
-        }
-    }
-
-    /// The second press of a double click opens a collection and leaves the
-    /// tree as it was. Folders have no page, so their second click is ignored.
-    pub(super) fn double_click(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.clicked.clone() else {
-            return;
-        };
-        let Some(index) = self.tree.index_of(&path) else {
-            return;
-        };
-        if self.tree.items[index].kind != ItemKind::Collection {
-            return;
-        }
-
-        match &self.pending_toggle {
-            Some((pending, _)) if *pending == path => self.pending_toggle = None,
-            // A slow double click finds the collection already toggled.
-            _ => self.toggle(index, cx),
-        }
-        self.open(index, cx);
-    }
-
-    fn toggle_later(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        // A newer click stops the previous collection's wait.
-        self.toggle_pending(cx);
-
-        let task = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(DOUBLE_CLICK_WAIT).await;
-            let _ = this.update(cx, |this, cx| this.toggle_pending(cx));
-        });
-        self.pending_toggle = Some((path, task));
-    }
-
-    fn toggle_pending(&mut self, cx: &mut Context<Self>) {
-        if let Some((path, _)) = self.pending_toggle.take()
-            && let Some(index) = self.tree.index_of(&path)
-        {
-            self.toggle(index, cx);
-        }
-    }
-
     /// Open a collection or request row in a tab; folder rows have no page.
     pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
         match self.tree.items[index].kind {
@@ -353,13 +280,6 @@ impl CollectionPanel {
         {
             self.pending_delete = None;
             window.focus(&self.focus, cx);
-        }
-
-        // Expanding or collapsing from the keyboard overrides a click that is
-        // still waiting to.
-        if matches!(event.keystroke.key.as_str(), "space" | "left" | "right") {
-            self.pending_toggle = None;
-            self.clicked = None;
         }
 
         match event.keystroke.key.as_str() {
@@ -532,11 +452,9 @@ impl Render for CollectionPanel {
                     .on_action(cx.listener(Self::delete_selected))
                     .capture_key_down(cx.listener(Self::on_delete_key_down))
                     .on_key_down(cx.listener(Self::on_key_down))
-                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                        match event.click_count {
-                            1 => this.clicked = None,
-                            2 if event.button == MouseButton::Left => this.double_click(cx),
-                            _ => {}
+                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                        if event.click_count == 1 {
+                            this.clicked = None;
                         }
                     }))
                     .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, _| {

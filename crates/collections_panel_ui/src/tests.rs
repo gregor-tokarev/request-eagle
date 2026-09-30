@@ -9,7 +9,6 @@ use gpui_kit::{
 
 use super::{
     CollectionPanel, CollectionPanelEvent,
-    panel::DOUBLE_CLICK_WAIT,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -163,7 +162,7 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
 
     let root = cx.debug_bounds("collection-row-0").unwrap();
     cx.simulate_click(root.center(), Modifiers::default());
-    wait_for_double_click(cx);
+    cx.run_until_parked();
 
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
@@ -297,82 +296,17 @@ fn last_collection(
     (path, selector, cx.debug_bounds(selector).unwrap().center())
 }
 
-/// Let a clicked collection stop waiting for a second click.
-fn wait_for_double_click(cx: &mut VisualTestContext) {
-    cx.executor().advance_clock(DOUBLE_CLICK_WAIT);
-    cx.run_until_parked();
-}
-
-fn is_collapsed(sidebar: &Entity<CollectionPanel>, index: usize, cx: &VisualTestContext) -> bool {
-    cx.read(|cx| sidebar.read(cx).collapsed.contains(&index))
-}
-
 #[gpui_kit::test]
-fn double_click_opens_a_collection_without_toggling_it(cx: &mut TestAppContext) {
-    let (sidebar, opened, cx) = clicking_sidebar(cx);
-    let (folder, collection) = cx.read(|cx| {
-        let items = &sidebar.read(cx).tree.items;
-        let folder = items
-            .iter()
-            .position(|item| item.kind == ItemKind::Folder)
-            .unwrap();
-        (folder, items[0].path.clone())
-    });
-
-    // A folder has no tab, so a double click toggles it once, right away.
-    let position = cx.debug_bounds(row_selector(folder)).unwrap().center();
-    click_at(cx, position, 1);
-    assert!(is_collapsed(&sidebar, folder, cx));
-    click_at(cx, position, 2);
-    wait_for_double_click(cx);
-    assert!(is_collapsed(&sidebar, folder, cx));
-
-    // A click on a collection waits for a possible second click.
-    let position = cx.debug_bounds(row_selector(0)).unwrap().center();
-    click_at(cx, position, 1);
-    assert!(!is_collapsed(&sidebar, 0, cx));
-    wait_for_double_click(cx);
-    assert!(is_collapsed(&sidebar, 0, cx));
-    assert!(opened.borrow().is_empty());
-
-    click_at(cx, position, 1);
-    click_at(cx, position, 2);
-    wait_for_double_click(cx);
-    assert!(is_collapsed(&sidebar, 0, cx));
-    assert_eq!(*opened.borrow(), [collection]);
-}
-
-#[gpui_kit::test]
-fn arrow_keys_override_a_collection_click_that_is_still_waiting(cx: &mut TestAppContext) {
-    let (sidebar, _, cx) = clicking_sidebar(cx);
-    let position = cx.debug_bounds(row_selector(0)).unwrap().center();
-
-    click_at(cx, position, 1);
-    cx.simulate_keystrokes("left");
-    wait_for_double_click(cx);
-    assert!(is_collapsed(&sidebar, 0, cx));
-
-    click_at(cx, position, 1);
-    cx.simulate_keystrokes("right");
-    wait_for_double_click(cx);
-    assert!(!is_collapsed(&sidebar, 0, cx));
-}
-
-#[gpui_kit::test]
-fn slow_double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
+fn double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
     let (sidebar, opened, cx) = clicking_sidebar(cx);
     let (path, selector, position) = last_collection(&sidebar, cx);
-    let index = cx.read(|cx| sidebar.read(cx).tree.index_of(&path).unwrap());
 
     click_at(cx, position, 1);
-    wait_for_double_click(cx);
     assert!(opened.borrow().is_empty());
     assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
 
-    // The second click restores the collection it toggled.
     click_at(cx, position, 2);
     assert_eq!(*opened.borrow(), [path]);
-    assert!(!is_collapsed(&sidebar, index, cx));
 }
 
 #[gpui_kit::test]
@@ -403,7 +337,6 @@ fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) 
     // the row now under the pointer.
     let (collection, _, position) = last_collection(&sidebar, cx);
     click_at(cx, position, 1);
-    wait_for_double_click(cx);
     cx.simulate_event(ScrollWheelEvent {
         position,
         delta: ScrollDelta::Pixels(point(px(0.), px(32.))),
