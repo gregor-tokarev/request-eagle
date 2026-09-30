@@ -11,9 +11,6 @@ DOM, Node, Intl and decorator declarations are deliberately absent because
 scripts expose none of them. See `LIBRARIES` in the vendoring script for the
 other omissions.
 
-The build compiles the compiler to QuickJS bytecode without its source text or
-debug information, so the application neither parses nor retains the source.
-
 Archive SHA-256: `10e108c9cf7d5f2879053dff18515fb405abf2ccef63eaaf017d9c571687a1d3`
 Uncompressed typescript.js SHA-256: `3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675`
 
@@ -25,5 +22,5 @@ Bundled file SHA-256 checksums:
 
 Regenerate with `python3 ../vendor_typescript.py` from this directory. Python and
 network access are only needed for this development operation. The application
-embeds the bytecode and the gzip library bundle, and requires no Node, installed
-TypeScript, external language server, filesystem access, or network access.
+is built from these assets and requires no Node, installed TypeScript, external
+language server, filesystem access, or network access.

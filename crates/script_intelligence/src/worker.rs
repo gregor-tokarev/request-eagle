@@ -150,6 +150,9 @@ fn worker() -> Result<&'static Arc<Queue>> {
                     // The compiler and static libraries load off the UI thread
                     // on warm-up or the first query, and unload when idle.
                     let mut compiler = None;
+                    // Failed queries drop their compiler before the worker
+                    // goes idle, so track memory to release separately.
+                    let mut used_since_release = false;
 
                     loop {
                         let query = match worker_queue.next(IDLE_LIMIT) {
@@ -157,12 +160,14 @@ fn worker() -> Result<&'static Arc<Queue>> {
                             Work::WarmUp => {
                                 if compiler.is_none() {
                                     // The next query retries and reports a failure.
+                                    used_since_release = true;
                                     compiler = Compiler::new().ok();
                                 }
                                 continue;
                             }
                             Work::Idle => {
-                                if compiler.take().is_some() {
+                                compiler = None;
+                                if mem::take(&mut used_since_release) {
                                     release_freed_memory();
                                 }
                                 continue;
@@ -173,6 +178,7 @@ fn worker() -> Result<&'static Arc<Queue>> {
                             continue;
                         }
 
+                        used_since_release = true;
                         let loaded = compiler.take().map_or_else(Compiler::new, Ok);
                         let result = loaded.and_then(|mut loaded| {
                             let cancelled = query.cancelled.clone();
