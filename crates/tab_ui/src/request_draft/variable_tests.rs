@@ -224,18 +224,23 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn variables_show_as_chips_that_follow_edits(cx: &mut TestAppContext) {
-    let (draft, cx, _directory) = setup(cx);
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "Each list holds the byte ranges of chips, sometimes just one."
+)]
+fn variables_show_as_chips_that_follow_edits_and_resolution(cx: &mut TestAppContext) {
+    let (draft, cx, directory) = setup(cx);
     let url_chips = |cx: &mut VisualTestContext| {
         cx.read(|cx| {
             let completion = draft.read(cx).url_completion.clone().unwrap();
-            completion.read(cx).chips().to_vec()
+            let (resolved, unresolved) = completion.read(cx).chips();
+            (resolved.to_vec(), unresolved.to_vec())
         })
     };
 
     click(cx, "request-url");
     cx.simulate_input("{{base_url}}/users/{{ id }}?raw={{!id}}");
-    assert_eq!(url_chips(cx), vec![0..12, 19..27]);
+    assert_eq!(url_chips(cx), (vec![0..12], vec![19..27]));
 
     // Chips stay plain text: the caret moves into them and edits resize them.
     cx.simulate_keystrokes("home right right right");
@@ -248,7 +253,16 @@ fn variables_show_as_chips_that_follow_edits(cx: &mut TestAppContext) {
             "{{bapi_ase_url}}/users/{{ id }}?raw={{!id}}&v={{message}}"
         )
     });
-    assert_eq!(url_chips(cx), vec![0..16, 23..31, 46..57]);
+    assert_eq!(url_chips(cx), (vec![46..57], vec![0..16, 23..31]));
+
+    // Defining a variable resolves its chips the next time the tab is prepared.
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "base_url = 'https://example.com'\nmessage = 'hello'\nid = '7'\n",
+    )
+    .unwrap();
+    cx.update(|window, cx| draft.update(cx, |draft, cx| draft.prepare(window, cx)));
+    assert_eq!(url_chips(cx), (vec![23..31, 46..57], vec![0..16]));
 
     // Replacing the whole body does not emit a change event.
     cx.update(|window, cx| {
@@ -258,7 +272,7 @@ fn variables_show_as_chips_that_follow_edits(cx: &mut TestAppContext) {
             draft.prepare(window, cx);
             draft.body.as_ref().unwrap().update(cx, |body, cx| {
                 body.set_value(
-                    "{\n  \"a\": \"{{message}}\",\n  \"b\": \"{{\"\n}",
+                    "{\n  \"a\": \"{{message}}\",\n  \"g\": \"{{$guid}}{{$nope}}\",\n  \"b\": \"{{\"\n}",
                     window,
                     cx,
                 );
@@ -267,9 +281,10 @@ fn variables_show_as_chips_that_follow_edits(cx: &mut TestAppContext) {
     });
     let body_chips = cx.read(|cx| {
         let completion = draft.read(cx).body_completion.clone().unwrap();
-        completion.read(cx).chips().to_vec()
+        let (resolved, unresolved) = completion.read(cx).chips();
+        (resolved.to_vec(), unresolved.to_vec())
     });
-    assert_eq!(body_chips, vec![10..21]);
+    assert_eq!(body_chips, (vec![10..21, 32..41], vec![41..50]));
 }
 
 #[gpui_kit::test]
@@ -859,4 +874,65 @@ fn the_active_global_environment_overrides_collection_values(cx: &mut TestAppCon
             "https://staging.example.com/users"
         );
     });
+}
+
+#[gpui_kit::test]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "Each list holds the byte ranges of chips, sometimes just one."
+)]
+fn switching_the_active_environment_recolors_chips(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "base_url = 'https://example.com'\n",
+    )
+    .unwrap();
+    let catalog = environment::GlobalEnvironments::new(directory.path().join("environments"));
+    catalog.create("Staging").unwrap();
+    std::fs::write(catalog.path("Staging"), "token = 'staging'\n").unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let mut draft = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let environments = cx.new(|_| crate::Environments::new(catalog, None));
+        let view = cx.new(|cx| {
+            let request = request::HttpRequest {
+                path: "{{base_url}}/{{token}}".into(),
+                ..Default::default()
+            };
+            let location = location(&directory.path().join("request.toml"), 0);
+            let mut draft = RequestDraft::new(
+                request,
+                Some(location),
+                Default::default(),
+                Some(environments.clone()),
+                cx,
+            );
+            draft.prepare(window, cx);
+            draft
+        });
+        draft = Some((view.clone(), environments));
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let (draft, environments) = draft.unwrap();
+    let url_chips = |cx: &mut VisualTestContext| {
+        cx.read(|cx| {
+            let completion = draft.read(cx).url_completion.clone().unwrap();
+            let (resolved, unresolved) = completion.read(cx).chips();
+            (resolved.to_vec(), unresolved.to_vec())
+        })
+    };
+
+    assert_eq!(url_chips(cx), (vec![0..12], vec![13..22]));
+    cx.update(|_, cx| {
+        environments.update(cx, |environments, cx| {
+            environments.set_active(Some("Staging".into()), cx)
+        })
+    });
+    assert_eq!(url_chips(cx), (vec![0..12, 13..22], vec![]));
 }

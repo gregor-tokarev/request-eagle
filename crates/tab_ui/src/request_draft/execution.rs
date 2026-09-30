@@ -131,7 +131,7 @@ impl RequestDraft {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.executor = executor;
                 this.task = None;
-                scope.update(cx, |_, cx| cx.notify());
+                scope.update(cx, |scope, cx| scope.changed(cx));
                 response.update(cx, |response, cx| response.finish(result, window, cx));
                 cx.notify();
             });

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::rc::Rc;
 
 use environment::GENERATED_VARIABLES;
 use gpui_kit::{
@@ -128,10 +129,12 @@ pub(crate) struct VariableInput {
     suggestions: Vec<Suggestion>,
     selected: usize,
     scroll: UniformListScrollHandle,
-    /// Byte ranges of the `{{variable}}` references shown as chips.
+    /// Byte ranges of the `{{variable}}` references that resolve.
     chips: Vec<Range<usize>>,
-    /// The text the chips were found in.
-    chipped: Rope,
+    /// Byte ranges of references that sending could not resolve.
+    unresolved: Vec<Range<usize>>,
+    /// The text and names the chips were found with.
+    chipped: (Rope, Rc<HashSet<String>>),
     _subscriptions: Vec<Subscription>,
 }
 
@@ -153,6 +156,7 @@ impl VariableInput {
             }),
         };
         let scope_subscription = cx.observe_in(&scope, window, |this, _, window, cx| {
+            this.update_chips(cx);
             this.snapshot = None;
             this.range = None;
             this.refresh(window, cx);
@@ -168,7 +172,8 @@ impl VariableInput {
             selected: 0,
             scroll: UniformListScrollHandle::new(),
             chips: Vec::new(),
-            chipped: Rope::new(),
+            unresolved: Vec::new(),
+            chipped: Default::default(),
             _subscriptions: vec![input_subscription, scope_subscription],
         };
         this.update_chips(cx);
@@ -176,32 +181,47 @@ impl VariableInput {
         this
     }
 
-    fn update_chips(&mut self, cx: &App) {
+    fn update_chips(&mut self, cx: &mut App) {
         let text = self.target.text(cx);
+        let names = self.scope.update(cx, |scope, cx| scope.names(cx));
 
-        // Observers also run for caret moves and repaints; only edits move chips.
-        if !ropes_are_instances(&self.chipped, &text) {
-            self.chips = variable_references(&text.to_string()).collect();
-            self.chipped = text;
+        // Observers also run for caret moves and repaints; only edits and
+        // environment changes move or recolor chips.
+        if ropes_are_instances(&self.chipped.0, &text) && Rc::ptr_eq(&self.chipped.1, &names) {
+            return;
         }
+
+        let source = text.to_string();
+        (self.chips, self.unresolved) = variable_references(&source).partition(|chip| {
+            let name = source[chip.start + 2..chip.end - 2].trim();
+            names.contains(name)
+                || (name.starts_with('$') && environment::generate_variable(name).is_some())
+        });
+        self.chipped = (text, names);
     }
 
     /// Paint each `{{variable}}` as a rounded chip over its text. The text
     /// stays ordinary input text; the input only reports where it is.
     fn paint_chips(&self, window: &mut Window, cx: &App) {
-        let (visible, chips) = self.target.chip_bounds(&self.chips, cx);
         let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
-        let color = cx.theme().info.opacity(0.25);
         let radius = cx.theme().radius_tokens().sm;
-        // Let a chip at either edge of the text keep its padding.
-        let visible = visible.dilate(outset.x);
 
-        window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
-            for chip in chips {
-                let chip = Bounds::from_corners(chip.origin - outset, chip.bottom_right() + outset);
-                window.paint_quad(fill(chip, color).corner_radii(radius));
-            }
-        });
+        for (chips, color) in [
+            (&self.chips, cx.theme().info),
+            (&self.unresolved, cx.theme().danger),
+        ] {
+            let (visible, chips) = self.target.chip_bounds(chips, cx);
+            // Let a chip at either edge of the text keep its padding.
+            let visible = visible.dilate(outset.x);
+
+            window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
+                for chip in chips {
+                    let chip =
+                        Bounds::from_corners(chip.origin - outset, chip.bottom_right() + outset);
+                    window.paint_quad(fill(chip, color.opacity(0.25)).corner_radii(radius));
+                }
+            });
+        }
     }
 
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -346,8 +366,9 @@ impl VariableInput {
 
 #[cfg(test)]
 impl VariableInput {
-    pub(crate) fn chips(&self) -> &[Range<usize>] {
-        &self.chips
+    /// Chips that resolve, then chips that don't.
+    pub(crate) fn chips(&self) -> (&[Range<usize>], &[Range<usize>]) {
+        (&self.chips, &self.unresolved)
     }
 }
 

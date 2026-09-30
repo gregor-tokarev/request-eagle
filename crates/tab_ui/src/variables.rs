@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use collection::Collection;
 
 use environment::{Environment, EnvironmentSession};
-use gpui_kit::{App, Entity};
+use gpui_kit::{App, Context, Entity};
 use request::RequestScripts;
 
 use crate::Environments;
@@ -13,9 +14,28 @@ pub(crate) struct VariableScope {
     pub path: Option<PathBuf>,
     pub session: EnvironmentSession,
     pub environments: Option<Entity<Environments>>,
+    /// Names that resolve, read once after each change for every field.
+    pub names: Option<Rc<HashSet<String>>>,
 }
 
 impl VariableScope {
+    /// The files, session or active environment may have changed.
+    pub fn changed(&mut self, cx: &mut Context<Self>) {
+        self.names = None;
+        cx.notify();
+    }
+
+    /// Environment names a reference resolves to. A file that can't be read
+    /// resolves nothing, as sending would fail.
+    pub fn names(&mut self, cx: &App) -> Rc<HashSet<String>> {
+        if self.names.is_none() {
+            let names = self.values(cx).unwrap_or_default().into_keys().collect();
+            self.names = Some(Rc::new(names));
+        }
+
+        self.names.clone().unwrap_or_default()
+    }
+
     /// Reload file values so external edits appear on the next send or
     /// completion. The active global environment overrides the collection's.
     fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
