@@ -323,7 +323,7 @@ fn sidebar_sections_fold_smoothly(cx: &mut TestAppContext) {
     init(cx);
     cx.update(|cx| cx.set_reduce_motion(false));
     let directory = tempfile::tempdir().unwrap();
-    let (_, cx) = workspace(
+    let (layout, cx) = workspace(
         collections(2),
         GlobalEnvironments::new(directory.path()),
         cx,
@@ -334,6 +334,7 @@ fn sidebar_sections_fold_smoothly(cx: &mut TestAppContext) {
         cx.debug_bounds(selector).map(|bounds| bounds.size.height)
     };
     let open = height(cx, "collections-sidebar").unwrap();
+    let header = cx.read(|cx| layout.read(cx).collections_header.clone());
 
     // A folding section shrinks over a few frames before it is removed.
     click(cx, "collections-section");
@@ -341,8 +342,14 @@ fn sidebar_sections_fold_smoothly(cx: &mut TestAppContext) {
     let folding = height(cx, "collections-sidebar").unwrap();
     assert!(folding > px(0.) && folding < open);
 
+    // Its rows can still be clicked, but they do not keep focus.
+    click(cx, "collections-search");
     cx.executor().advance_clock(Duration::from_millis(200));
     assert_eq!(height(cx, "collections-sidebar"), None);
+    cx.update(|window, cx| {
+        assert!(header.is_focused(window));
+        assert!(window.is_action_available(&NewTab, cx));
+    });
 
     // Reopening grows it back to its share.
     click(cx, "collections-section");

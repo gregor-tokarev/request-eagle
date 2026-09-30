@@ -303,36 +303,37 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        match section {
+            SidebarSection::Collections => self.collections_open = !self.collections_open,
+            SidebarSection::Environments => self.environments_open = !self.environments_open,
+        }
+
+        self.release_section_focus(section, window, cx);
+
+        cx.notify();
+    }
+
+    /// Keys must not go to the rows of a folded section. Its header can open
+    /// it again.
+    fn release_section_focus(&self, section: SidebarSection, window: &mut Window, cx: &mut App) {
         let (open, contains_focus, header) = match section {
-            SidebarSection::Collections => {
-                self.collections_open = !self.collections_open;
-
-                (
-                    self.collections_open,
-                    self.sidebar.read(cx).contains_focus(window, cx),
-                    &self.collections_header,
-                )
-            }
-            SidebarSection::Environments => {
-                self.environments_open = !self.environments_open;
-
-                (
-                    self.environments_open,
-                    self.environment_panel
-                        .focus_handle(cx)
-                        .contains_focused(window, cx),
-                    &self.environments_header,
-                )
-            }
+            SidebarSection::Collections => (
+                self.collections_open,
+                self.sidebar.read(cx).contains_focus(window, cx),
+                &self.collections_header,
+            ),
+            SidebarSection::Environments => (
+                self.environments_open,
+                self.environment_panel
+                    .focus_handle(cx)
+                    .contains_focused(window, cx),
+                &self.environments_header,
+            ),
         };
 
-        // Keys must not go to the rows of a folded section. Its header can
-        // open it again.
         if !open && contains_focus {
             window.focus(header, cx);
         }
-
-        cx.notify();
     }
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -458,6 +459,11 @@ impl Workspace {
         let collections_progress = self.section_progress(SidebarSection::Collections, window, cx);
         let environments_progress = self.section_progress(SidebarSection::Environments, window, cx);
 
+        // A folding section's rows stay on screen, where a click can still
+        // focus them.
+        self.release_section_focus(SidebarSection::Collections, window, cx);
+        self.release_section_focus(SidebarSection::Environments, window, cx);
+
         let new_collection = Button::new("new-collection")
             .debug_selector(|| "new-collection".into())
             .icon(IconName::Plus)
@@ -475,14 +481,15 @@ impl Workspace {
             .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
 
         // Open sections share the height, like the sections of an editor sidebar.
-        // A folding section gives its share away and clips its rows.
+        // A folding section gives its share away and clips its rows. An open
+        // one does not clip, so focus rings at its edges stay whole.
         let section_body = |progress: f32, view: AnyView| {
             div()
                 .w_full()
                 .flex_basis(relative(0.))
                 .flex_grow(progress)
                 .min_h_0()
-                .overflow_hidden()
+                .when(progress < 1.0, |this| this.overflow_hidden())
                 .child(view.cached(StyleRefinement::default().size_full()))
         };
 
