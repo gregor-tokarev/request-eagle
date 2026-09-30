@@ -18,6 +18,14 @@ members = [
 default-members = ["crates/request-eagle"]
 resolver = "3"
 
+# Shipped app builds. Whole-program optimization makes the binary a third
+# smaller and launch a little faster, but takes several times longer to build,
+# so development keeps the release profile.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
 [workspace.dependencies]
 anyhow = "1"
 gpui-kit = { version = "=0.6.2", default-features = false }
