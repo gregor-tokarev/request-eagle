@@ -2,7 +2,7 @@ use gpui_kit::component::{Size, button::*, input::Input, *};
 use gpui_kit::*;
 use keybindings_service::Command;
 
-use super::{KeybindingsPage, matches_search, shortcut_keycaps};
+use super::{KeybindingsPage, keycaps::shortcut_keycaps, recorder::is_modifier_only};
 
 impl KeybindingsPage {
     fn toggle_search_recorder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -15,12 +15,7 @@ impl KeybindingsPage {
     }
 
     pub(super) fn record_search_key(&mut self, stroke: &Keystroke, cx: &mut Context<Self>) {
-        if stroke.key.is_empty()
-            || matches!(
-                stroke.key.as_str(),
-                "cmd" | "platform" | "control" | "ctrl" | "alt" | "shift" | "function" | "fn"
-            )
-        {
+        if is_modifier_only(stroke) {
             return;
         }
 
@@ -154,4 +149,35 @@ fn matches_shortcut(command: &Command, stroke: &Keystroke) -> bool {
             })
         })
     })
+}
+
+fn search_text(value: &str) -> String {
+    value
+        .to_lowercase()
+        .replace('⌘', " cmd ")
+        .replace("command", "cmd")
+        .replace("super", "cmd")
+        .replace('⌃', " ctrl ")
+        .replace("control", "ctrl")
+        .replace('⌥', " alt ")
+        .replace("option", "alt")
+        .replace('⇧', " shift ")
+        .replace('⎋', " escape ")
+        .replace(['-', '+'], " ")
+}
+
+pub(super) fn matches_search(command: &Command, query: &str) -> bool {
+    let keys = command
+        .binding
+        .as_ref()
+        .map(|b| b.keystrokes.as_str())
+        .unwrap_or("not set unassigned");
+    let text = search_text(&format!(
+        "{} {} {} {} {}",
+        command.label, command.description, command.category, command.id, keys
+    ));
+
+    search_text(query)
+        .split_whitespace()
+        .all(|word| text.contains(word))
 }

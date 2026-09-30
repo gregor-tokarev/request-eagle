@@ -2,7 +2,7 @@ use gpui_kit::component::select::SelectEvent;
 use gpui_kit::{ClipboardItem, TestAppContext};
 use preferences::{Preferences, ProxyMode, ProxyPreferences, ProxyProtocol};
 
-use super::ProxySettings;
+use super::proxy::ProxySettings;
 
 #[gpui_kit::test]
 fn valid_edits_save_automatically_and_invalid_edits_keep_previous_settings(

@@ -61,7 +61,7 @@ impl Render for CommandRow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.page
             .update(cx, |page, cx| {
-                page.render_command(&self.command, crate::geometry::is_narrow(window), cx)
+                page.render_command(&self.command, crate::layout::is_narrow(window), cx)
                     .into_any_element()
             })
             .unwrap_or_else(|_| div().into_any_element())

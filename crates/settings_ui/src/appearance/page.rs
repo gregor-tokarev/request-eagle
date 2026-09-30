@@ -6,9 +6,13 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::*, *};
-use preferences::{AppearanceMode, AppearancePreferences};
+use preferences::{AppearanceMode, AppearancePreferences, Preferences};
+
+use crate::layout;
 
 type FontList = SearchableVec<SharedString>;
+
+const THEME_CARD_WIDTH: Rems = rems(12.);
 
 #[derive(Clone)]
 pub(super) enum PageRow {
@@ -31,18 +35,14 @@ pub(crate) struct AppearanceSettings {
 
 impl AppearanceSettings {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let preferences = cx
-            .try_global::<preferences::Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .appearance;
+        let editor_font = cx.global::<Preferences>().appearance.editor_font.clone();
 
         let mut names = cx.text_system().all_font_names();
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup();
 
-        if !preferences.editor_font.is_empty() && !names.contains(&preferences.editor_font) {
-            names.insert(0, preferences.editor_font.clone());
+        if !editor_font.is_empty() && !names.contains(&editor_font) {
+            names.insert(0, editor_font.clone());
         }
 
         let mut fonts = vec![SharedString::from("Default monospace")];
@@ -50,7 +50,7 @@ impl AppearanceSettings {
 
         let selected = fonts
             .iter()
-            .position(|font| font.as_ref() == preferences.editor_font)
+            .position(|font| font.as_ref() == editor_font)
             .unwrap_or(0);
         let font = cx.new(|cx| {
             SelectState::new(
@@ -64,18 +64,13 @@ impl AppearanceSettings {
 
         let subscription = cx.subscribe(&font, |this, _, event: &SelectEvent<FontList>, cx| {
             if let SelectEvent::Confirm(Some(font)) = event {
-                let mut preferences = cx
-                    .try_global::<preferences::Preferences>()
-                    .cloned()
-                    .unwrap_or_default()
-                    .appearance;
-                preferences.editor_font = if font == "Default monospace" {
+                let font = if font == "Default monospace" {
                     String::new()
                 } else {
                     font.to_string()
                 };
 
-                this.save(preferences, cx);
+                this.save(|appearance| appearance.editor_font = font, cx);
             }
         });
 
@@ -97,9 +92,9 @@ impl AppearanceSettings {
         }
     }
 
-    fn save(&mut self, preferences: AppearancePreferences, cx: &mut Context<Self>) {
+    fn save(&mut self, change: impl FnOnce(&mut AppearancePreferences), cx: &mut Context<Self>) {
         let had_error = self.error.is_some();
-        self.error = preferences::update(cx, |settings| settings.appearance = preferences)
+        self.error = preferences::update(cx, |preferences| change(&mut preferences.appearance))
             .err()
             .map(|error| format!("Could not save appearance settings: {error}"));
 
@@ -111,11 +106,7 @@ impl AppearanceSettings {
     }
 
     fn mode_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let preferences = cx
-            .try_global::<preferences::Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .appearance;
+        let selected = cx.global::<Preferences>().appearance.mode;
 
         h_flex().gap_2().children(
             [
@@ -131,27 +122,16 @@ impl AppearanceSettings {
                     .icon(icon)
                     .label(label)
                     .outline()
-                    .selected(preferences.mode == mode)
+                    .selected(selected == mode)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        let mut preferences = cx
-                            .try_global::<preferences::Preferences>()
-                            .cloned()
-                            .unwrap_or_default()
-                            .appearance;
-                        preferences.mode = mode;
-
-                        this.save(preferences, cx);
+                        this.save(|appearance| appearance.mode = mode, cx);
                     }))
             }),
         )
     }
 
     fn theme_cards(&self, indices: &[usize], cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let preferences = cx
-            .try_global::<preferences::Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .appearance;
+        let appearance = &cx.global::<Preferences>().appearance;
 
         h_flex().gap_3().children(indices.iter().map(|&index| {
             let preview = &self.previews[index];
@@ -159,9 +139,9 @@ impl AppearanceSettings {
             let name = preview.name.clone();
 
             let selected = if dark {
-                &preferences.dark_theme
+                &appearance.dark_theme
             } else {
-                &preferences.light_theme
+                &appearance.light_theme
             };
             let active = selected == name.as_ref();
 
@@ -184,7 +164,7 @@ impl AppearanceSettings {
                 .bg(cx.theme().background)
                 .hover(|style| style.bg(cx.theme().muted))
                 .focus_visible(|style| style.border_color(cx.theme().ring))
-                .w(crate::geometry::THEME_CARD_WIDTH)
+                .w(THEME_CARD_WIDTH)
                 .h_auto()
                 .p_2()
                 .rounded(cx.theme().radius_tokens().lg)
@@ -195,19 +175,16 @@ impl AppearanceSettings {
                 })
                 .child(preview.render(active, cx))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    let mut preferences = cx
-                        .try_global::<preferences::Preferences>()
-                        .cloned()
-                        .unwrap_or_default()
-                        .appearance;
-
-                    if dark {
-                        preferences.dark_theme = name.to_string();
-                    } else {
-                        preferences.light_theme = name.to_string();
-                    }
-
-                    this.save(preferences, cx);
+                    this.save(
+                        |appearance| {
+                            if dark {
+                                appearance.dark_theme = name.to_string();
+                            } else {
+                                appearance.light_theme = name.to_string();
+                            }
+                        },
+                        cx,
+                    );
                 }))
         }))
     }
@@ -269,16 +246,11 @@ impl AppearanceSettings {
     }
 
     fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let preferences = cx
-            .try_global::<preferences::Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .appearance;
-        let font_size = preferences.interface_font_size;
+        let font_size = cx.global::<Preferences>().appearance.interface_font_size;
 
         v_flex()
             .w_full()
-            .max_w(crate::geometry::PAGE_WIDTH)
+            .max_w(layout::PAGE_WIDTH)
             .gap_6()
             .child(
                 div()
@@ -359,14 +331,10 @@ impl AppearanceSettings {
                                             .accessibility_label("Decrease interface font size")
                                             .tooltip("Decrease interface font size")
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                let mut preferences = cx
-                                                    .try_global::<preferences::Preferences>()
-                                                    .cloned()
-                                                    .unwrap_or_default()
-                                                    .appearance;
-                                                preferences.interface_font_size -= 1.;
-
-                                                this.save(preferences, cx);
+                                                this.save(
+                                                    |appearance| appearance.interface_font_size -= 1.,
+                                                    cx,
+                                                );
                                             })),
                                     )
                                     .child(
@@ -383,14 +351,10 @@ impl AppearanceSettings {
                                             .accessibility_label("Increase interface font size")
                                             .tooltip("Increase interface font size")
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                let mut preferences = cx
-                                                    .try_global::<preferences::Preferences>()
-                                                    .cloned()
-                                                    .unwrap_or_default()
-                                                    .appearance;
-                                                preferences.interface_font_size += 1.;
-
-                                                this.save(preferences, cx);
+                                                this.save(
+                                                    |appearance| appearance.interface_font_size += 1.,
+                                                    cx,
+                                                );
                                             })),
                                     )
                                     .child(
@@ -398,14 +362,10 @@ impl AppearanceSettings {
                                             .ghost()
                                             .label("Reset")
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                let mut preferences = cx
-                                                    .try_global::<preferences::Preferences>()
-                                                    .cloned()
-                                                    .unwrap_or_default()
-                                                    .appearance;
-                                                preferences.interface_font_size = 16.;
-
-                                                this.save(preferences, cx);
+                                                this.save(
+                                                    |appearance| appearance.interface_font_size = 16.,
+                                                    cx,
+                                                );
                                             })),
                                     ),
                             ),
@@ -418,8 +378,7 @@ impl AppearanceSettings {
 
     fn update_rows(&mut self, width: Pixels, font_size: Pixels) {
         let gap = font_size * 0.75;
-        let columns = ((width + gap)
-            / (crate::geometry::THEME_CARD_WIDTH.to_pixels(font_size) + gap))
+        let columns = ((width + gap) / (THEME_CARD_WIDTH.to_pixels(font_size) + gap))
             .floor()
             .max(1.) as usize;
 
@@ -454,11 +413,7 @@ impl AppearanceSettings {
             return div().into_any_element();
         };
 
-        let preferences = cx
-            .try_global::<preferences::Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .appearance;
+        let appearance = &cx.global::<Preferences>().appearance;
 
         let content = match row {
             PageRow::Header => self.header(cx).into_any_element(),
@@ -476,9 +431,9 @@ impl AppearanceSettings {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if *dark {
-                            format!("Used in dark mode: {}", preferences.dark_theme)
+                            format!("Used in dark mode: {}", appearance.dark_theme)
                         } else {
-                            format!("Used in light mode: {}", preferences.light_theme)
+                            format!("Used in light mode: {}", appearance.light_theme)
                         }),
                 )
                 .into_any_element(),
@@ -491,7 +446,7 @@ impl AppearanceSettings {
             .child(
                 div()
                     .w_full()
-                    .max_w(crate::geometry::PAGE_WIDTH)
+                    .max_w(layout::PAGE_WIDTH)
                     .pb_3()
                     .child(content),
             )
@@ -501,7 +456,7 @@ impl AppearanceSettings {
 
 impl Render for AppearanceSettings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let padding = crate::geometry::page_inset(window).to_pixels(window.rem_size());
+        let padding = layout::page_inset(window).to_pixels(window.rem_size());
         let font_size = cx.theme().font_size;
         let weak = cx.entity().downgrade();
         let row_view = cx.entity().downgrade();
@@ -513,7 +468,7 @@ impl Render for AppearanceSettings {
                 let _ = weak.update(cx, |this, _| {
                     this.update_rows(
                         (bounds.size.width - padding * 2.)
-                            .min(crate::geometry::PAGE_WIDTH.to_pixels(font_size)),
+                            .min(layout::PAGE_WIDTH.to_pixels(font_size)),
                         font_size,
                     );
                 });
@@ -526,7 +481,7 @@ impl Render for AppearanceSettings {
                 })
                 .size_full()
                 .px(padding)
-                .py(crate::geometry::page_inset(window)),
+                .py(layout::page_inset(window)),
             )
             .child(scroll::Scrollbar::vertical(&self.list))
     }

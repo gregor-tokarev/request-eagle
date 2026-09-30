@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -64,7 +64,6 @@ pub struct CollectionPanel {
     pub(super) unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
-    pub(super) selected_row: Option<usize>,
     pub(super) search: Entity<InputState>,
     pub(super) query: String,
     pub(super) scroll_handle: UniformListScrollHandle,
@@ -100,7 +99,7 @@ impl CollectionPanel {
 
         let focus = cx.focus_handle().tab_stop(true);
         let focus_subscription = cx.on_focus(&focus, window, |this, _, cx| {
-            this.select_row(this.selected_row.unwrap_or(0), cx);
+            this.select_row(this.selected_row().unwrap_or(0), cx);
         });
 
         Self {
@@ -114,7 +113,6 @@ impl CollectionPanel {
             visible,
             collapsed: HashSet::new(),
             selected: None,
-            selected_row: None,
             search,
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
@@ -131,62 +129,6 @@ impl CollectionPanel {
             search.select_all(window, cx);
             search.focus(window, cx);
         });
-    }
-
-    /// Save the editor's request and refresh the snapshot used when reopening it.
-    pub fn save_request(
-        &mut self,
-        path: &Path,
-        expected_id: &str,
-        request: Request,
-        cx: &mut Context<Self>,
-    ) -> Result<(), collection::CollectionEditError> {
-        self.collections
-            .update_request(path, expected_id, request)?;
-        let file = self.collections.file(path).expect("saved request exists");
-
-        if self.tree.request_changed(file) {
-            // Cancel any result computed from the previous search documents.
-            self.rows_task = None;
-            Arc::make_mut(&mut self.tree).update_request(file);
-            self.refresh_rows(false, cx);
-        }
-
-        Ok(())
-    }
-
-    /// Save a collection tab's edits, renaming its directory when the name
-    /// changed. Returns the collection's path after the save.
-    pub fn save_collection(
-        &mut self,
-        path: &Path,
-        name: &str,
-        variables: HashMap<String, String>,
-        scripts: RequestScripts,
-        cx: &mut Context<Self>,
-    ) -> Result<PathBuf, collection::CollectionEditError> {
-        // Rename first: an invalid or taken name then fails before any file
-        // changes. The rename event keeps the tab in step if a later write fails.
-        let destination = if path.file_name().is_some_and(|current| current == name) {
-            path.to_path_buf()
-        } else {
-            let destination = self.collections.rename(path, name)?;
-            let selected = self.selected.map(|index| {
-                let selected = &self.tree.items[index].path;
-                match selected.strip_prefix(path) {
-                    Ok(relative) => destination.join(relative),
-                    Err(_) => selected.clone(),
-                }
-            });
-            self.rebuild_tree(selected.as_deref(), Some((path, &destination)), cx);
-
-            destination
-        };
-
-        self.collections
-            .update_collection(&destination, variables, scripts)?;
-
-        Ok(destination)
     }
 
     pub(super) fn refresh_rows(&mut self, reset_scroll: bool, cx: &mut Context<Self>) {
@@ -229,9 +171,6 @@ impl CollectionPanel {
         cx: &mut Context<Self>,
     ) {
         self.visible = rows;
-        self.selected_row = self
-            .selected
-            .and_then(|selected| self.visible.binary_search(&selected).ok());
 
         if reset_scroll {
             self.scroll_handle
@@ -239,6 +178,12 @@ impl CollectionPanel {
         }
 
         cx.notify();
+    }
+
+    /// The selected item's row, while the item is visible.
+    pub(super) fn selected_row(&self) -> Option<usize> {
+        self.selected
+            .and_then(|selected| self.visible.binary_search(&selected).ok())
     }
 
     pub(super) fn toggle(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -261,7 +206,6 @@ impl CollectionPanel {
             }
 
             self.selected = Some(index);
-            self.selected_row = Some(row);
             self.scroll_handle
                 .scroll_to_item(row, ScrollStrategy::Nearest);
             cx.notify();
@@ -301,28 +245,14 @@ impl CollectionPanel {
         let Some(file) = self.collections.file(&item.path) else {
             return;
         };
-
-        let mut root = index;
-        while let Some(parent) = self.tree.items[root].parent {
-            root = parent;
-        }
+        let (collection, folders) = self.tree.location(index);
 
         cx.emit(CollectionPanelEvent::OpenRequest {
             id: file.id.clone().into(),
             path: item.path.clone(),
             name: item.label.clone(),
-            collection: self.tree.items[root].label.clone(),
-            folders: item
-                .path
-                .strip_prefix(&self.tree.items[root].path)
-                .ok()
-                .and_then(Path::parent)
-                .map(|path| {
-                    path.iter()
-                        .map(|part| part.to_string_lossy().into_owned().into())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            collection,
+            folders,
             request: file.request.clone(),
         });
     }
@@ -335,7 +265,7 @@ impl CollectionPanel {
             return;
         }
 
-        let row = self.selected_row.unwrap_or(0);
+        let row = self.selected_row().unwrap_or(0);
         let index = self.visible[row];
 
         if self.delete_focus.is_focused(window)
@@ -347,7 +277,7 @@ impl CollectionPanel {
 
         match event.keystroke.key.as_str() {
             "down" => self.select_row(
-                self.selected_row
+                self.selected_row()
                     .map_or(0, |row| (row + 1).min(self.visible.len() - 1)),
                 cx,
             ),
@@ -385,7 +315,7 @@ impl CollectionPanel {
     }
 
     fn rename_selected(&mut self, _: &RenameItem, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(&index) = self.visible.get(self.selected_row.unwrap_or(0)) {
+        if let Some(&index) = self.visible.get(self.selected_row().unwrap_or(0)) {
             self.begin_rename(index, window, cx);
         }
     }
@@ -396,7 +326,7 @@ impl CollectionPanel {
             return;
         }
 
-        if let Some(&index) = self.selected_row.and_then(|row| self.visible.get(row)) {
+        if let Some(&index) = self.selected_row().and_then(|row| self.visible.get(row)) {
             self.request_delete(index, window, cx);
         }
     }

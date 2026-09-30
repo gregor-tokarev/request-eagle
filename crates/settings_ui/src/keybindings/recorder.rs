@@ -3,7 +3,7 @@ use gpui_kit::component::*;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use keybindings_service::{self as keybindings, Command};
 
-use super::{KeybindingsPage, shortcut_keycaps};
+use super::{KeybindingsPage, keycaps::shortcut_keycaps};
 
 pub(super) struct Recording {
     pub(super) command: Command,
@@ -78,12 +78,7 @@ impl KeybindingsPage {
     }
 
     fn record_key(&mut self, stroke: &Keystroke, cx: &mut Context<Self>) {
-        if stroke.key.is_empty()
-            || matches!(
-                stroke.key.as_str(),
-                "cmd" | "platform" | "control" | "ctrl" | "alt" | "shift" | "function" | "fn"
-            )
-        {
+        if is_modifier_only(stroke) {
             return;
         }
 
@@ -253,4 +248,14 @@ impl KeybindingsPage {
                     }),
             )
     }
+}
+
+/// Recorders wait for a key that completes a shortcut, ignoring modifier
+/// presses on their own.
+pub(super) fn is_modifier_only(stroke: &Keystroke) -> bool {
+    stroke.key.is_empty()
+        || matches!(
+            stroke.key.as_str(),
+            "cmd" | "platform" | "control" | "ctrl" | "alt" | "shift" | "function" | "fn"
+        )
 }

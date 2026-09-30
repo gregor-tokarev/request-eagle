@@ -1,4 +1,3 @@
-use super::appearance;
 use gpui_kit::component::{
     button::*,
     resizable::{h_resizable, resizable_panel},
@@ -6,12 +5,15 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-
-use super::general::GeneralSettings;
-use super::keybindings::KeybindingsPage;
-use super::proxy::ProxySettings;
-use crate::actions::CloseSettings;
 use updater::Updater;
+
+use crate::{
+    actions::CloseSettings, appearance::AppearanceSettings, general::GeneralSettings,
+    keybindings::KeybindingsPage, layout, proxy::ProxySettings,
+};
+
+const SIDEBAR_MIN: Rems = rems(14.);
+const CONTENT_MIN: Rems = rems(28.);
 
 pub enum SettingsEvent {
     Close,
@@ -49,7 +51,7 @@ pub struct Settings {
     page: SettingsPage,
     general: Entity<GeneralSettings>,
     proxy: Entity<ProxySettings>,
-    appearance: Entity<appearance::AppearanceSettings>,
+    appearance: Entity<AppearanceSettings>,
     keybindings: Entity<KeybindingsPage>,
     focus_handle: FocusHandle,
 }
@@ -62,7 +64,7 @@ impl Settings {
             page: SettingsPage::General,
             general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
             proxy: cx.new(|cx| ProxySettings::new(window, cx)),
-            appearance: cx.new(|cx| appearance::AppearanceSettings::new(window, cx)),
+            appearance: cx.new(|cx| AppearanceSettings::new(window, cx)),
             keybindings: cx.new(|cx| KeybindingsPage::new(window, cx)),
             focus_handle: cx.focus_handle(),
         }
@@ -161,7 +163,7 @@ impl Settings {
 
 impl Render for Settings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let narrow = crate::geometry::is_narrow(window);
+        let narrow = layout::is_narrow(window);
 
         let content = v_flex()
             .flex_1()
@@ -190,24 +192,22 @@ impl Render for Settings {
                         ),
                 )
             })
-            .child(if self.page == SettingsPage::Appearance {
-                div()
+            .child(match self.page {
+                SettingsPage::Appearance => div()
                     .flex_1()
                     .min_h_0()
                     .child(self.appearance.clone())
-                    .into_any_element()
-            } else if self.page == SettingsPage::Keybindings {
-                h_flex()
+                    .into_any_element(),
+                SettingsPage::Keybindings => h_flex()
                     .flex_1()
                     .min_h_0()
                     .items_stretch()
                     .justify_center()
-                    .px(crate::geometry::page_inset(window))
-                    .py(crate::geometry::page_inset(window))
+                    .px(layout::page_inset(window))
+                    .py(layout::page_inset(window))
                     .child(self.keybindings.clone())
-                    .into_any_element()
-            } else {
-                div()
+                    .into_any_element(),
+                SettingsPage::General | SettingsPage::Proxy => div()
                     .id("settings-scroll")
                     .flex_1()
                     .min_h_0()
@@ -215,15 +215,15 @@ impl Render for Settings {
                     .child(
                         v_flex()
                             .items_center()
-                            .px(crate::geometry::page_inset(window))
-                            .py(crate::geometry::page_inset(window))
+                            .px(layout::page_inset(window))
+                            .py(layout::page_inset(window))
                             .child(if self.page == SettingsPage::Proxy {
                                 self.proxy.clone().into_any_element()
                             } else {
                                 self.general.clone().into_any_element()
                             }),
                     )
-                    .into_any_element()
+                    .into_any_element(),
             });
 
         h_flex()
@@ -246,11 +246,10 @@ impl Render for Settings {
                         resizable_panel()
                             .size(rems(15.).to_pixels(window.rem_size()))
                             .size_range(
-                                crate::geometry::SIDEBAR_MIN.to_pixels(window.rem_size())
+                                SIDEBAR_MIN.to_pixels(window.rem_size())
                                     ..rems(25.).to_pixels(window.rem_size()).min(
                                         window.viewport_size().width
-                                            - crate::geometry::CONTENT_MIN
-                                                .to_pixels(window.rem_size()),
+                                            - CONTENT_MIN.to_pixels(window.rem_size()),
                                     ),
                             )
                             .flex_none()
@@ -258,10 +257,7 @@ impl Render for Settings {
                     )
                     .child(
                         resizable_panel()
-                            .size_range(
-                                crate::geometry::CONTENT_MIN.to_pixels(window.rem_size())
-                                    ..Pixels::MAX,
-                            )
+                            .size_range(CONTENT_MIN.to_pixels(window.rem_size())..Pixels::MAX)
                             .child(content),
                     )
                     .into_any_element()
