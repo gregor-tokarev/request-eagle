@@ -147,22 +147,21 @@ impl VariableInput {
     ) -> Self {
         let input_subscription = match &target {
             VariableTarget::Input(input) => cx.observe_in(input, window, |this, _, window, cx| {
-                this.update_chips(cx);
                 this.refresh(window, cx)
             }),
             VariableTarget::Editor(input) => cx.observe_in(input, window, |this, _, window, cx| {
-                this.update_chips(cx);
                 this.refresh(window, cx)
             }),
         };
         let scope_subscription = cx.observe_in(&scope, window, |this, _, window, cx| {
-            this.update_chips(cx);
+            // Repaint to recolor the chips, even when completion is closed.
+            cx.notify();
             this.snapshot = None;
             this.range = None;
             this.refresh(window, cx);
         });
 
-        let mut this = Self {
+        Self {
             target,
             scope,
             environment_names: Vec::new(),
@@ -175,18 +174,15 @@ impl VariableInput {
             unresolved: Vec::new(),
             chipped: Default::default(),
             _subscriptions: vec![input_subscription, scope_subscription],
-        };
-        this.update_chips(cx);
-
-        this
+        }
     }
 
+    /// Find and color the chips when the text or the resolvable names changed.
+    /// This runs as the field paints, so hidden tabs never read environments.
     fn update_chips(&mut self, cx: &mut App) {
         let text = self.target.text(cx);
         let names = self.scope.update(cx, |scope, cx| scope.names(cx));
 
-        // Observers also run for caret moves and repaints; only edits and
-        // environment changes move or recolor chips.
         if ropes_are_instances(&self.chipped.0, &text) && Rc::ptr_eq(&self.chipped.1, &names) {
             return;
         }
@@ -194,15 +190,21 @@ impl VariableInput {
         let source = text.to_string();
         (self.chips, self.unresolved) = variable_references(&source).partition(|chip| {
             let name = source[chip.start + 2..chip.end - 2].trim();
-            names.contains(name)
-                || (name.starts_with('$') && environment::generate_variable(name).is_some())
+
+            // Sending resolves `$` names only as generated values.
+            if name.starts_with('$') {
+                environment::is_generated_variable(name)
+            } else {
+                names.contains(name)
+            }
         });
         self.chipped = (text, names);
     }
 
     /// Paint each `{{variable}}` as a rounded chip over its text. The text
     /// stays ordinary input text; the input only reports where it is.
-    fn paint_chips(&self, window: &mut Window, cx: &App) {
+    fn paint_chips(&mut self, window: &mut Window, cx: &mut App) {
+        self.update_chips(cx);
         let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
         let radius = cx.theme().radius_tokens().sm;
 
@@ -366,9 +368,10 @@ impl VariableInput {
 
 #[cfg(test)]
 impl VariableInput {
-    /// Chips that resolve, then chips that don't.
-    pub(crate) fn chips(&self) -> (&[Range<usize>], &[Range<usize>]) {
-        (&self.chips, &self.unresolved)
+    /// Chips that resolve, then chips that don't, as the next paint shows them.
+    pub(crate) fn chips(&mut self, cx: &mut App) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+        self.update_chips(cx);
+        (self.chips.clone(), self.unresolved.clone())
     }
 }
 
@@ -496,7 +499,9 @@ impl Render for VariableInput {
             .child(
                 canvas(
                     |_, _, _| {},
-                    move |_, _, window, cx| chips.read(cx).paint_chips(window, cx),
+                    move |_, _, window, cx| {
+                        chips.update(cx, |chips, cx| chips.paint_chips(window, cx))
+                    },
                 )
                 .size_full(),
             )

@@ -174,3 +174,28 @@ fn changed_name_count_is_bounded_even_for_deleted_values() {
     assert!(session.apply(&changes).is_err());
     assert!(session.values(HashMap::new()).is_empty());
 }
+
+#[test]
+fn every_tab_sees_the_revision_of_committed_updates() {
+    let workspace = EnvironmentSessions::default();
+    let path = Path::new("/workspace/one/environment.toml");
+    let sender = workspace.for_path(Some(path));
+    let other_tab = workspace.for_path(Some(path));
+    assert_eq!(other_tab.revision(), 0);
+
+    sender
+        .apply(&BTreeMap::from([("token".into(), Some("new".into()))]))
+        .unwrap();
+    assert_eq!(other_tab.revision(), 1);
+
+    // A rejected update leaves the values, and therefore the revision, alone.
+    assert!(
+        sender
+            .apply(&BTreeMap::from([(
+                "oversized".into(),
+                Some("x".repeat(1024 * 1024 + 1))
+            )]))
+            .is_err()
+    );
+    assert_eq!(other_tab.revision(), 1);
+}

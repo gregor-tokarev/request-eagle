@@ -14,8 +14,9 @@ pub(crate) struct VariableScope {
     pub path: Option<PathBuf>,
     pub session: EnvironmentSession,
     pub environments: Option<Entity<Environments>>,
-    /// Names that resolve, read once after each change for every field.
-    pub names: Option<Rc<HashSet<String>>>,
+    /// Names that resolve and the session revision they were read at,
+    /// shared by every field of the request.
+    pub names: Option<(u64, Rc<HashSet<String>>)>,
 }
 
 impl VariableScope {
@@ -25,15 +26,24 @@ impl VariableScope {
         cx.notify();
     }
 
-    /// Environment names a reference resolves to. A file that can't be read
-    /// resolves nothing, as sending would fail.
+    /// Environment names a reference resolves to. Other tabs of the collection
+    /// can change the shared session, so its revision is checked every time.
     pub fn names(&mut self, cx: &App) -> Rc<HashSet<String>> {
-        if self.names.is_none() {
-            let names = self.values(cx).unwrap_or_default().into_keys().collect();
-            self.names = Some(Rc::new(names));
+        let revision = self.session.revision();
+        if let Some((read_at, names)) = &self.names
+            && *read_at == revision
+        {
+            return names.clone();
         }
 
-        self.names.clone().unwrap_or_default()
+        // Sending still resolves session values when a file can't be read.
+        let values = self
+            .values(cx)
+            .unwrap_or_else(|_| self.session.values(HashMap::new()));
+        let names = Rc::new(values.into_keys().collect::<HashSet<_>>());
+        self.names = Some((revision, names.clone()));
+
+        names
     }
 
     /// Reload file values so external edits appear on the next send or
