@@ -313,17 +313,25 @@ impl MessageLog {
         cx.notify();
     }
 
+    /// The selected message's row, when the filter shows it.
+    fn selected_row(&self) -> Option<usize> {
+        self.selected
+            .and_then(|id| self.visible.iter().rposition(|&visible| visible == id))
+            .map(|index| self.visible.len() - 1 - index)
+    }
+
+    fn keyboard_row(&self) -> usize {
+        self.selected_row().unwrap_or(0)
+    }
+
     /// Up and Down show the neighboring message; Escape closes it.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let row = self
-            .selected
-            .and_then(|id| self.visible.iter().rposition(|&visible| visible == id))
-            .map(|index| self.visible.len() - 1 - index);
+        let row = self.selected_row();
         let next = match (event.keystroke.key.as_str(), row) {
             ("down", Some(row)) => (row + 1 < self.visible.len()).then_some(row + 1),
             ("up", Some(row)) => row.checked_sub(1),
             ("down" | "up", None) => (!self.visible.is_empty()).then_some(0),
-            ("escape", Some(_)) => {
+            ("escape", _) if self.selected.is_some() => {
                 self.selected = None;
                 self.detail = None;
                 cx.notify();
@@ -488,9 +496,11 @@ impl MessageLog {
             )
     }
 
-    fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&self, row: usize, focused: bool, cx: &mut Context<Self>) -> AnyElement {
         let (id, entry) = self.row_entry(row);
         let selected = self.selected == Some(id);
+        // Where the arrow keys start: the selection, or else the newest row.
+        let keyboard = focused && self.keyboard_row() == row;
         let (icon, color) = kind_icon(entry.kind, cx);
 
         h_flex()
@@ -511,6 +521,7 @@ impl MessageLog {
             .when(!selected, |this| {
                 this.hover(|this| this.bg(cx.theme().list_hover))
             })
+            .when(keyboard, |this| this.border_color(cx.theme().ring))
             .child(
                 Icon::new(icon)
                     .size(rems(0.875))
@@ -564,8 +575,9 @@ impl MessageLog {
                 uniform_list(
                     "websocket-messages",
                     self.visible.len(),
-                    cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
-                        range.map(|row| this.row(row, cx)).collect()
+                    cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
+                        let focused = this.focus.is_focused(window);
+                        range.map(|row| this.row(row, focused, cx)).collect()
                     }),
                 )
                 .size_full()

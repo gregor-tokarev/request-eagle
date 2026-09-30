@@ -304,6 +304,8 @@ impl Connection {
             let mut close = None;
 
             while let Some(message) = stream.next().await {
+                // The message may wait below; the log shows when it arrived.
+                let time = SystemTime::now();
                 let message = match message? {
                     Message::Text(text) => WebSocketMessage::Text(text.as_str().to_owned()),
                     Message::Binary(bytes) => WebSocketMessage::Binary(bytes.to_vec()),
@@ -329,11 +331,8 @@ impl Connection {
                     .bytes
                     .fetch_add(message_bytes(&message), Ordering::SeqCst);
 
-                if received
-                    .send(event(WebSocketEventKind::Received(message)))
-                    .await
-                    .is_err()
-                {
+                let kind = WebSocketEventKind::Received(message);
+                if received.send(WebSocketEvent { time, kind }).await.is_err() {
                     break;
                 }
             }

@@ -386,4 +386,13 @@ fn arrow_keys_move_between_messages(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("escape");
     assert_eq!(selected(cx), None);
     assert!(element_bounds(cx, "websocket-message-detail").is_none());
+
+    // Escape also closes a message that the filter no longer shows.
+    push(&log, vec![sent("mine")], cx);
+    let mine = element_bounds(cx, "websocket-message-0").unwrap();
+    cx.simulate_click(mine.center(), Modifiers::default());
+    assert_eq!(selected(cx).as_deref(), Some("mine"));
+    cx.update(|_, cx| log.update(cx, |log, cx| log.set_filter(Filter::Received, cx)));
+    cx.simulate_keystrokes("escape");
+    assert_eq!(selected(cx), None);
 }
