@@ -8,6 +8,7 @@
     }};
 
     const files = Object.assign(Object.create(null), JSON.parse(libraryJson));
+    const libraries = Object.keys(files);
     const snapshots = new Map();
     let source = "", phase = "", version = 0, declarationVersion = 0;
     let lineStarts = [0];
@@ -28,7 +29,7 @@
         target: ts.ScriptTarget.ES2023,
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Classic,
-        lib: ["lib.es2023.d.ts"],
+        lib: libraries,
         types: [],
     };
     const host = {
@@ -42,7 +43,7 @@
             return snapshots.get(name);
         },
         getCurrentDirectory: () => "",
-        getDefaultLibFileName: () => "lib.es2023.d.ts",
+        getDefaultLibFileName: () => "lib.es5.d.ts",
         fileExists: name => Object.hasOwn(files, name),
         readFile: name => files[name],
         readDirectory: () => [],
