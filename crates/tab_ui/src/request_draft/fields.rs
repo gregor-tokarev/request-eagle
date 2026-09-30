@@ -20,10 +20,10 @@ struct FieldRow {
     _subscriptions: Vec<Subscription>,
 }
 
-pub(super) struct FieldsChanged(pub Vec<(String, String)>);
+pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
 
 /// A request's editable key/value rows, including one trailing empty row.
-pub(super) struct RequestFields {
+pub(crate) struct RequestFields {
     id: &'static str,
     rows: Vec<FieldRow>,
     generated_headers: Vec<(SharedString, SharedString)>,
@@ -34,7 +34,7 @@ pub(super) struct RequestFields {
 impl EventEmitter<FieldsChanged> for RequestFields {}
 
 impl RequestFields {
-    pub(super) fn new(
+    pub(crate) fn new(
         id: &'static str,
         values: &[(String, String)],
         generated_headers: &[(String, String)],
@@ -61,7 +61,7 @@ impl RequestFields {
         fields
     }
 
-    pub(super) fn set_generated_headers(
+    pub(crate) fn set_generated_headers(
         &mut self,
         headers: &[(String, String)],
         cx: &mut Context<Self>,

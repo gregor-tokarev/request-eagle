@@ -40,7 +40,7 @@ impl Body {
 
 /// Cache the editor independently so selecting response details does not lay
 /// out and paint an unchanged (potentially large) response body again.
-pub(super) struct ResponseBodyEditor(pub(super) Entity<EditorState>);
+pub(crate) struct ResponseBodyEditor(pub(crate) Entity<EditorState>);
 
 impl Render for ResponseBodyEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

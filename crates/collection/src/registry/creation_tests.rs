@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Method, Request};
+use request::{Method, Request, WebSocketRequest};
 
 struct Fixture(PathBuf);
 
@@ -50,7 +50,9 @@ fn creates_collections_folders_and_requests_that_survive_reload() {
     assert_eq!(file.name, "New Request");
     assert_eq!(file.schema_version, 1);
     assert!(Uuid::parse_str(&file.id).is_ok());
-    let Request::Http(http) = &file.request;
+    let Request::Http(http) = &file.request else {
+        panic!("expected an HTTP request");
+    };
     assert!(matches!(http.method, Method::Get));
     assert_eq!(http.path, "/");
     let Entry::File(root_file) = &reloaded.collections()[0].entries[1] else {
@@ -112,7 +114,9 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
             .unwrap();
         assert_eq!(path.parent(), Some(parent.as_path()));
         let file = crate::FileEntry::from_path(path).unwrap();
-        let Request::Http(saved) = file.request;
+        let Request::Http(saved) = file.request else {
+            panic!("expected an HTTP request");
+        };
         assert_eq!(saved, request);
     }
     assert!(
@@ -130,7 +134,9 @@ fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
     let collection = registry.create_collection().unwrap();
     let path = registry.create_request(&collection).unwrap();
     let original = crate::FileEntry::from_path(&path).unwrap();
-    let Request::Http(mut request) = original.request;
+    let Request::Http(mut request) = original.request else {
+        panic!("expected an HTTP request");
+    };
     assert!(request.scripts.is_empty());
     request.scripts.pre_request = "pm.variables.set('token', 'abc');\nconsole.log('ready');".into();
     request.scripts.post_response = "pm.test('ok', () => pm.response.to.have.status(200));".into();
@@ -138,7 +144,9 @@ fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
         .update_request(&path, &original.id, Request::Http(request.clone()))
         .unwrap();
     let reloaded = crate::FileEntry::from_path(&path).unwrap();
-    let Request::Http(saved) = reloaded.request;
+    let Request::Http(saved) = reloaded.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(saved.scripts, request.scripts);
     assert_eq!(reloaded.name, original.name);
 
@@ -147,17 +155,63 @@ fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
     registry
         .update_request(&path, &original.id, Request::Http(request.clone()))
         .unwrap();
-    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(saved.scripts, request.scripts);
     request.scripts.post_response.clear();
     registry
         .update_request(&path, &original.id, Request::Http(request))
         .unwrap();
-    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(saved) = crate::FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert!(saved.scripts.is_empty());
     assert!(
         !fs::read_to_string(path)
             .unwrap()
             .contains("[request.scripts]")
     );
+}
+
+#[test]
+fn websocket_requests_save_and_reload_without_stale_fields() {
+    let fixture = Fixture::new();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let collection = registry.create_collection().unwrap();
+    let mut request = WebSocketRequest {
+        url: "wss://{{host}}/feed".into(),
+        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        query: vec![("room".into(), "42".into())],
+        message: "{\"subscribe\":\"prices\"}".into(),
+    };
+    let path = registry
+        .create_request_with(&collection, "Prices", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.contains("type = \"websocket\""), "{content}");
+    let file = crate::FileEntry::from_path(&path).unwrap();
+    let Request::WebSocket(saved) = &file.request else {
+        panic!("expected a WebSocket request");
+    };
+    assert_eq!(saved, &request);
+    assert_eq!(file.request.label(), "WS");
+    assert_eq!(file.request.url(), "wss://{{host}}/feed");
+
+    // Emptied fields are removed from the file rather than kept from before.
+    request.headers.clear();
+    request.query.clear();
+    request.message.clear();
+    registry
+        .update_request(&path, &file.id, request.clone().into())
+        .unwrap();
+    let content = fs::read_to_string(&path).unwrap();
+    for field in ["headers", "query", "message"] {
+        assert!(!content.contains(field), "{field} remained in {content}");
+    }
+    let Request::WebSocket(saved) = crate::FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected a WebSocket request");
+    };
+    assert_eq!(saved, request);
 }

@@ -177,7 +177,9 @@ request_custom = 'keep the request metadata'
     assert_eq!(cached.name, "External name");
     assert_eq!(cached.schema_version, 3);
     let loaded = FileEntry::from_path(&path).unwrap();
-    let Request::Http(saved) = loaded.request;
+    let Request::Http(saved) = loaded.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(saved.method, updated.method);
     assert_eq!(saved.path, updated.path);
     assert_eq!(saved.headers, updated.headers);
@@ -206,7 +208,9 @@ request_custom = 'keep the request metadata'
     registry
         .update_request(&path, "list", cleared.into())
         .unwrap();
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(reloaded.body, None);
     assert!(reloaded.query.is_empty());
 }
@@ -237,7 +241,9 @@ fn failed_request_save_keeps_file_and_registry_unchanged() {
 
     assert!(matches!(result, Err(CollectionEditError::Save(_))));
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
-    let Request::Http(cached) = &registry.file(&path).unwrap().request;
+    let Request::Http(cached) = &registry.file(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(cached.path, "/users");
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
 }
@@ -272,7 +278,9 @@ fn stale_save_cannot_overwrite_a_request_recreated_at_the_same_path() {
     let cached = registry.file(&path).unwrap();
     assert_eq!(cached.id, replacement_id);
     assert_eq!(cached.raw_content, replacement_content);
-    let Request::Http(request) = &cached.request;
+    let Request::Http(request) = &cached.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(request.path, "/");
 }
 
@@ -304,7 +312,9 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
     let cached = registry.file(&path).unwrap();
     assert_eq!(cached.id, "list");
     assert_eq!(cached.raw_content, original_content);
-    let Request::Http(request) = &cached.request;
+    let Request::Http(request) = &cached.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(request.path, "/users");
 }
 
@@ -335,7 +345,9 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains("custom = 'keep'"));
     assert!(content.contains("# request comment"));
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(reloaded.path, "https://example.com/edited");
     assert_eq!(reloaded.body, None);
 }
@@ -366,7 +378,9 @@ query = [
     )
     .unwrap();
     let mut registry = CollectionRegistry::from_path(root).unwrap();
-    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
+    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
+        panic!("expected an HTTP request");
+    };
     request.path = "https://example.com/edited".into();
 
     registry
@@ -393,7 +407,9 @@ query = [
         content.ends_with(&edited_arrays),
         "array comments changed: {content}"
     );
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
 }
@@ -428,7 +444,9 @@ query = [
     )
     .unwrap();
     let mut registry = CollectionRegistry::from_path(root).unwrap();
-    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
+    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
+        panic!("expected an HTTP request");
+    };
     request.headers.remove(0);
     request.query.remove(0);
 
@@ -475,7 +493,9 @@ query = [
         content.ends_with(reordered),
         "row annotations moved: {content}"
     );
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
 }

@@ -16,7 +16,9 @@ pub async fn run(
 ) -> Result<Value> {
     let registry = crate::collections::load(root)?;
     let file = registry.file(path).context("Unknown saved request path")?;
-    let request::Request::Http(request) = file.request.clone();
+    let request::Request::Http(request) = file.request.clone() else {
+        bail!("requests.run sends HTTP requests. Open WebSocket requests in the app to connect");
+    };
     let collection = registry
         .collections()
         .iter()

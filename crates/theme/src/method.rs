@@ -1,10 +1,12 @@
 use gpui_kit::{App, Hsla, component::ActiveTheme as _};
 
-/// The color that identifies an HTTP method wherever it is shown.
+/// The color that identifies an HTTP method, or the WebSocket protocol,
+/// wherever it is shown.
 pub fn method_color(method: &str, cx: &App) -> Hsla {
     let theme = cx.theme();
 
     match method {
+        "WS" => theme.magenta,
         "GET" => theme.success,
         "POST" => theme.warning,
         "PUT" | "PATCH" => theme.info,

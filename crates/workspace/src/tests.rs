@@ -98,9 +98,18 @@ impl PageTab {
         draft.clone()
     }
 
+    /// The WebSocket draft shown in this tab.
+    pub(crate) fn websocket(&self) -> gpui_kit::Entity<tab_ui::WebSocketDraft> {
+        let Page::WebSocket(draft) = &self.page else {
+            panic!("{} is not a WebSocket tab", self.title);
+        };
+
+        draft.clone()
+    }
+
     /// Where the tab's request is saved.
     pub(crate) fn location(&self, cx: &gpui_kit::App) -> Option<tab_ui::RequestLocation> {
-        self.draft().read(cx).location.clone()
+        self.page.location(cx).cloned()
     }
 }
 

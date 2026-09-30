@@ -203,6 +203,22 @@ fn build_client(
     preferences: &RequestPreferences,
     version: HttpVersion,
 ) -> Result<Arc<reqwest_client::ReqwestClient>, ExecutionError> {
+    let builder = client_builder(preferences)?;
+    let builder = match version {
+        HttpVersion::Auto => builder,
+        HttpVersion::Http1_1 => builder.http1_only(),
+        HttpVersion::Http2 => builder.http2_prior_knowledge(),
+    };
+    let client = builder.build().map_err(ExecutionError::Client)?;
+
+    Ok(Arc::new(client.into()))
+}
+
+/// A client with the certificate and proxy preferences, shared by HTTP
+/// requests and WebSocket handshakes.
+pub(crate) fn client_builder(
+    preferences: &RequestPreferences,
+) -> Result<reqwest::ClientBuilder, ExecutionError> {
     let builder = reqwest::Client::builder()
         .use_rustls_tls()
         .danger_accept_invalid_certs(!preferences.ssl_certificate_verification)
@@ -211,18 +227,8 @@ fn build_client(
         .no_brotli()
         .no_deflate()
         .no_zstd();
-    let builder = match version {
-        HttpVersion::Auto => builder,
-        HttpVersion::Http1_1 => builder.http1_only(),
-        HttpVersion::Http2 => builder.http2_prior_knowledge(),
-    };
-    let client = preferences
-        .proxy
-        .apply(builder)?
-        .build()
-        .map_err(ExecutionError::Client)?;
 
-    Ok(Arc::new(client.into()))
+    preferences.proxy.apply(builder)
 }
 
 fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, ExecutionError> {

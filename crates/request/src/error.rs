@@ -46,6 +46,22 @@ pub enum ExecutionError {
     #[error("unsupported URL scheme: {0}; expected http or https")]
     UnsupportedScheme(String),
 
+    #[error("unsupported URL scheme: {0}; expected ws or wss")]
+    UnsupportedWebSocketScheme(String),
+
+    #[error("the server did not accept the WebSocket connection: {status}")]
+    WebSocketRejected {
+        status: http_client::http::StatusCode,
+    },
+
+    #[error(
+        "the server answered the WebSocket handshake with a Sec-WebSocket-Accept that does not match the request"
+    )]
+    WebSocketAccept,
+
+    #[error("WebSocket connection failed: {0}")]
+    WebSocket(#[source] tokio_tungstenite::tungstenite::Error),
+
     #[error("invalid HTTP request: {0}")]
     InvalidRequest(#[from] http_client::http::Error),
 
