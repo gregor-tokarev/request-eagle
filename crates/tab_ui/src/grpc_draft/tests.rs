@@ -296,3 +296,21 @@ fn settings_are_saved_with_the_request(cx: &mut TestAppContext) {
         assert!(draft.is_dirty());
     });
 }
+
+#[gpui_kit::test]
+fn clearing_the_source_drops_a_waiting_invoke(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(GrpcRequest::default(), cx);
+
+    // An Invoke waiting for reflection, whose URL is then cleared.
+    draft.update_in(cx, |draft, window, cx| {
+        draft.invoke_when_loaded = true;
+        draft.response.update(cx, |response, cx| response.wait(cx));
+        draft.load_definition(false, window, cx);
+    });
+
+    draft.read_with(cx, |draft, _| assert!(!draft.invoke_when_loaded));
+    let invoke = element_bounds(cx, "grpc-invoke").unwrap();
+    cx.simulate_click(invoke.center(), Modifiers::default());
+    // Invoke runs again and explains what is missing.
+    assert!(element_bounds(cx, "grpc-error").is_some());
+}

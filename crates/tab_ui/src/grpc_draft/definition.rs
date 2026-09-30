@@ -75,6 +75,11 @@ impl GrpcDraft {
 
         self.definition = DefinitionState::Idle;
         self.definition_source = None;
+
+        if self.current_source().is_none() {
+            self.drop_pending_invoke(cx);
+        }
+
         self.definition_task = self.current_source().map(|_| {
             cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor().timer(REFLECTION_DELAY).await;
@@ -97,6 +102,8 @@ impl GrpcDraft {
         cx: &mut Context<Self>,
     ) {
         let Some(source) = self.current_source() else {
+            self.drop_pending_invoke(cx);
+
             if !matches!(self.definition, DefinitionState::Idle) || self.definition_task.is_some() {
                 self.definition = DefinitionState::Idle;
                 self.definition_source = None;
@@ -118,6 +125,7 @@ impl GrpcDraft {
         let variables = self.variables.read(cx).request_variables(cx);
         let collection = self.collection_path();
         let load = client.load_definition(&self.request, &variables, collection.as_deref());
+        self.reflected_target = reflected_target(&self.request, &variables);
         let task = cx.background_executor().spawn(load);
 
         self.definition = DefinitionState::Loading;
@@ -149,6 +157,15 @@ impl GrpcDraft {
         }));
         self.refresh_methods(window, cx);
         self.redraw(cx);
+    }
+
+    /// Forget an Invoke waiting for a definition that will no longer load,
+    /// such as after the URL was cleared.
+    fn drop_pending_invoke(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.invoke_when_loaded) {
+            self.response
+                .update(cx, |response, cx| response.cancel(false, cx));
+        }
     }
 
     /// Show the loaded methods in the picker and select the request's method.
@@ -240,6 +257,32 @@ impl GrpcDraft {
 
         if let GrpcDefinition::ProtoFile { import_paths, .. } = &mut self.request.definition {
             *import_paths = paths;
+        }
+
+        self.redraw(cx);
+    }
+
+    /// Replace the definition's paths, such as with the relative paths a save
+    /// stored. The loaded services stay current when they came from the
+    /// same files.
+    pub fn set_definition(
+        &mut self,
+        definition: GrpcDefinition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.request.definition == definition {
+            return;
+        }
+
+        let current = self.definition_is_current();
+        self.request.definition = definition;
+        self.proto_path = None;
+        self.import_paths.clear();
+        self.definition_inputs(window, cx);
+
+        if current {
+            self.definition_source = self.current_source();
         }
 
         self.redraw(cx);
@@ -406,7 +449,6 @@ impl GrpcDraft {
                         Button::new("grpc-import-proto")
                             .debug_selector(|| "grpc-import-proto".into())
                             .outline()
-                            .small()
                             .label("Import .proto file")
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.use_proto_file(window, cx)),
@@ -429,7 +471,6 @@ impl GrpcDraft {
                     Button::new("grpc-use-reflection")
                         .debug_selector(|| "grpc-use-reflection".into())
                         .ghost()
-                        .small()
                         .icon(IconName::ArrowLeft)
                         .label("Use server reflection")
                         .on_click(
@@ -454,13 +495,12 @@ impl GrpcDraft {
                                     .debug_selector(|| "grpc-proto-path".into())
                                     .flex_1()
                                     .min_w_0()
-                                    .child(Input::new(&proto_path).small().aria_label(".proto file")),
+                                    .child(Input::new(&proto_path).aria_label(".proto file")),
                             )
                             .child(
                                 Button::new("grpc-choose-proto")
                                     .debug_selector(|| "grpc-choose-proto".into())
                                     .outline()
-                                    .small()
                                     .label("Choose a File")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.choose_proto_file(window, cx)
@@ -483,12 +523,11 @@ impl GrpcDraft {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(Input::new(input).small().aria_label(format!("Import path {}", index + 1))),
+                                    .child(Input::new(input).aria_label(format!("Import path {}", index + 1))),
                             )
                             .child(
                                 Button::new(("grpc-choose-import-path", index))
                                     .ghost()
-                                    .small()
                                     .icon(IconName::FolderOpen)
                                     .accessibility_label("Choose a folder")
                                     .tooltip("Choose a folder")
@@ -500,7 +539,6 @@ impl GrpcDraft {
                                 Button::new(("grpc-remove-import-path", index))
                                     .debug_selector(move || format!("grpc-remove-import-path-{index}"))
                                     .ghost()
-                                    .small()
                                     .icon(IconName::Close)
                                     .accessibility_label("Remove import path")
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -513,7 +551,6 @@ impl GrpcDraft {
                             Button::new("grpc-add-import-path")
                                 .debug_selector(|| "grpc-add-import-path".into())
                                 .ghost()
-                                .small()
                                 .icon(IconName::Plus)
                                 .label("Add an import path")
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -527,7 +564,6 @@ impl GrpcDraft {
                     Button::new("grpc-load-proto")
                         .debug_selector(|| "grpc-load-proto".into())
                         .primary()
-                        .small()
                         .label("Import")
                         .disabled(!has_path)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -663,4 +699,19 @@ impl GrpcDraft {
             )
             .into_any_element()
     }
+}
+
+/// The URL and metadata a reflection request resolves to with these values.
+pub(super) fn reflected_target(
+    request: &request::GrpcRequest,
+    variables: &request::RequestVariables,
+) -> Option<(String, Vec<(String, String)>)> {
+    if !request.definition.is_reflection() {
+        return None;
+    }
+
+    variables
+        .resolve_grpc_target(request)
+        .ok()
+        .map(|request| (request.url, request.metadata))
 }

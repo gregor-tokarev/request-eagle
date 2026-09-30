@@ -1,9 +1,11 @@
+use std::task::Poll;
+
 use futures::StreamExt as _;
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{GrpcClient, GrpcEvent, GrpcEvents};
 
-use super::definition::DefinitionState;
+use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
 
 /// Events handled in one update, so fast streams do not redraw per message.
@@ -57,7 +59,12 @@ impl GrpcDraft {
             return;
         }
 
-        if !self.definition_is_current() {
+        let variables = self.variables.read(cx).request_variables(cx);
+        // Variables can point reflection at another server, such as after
+        // the active environment changed. Load that server's services.
+        let target_changed = reflected_target(&self.request, &variables) != self.reflected_target;
+
+        if !self.definition_is_current() || target_changed {
             if self.current_source().is_none() {
                 let message = if self.request.definition.is_reflection() {
                     "Enter a server URL"
@@ -68,10 +75,11 @@ impl GrpcDraft {
                     .update(cx, |response, cx| response.fail(message.into(), cx));
             } else {
                 // A failed load is retried, as Invoke is the user asking again.
-                let retry = matches!(self.definition, DefinitionState::Failed(_));
+                let reload =
+                    target_changed || matches!(self.definition, DefinitionState::Failed(_));
                 self.invoke_when_loaded = true;
                 self.response.update(cx, |response, cx| response.wait(cx));
-                self.load_definition(retry, window, cx);
+                self.load_definition(reload, window, cx);
             }
 
             self.redraw(cx);
@@ -83,7 +91,6 @@ impl GrpcDraft {
         };
         let definition = definition.clone();
         let client = self.client(cx);
-        let variables = self.variables.read(cx).request_variables(cx);
         let server: SharedString = self.request.url.trim().to_owned().into();
 
         match client.invoke(&self.request, variables, &definition) {
@@ -138,6 +145,9 @@ impl GrpcDraft {
                 if finished || updated.is_err() {
                     return;
                 }
+
+                // Let input and drawing run before the next queued batch.
+                yield_now().await;
             }
         })
     }
@@ -174,4 +184,19 @@ impl GrpcDraft {
 
         self.redraw(cx);
     }
+}
+
+/// Return to the executor once, so other work runs before this task goes on.
+async fn yield_now() {
+    let mut yielded = false;
+
+    futures::future::poll_fn(|cx| {
+        if std::mem::replace(&mut yielded, true) {
+            Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await
 }

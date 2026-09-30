@@ -30,6 +30,7 @@ syntax = "proto3";
 package echo.v1;
 
 import "common/types.proto";
+import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
 service EchoService {
@@ -51,6 +52,7 @@ message EchoRequest {
     string user = 7;
     int32 group = 8;
   }
+  google.protobuf.Any detail = 9;
 }
 
 message EchoReply {
@@ -683,6 +685,8 @@ async fn example_messages_fill_every_field() {
     // Only the first field of a oneof is filled in.
     assert!(example.get("user").is_some());
     assert!(example.get("group").is_none());
+    // An Any names a type that the definition knows.
+    assert!(example["detail"]["@type"].is_string());
 
     // The example is a valid message for the method.
     let request = GrpcRequest {
@@ -844,4 +848,76 @@ async fn public_tls_service() {
 
     request.settings.verify_certificates = Some(false);
     reflect(&request).await;
+}
+
+#[tokio::test]
+async fn generated_values_match_across_metadata_and_message() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", r#"{"text": "{{$guid}}"}"#);
+    request.metadata = vec![("x-echo".into(), "{{$guid}}".into())];
+    let definition = reflect(&request).await;
+
+    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let events = collect(events).await;
+
+    let echoed = events
+        .iter()
+        .find_map(|event| match event {
+            GrpcEvent::Metadata(metadata) => metadata
+                .iter()
+                .find(|(name, _)| name == "x-echo")
+                .map(|(_, value)| value.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(received(&events)[0]["text"], format!("hello {echoed}"));
+}
+
+#[test]
+fn import_paths_keep_their_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("project");
+    let vendor = directory.path().join("vendor");
+
+    fs::create_dir_all(root.join("api")).unwrap();
+    fs::create_dir_all(root.join("common")).unwrap();
+    fs::create_dir_all(vendor.join("common")).unwrap();
+    fs::write(
+        root.join("api/root.proto"),
+        "syntax = \"proto3\";\npackage api;\nimport \"common/types.proto\";\nservice Api { rpc Get(common.Tag) returns (common.Tag); }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("common/types.proto"),
+        "syntax = \"proto3\";\npackage common;\nmessage Tag { string project = 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        vendor.join("common/types.proto"),
+        "syntax = \"proto3\";\npackage common;\nmessage Tag { string vendor = 1; }\n",
+    )
+    .unwrap();
+
+    // The first import path that has an import wins, as with protoc.
+    let definition =
+        ServiceDefinition::from_proto_file(&root.join("api/root.proto"), &[vendor, root]).unwrap();
+    let example = definition.example_message("api.Api/Get").unwrap();
+    assert!(example.contains("vendor"), "{example}");
+}
+
+#[test]
+fn definitions_store_paths_inside_the_collection_relative_to_it() {
+    let definition = GrpcDefinition::ProtoFile {
+        path: "/collections/Demo/protos/root.proto".into(),
+        import_paths: vec!["/collections/Demo/shared".into(), "/usr/include".into()],
+    };
+
+    assert_eq!(
+        definition.relative_to(Path::new("/collections/Demo")),
+        GrpcDefinition::ProtoFile {
+            path: "protos/root.proto".into(),
+            import_paths: vec!["shared".into(), "/usr/include".into()],
+        }
+    );
 }

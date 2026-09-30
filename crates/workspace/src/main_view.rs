@@ -666,7 +666,11 @@ impl MainView {
                 draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx))
             }
             (Page::Grpc(draft), request::Request::Grpc(request)) => {
-                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx))
+                draft.update(cx, |draft, cx| {
+                    // Saving can store `.proto` paths relative to the collection.
+                    draft.set_definition(request.definition.clone(), window, cx);
+                    draft.mark_saved(request.clone(), cx);
+                })
             }
             _ => {}
         }

@@ -84,7 +84,11 @@ fn well_known(descriptor: &MessageDescriptor) -> Option<Value> {
         "google.protobuf.ListValue" => json!([]),
         "google.protobuf.Value" => json!(null),
         "google.protobuf.Empty" => json!({}),
-        "google.protobuf.Any" => json!({}),
+        // Any needs a type; a well-known one is always in the definition.
+        "google.protobuf.Any" => json!({
+            "@type": "type.googleapis.com/google.protobuf.StringValue",
+            "value": "value",
+        }),
         "google.protobuf.StringValue" => json!("value"),
         "google.protobuf.BytesValue" => json!("SGVsbG8="),
         "google.protobuf.BoolValue" => json!(true),

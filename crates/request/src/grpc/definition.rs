@@ -72,28 +72,25 @@ impl ServiceDefinition {
             )));
         }
 
-        let mut includes = import_paths
+        // The first import path that contains the file names it, as imports do.
+        let includes = import_paths
             .iter()
             .filter_map(|path| std::path::absolute(path).ok())
-            .filter(|include| path.starts_with(include))
+            .chain(path.parent().map(Path::to_path_buf))
             .collect::<Vec<_>>();
-        // Import paths that do not contain the file can still provide its
-        // imports, but only an include that contains it can name the file.
-        includes.extend(
-            import_paths
-                .iter()
-                .filter_map(|path| std::path::absolute(path).ok())
-                .filter(|include| !path.starts_with(include)),
-        );
-        includes.extend(path.parent().map(Path::to_path_buf));
 
-        let pool = protox::Compiler::new(&includes)
+        let files = protox::Compiler::new(&includes)
             .and_then(|mut compiler| {
                 compiler.include_imports(true).open_file(&path)?;
-                Ok(compiler.descriptor_pool())
+                Ok(compiler.file_descriptor_set())
             })
             // The debug format starts with the file, line and column.
             .map_err(|error| GrpcError::ProtoFile(format!("{error:?}")))?;
+
+        // Include every well-known type, so an Any field can hold any of them.
+        let mut pool = DescriptorPool::global();
+        pool.add_file_descriptor_set(files)
+            .map_err(|error| GrpcError::ProtoFile(error.to_string()))?;
 
         Ok(Self { pool })
     }

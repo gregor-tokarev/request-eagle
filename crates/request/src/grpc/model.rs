@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +80,23 @@ pub enum GrpcDefinition {
 impl GrpcDefinition {
     pub fn is_reflection(&self) -> bool {
         matches!(self, Self::Reflection)
+    }
+
+    /// Store paths inside `collection` relative to it, so the collection
+    /// keeps working when it is renamed, moved or shared.
+    pub fn relative_to(&self, collection: &Path) -> Self {
+        let relative = |path: &PathBuf| {
+            path.strip_prefix(collection)
+                .map_or_else(|_| path.clone(), Path::to_path_buf)
+        };
+
+        match self {
+            Self::Reflection => Self::Reflection,
+            Self::ProtoFile { path, import_paths } => Self::ProtoFile {
+                path: relative(path),
+                import_paths: import_paths.iter().map(relative).collect(),
+            },
+        }
     }
 }
 

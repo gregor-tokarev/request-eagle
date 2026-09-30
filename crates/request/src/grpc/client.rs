@@ -81,7 +81,7 @@ impl GrpcClient {
                 })
             }
             GrpcDefinition::Reflection => variables
-                .resolve_grpc(request)
+                .resolve_grpc_target(request)
                 .map_err(GrpcError::Variables)
                 .and_then(|request| {
                     Ok(Definition::Reflection(
@@ -131,7 +131,7 @@ impl GrpcClient {
         }
 
         let resolved = variables
-            .resolve_grpc(request)
+            .resolve_grpc_call(request)
             .map_err(GrpcError::Variables)?;
         let method = definition
             .descriptor(resolved.method.trim())
@@ -158,7 +158,7 @@ impl GrpcClient {
         );
 
         if !kind.streams_requests() {
-            call.send(&request.message)?;
+            call.send_resolved(&resolved.message)?;
             call.end();
         }
 

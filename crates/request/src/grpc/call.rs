@@ -76,14 +76,20 @@ impl GrpcCall {
     /// Resolve variables in a JSON message and send it. The message is
     /// validated against the method's input type first.
     pub fn send(&mut self, text: &str) -> Result<(), GrpcError> {
-        let Some(messages) = &self.messages else {
-            return Err(GrpcError::StreamEnded);
-        };
         let text = self
             .variables
             .resolve_text(text)
             .map_err(GrpcError::Variables)?;
-        let message = parse_message(&self.input, &text)?;
+
+        self.send_resolved(&text)
+    }
+
+    /// Send a message whose variables are already resolved.
+    pub(super) fn send_resolved(&mut self, text: &str) -> Result<(), GrpcError> {
+        let Some(messages) = &self.messages else {
+            return Err(GrpcError::StreamEnded);
+        };
+        let message = parse_message(&self.input, text)?;
         let json = format_message(&message, self.include_defaults);
 
         messages

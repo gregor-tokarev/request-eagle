@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
     button::*,
@@ -25,22 +23,6 @@ impl GrpcResponse {
     /// Sent and received messages and call events, newest first, with
     /// search, a direction filter and Clear Messages.
     pub(super) fn stream(&self, cx: &mut Context<Self>) -> AnyElement {
-        let rows: Rc<[Row]> = self
-            .visible()
-            .into_iter()
-            .map(|index| {
-                let entry = &self.entries[index];
-
-                Row {
-                    index,
-                    kind: entry.kind,
-                    time: time_label(entry.at).into(),
-                    summary: entry.summary.clone(),
-                    detail: entry.detail.clone(),
-                    expanded: self.expanded.contains(&index),
-                }
-            })
-            .collect();
         let view = cx.entity().downgrade();
 
         v_flex()
@@ -86,7 +68,23 @@ impl GrpcResponse {
             })
             .child(
                 list(self.list.clone(), move |position, _, cx| {
-                    let row = &rows[position];
+                    // Rows are built as they scroll into view.
+                    let Some(row) = view.upgrade().and_then(|view| {
+                        let this = view.read(cx);
+                        let index = this.entry_at(position)?;
+                        let entry = &this.entries[index];
+
+                        Some(Row {
+                            index,
+                            kind: entry.kind,
+                            time: time_label(entry.at).into(),
+                            summary: entry.summary.clone(),
+                            detail: entry.detail.clone(),
+                            expanded: this.expanded.contains(&index),
+                        })
+                    }) else {
+                        return div().into_any_element();
+                    };
                     let index = row.index;
                     let view = view.clone();
                     let (icon, color) = match row.kind {
@@ -289,7 +287,8 @@ impl GrpcResponse {
         }
 
         // Measure the row again at its new height.
-        if let Some(position) = self.visible().iter().position(|visible| *visible == index) {
+        if let Ok(found) = self.shown.binary_search(&index) {
+            let position = self.shown.len() - 1 - found;
             self.list.splice(position..position + 1, 1);
         }
 

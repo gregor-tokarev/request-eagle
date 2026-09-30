@@ -75,6 +75,9 @@ pub(crate) struct GrpcResponse {
     pub(super) entries: Vec<Entry>,
     /// Entries before this index were cleared from view and can be restored.
     pub(super) hidden: usize,
+    /// Indices of the entries the stream shows, oldest first. The list shows
+    /// them newest first.
+    pub(super) shown: Vec<usize>,
     pub(super) expanded: HashSet<usize>,
     pub(super) filter: Filter,
     pub(super) search: Option<Entity<InputState>>,
@@ -96,6 +99,7 @@ impl GrpcResponse {
             body: None,
             entries: Vec::new(),
             hidden: 0,
+            shown: Vec::new(),
             expanded: HashSet::new(),
             filter: Filter::All,
             search: None,
@@ -111,6 +115,7 @@ impl GrpcResponse {
         self.body = None;
         self.entries.clear();
         self.hidden = 0;
+        self.shown.clear();
         self.expanded.clear();
         self.section = Section::Response;
         self.list.reset(0);
@@ -264,6 +269,8 @@ impl GrpcResponse {
         self.entries.push(entry);
 
         if self.shows(self.entries.len() - 1) {
+            self.shown.push(self.entries.len() - 1);
+
             // The newest row is first. Keep it in view unless the stream
             // was scrolled down to read earlier messages.
             let top = self.list.logical_scroll_top();
@@ -290,16 +297,25 @@ impl GrpcResponse {
     }
 
     /// Visible entry indices, newest first.
+    #[cfg(test)]
     pub(super) fn visible(&self) -> Vec<usize> {
-        (0..self.entries.len())
-            .rev()
-            .filter(|index| self.shows(*index))
-            .collect()
+        self.shown.iter().rev().copied().collect()
     }
 
+    /// The entry at a position of the list, which shows the newest first.
+    pub(super) fn entry_at(&self, position: usize) -> Option<usize> {
+        self.shown
+            .len()
+            .checked_sub(position + 1)
+            .map(|index| self.shown[index])
+    }
+
+    /// Apply a changed filter, search or cleared history.
     pub(super) fn refresh_list(&mut self) {
-        let count = self.visible().len();
-        self.list.reset(count);
+        self.shown = (0..self.entries.len())
+            .filter(|index| self.shows(*index))
+            .collect();
+        self.list.reset(self.shown.len());
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {

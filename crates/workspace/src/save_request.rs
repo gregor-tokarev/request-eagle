@@ -101,8 +101,17 @@ impl SaveRequestDialog {
             return;
         };
         let name = self.name.read(cx).value().to_string();
+        let mut request = self.request.clone();
+
+        // Files picked before the collection was known are stored relative to it.
+        if let request::Request::Grpc(grpc) = &mut request
+            && let Some(collection) = destination.path.ancestors().nth(destination.folders.len())
+        {
+            grpc.definition = grpc.definition.relative_to(collection);
+        }
+
         let result = self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.save_new_request(&destination.path, &name, self.request.clone(), window, cx)
+            sidebar.save_new_request(&destination.path, &name, request, window, cx)
         });
         match result {
             Ok(file) => {

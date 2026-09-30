@@ -95,7 +95,9 @@ impl GrpcDraft {
                             .addon(
                                 InputGroupAddon::new("grpc-method-addon")
                                     .align(InputGroupAddonAlignment::InlineEnd)
-                                    .w(rems(24.))
+                                    // Leave the URL room in narrow windows.
+                                    .w(relative(0.4))
+                                    .max_w(rems(24.))
                                     .p_0()
                                     .border_l_1()
                                     .border_color(cx.theme().input)

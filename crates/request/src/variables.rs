@@ -50,15 +50,36 @@ impl RequestVariables {
         variables
     }
 
-    /// Resolve a gRPC request's URL and metadata. Messages resolve with
-    /// `resolve_text` when they are sent.
-    pub(crate) fn resolve_grpc(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
+    /// Resolve where a gRPC request connects: its URL and metadata. The
+    /// message is left as written.
+    pub fn resolve_grpc_target(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
+        self.resolve_grpc(request, false)
+    }
+
+    /// Resolve the URL, metadata and message of a call together, so a
+    /// generated value such as `{{$guid}}` is the same in each. Later stream
+    /// messages resolve with `resolve_text`.
+    pub(crate) fn resolve_grpc_call(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
+        self.resolve_grpc(request, true)
+    }
+
+    fn resolve_grpc(&self, request: &GrpcRequest, message: bool) -> Result<GrpcRequest, String> {
+        let mut resolver = VariableResolver::new(&self.values);
+        let mut resolve = |text: &str| {
+            resolver
+                .resolve(text)
+                .map_err(|error| self.variable_error(error))
+        };
         let mut request = request.clone();
-        request.url = self.resolve_text(&request.url)?;
+        request.url = resolve(&request.url)?;
 
         for (key, value) in &mut request.metadata {
-            *key = self.resolve_text(key)?;
-            *value = self.resolve_text(value)?;
+            *key = resolve(key)?;
+            *value = resolve(value)?;
+        }
+
+        if message {
+            request.message = resolve(&request.message)?;
         }
 
         Ok(request)

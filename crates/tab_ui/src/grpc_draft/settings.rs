@@ -103,7 +103,7 @@ impl GrpcDraft {
                 div()
                     .debug_selector(|| "grpc-server-name".into())
                     .w_40()
-                    .child(Input::new(self.server_name.as_ref().unwrap()).small()),
+                    .child(Input::new(self.server_name.as_ref().unwrap())),
                 cx,
             ))
             .child(row(
@@ -128,7 +128,6 @@ impl GrpcDraft {
                     .w_40()
                     .child(
                         Input::new(self.max_message.as_ref().unwrap())
-                            .small()
                             .suffix(div().text_color(cx.theme().muted_foreground).child("MB")),
                     ),
                 cx,
