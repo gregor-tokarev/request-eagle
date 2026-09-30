@@ -282,10 +282,14 @@ impl Vim {
     }
 
     fn select(&mut self, range: Range<usize>, cx: &mut App) {
-        // A Visual selection scrolls with its active end, like the Vim cursor.
-        let reversed = matches!(self.mode, Mode::Visual { anchor, cursor, .. } if cursor < anchor);
+        // Keep the Vim cursor in view, not an edge of the Visual selection.
+        let cursor = match self.mode {
+            Mode::Visual { cursor, .. } => cursor,
+            _ => range.start,
+        };
         self.editor.update(cx, |editor, cx| {
-            editor.set_selected_range_with_direction(range, reversed, cx)
+            editor.set_selected_range(range, cx);
+            editor.scroll_to_offset(cursor, cx);
         });
         self.selection = self.editor.read(cx).selected_range();
     }

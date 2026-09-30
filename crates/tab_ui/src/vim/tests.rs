@@ -207,26 +207,55 @@ fn visual_block_cursor_follows_the_active_end_and_replaces_the_caret(cx: &mut Te
 fn visual_selections_scroll_with_the_vim_cursor(cx: &mut TestAppContext) {
     use gpui_kit::{px, size};
 
-    let (view, cx) = setup(cx, &"line\n".repeat(200), true);
-    cx.simulate_resize(size(px(400.), px(200.)));
+    let lines = "line\n".repeat(200);
+    // A wrapped line taller than the editor: Visual Line mode must reveal its
+    // first character, not the start of the next line.
+    let tall_line = format!("short\n{}\nend", "wrapped ".repeat(2000));
 
-    for (keys, row) in [
-        ("V 1 0 0 j", 100),
-        ("escape G V 1 0 0 k", 100),
-        ("escape g g v 1 5 0 j", 150),
-        ("escape G v 1 5 0 k", 50),
+    for (text, keys) in [
+        (&lines, "V 1 0 0 j"),
+        (&lines, "G V 1 0 0 k"),
+        (&lines, "v 1 5 0 j"),
+        (&lines, "G v 1 5 0 k"),
+        (&tall_line, "j V"),
     ] {
+        let (view, cx) = setup(cx, text, true);
+        cx.simulate_resize(size(px(400.), px(200.)));
         cx.simulate_keystrokes(keys);
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
-            let visible = view.read(cx).editor.read(cx).visible_row_range().unwrap();
+            let block = super::cursor::layout(&view.read(cx).vim, window, cx).unwrap();
             assert!(
-                visible.contains(&row),
-                "{keys}: row {row} outside {visible:?}"
+                block.clip.contains(&block.bounds.center()),
+                "{keys}: {:?} outside {:?}",
+                block.bounds,
+                block.clip
             );
-            assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_some());
         });
     }
+}
+
+#[gpui_kit::test]
+fn block_cursor_hides_when_its_line_scrolls_out_of_view(cx: &mut TestAppContext) {
+    use gpui_kit::{point, px, size};
+
+    let (view, cx) = setup(cx, &"line\n".repeat(200), true);
+    cx.simulate_resize(size(px(400.), px(200.)));
+    cx.simulate_keystrokes("l l");
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_some());
+
+        let editor = view.read(cx).editor.clone();
+        let line_height = editor.read(cx).line_height().unwrap();
+        editor.update(cx, |editor, cx| {
+            editor.set_scroll_offset(point(px(0.), -line_height * 50.), cx)
+        });
+    });
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_none());
+    });
 }
 
 fn setup<'a>(

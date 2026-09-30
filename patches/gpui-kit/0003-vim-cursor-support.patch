@@ -1,5 +1,5 @@
 diff --git a/crates/base/src/input/base/state.rs b/crates/base/src/input/base/state.rs
-index c7bc92e0..97ed4b16 100644
+index c7bc92e0..667106b8 100644
 --- a/crates/base/src/input/base/state.rs
 +++ b/crates/base/src/input/base/state.rs
 @@ -381,6 +381,8 @@ pub struct InputBaseState<M: InputModeKind> {
@@ -36,31 +36,23 @@ index c7bc92e0..97ed4b16 100644
      /// Empty rows reserved below the last line of content ("scroll
      /// beyond last line"), code-editor mode only. Mirrors VSCode's
      /// `editor.scrollBeyondLastLine` / Zed's `scroll_beyond_last_line`.
-@@ -2858,6 +2871,23 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -2858,6 +2871,15 @@ impl<M: InputModeKind> InputBaseState<M> {
          self.select_to(end, cx);
      }
  
-+    /// Like [`Self::set_selected_range`], but places the caret at `range.start` when `reversed`
-+    /// is true, and scrolls the caret into view instead of `range.start`.
++    /// Scroll the least distance that shows the UTF-8 byte `offset`.
 +    ///
-+    /// Use this for a selection that is extended from its end back toward its start.
-+    pub fn set_selected_range_with_direction(
-+        &mut self,
-+        range: Range<usize>,
-+        reversed: bool,
-+        cx: &mut Context<Self>,
-+    ) {
-+        self.set_selected_range(range, cx);
-+
-+        let active = self.active_selection_mut();
-+        active.reversed = reversed && !active.is_empty();
-+        self.scroll_to(self.cursor(), None, cx);
++    /// Selection changes reveal their own position; use this to reveal another
++    /// one, such as the cursor of a consumer that paints its own.
++    pub fn scroll_to_offset(&mut self, offset: usize, cx: &mut Context<Self>) {
++        let offset = self.text.clip_offset(offset, Bias::Left);
++        self.scroll_to(offset, None, cx);
 +    }
 +
      /// Resolve a mouse position to a byte offset in the text.
      ///
      /// Also reports the caret's line-end affinity for that offset: `true` when the position
-@@ -3162,6 +3192,7 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -3162,6 +3184,7 @@ impl<M: InputModeKind> InputBaseState<M> {
      pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
          (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
              && !self.disabled
@@ -68,12 +60,25 @@ index c7bc92e0..97ed4b16 100644
              && self.blink_cursor.read(cx).visible()
              && window.is_window_active()
      }
-@@ -6162,6 +6193,76 @@ mod tests {
+@@ -3419,6 +3442,12 @@ impl<M: InputModeKind> InputBaseState<M> {
+             return None;
+         };
+ 
++        // Offsets outside the laid-out lines would resolve to the nearest visible line.
++        let laid_out = &last_layout.visible_range_offset;
++        if range.start < laid_out.start || range.end > laid_out.end {
++            return None;
++        }
++
+         let (_, _, start_pos) = self.line_and_position_for_offset(range.start);
+         let (_, _, end_pos) = self.line_and_position_for_offset(range.end);
+ 
+@@ -6162,6 +6191,103 @@ mod tests {
          });
      }
  
 +    #[gpui::test]
-+    fn test_set_selected_range_with_direction_reveals_the_caret(cx: &mut TestAppContext) {
++    fn test_scroll_to_offset_reveals_a_position_away_from_the_selection(cx: &mut TestAppContext) {
 +        let input_view = InputView::new(cx);
 +        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
 +        let input = input_view.input;
@@ -86,29 +91,56 @@ index c7bc92e0..97ed4b16 100644
 +        });
 +        cx.run_until_parked();
 +
-+        for (rows, reversed, caret_row) in [(10..100, false, 100), (60..150, true, 60)] {
++        for (rows, row) in [(10..100, 100), (60..150, 60)] {
 +            cx.update(|_, cx| {
 +                input.update(cx, |state, cx| {
 +                    let range = state.text.line_start_offset(rows.start)
 +                        ..state.text.line_start_offset(rows.end);
-+                    state.set_selected_range_with_direction(range.clone(), reversed, cx);
++                    state.set_selected_range(range.clone(), cx);
++                    state.scroll_to_offset(state.text.line_start_offset(row), cx);
 +
 +                    assert_eq!(state.selected_range(), range);
-+                    assert_eq!(
-+                        state.cursor(),
-+                        if reversed { range.start } else { range.end }
-+                    );
 +                });
 +            });
 +            cx.run_until_parked();
 +            input.read_with(&cx, |state, _| {
 +                let visible = state.visible_row_range().unwrap();
-+                assert!(
-+                    visible.contains(&caret_row),
-+                    "caret row {caret_row} outside {visible:?}"
-+                );
++                assert!(visible.contains(&row), "row {row} outside {visible:?}");
 +            });
 +        }
++    }
++
++    #[gpui::test]
++    fn test_range_to_bounds_rejects_lines_scrolled_out_of_view(cx: &mut TestAppContext) {
++        let input_view = InputView::new(cx);
++        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
++        let input = input_view.input;
++        let text = (0..160)
++            .map(|row| format!("line {row}"))
++            .collect::<Vec<_>>()
++            .join("\n");
++        cx.update(|window, cx| {
++            input.update(cx, |state, cx| state.set_value(text, window, cx));
++        });
++        cx.run_until_parked();
++        cx.update(|_, cx| {
++            input.update(cx, |state, cx| {
++                let line_height = state.line_height().unwrap();
++                state.set_scroll_offset(point(px(0.), -line_height * 80.), cx);
++            });
++        });
++        cx.run_until_parked();
++
++        input.read_with(&cx, |state, _| {
++            let visible = state.visible_row_range().unwrap();
++            let above = state.text.line_start_offset(visible.start - 1) + 2;
++            let below = state.text.line_start_offset(visible.end + 1) + 2;
++            let inside = state.text.line_start_offset(visible.start + 1) + 2;
++
++            assert_eq!(state.range_to_bounds(&(above..above)), None);
++            assert_eq!(state.range_to_bounds(&(below..below)), None);
++            assert!(state.range_to_bounds(&(inside..inside)).is_some());
++        });
 +    }
 +
 +    #[gpui::test]
