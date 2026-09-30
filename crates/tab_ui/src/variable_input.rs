@@ -10,6 +10,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _,
     *,
 };
+use ropey::{Rope, extra::esoterica::ropes_are_instances};
 
 use crate::variables::VariableScope;
 
@@ -20,6 +21,46 @@ pub(crate) enum VariableTarget {
 }
 
 impl VariableTarget {
+    fn text(&self, cx: &App) -> Rope {
+        match self {
+            Self::Input(input) => input.read(cx).text().clone(),
+            Self::Editor(input) => input.read(cx).text().clone(),
+        }
+    }
+
+    /// Where `ranges` are on screen this frame, and the visible text area.
+    /// Ranges that are scrolled away or wrap onto another row are left out.
+    fn bounds(&self, ranges: &[Range<usize>], cx: &App) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
+        let (visible, line_height, bounds) = match self {
+            Self::Input(input) => {
+                let input = input.read(cx);
+                let bounds = ranges
+                    .iter()
+                    .filter_map(|range| input.range_to_bounds(range));
+                (
+                    input.input_bounds(),
+                    input.line_height(),
+                    bounds.collect::<Vec<_>>(),
+                )
+            }
+            Self::Editor(input) => {
+                let input = input.read(cx);
+                let bounds = ranges
+                    .iter()
+                    .filter_map(|range| input.range_to_bounds(range));
+                (
+                    input.input_bounds(),
+                    input.line_height(),
+                    bounds.collect::<Vec<_>>(),
+                )
+            }
+        };
+        let one_row =
+            |bounds: &Bounds<Pixels>| line_height.is_some_and(|h| bounds.size.height <= h);
+
+        (visible, bounds.into_iter().filter(one_row).collect())
+    }
+
     fn snapshot(&self, window: &Window, cx: &App) -> Option<(SharedString, usize)> {
         match self {
             Self::Input(input) => {
@@ -96,6 +137,10 @@ pub(crate) struct VariableInput {
     suggestions: Vec<Suggestion>,
     selected: usize,
     scroll: UniformListScrollHandle,
+    /// Byte ranges of the `{{variable}}` references shown as chips.
+    chips: Vec<Range<usize>>,
+    /// The text the chips were found in.
+    chipped: Rope,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -108,9 +153,11 @@ impl VariableInput {
     ) -> Self {
         let input_subscription = match &target {
             VariableTarget::Input(input) => cx.observe_in(input, window, |this, _, window, cx| {
+                this.update_chips(cx);
                 this.refresh(window, cx)
             }),
             VariableTarget::Editor(input) => cx.observe_in(input, window, |this, _, window, cx| {
+                this.update_chips(cx);
                 this.refresh(window, cx)
             }),
         };
@@ -120,7 +167,7 @@ impl VariableInput {
             this.refresh(window, cx);
         });
 
-        Self {
+        let mut this = Self {
             target,
             scope,
             environment_names: Vec::new(),
@@ -129,8 +176,41 @@ impl VariableInput {
             suggestions: Vec::new(),
             selected: 0,
             scroll: UniformListScrollHandle::new(),
+            chips: Vec::new(),
+            chipped: Rope::new(),
             _subscriptions: vec![input_subscription, scope_subscription],
+        };
+        this.update_chips(cx);
+
+        this
+    }
+
+    fn update_chips(&mut self, cx: &App) {
+        let text = self.target.text(cx);
+
+        // Observers also run for caret moves and repaints; only edits move chips.
+        if !ropes_are_instances(&self.chipped, &text) {
+            self.chips = variable_references(&text.to_string()).collect();
+            self.chipped = text;
         }
+    }
+
+    /// Paint each `{{variable}}` as a rounded chip over its text. The text
+    /// stays ordinary input text; the input only reports where it is.
+    fn paint_chips(&self, window: &mut Window, cx: &App) {
+        let (visible, chips) = self.target.bounds(&self.chips, cx);
+        let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
+        let color = cx.theme().info.opacity(0.25);
+        let radius = cx.theme().radius_tokens().sm;
+        // Let a chip at either edge of the text keep its padding.
+        let visible = visible.dilate(outset.x);
+
+        window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
+            for chip in chips {
+                let chip = Bounds::from_corners(chip.origin - outset, chip.bottom_right() + outset);
+                window.paint_quad(fill(chip, color).corner_radii(radius));
+            }
+        });
     }
 
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -273,6 +353,13 @@ impl VariableInput {
     }
 }
 
+#[cfg(test)]
+impl VariableInput {
+    pub(crate) fn chips(&self) -> &[Range<usize>] {
+        &self.chips
+    }
+}
+
 pub(crate) fn with_variables(completion: &Entity<VariableInput>, content: impl IntoElement) -> Div {
     use gpui_kit::component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp};
 
@@ -385,31 +472,42 @@ impl VariableInput {
 
 impl Render for VariableInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.range.is_none() {
-            return Empty.into_any_element();
-        }
+        let chips = cx.entity();
+        let completion = chips.clone();
 
-        let completion = cx.entity();
-
-        // Defer positioning until the input has laid out this frame's caret.
-        deferred(
-            canvas(
-                move |_, window, cx| {
-                    let mut popover = completion
-                        .update(cx, |completion, cx| completion.render_popover(window, cx));
-                    popover.prepaint_as_root(
-                        Point::default(),
-                        window.viewport_size().map(AvailableSpace::Definite),
-                        window,
-                        cx,
-                    );
-                    popover
-                },
-                |_, mut popover, window, cx| popover.paint(window, cx),
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            // The input is an earlier sibling, so its layout is current by now.
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |_, _, window, cx| chips.read(cx).paint_chips(window, cx),
+                )
+                .size_full(),
             )
-            .absolute(),
-        )
-        .into_any_element()
+            .when(self.range.is_some(), |this| {
+                // Defer positioning until the input has laid out this frame's caret.
+                this.child(deferred(
+                    canvas(
+                        move |_, window, cx| {
+                            let mut popover = completion
+                                .update(cx, |completion, cx| completion.render_popover(window, cx));
+                            popover.prepaint_as_root(
+                                Point::default(),
+                                window.viewport_size().map(AvailableSpace::Definite),
+                                window,
+                                cx,
+                            );
+                            popover
+                        },
+                        |_, mut popover, window, cx| popover.paint(window, cx),
+                    )
+                    .absolute(),
+                ))
+            })
     }
 }
 
@@ -439,4 +537,28 @@ pub(crate) fn active_token(text: &str, cursor: usize) -> Option<(Range<usize>, &
     }
 
     Some((start..end, query))
+}
+
+/// Byte ranges of `{{variable}}` references. `{{!literal}}` escapes are sent
+/// as written. An unclosed `{{` on one line does not claim later lines.
+pub(crate) fn variable_references(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut offset = 0;
+
+    std::iter::from_fn(move || {
+        loop {
+            let start = offset + text[offset..].find("{{")?;
+            let end = start + 2 + text[start + 2..].find("}}")? + 2;
+            let name = &text[start + 2..end - 2];
+
+            if name.contains('\n') {
+                offset = start + 2;
+                continue;
+            }
+
+            offset = end;
+            if !name.starts_with('!') {
+                return Some(start..end);
+            }
+        }
+    })
 }

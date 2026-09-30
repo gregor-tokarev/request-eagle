@@ -224,6 +224,55 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn variables_show_as_chips_that_follow_edits(cx: &mut TestAppContext) {
+    let (draft, cx, _directory) = setup(cx);
+    let url_chips = |cx: &mut VisualTestContext| {
+        cx.read(|cx| {
+            let completion = draft.read(cx).url_completion.clone().unwrap();
+            completion.read(cx).chips().to_vec()
+        })
+    };
+
+    click(cx, "request-url");
+    cx.simulate_input("{{base_url}}/users/{{ id }}?raw={{!id}}");
+    assert_eq!(url_chips(cx), vec![0..12, 19..27]);
+
+    // Chips stay plain text: the caret moves into them and edits resize them.
+    cx.simulate_keystrokes("home right right right");
+    cx.simulate_input("api_");
+    cx.simulate_keystrokes("end");
+    cx.simulate_input("&v={{message}}");
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).request.path,
+            "{{bapi_ase_url}}/users/{{ id }}?raw={{!id}}&v={{message}}"
+        )
+    });
+    assert_eq!(url_chips(cx), vec![0..16, 23..31, 46..57]);
+
+    // Replacing the whole body does not emit a change event.
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(Method::Post, cx);
+            draft.section = RequestSection::Body;
+            draft.prepare(window, cx);
+            draft.body.as_ref().unwrap().update(cx, |body, cx| {
+                body.set_value(
+                    "{\n  \"a\": \"{{message}}\",\n  \"b\": \"{{\"\n}",
+                    window,
+                    cx,
+                );
+            });
+        })
+    });
+    let body_chips = cx.read(|cx| {
+        let completion = draft.read(cx).body_completion.clone().unwrap();
+        completion.read(cx).chips().to_vec()
+    });
+    assert_eq!(body_chips, vec![10..21]);
+}
+
+#[gpui_kit::test]
 fn variable_completion_handles_unicode_blur_and_window_edges_at_all_scales(
     cx: &mut TestAppContext,
 ) {
