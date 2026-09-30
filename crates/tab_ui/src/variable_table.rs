@@ -12,22 +12,32 @@ struct VariableRow {
 }
 
 /// The rows with a name, in table order.
-pub(super) struct VariablesChanged(pub Vec<(String, String)>);
+pub(crate) struct VariablesChanged(pub Vec<(String, String)>);
 
-/// Editable collection variables, including one trailing empty row.
-pub(super) struct VariableTable {
+/// Editable collection or environment variables, including one trailing empty row.
+pub(crate) struct VariableTable {
+    /// Debug selectors are `{prefix}-table`, `{prefix}-{name_column}-{row}`,
+    /// `{prefix}-value-{row}` and `{prefix}-remove-{row}`.
+    prefix: &'static str,
+    name_column: &'static str,
     rows: Vec<VariableRow>,
 }
 
 impl EventEmitter<VariablesChanged> for VariableTable {}
 
 impl VariableTable {
-    pub(super) fn new(
+    pub(crate) fn new(
+        prefix: &'static str,
+        name_column: &'static str,
         variables: &[(String, String)],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut table = Self { rows: Vec::new() };
+        let mut table = Self {
+            prefix,
+            name_column,
+            rows: Vec::new(),
+        };
 
         for (name, value) in variables {
             table.append_row(name, value, window, cx);
@@ -94,8 +104,10 @@ impl VariableRow {
 
 impl Render for VariableTable {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (prefix, name_column) = (self.prefix, self.name_column);
+
         v_flex()
-            .debug_selector(|| "collection-variables-table".into())
+            .debug_selector(move || format!("{prefix}-table"))
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
@@ -125,18 +137,20 @@ impl Render for VariableTable {
                 let populated = !row.is_empty(cx);
 
                 h_flex()
-                    .id(("collection-variable", row.name.entity_id()))
+                    .id(("variable", row.name.entity_id()))
                     .h_8()
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .hover(|row| row.bg(cx.theme().table_hover))
-                    .children([("name", &row.name), ("value", &row.value)].map(
-                        |(column, input)| {
+                    .children(
+                        [
+                            ("name", name_column, &row.name),
+                            ("value", "value", &row.value),
+                        ]
+                        .map(|(column, selector, input)| {
                             h_flex()
                                 .relative()
-                                .debug_selector(move || {
-                                    format!("collection-variable-{column}-{index}")
-                                })
+                                .debug_selector(move || format!("{prefix}-{selector}-{index}"))
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
@@ -158,7 +172,7 @@ impl Render for VariableTable {
                                         h_flex().absolute().right_1().top_0().h_full().child(
                                             Button::new("remove-variable")
                                                 .debug_selector(move || {
-                                                    format!("collection-variable-remove-{index}")
+                                                    format!("{prefix}-remove-{index}")
                                                 })
                                                 .ghost()
                                                 .xsmall()
@@ -171,8 +185,8 @@ impl Render for VariableTable {
                                         ),
                                     )
                                 })
-                        },
-                    ))
+                        }),
+                    )
             }))
     }
 }

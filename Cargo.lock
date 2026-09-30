@@ -6649,6 +6649,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "script_intelligence"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "event-listener",
+ "flate2",
+ "futures-channel",
+ "lsp-types",
+ "request",
+ "rquickjs",
+ "serde_json",
+ "smol",
+]
+
+[[package]]
 name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7380,15 +7395,12 @@ dependencies = [
  "anyhow",
  "collection",
  "environment",
- "event-listener",
- "flate2",
- "futures-channel",
  "gpui-kit",
  "lsp-types",
  "preferences",
  "request",
  "ropey",
- "rquickjs",
+ "script_intelligence",
  "serde_json",
  "smol",
  "tempfile",

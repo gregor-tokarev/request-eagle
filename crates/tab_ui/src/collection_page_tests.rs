@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use collection::RequestScripts;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 
-use super::CollectionPage;
-use crate::{TabPage as _, request_draft::tests::element_bounds};
+use crate::{CollectionPage, TabPage as _, request_draft::tests::element_bounds};
 
 fn page(cx: &mut TestAppContext) -> (Entity<CollectionPage>, &mut VisualTestContext) {
     cx.update(|cx| {
@@ -109,7 +108,7 @@ fn scripts_section_edits_collection_scripts(cx: &mut TestAppContext) {
     let scripts = element_bounds(cx, "collection-section-Scripts").unwrap();
     cx.simulate_click(scripts.center(), Modifiers::default());
     assert!(element_bounds(cx, "collection-scripts").is_some());
-    assert!(element_bounds(cx, "collection-variables-table").is_none());
+    assert!(element_bounds(cx, "collection-variable-table").is_none());
 
     cx.update(|window, cx| {
         page.update(cx, |page, cx| {

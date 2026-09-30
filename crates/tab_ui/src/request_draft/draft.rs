@@ -1,4 +1,4 @@
-use super::super::request_fields::{FieldsChanged, RequestFields};
+use super::fields::{FieldsChanged, RequestFields};
 use crate::{
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
@@ -44,7 +44,7 @@ pub struct RequestDraft {
     environments: Option<Entity<crate::Environments>>,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
-    pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
+    pub(super) response: Option<Entity<crate::response_view::ResponseView>>,
     pub(super) split: Option<Entity<ResizableState>>,
     pub(super) task: Option<Task<()>>,
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
@@ -69,7 +69,7 @@ impl RequestDraft {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn response_for_test(&self) -> Entity<super::super::response_view::ResponseView> {
+    pub fn response_for_test(&self) -> Entity<crate::response_view::ResponseView> {
         self.response.as_ref().expect("prepared response").clone()
     }
 
@@ -223,7 +223,7 @@ impl RequestDraft {
         self.refresh_generated_headers(cx);
 
         self.response
-            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
+            .get_or_insert_with(|| cx.new(|cx| crate::response_view::ResponseView::new(cx)));
         self.split
             .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
     }
@@ -345,7 +345,7 @@ impl Render for RequestDraft {
         // The first tab can render before it is focused. These panel states do
         // not install window listeners or notify during construction.
         self.response
-            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
+            .get_or_insert_with(|| cx.new(|cx| crate::response_view::ResponseView::new(cx)));
         self.split
             .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
 

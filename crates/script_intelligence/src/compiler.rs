@@ -12,7 +12,7 @@ const INITIALIZATION_LIMIT: Duration = Duration::from_secs(15);
 const QUERY_LIMIT: Duration = Duration::from_secs(2);
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 
-pub(super) struct Compiler {
+pub(crate) struct Compiler {
     context: Context,
     runtime: Runtime,
 }

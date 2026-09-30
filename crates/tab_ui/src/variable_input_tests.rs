@@ -1,4 +1,4 @@
-use super::token::active_token;
+use crate::variable_input::active_token;
 
 #[test]
 fn finds_token_at_caret_and_replaces_existing_suffix_without_eating_surroundings() {

@@ -8,21 +8,24 @@ mod environment_editor;
 mod environments;
 mod page;
 mod request_draft;
-mod request_fields;
 mod response_view;
 mod script_editor;
-mod script_intelligence;
 mod section_count;
 mod variable_input;
+mod variable_table;
 mod variables;
 mod vim;
 
+#[cfg(test)]
+mod collection_page_tests;
 #[cfg(test)]
 mod environment_editor_tests;
 #[cfg(test)]
 mod test_allocator;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+#[cfg(test)]
+mod variable_input_tests;
 
 pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
