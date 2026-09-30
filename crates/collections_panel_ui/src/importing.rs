@@ -6,6 +6,7 @@ use std::{
 use collection::Collection;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
+    spinner::Spinner,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -26,10 +27,12 @@ impl CollectionPanel {
         });
 
         window.open_dialog(cx, move |modal, window, _| {
-            modal
-                .title("Import")
-                .w(rems(30.).to_pixels(window.rem_size()))
-                .child(dialog.clone())
+            // Wide like a page, but never wider than the window allows.
+            let width = rems(48.)
+                .to_pixels(window.rem_size())
+                .min(window.viewport_size().width - rems(4.).to_pixels(window.rem_size()));
+
+            modal.title("Import").w(width).child(dialog.clone())
         });
     }
 
@@ -222,20 +225,16 @@ impl Render for ImportDialog {
         }
 
         let theme = cx.theme();
-        let format = |name: &'static str, details: &'static str| {
-            h_flex()
-                .gap_2()
-                .child(name)
-                .child(div().text_color(theme.muted_foreground).child(details))
-        };
 
         v_flex()
             .debug_selector(|| "import-dialog".into())
-            .gap_4()
+            .gap_3()
             .child(
                 v_flex()
                     .id("import-drop-zone")
+                    .h(rems(24.))
                     .items_center()
+                    .justify_center()
                     .gap_3()
                     .p_6()
                     .rounded(theme.radius_tokens().md)
@@ -253,55 +252,76 @@ impl Render for ImportDialog {
                         }
                     }))
                     .child(
-                        Icon::default()
-                            .path("icons/import.svg")
-                            .size_6()
-                            .text_color(theme.muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child("Drop a file here to import it as a new collection"),
-                    )
-                    .child(
-                        Button::new("choose-import-file")
-                            .debug_selector(|| "choose-import-file".into())
-                            .primary()
-                            .label(if self.importing {
-                                "Importing…"
+                        h_flex()
+                            .gap_3()
+                            .child(if self.importing {
+                                Spinner::new()
+                                    .large()
+                                    .color(theme.muted_foreground)
+                                    .into_any_element()
                             } else {
-                                "Choose File…"
+                                Icon::default()
+                                    .path("icons/import.svg")
+                                    .size_6()
+                                    .text_color(theme.muted_foreground)
+                                    .into_any_element()
                             })
-                            .loading(self.importing)
-                            .disabled(self.importing)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
+                            .child(
+                                v_flex()
+                                    .gap_1()
+                                    .child(
+                                        div().text_base().font_weight(FontWeight::SEMIBOLD).child(
+                                            if self.importing {
+                                                "Importing…"
+                                            } else {
+                                                "Drop a file to import"
+                                            },
+                                        ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .text_sm()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Or select")
+                                            .child(
+                                                Button::new("choose-import-file")
+                                                    .debug_selector(|| "choose-import-file".into())
+                                                    .link()
+                                                    .small()
+                                                    // Colored like a link, it needs no underline.
+                                                    .text_decoration_0()
+                                                    .label("a file")
+                                                    .disabled(self.importing)
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.choose_file(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    ),
                             ),
-                    ),
+                    )
+                    .when_some(self.error.clone(), |this, error| {
+                        this.child(
+                            div()
+                                .debug_selector(|| "import-error".into())
+                                .max_w(rems(30.))
+                                .text_center()
+                                .text_sm()
+                                .text_color(theme.danger)
+                                .child(error),
+                        )
+                    }),
             )
             .child(
-                v_flex()
-                    .gap_1()
+                h_flex()
+                    .gap_3()
                     .text_sm()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.muted_foreground)
-                            .child("Supported formats"),
-                    )
-                    .child(format("Postman Collection", "v2.0 and v2.1, JSON"))
-                    .child(format("OpenAPI", "3.x and Swagger 2.0, JSON or YAML")),
+                    .text_color(theme.muted_foreground)
+                    .child("Postman Collection v2.0 and v2.1")
+                    .child(div().h_4().w(px(1.)).bg(theme.border))
+                    .child("OpenAPI 3 and Swagger 2.0, in JSON or YAML"),
             )
-            .when_some(self.error.clone(), |this, error| {
-                this.child(
-                    div()
-                        .debug_selector(|| "import-error".into())
-                        .text_sm()
-                        .text_color(theme.danger)
-                        .child(error),
-                )
-            })
     }
 }
