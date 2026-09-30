@@ -1,5 +1,5 @@
 use crate::credentials::{CredentialStore, NativeCredentialStore, ProxyCredentials};
-use crate::file::{persist, read};
+use crate::file::{persist, read_document};
 use crate::{Preferences, ProxyPreferences};
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -63,19 +63,7 @@ pub fn load(directory: impl AsRef<Path>, cx: &mut App) -> Task<Result<()>> {
     storage.credential_error = None;
     storage.legacy_credentials = false;
 
-    let result = read(&path).and_then(|bytes| {
-        let preferences: Preferences = match bytes {
-            Some(bytes) => serde_json::from_slice(&bytes).context("Invalid preferences.json")?,
-            None => Preferences::default(),
-        };
-
-        if let Some(id) = &preferences.proxy_credentials_id {
-            Uuid::parse_str(id).context("Invalid proxy credential reference")?;
-        }
-
-        Ok(preferences)
-    });
-    let preferences = match result {
+    let preferences = match read_document(&path) {
         Ok(preferences) => preferences,
         Err(error) => {
             cx.global_mut::<Storage>().load_error = Some(format!("{error:#}"));

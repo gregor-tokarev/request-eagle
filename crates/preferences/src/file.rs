@@ -36,22 +36,9 @@ impl PreferencesFile {
 
     /// Read configuration without opening the keyring or returning saved secrets.
     pub fn read(&self) -> Result<Preferences> {
-        let mut preferences = self.read_document()?;
+        let mut preferences = read_document(&self.path)?;
         preferences.request.proxy.username.clear();
         preferences.request.proxy.password.clear();
-        Ok(preferences)
-    }
-
-    fn read_document(&self) -> Result<Preferences> {
-        let preferences: Preferences = match read(&self.path)? {
-            Some(bytes) => serde_json::from_slice(&bytes).context("Invalid preferences.json")?,
-            None => Preferences::default(),
-        };
-
-        if let Some(id) = &preferences.proxy_credentials_id {
-            Uuid::parse_str(id).context("Invalid proxy credential reference")?;
-        }
-
         Ok(preferences)
     }
 
@@ -60,7 +47,7 @@ impl PreferencesFile {
         change: impl FnOnce(&mut Preferences) -> Result<()>,
     ) -> Result<Preferences> {
         let _lock = self.lock()?;
-        let mut preferences = self.read_document()?;
+        let mut preferences = read_document(&self.path)?;
         let previous_proxy = preferences.request.proxy.clone();
 
         if !previous_proxy.username.is_empty() || !previous_proxy.password.is_empty() {
@@ -80,7 +67,7 @@ impl PreferencesFile {
 
     /// Resolve credentials only when an authenticated custom proxy is in use.
     pub async fn request_preferences(&self) -> Result<RequestPreferences> {
-        let mut preferences = self.read_document()?;
+        let mut preferences = read_document(&self.path)?;
         let proxy = &mut preferences.request.proxy;
 
         if proxy.mode == crate::ProxyMode::Custom
@@ -108,7 +95,7 @@ impl PreferencesFile {
         credentials: Option<(String, String)>,
     ) -> Result<Preferences> {
         let _lock = self.lock()?;
-        let mut preferences = self.read_document()?;
+        let mut preferences = read_document(&self.path)?;
         let old_proxy = preferences.request.proxy.clone();
         let old_id = preferences.proxy_credentials_id.clone();
         let proxy = &mut preferences.request.proxy;
@@ -193,12 +180,22 @@ impl PreferencesFile {
     }
 }
 
-pub(crate) fn read(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
+/// Reads preferences as saved, including any legacy plaintext proxy credentials.
+/// A missing file yields the defaults.
+pub(crate) fn read_document(path: &Path) -> Result<Preferences> {
+    let preferences: Preferences = match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).context("Invalid preferences.json")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Preferences::default(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Could not read {}", path.display()));
+        }
+    };
+
+    if let Some(id) = &preferences.proxy_credentials_id {
+        Uuid::parse_str(id).context("Invalid proxy credential reference")?;
     }
+
+    Ok(preferences)
 }
 
 pub(crate) fn persist(path: &Path, preferences: &Preferences) -> Result<()> {
