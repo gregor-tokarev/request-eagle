@@ -137,7 +137,7 @@ impl HoverProvider for ScriptCompletions {
 }
 
 #[cfg(test)]
-pub(crate) fn completion_items(
+pub(super) fn completion_items(
     text: &Rope,
     offset: usize,
     phase: ScriptPhase,
