@@ -35,6 +35,8 @@ pub(crate) struct Workspace {
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
     collections_open: bool,
     environments_open: bool,
+    pub(crate) collections_header: FocusHandle,
+    environments_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -178,6 +180,8 @@ impl Workspace {
             environment_panel,
             collections_open: true,
             environments_open: true,
+            collections_header: cx.focus_handle(),
+            environments_header: cx.focus_handle(),
             main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -281,30 +285,33 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (open, focus, contains_focus) = match section {
+        let (open, contains_focus, header) = match section {
             SidebarSection::Collections => {
                 self.collections_open = !self.collections_open;
 
                 (
                     self.collections_open,
-                    self.sidebar.focus_handle(cx),
                     self.sidebar.read(cx).contains_focus(window, cx),
+                    &self.collections_header,
                 )
             }
             SidebarSection::Environments => {
                 self.environments_open = !self.environments_open;
-                let focus = self.environment_panel.focus_handle(cx);
-                let contains_focus = focus.contains_focused(window, cx);
 
-                (self.environments_open, focus, contains_focus)
+                (
+                    self.environments_open,
+                    self.environment_panel
+                        .focus_handle(cx)
+                        .contains_focused(window, cx),
+                    &self.environments_header,
+                )
             }
         };
 
-        // Keys must not go to the rows of a folded section.
-        if open {
-            window.focus(&focus, cx);
-        } else if contains_focus {
-            self.main_view.update(cx, |view, cx| view.focus(window, cx));
+        // Keys must not go to the rows of a folded section. Its header can
+        // open it again.
+        if !open && contains_focus {
+            window.focus(header, cx);
         }
 
         cx.notify();
@@ -332,65 +339,79 @@ impl Workspace {
         section: SidebarSection,
         count: usize,
         new_button: Button,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let theme = cx.theme();
-        let (id, label, open) = match section {
-            SidebarSection::Collections => {
-                ("collections-section", "COLLECTIONS", self.collections_open)
-            }
+        let (id, label, open, focus) = match section {
+            SidebarSection::Collections => (
+                "collections-section",
+                "Collections",
+                self.collections_open,
+                &self.collections_header,
+            ),
             SidebarSection::Environments => (
                 "environments-section",
-                "ENVIRONMENTS",
+                "Environments",
                 self.environments_open,
+                &self.environments_header,
             ),
         };
+        let focus_visible = focus.is_focused(window) && window.last_input_was_keyboard();
 
-        div()
-            .id(id)
-            .debug_selector(move || id.into())
-            .flex_none()
-            .h_8()
-            .w_full()
-            .px_2()
-            .child(
-                h_flex()
-                    .size_full()
-                    .rounded(theme.radius_tokens().md)
-                    .pl_2()
-                    .pr_1()
-                    .gap_2()
-                    .hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
-                    .child(
-                        Icon::new(if open {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size_3p5()
-                        .flex_none(),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(count.to_string()),
-                    )
-                    .child(div().flex_1())
-                    .child(new_button.ghost().xsmall()),
-            )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.toggle_sidebar_section(section, window, cx)
-            }))
+        div().flex_none().h_8().w_full().px_2().child(
+            h_flex()
+                .size_full()
+                .rounded(theme.radius_tokens().md)
+                .pr_1()
+                .hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
+                .child(
+                    gpui_kit::base::Button::new(id)
+                        .debug_selector(move || id.into())
+                        .track_focus(focus)
+                        .accessibility_label(label)
+                        .aria_expanded(open)
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .justify_start()
+                        .pl_2()
+                        .gap_2()
+                        .rounded(theme.radius_tokens().md)
+                        .cursor_default()
+                        .when(focus_visible, |this| this.focus_ring_style(window, cx))
+                        // Clicking keeps focus where it is, like other buttons.
+                        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.toggle_sidebar_section(section, window, cx)
+                        }))
+                        .child(
+                            Icon::new(if open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size_3p5()
+                            .flex_none(),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(label.to_uppercase()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(count.to_string()),
+                        ),
+                )
+                .child(new_button.ghost().xsmall()),
+        )
     }
 
-    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
 
@@ -412,10 +433,10 @@ impl Workspace {
                         .debug_selector(|| "new-collection".into())
                         .icon(IconName::Plus)
                         .tooltip("New Collection")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.create_collection(window, cx);
-                        })),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.create_collection(window, cx)),
+                        ),
+                    window,
                     cx,
                 ),
             )
@@ -437,10 +458,10 @@ impl Workspace {
                         .debug_selector(|| "new-environment".into())
                         .icon(IconName::Plus)
                         .tooltip("New Environment")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.create_environment(window, cx);
-                        })),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.create_environment(window, cx)),
+                        ),
+                    window,
                     cx,
                 ),
             )
@@ -640,7 +661,7 @@ impl Render for Workspace {
                                     rems(14.).to_pixels(window.rem_size())
                                         ..rems(30.).to_pixels(window.rem_size()),
                                 )
-                                .child(self.sidebar(cx)),
+                                .child(self.sidebar(window, cx)),
                         )
                         .child(self.main_view.clone().into_any_element()),
                 ),
