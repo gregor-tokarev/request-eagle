@@ -4,15 +4,14 @@ use std::sync::{
 };
 
 use bytes::Bytes;
+use environment::EnvironmentSession;
 use serde_json::json;
 
-use super::{
-    ScriptPhase, ScriptReport,
-    engine::run,
-    network::NetworkOptions,
-    variables::{Variables, expand_request, needs_variable_expansion},
+use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
+use crate::{
+    Execution, ExecutionError, HttpRequest, Method, RequestExecutor, RequestVariables, Response,
+    variables::resolve_request,
 };
-use crate::{Execution, ExecutionError, HttpRequest, Method, Response};
 
 /// A dropped request future also interrupts a script on the blocking pool.
 pub(crate) struct Cancellation(pub Arc<AtomicBool>);
@@ -29,35 +28,31 @@ impl Drop for Cancellation {
     }
 }
 
-#[cfg(test)]
-pub(super) async fn pre_request(
-    request: HttpRequest,
-    cancelled: Arc<AtomicBool>,
-) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
-    pre_request_with_variables(request, cancelled, None).await
+/// State the pre-request phase hands to the post-response phase.
+#[derive(Debug)]
+pub(crate) struct ScriptState {
+    pub variables: Variables,
+    pub session: Option<EnvironmentSession>,
+    /// Runs before the request's own post-response script.
+    pub collection_post_response: String,
 }
 
-#[cfg(test)]
-pub(super) async fn pre_request_with_variables(
-    request: HttpRequest,
-    cancelled: Arc<AtomicBool>,
-    context: Option<crate::RequestVariables>,
-) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
-    pre_request_with_network(request, cancelled, context, None).await
-}
-
-pub(crate) async fn pre_request_with_network(
+pub(crate) async fn pre_request(
     mut request: HttpRequest,
+    variables: RequestVariables,
+    executor: RequestExecutor,
     cancelled: Arc<AtomicBool>,
-    mut context: Option<crate::RequestVariables>,
-    network: Option<NetworkOptions>,
-) -> Result<(HttpRequest, Variables, Vec<ScriptReport>), ExecutionError> {
-    let collection = match context
-        .as_mut()
-        .map(|context| std::mem::replace(&mut context.collection_scripts, Ok(Default::default())))
-    {
-        Some(Ok(scripts)) => scripts,
-        Some(Err(message)) => {
+) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
+    let RequestVariables {
+        mut values,
+        session,
+        collection_scripts,
+        environment_error,
+    } = variables;
+
+    let collection = match collection_scripts {
+        Ok(scripts) => scripts,
+        Err(message) => {
             let report = ScriptReport {
                 phase: ScriptPhase::PreRequest,
                 collection: true,
@@ -70,8 +65,8 @@ pub(crate) async fn pre_request_with_network(
                 report: Box::new(report),
             });
         }
-        None => Default::default(),
     };
+
     // Like Postman, the collection's script runs first and shares the
     // execution's variables with the request's own script.
     let scripts: Vec<(bool, String)> = [
@@ -81,30 +76,24 @@ pub(crate) async fn pre_request_with_network(
     .into_iter()
     .filter(|(_, source)| !source.trim().is_empty())
     .collect();
-    let has_script = !scripts.is_empty();
-    if context.is_none() && !has_script && !needs_variable_expansion(&request) {
-        return Ok((request, Variables::default(), Vec::new()));
-    }
+    let scripted = !scripts.is_empty();
 
     smol::unblock(move || {
         let mut reports = Vec::new();
-        let mut variables = Variables {
-            environment: context
-                .as_mut()
-                .map(|context| {
-                    std::mem::take(&mut context.values.environment)
-                        .into_iter()
-                        .collect()
-                })
-                .unwrap_or_default(),
-            session: context.as_mut().and_then(|context| context.session.take()),
+        let mut state = ScriptState {
+            variables: Variables {
+                environment: std::mem::take(&mut values.environment)
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+            session,
             collection_post_response: collection.post_response,
-            ..Default::default()
         };
 
         let mut body_changed = false;
         for (collection, source) in scripts {
-            let input = input(&request, &variables);
+            let input = input(&request, &state.variables);
             let mut body = request.body.take().map(Bytes::from);
             let (output, mut report) = run(
                 &source,
@@ -113,7 +102,7 @@ pub(crate) async fn pre_request_with_network(
                 &mut body,
                 None,
                 cancelled.clone(),
-                network.clone(),
+                &executor,
             );
             report.collection = collection;
             request.body = body.map(Vec::from);
@@ -131,11 +120,8 @@ pub(crate) async fn pre_request_with_network(
                 ));
             }
 
-            let mut output = output.expect("successful script output");
-            output.variables.session = variables.session.take();
-            output.variables.collection_post_response =
-                std::mem::take(&mut variables.collection_post_response);
-            if let Some(session) = &output.variables.session
+            let output = output.expect("successful script output");
+            if let Some(session) = &state.session
                 && let Err(message) = session.apply(&output.environment_changes)
             {
                 report.error = Some(message.into());
@@ -160,7 +146,7 @@ pub(crate) async fn pre_request_with_network(
             request.path = output.url;
             request.query = Some(output.query);
             request.headers = output.headers;
-            variables = output.variables;
+            state.variables = output.variables;
 
             if output.body_changed {
                 body_changed = true;
@@ -169,54 +155,43 @@ pub(crate) async fn pre_request_with_network(
             reports.push(report);
         }
 
-        if (has_script || context.is_some()) && matches!(request.method, Method::Get | Method::Head)
-        {
+        if matches!(request.method, Method::Get | Method::Head) {
             request.body = None;
         }
 
-        let expanded = if let Some(context) = &mut context {
-            context.values.environment = variables
-                .environment
-                .iter()
-                .chain(variables.values.iter())
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect();
-            context.resolve_owned(request, has_script, body_changed, &mut variables.generated)
-        } else {
-            expand_request(&mut request, &mut variables, body_changed).map(|()| request)
-        };
+        values.environment = state
+            .variables
+            .environment
+            .iter()
+            .chain(state.variables.values.iter())
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let resolved = resolve_request(
+            &values,
+            environment_error.as_deref(),
+            request,
+            scripted,
+            body_changed,
+            &mut state.variables.generated,
+        );
 
-        let mut request = match expanded {
-            Ok(request) => request,
+        match resolved {
+            Ok(request) => Ok((request.prepare_for_send(), state, reports)),
             Err(message) => {
                 let message: String = message.chars().take(4096).collect();
-                let mut report = match reports.pop() {
-                    Some(report) => report,
-                    None if context.is_some() => return Err(ExecutionError::Variables(message)),
-                    None => ScriptReport {
-                        phase: ScriptPhase::PreRequest,
-                        collection: false,
-                        tests: Vec::new(),
-                        logs: Vec::new(),
-                        error: None,
-                    },
+                let Some(mut report) = reports.pop() else {
+                    return Err(ExecutionError::Variables(message));
                 };
                 report.error = Some(message.clone());
-                return Err(after_earlier_scripts(
+                Err(after_earlier_scripts(
                     reports,
                     ExecutionError::Script {
                         message,
                         report: Box::new(report),
                     },
-                ));
+                ))
             }
-        };
-
-        if context.is_some() {
-            request = request.prepare_for_send();
         }
-
-        Ok((request, variables, reports))
     })
     .await
 }
@@ -237,30 +212,16 @@ fn after_earlier_scripts(mut reports: Vec<ScriptReport>, error: ExecutionError) 
     }
 }
 
-#[cfg(test)]
-pub(super) async fn post_response(
-    request: HttpRequest,
-    request_body: Option<Bytes>,
-    variables: Variables,
-    execution: Execution,
-    cancelled: Arc<AtomicBool>,
-) -> Execution {
-    post_response_with_network(request, request_body, variables, execution, cancelled, None).await
-}
-
-pub(crate) async fn post_response_with_network(
+pub(crate) async fn post_response(
     request: HttpRequest,
     mut request_body: Option<Bytes>,
-    mut variables: Variables,
+    mut state: ScriptState,
     mut execution: Execution,
+    executor: RequestExecutor,
     cancelled: Arc<AtomicBool>,
-    network: Option<NetworkOptions>,
 ) -> Execution {
     let scripts: Vec<(bool, String)> = [
-        (
-            true,
-            std::mem::take(&mut variables.collection_post_response),
-        ),
+        (true, std::mem::take(&mut state.collection_post_response)),
         (false, request.scripts.post_response.clone()),
     ]
     .into_iter()
@@ -273,7 +234,7 @@ pub(crate) async fn post_response_with_network(
     smol::unblock(move || {
         // A failing collection script does not prevent the request's own tests.
         for (collection, source) in scripts {
-            let mut input = input(&request, &variables);
+            let mut input = input(&request, &state.variables);
             let Response::Http(response) = &mut execution.response;
             input["response"] = json!({
                 "code": response.status.as_u16(),
@@ -290,22 +251,21 @@ pub(crate) async fn post_response_with_network(
                 &mut request_body,
                 Some(&mut response.body),
                 cancelled.clone(),
-                network.clone(),
+                &executor,
             );
             report.collection = collection;
             if cancelled.load(Ordering::Relaxed) {
                 report.error = Some("Script cancelled".into());
             }
             if report.error.is_none()
-                && let Some(mut output) = output
+                && let Some(output) = output
             {
-                if let Some(session) = &variables.session
+                if let Some(session) = &state.session
                     && let Err(message) = session.apply(&output.environment_changes)
                 {
                     report.error = Some(message.into());
                 } else {
-                    output.variables.session = variables.session.take();
-                    variables = output.variables;
+                    state.variables = output.variables;
                 }
             }
             execution.scripts.push(report);

@@ -10,7 +10,7 @@ pub enum Request {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: Method,
-    /// An absolute HTTP or HTTPS URL when executing the request.
+    /// An HTTP or HTTPS URL, which may contain `{{variables}}`.
     pub path: String,
 
     #[serde(default)]
@@ -50,18 +50,6 @@ impl HttpRequest {
 impl From<HttpRequest> for Request {
     fn from(request: HttpRequest) -> Self {
         Self::Http(request)
-    }
-}
-
-impl From<&HttpRequest> for Request {
-    fn from(request: &HttpRequest) -> Self {
-        Self::Http(request.clone())
-    }
-}
-
-impl From<&Request> for Request {
-    fn from(request: &Request) -> Self {
-        request.clone()
     }
 }
 

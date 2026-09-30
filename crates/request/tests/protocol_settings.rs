@@ -1,11 +1,16 @@
 use std::{net::TcpListener, sync::Arc};
 
+use environment::VariableValues;
 use request::{
-    ExecutionError, HttpError, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
-    Response, Version,
+    ExecutionError, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
+    RequestVariables, Response, Version,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, rustls};
+
+fn no_variables() -> RequestVariables {
+    RequestVariables::new(VariableValues::default(), None)
+}
 
 fn tls_config() -> rustls::ServerConfig {
     let rcgen::CertifiedKey { cert, signing_key } =
@@ -62,19 +67,19 @@ fn certificate_verification_is_enabled_by_default_and_can_be_overridden() {
 
             let executor = RequestExecutor::new(&preferences).unwrap();
             let result = executor
-                .execute(HttpRequest {
-                    path: url,
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await;
 
             if verification != Some(false) {
                 let error = result.unwrap_err();
                 println!("\n  Verify TLS = {verification:?}, self-signed server -> {error}");
-                assert!(matches!(
-                    error,
-                    ExecutionError::Http(HttpError::Transport(_))
-                ));
+                assert!(matches!(error, ExecutionError::Transport(_)));
             } else {
                 let execution = result.unwrap();
                 let Response::Http(response) = execution.response;
@@ -143,18 +148,21 @@ fn assert_http2_request(explicit_host: bool) {
         })
         .unwrap();
         let execution = executor
-            .execute(HttpRequest {
-                path: url,
-                headers: if explicit_host {
-                    vec![
-                        ("Host".into(), host),
-                        ("User-Agent".into(), "requesteagleruntime/0.041".into()),
-                    ]
-                } else {
-                    Vec::new()
+            .execute(
+                HttpRequest {
+                    path: url,
+                    headers: if explicit_host {
+                        vec![
+                            ("Host".into(), host),
+                            ("User-Agent".into(), "requesteagleruntime/0.041".into()),
+                        ]
+                    } else {
+                        Vec::new()
+                    },
+                    ..HttpRequest::default()
                 },
-                ..HttpRequest::default()
-            })
+                no_variables(),
+            )
             .await
             .unwrap();
         let Response::Http(response) = execution.response;
@@ -180,18 +188,18 @@ fn forced_http2_explains_unsupported_host_overrides_before_sending() {
         })
         .unwrap();
         let error = executor
-            .execute(HttpRequest {
-                path: "http://127.0.0.1:1".into(),
-                headers: vec![("Host".into(), "virtual.example".into())],
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: "http://127.0.0.1:1".into(),
+                    headers: vec![("Host".into(), "virtual.example".into())],
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::Http(HttpError::Http2HostOverride)
-        ));
+        assert!(matches!(error, ExecutionError::Http2HostOverride));
     });
 }
 
@@ -245,11 +253,14 @@ fn auto_host_override_uses_http1_preserving_destination_and_tls_name() {
         })
         .unwrap();
         let execution = executor
-            .execute(HttpRequest {
-                path: url,
-                headers: vec![("Host".into(), "virtual.example:8443".into())],
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: url,
+                    headers: vec![("Host".into(), "virtual.example:8443".into())],
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         let Response::Http(response) = execution.response;

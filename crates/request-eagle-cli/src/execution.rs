@@ -41,7 +41,7 @@ pub async fn run(
     }
 
     let executor = RequestExecutor::new(&settings)?;
-    let execution = executor.execute_with_variables(request, variables).await?;
+    let execution = executor.execute(request, variables).await?;
     let Response::Http(response) = execution.response;
     let headers = response.headers.iter().map(|(name, value)| json!({
         "name": name.as_str(), "value": value.to_str().ok(), "value_base64": STANDARD.encode(value.as_bytes()),
