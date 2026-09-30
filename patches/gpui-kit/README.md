@@ -1,12 +1,13 @@
 # GPUI Kit editor fixes
 
-The workspace pins eight changed files on top of GPUI Kit **0.6.2**:
+The workspace pins nine changed files on top of GPUI Kit **0.6.2**:
 
 - Upstream tag: `v0.6.2`, commit `122c36f7be19ea0e179107c067b679efccb7d66a`.
-- Patched commit: [`c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547`](https://github.com/gregor-tokarev/gpui-kit/commit/c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547).
+- Patched commit: [`c38733a06868b10813788ca3ebbace790eeb65b1`](https://github.com/gregor-tokarev/gpui-kit/commit/c38733a06868b10813788ca3ebbace790eeb65b1).
 - Completion changes: [0001-current-frame-completion-position.patch](0001-current-frame-completion-position.patch).
 - Query reuse: [0002-cache-syntax-queries.patch](0002-cache-syntax-queries.patch), applied after the first patch.
 - Vim cursor support: [0003-vim-cursor-support.patch](0003-vim-cursor-support.patch), applied after the second patch.
+- Idle caret: [0004-idle-caret.patch](0004-idle-caret.patch), applied after the third patch.
 
 Inputs previously published their caret geometry during paint, after popups
 had already chosen a position using the previous frame. Typing therefore
@@ -53,6 +54,12 @@ of the Visual selection. `range_to_bounds` now returns `None` for offsets above
 or below the laid-out lines instead of resolving them to the first visible line,
 so the block disappears with its line. Base tests cover all three; Request
 Eagle's Vim tests check the block in Normal, Visual, and Visual Line mode.
+
+The fourth patch stops the caret from redrawing an idle window. Every blink
+redraws the whole window, so a focused input kept an otherwise idle window
+drawing twice a second for as long as it stayed focused. The caret now stops
+blinking, visible, after ten seconds without input, as GTK does. Input or
+focus starts it again. A Base test covers settling and restarting.
 
 When upstream includes equivalent behavior, remove these overrides and this
 directory together, retaining the app regression tests.

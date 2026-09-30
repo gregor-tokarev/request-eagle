@@ -27,6 +27,6 @@ thiserror = "2"
 
 [patch.crates-io]
 # GPUI Kit 0.6.2 with editor fixes; see patches/gpui-kit/README.md.
-gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547" }
-gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547" }
-gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547" }
+gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
+gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
+gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
