@@ -142,7 +142,7 @@ pub(crate) async fn pre_request(
             }
             request.method = output.method;
             request.path = output.url;
-            request.query = Some(output.query);
+            request.query = output.query;
             request.headers = output.headers;
             state.variables = output.variables;
 
@@ -277,7 +277,7 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
-        "query": request.query.as_deref().unwrap_or_default(),
+        "query": request.query,
         "headers": request.headers,
         "variables": variables,
     })

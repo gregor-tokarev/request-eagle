@@ -264,7 +264,7 @@ impl RequestDraft {
             let values = if is_headers {
                 self.request.headers.as_slice()
             } else {
-                self.request.query.as_deref().unwrap_or_default()
+                self.request.query.as_slice()
             };
             let generated = if is_headers {
                 self.generated_headers.as_slice()
@@ -277,7 +277,7 @@ impl RequestDraft {
                     this.request.headers = event.0.clone();
                     this.refresh_generated_headers(cx);
                 } else {
-                    this.request.query = (!event.0.is_empty()).then(|| event.0.clone());
+                    this.request.query = event.0.clone();
                 }
 
                 cx.notify();

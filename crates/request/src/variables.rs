@@ -125,11 +125,7 @@ impl HttpRequest {
         let mut request = self;
         request.path = resolve_url(&request.path, resolver)?;
 
-        for (key, value) in request
-            .headers
-            .iter_mut()
-            .chain(request.query.iter_mut().flatten())
-        {
+        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = resolver.resolve(key)?;
             *value = resolver.resolve(value)?;
         }

@@ -230,7 +230,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
             method: crate::Method::Post,
             path: "https://example.com/{{!customer}}".into(),
             headers: vec![("X-Literal".into(), "{{!$guid}}/{{!customer}}".into())],
-            query: Some(vec![("{{!key}}".into(), "{{!customer}}".into())]),
+            query: vec![("{{!key}}".into(), "{{!customer}}".into())],
             body: Some(b"{{!customer}}".to_vec()),
             ..Default::default()
         };
@@ -243,10 +243,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
         let (sent, _, _) = send(request);
         assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
         assert_eq!(sent.headers[0].1, "{{$guid}}/{{customer}}");
-        assert_eq!(
-            sent.query.unwrap(),
-            [("{{key}}".into(), "{{customer}}".into())]
-        );
+        assert_eq!(sent.query, [("{{key}}".into(), "{{customer}}".into())]);
         assert_eq!(sent.body.unwrap(), b"{{customer}}");
         if mode == "dynamic" {
             uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
@@ -263,7 +260,7 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
             ("X-Time".into(), "{{$timestamp}}".into()),
             ("{{$guid}}".into(), "{{$randomUUID}}".into()),
         ],
-        query: Some(vec![("id".into(), "{{$randomUUID}}".into())]),
+        query: vec![("id".into(), "{{$randomUUID}}".into())],
         body: Some(br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#.to_vec()),
         ..Default::default()
     };
@@ -275,7 +272,7 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
     assert!(sent.headers[0].1.parse::<i64>().unwrap() > 0);
     uuid::Uuid::parse_str(&sent.headers[1].0).unwrap();
     uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
-    assert_eq!(sent.query.unwrap()[0].1, sent.headers[1].1);
+    assert_eq!(sent.query[0].1, sent.headers[1].1);
     assert_eq!(
         sent.path.strip_prefix("https://example.com/").unwrap(),
         sent.headers[1].0

@@ -165,7 +165,7 @@ request_custom = 'keep the request metadata'
         path: "https://example.com/v2/users".into(),
         headers: vec![("Accept".into(), "application/json".into())],
         body: Some(b"new body".to_vec()),
-        query: Some(vec![("page".into(), "2".into())]),
+        query: vec![("page".into(), "2".into())],
     };
 
     registry
@@ -200,7 +200,7 @@ request_custom = 'keep the request metadata'
 
     let cleared = HttpRequest {
         body: None,
-        query: None,
+        query: Vec::new(),
         ..updated
     };
     registry
@@ -208,7 +208,7 @@ request_custom = 'keep the request metadata'
         .unwrap();
     let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
     assert_eq!(reloaded.body, None);
-    assert_eq!(reloaded.query, None);
+    assert!(reloaded.query.is_empty());
 }
 
 #[test]
@@ -380,7 +380,7 @@ query = [
     );
 
     request.headers[0].1 = "text/plain".into();
-    request.query.as_mut().unwrap()[0].1 = "2".into();
+    request.query[0].1 = "2".into();
     registry
         .update_request(&path, "list", request.clone().into())
         .unwrap();
@@ -430,7 +430,7 @@ query = [
     let mut registry = CollectionRegistry::from_path(root).unwrap();
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
     request.headers.remove(0);
-    request.query.as_mut().unwrap().remove(0);
+    request.query.remove(0);
 
     registry
         .update_request(&path, "list", request.clone().into())
@@ -450,8 +450,8 @@ query = [
 
     request.headers.reverse();
     request.headers[0].1 = "two".into();
-    request.query.as_mut().unwrap().reverse();
-    request.query.as_mut().unwrap()[0].1 = "c".into();
+    request.query.reverse();
+    request.query[0].1 = "c".into();
 
     registry
         .update_request(&path, "list", request.clone().into())

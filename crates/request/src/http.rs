@@ -72,10 +72,8 @@ impl HttpExecutor {
         // the editor's pairs with URL encoding. Fragments are never sent.
         url.set_fragment(None);
 
-        if let Some(query) = &request.query
-            && !query.is_empty()
-        {
-            url.query_pairs_mut().extend_pairs(query);
+        if !request.query.is_empty() {
+            url.query_pairs_mut().extend_pairs(&request.query);
         }
 
         let request_body_bytes = body.as_ref().map_or(0, Bytes::len);

@@ -78,7 +78,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(data.request.path, url);
         assert_eq!(data.url_input().unwrap().read(cx).value(), url);
         assert_eq!(data.request.headers.len(), 2);
-        assert_eq!(data.request.query.as_ref().unwrap().len(), 2);
+        assert_eq!(data.request.query.len(), 2);
         assert_eq!(
             data.request.body.as_deref(),
             Some(b"{\"hello\":true}".as_slice())
@@ -115,7 +115,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
             ]
         );
         assert_eq!(
-            data.request.query.as_ref().unwrap(),
+            data.request.query,
             &[
                 ("tag".into(), "edited".into()),
                 ("tag".into(), "two".into())
@@ -171,10 +171,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_ne!(reopened, draft);
         assert_eq!(reopened.read(cx).request.method, Method::Put);
         assert_eq!(reopened.read(cx).request.headers[0].1, "updated");
-        assert_eq!(
-            reopened.read(cx).request.query.as_ref().unwrap()[0].1,
-            "edited"
-        );
+        assert_eq!(reopened.read(cx).request.query[0].1, "edited");
         assert_eq!(reopened.read(cx).request.path, format!("{url}&saved=true"));
         assert_eq!(reopened.read(cx).request, draft.read(cx).request);
         assert!(!reopened.read(cx).is_dirty());

@@ -102,7 +102,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                         ("X-Id".into(), "{{$guid}}".into()),
                         ("X-Uuid".into(), "{{$randomUUID}}".into()),
                     ],
-                    query: Some(vec![("id".into(), "{{$guid}}".into())]),
+                    query: vec![("id".into(), "{{$guid}}".into())],
                     body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -252,10 +252,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             ],
             body: Some(vec![0, 255, 42]),
             scripts: Default::default(),
-            query: Some(vec![
-                ("tag".into(), "a & b".into()),
-                ("tag".into(), "c+d".into()),
-            ]),
+            query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
@@ -1397,12 +1394,12 @@ fn scripts_see_and_edit_query_rows() {
             };
             let request = HttpRequest {
                 path: format!("{url}/path?tag=existing%20item#ignored"),
-                query: Some(vec![
+                query: vec![
                     ("tag".into(), "a & b".into()),
                     ("tag".into(), "c+d".into()),
                     ("Case".into(), "keep".into()),
                     ("remove".into(), "yes".into()),
-                ]),
+                ],
                 scripts: request::RequestScripts {
                     pre_request: format!(
                         "pm.expect(String(pm.request.url)).to.equal({initial:?}); pm.expect(pm.request.url.query.get('tag')).to.equal('existing item'); {mutation}"

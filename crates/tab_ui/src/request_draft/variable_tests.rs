@@ -182,7 +182,7 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
     click(cx, "variable-suggestion-0");
     cx.read(|cx| {
         assert_eq!(
-            draft.read(cx).request.query.as_ref().unwrap()[0],
+            draft.read(cx).request.query[0],
             ("{{message}}".into(), "{{$guid}}".into())
         )
     });
@@ -520,8 +520,8 @@ fn environment_errors_are_reported_in_every_request_field() {
             0 => request.path.push_str(&format!("/{token}")),
             1 => request.headers.push((token, "value".into())),
             2 => request.headers.push(("X-Message".into(), token)),
-            3 => request.query = Some(vec![(token, "value".into())]),
-            4 => request.query = Some(vec![("message".into(), token)]),
+            3 => request.query = vec![(token, "value".into())],
+            4 => request.query = vec![("message".into(), token)],
             _ => request.body = Some(token.into_bytes()),
         }
         assert!(

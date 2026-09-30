@@ -111,7 +111,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         assert!(draft.request.path.is_empty());
         assert!(draft.request.headers.is_empty());
         assert!(draft.request.body.is_none());
-        assert!(draft.request.query.is_none());
+        assert!(draft.request.query.is_empty());
         assert!(draft.url_input().unwrap().read(cx).value().is_empty());
     });
 
@@ -259,7 +259,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         );
         assert_eq!(
             draft.read(cx).request.query,
-            Some(vec![("page".into(), "2".into())])
+            [("page".into(), "2".into())]
         );
         assert_eq!(
             draft.read(cx).request.body.as_deref(),
@@ -274,7 +274,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
 
         assert_eq!(view.tabs[1].method, Some(request::Method::Get));
         assert!(new_draft.read(cx).request.headers.is_empty());
-        assert!(new_draft.read(cx).request.query.is_none());
+        assert!(new_draft.read(cx).request.query.is_empty());
         assert!(new_draft.read(cx).request.body.is_none());
     });
 

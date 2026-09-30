@@ -71,7 +71,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         method: Method::Post,
         path: "https://example.com/{{!customer}}".into(),
         headers: vec![("X-{{!customer}}".into(), "{{!missing}}".into())],
-        query: Some(vec![("{{!customer}}".into(), "{{!$guid}}".into())]),
+        query: vec![("{{!customer}}".into(), "{{!$guid}}".into())],
         body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
         ..Default::default()
     };
@@ -82,7 +82,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         ("X-{{customer}}".into(), "{{missing}}".into())
     );
     assert_eq!(
-        resolved.query.unwrap()[0],
+        resolved.query[0],
         ("{{customer}}".into(), "{{$guid}}".into())
     );
     assert_eq!(
@@ -105,7 +105,7 @@ fn resolves_every_request_field_in_a_snapshot() {
             ("X-{{key}}".into(), "{{value}}".into()),
             ("X-Request-ID".into(), "{{$guid}}".into()),
         ],
-        query: Some(vec![("{{key}}".into(), "{{$guid}}".into())]),
+        query: vec![("{{key}}".into(), "{{$guid}}".into())],
         body: Some(br#"{"value":"{{value}}","id":"{{$guid}}"}"#.to_vec()),
         ..Default::default()
     };
@@ -114,7 +114,7 @@ fn resolves_every_request_field_in_a_snapshot() {
     assert_eq!(draft, before);
     assert!(outgoing.path.starts_with("https://example.com/echo?id="));
     assert_eq!(outgoing.headers[0], ("X-message".into(), "🦅 hello".into()));
-    let id = &outgoing.query.as_ref().unwrap()[0].1;
+    let id = &outgoing.query[0].1;
     assert!(outgoing.path.ends_with(id));
     assert_eq!(&outgoing.headers[1].1, id);
     assert_eq!(

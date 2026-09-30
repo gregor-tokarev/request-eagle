@@ -76,7 +76,7 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
         );
         request.path = "http://localhost/{{path}}".into();
         request.headers = vec![("x-test".into(), "old".into())];
-        request.query = Some(vec![("q".into(), "{{value}}".into())]);
+        request.query = vec![("q".into(), "{{value}}".into())];
         let original = request.clone();
         let (sent, state, reports) = pre_request(request, no_variables()).await.unwrap();
 
@@ -89,7 +89,7 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
                 ("Content-Type".into(), "application/json".into())
             ]
         );
-        assert_eq!(sent.query.unwrap()[0].1, "a & b");
+        assert_eq!(sent.query[0].1, "a & b");
         assert_eq!(sent.body.unwrap(), br#"{"message":"a & b"}"#);
         assert_eq!(state.variables.values["path"], "hello");
         assert_eq!(reports[0].logs.len(), 1);
@@ -215,7 +215,7 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
         );
         request.path = "http://localhost/{{path}}".into();
         request.headers = vec![("X-Value".into(), "{{value}}/{{!value}}/{{$guid}}".into())];
-        request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
+        request.query = vec![("id".into(), "{{$guid}}".into())];
         let (sent, state, _) = pre_request(request, RequestVariables::new(values, None))
             .await
             .unwrap();
@@ -223,7 +223,7 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
         assert_eq!(state.variables.values["value"], "local");
         assert_eq!(
             sent.headers[0].1,
-            format!("local/{{{{value}}}}/{}", sent.query.unwrap()[0].1)
+            format!("local/{{{{value}}}}/{}", sent.query[0].1)
         );
 
         let mut request = scripted("pm.variables.set('path', 'fallback');");
@@ -266,7 +266,7 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             request.method = before;
             request.path = "http://localhost/{{$guid}}".into();
             request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
-            request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
+            request.query = vec![("id".into(), "{{$guid}}".into())];
             request.body = Some(body.as_bytes().to_vec());
             let values = HashMap::from([("$guid".into(), "from file".into())]);
             let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
@@ -274,7 +274,7 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
                 .unwrap();
             assert_eq!(sent.path, "http://localhost/fixed");
             assert_eq!(sent.headers[0].1, "fixed");
-            assert_eq!(sent.query.unwrap()[0].1, "fixed");
+            assert_eq!(sent.query[0].1, "fixed");
             assert_eq!(sent.body.as_deref(), expected.map(str::as_bytes));
         }
     });

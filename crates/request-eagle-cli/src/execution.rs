@@ -72,7 +72,7 @@ impl From<RequestInput> for HttpRequest {
             },
             path: input.url,
             headers: input.headers,
-            query: (!input.query.is_empty()).then_some(input.query),
+            query: input.query,
             body: input.body.map(|body| match body {
                 Body::Text(text) => text.into_bytes(),
                 Body::Bytes(bytes) => bytes,
@@ -99,7 +99,7 @@ impl From<&HttpRequest> for RequestInput {
             },
             url: request.path.clone(),
             headers: request.headers.clone(),
-            query: request.query.clone().unwrap_or_default(),
+            query: request.query.clone(),
             body: request
                 .body
                 .as_ref()
