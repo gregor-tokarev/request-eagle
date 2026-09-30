@@ -95,10 +95,10 @@ impl RequestDraft {
         }
 
         self.prepare(window, cx);
-        let response = self.response.as_ref().unwrap().clone();
+        let response = self.response.clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         let request = self.request.clone();
         let variables = scope.read(cx).request_variables(cx);
         let preferences = cx
@@ -142,9 +142,7 @@ impl RequestDraft {
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self.task = None;
 
-        if let Some(response) = &self.response {
-            response.update(cx, |response, cx| response.cancel(cx));
-        }
+        self.response.update(cx, |response, cx| response.cancel(cx));
 
         cx.notify();
     }

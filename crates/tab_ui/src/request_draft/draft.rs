@@ -1,10 +1,15 @@
+use std::path::PathBuf;
+
 use super::super::request_fields::{FieldsChanged, RequestFields};
+use super::super::response_view::ResponseView;
 use crate::{
+    Environments,
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
 use collection::{HttpRequest, Method};
+use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
@@ -21,13 +26,32 @@ pub(crate) enum RequestSection {
     Scripts,
 }
 
+/// Where a saved request is stored, and how the collections sidebar names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RequestLocation {
+    pub path: PathBuf,
+    pub id: SharedString,
+    pub name: SharedString,
+    pub collection: SharedString,
+    pub folders: Vec<SharedString>,
+}
+
+impl RequestLocation {
+    /// The collection environment that the request's variables resolve from.
+    fn environment_path(&self) -> Option<PathBuf> {
+        self.path
+            .ancestors()
+            .nth(self.folders.len() + 1)
+            .map(|collection| collection.join("environment.toml"))
+    }
+}
+
 /// An editable HTTP request snapshot owned by one tab, independent of collection storage.
 pub struct RequestDraft {
-    pub name: SharedString,
-    pub collection: Option<SharedString>,
-    pub folders: Vec<SharedString>,
+    /// Unsaved drafts have no location.
+    pub location: Option<RequestLocation>,
     pub request: HttpRequest,
-    pub(crate) saved_request: HttpRequest,
+    saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
     pub(crate) section: RequestSection,
     pub(super) params: Option<Entity<RequestFields>>,
@@ -38,81 +62,71 @@ pub struct RequestDraft {
     pub(super) body_json_valid: bool,
     pub(super) body_task: Option<Task<()>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
-    pub(super) variable_scope: Option<Entity<VariableScope>>,
-    variable_path: Option<std::path::PathBuf>,
-    variable_sessions: environment::EnvironmentSessions,
-    environments: Option<Entity<crate::Environments>>,
+    pub(super) variables: Entity<VariableScope>,
+    pub(super) variable_sessions: EnvironmentSessions,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
-    pub(super) response: Option<Entity<super::super::response_view::ResponseView>>,
-    pub(super) split: Option<Entity<ResizableState>>,
+    pub(super) response: Entity<ResponseView>,
+    split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
-    address_view: Option<Entity<RequestAddress>>,
-    configuration_view: Option<Entity<RequestConfiguration>>,
+    address: Entity<RequestAddress>,
+    configuration: Entity<RequestConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
 
-impl Default for RequestDraft {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl RequestDraft {
-    pub fn url_input(&self) -> Option<&Entity<InputState>> {
-        self.url.as_ref()
-    }
+    /// Variables resolve from the request's collection environment, its
+    /// session values and the active global environment.
+    pub fn new(
+        request: HttpRequest,
+        location: Option<RequestLocation>,
+        sessions: EnvironmentSessions,
+        environments: Option<Entity<Environments>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let environment_path = location
+            .as_ref()
+            .and_then(RequestLocation::environment_path);
+        let variables = cx.new(|_| VariableScope {
+            session: sessions.for_path(environment_path.as_deref()),
+            path: environment_path,
+            environments,
+        });
 
-    pub fn is_sending(&self) -> bool {
-        self.task.is_some()
-    }
+        // Unlike the editors, these views do not install window listeners or
+        // notify while they are created, so unvisited tabs can own them.
+        let owner = cx.weak_entity();
+        let response = cx.new(|cx| ResponseView::new(cx));
+        let split = cx.new(|_| ResizableState::default());
+        let address = cx.new(|_| RequestAddress(owner.clone()));
+        let configuration = cx.new(|_| RequestConfiguration(owner));
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn response_for_test(&self) -> Entity<super::super::response_view::ResponseView> {
-        self.response.as_ref().expect("prepared response").clone()
-    }
-
-    pub fn new() -> Self {
         Self {
-            name: "Untitled Request".into(),
-            collection: None,
-            folders: Vec::new(),
-            request: HttpRequest::default(),
-            saved_request: HttpRequest::default(),
+            location,
+            generated_headers: super::execution::generated_headers(&request),
+            saved_request: request.clone(),
+            request,
             url: None,
             section: RequestSection::Headers,
             params: None,
             headers: None,
-            generated_headers: super::execution::generated_headers(&HttpRequest::default()),
             body: None,
             body_vim: None,
             body_json_valid: false,
             body_task: None,
             scripts: None,
-            variable_scope: None,
-            variable_path: None,
-            variable_sessions: environment::EnvironmentSessions::default(),
-            environments: None,
+            variables,
+            variable_sessions: sessions,
             url_completion: None,
             body_completion: None,
-            response: None,
-            split: None,
+            response,
+            split,
             task: None,
             executor: None,
-            address_view: None,
-            configuration_view: None,
+            address,
+            configuration,
             _subscriptions: Vec::new(),
-        }
-    }
-
-    pub fn from_saved(name: SharedString, collection: SharedString, request: HttpRequest) -> Self {
-        Self {
-            name,
-            collection: Some(collection),
-            saved_request: request.clone(),
-            request,
-            ..Self::new()
         }
     }
 
@@ -120,71 +134,19 @@ impl RequestDraft {
         self.request != self.saved_request
     }
 
-    pub fn set_variable_environment(
-        &mut self,
-        request_path: &std::path::Path,
-        folder_depth: usize,
-        cx: &mut App,
-    ) {
-        let path = request_path
-            .ancestors()
-            .nth(folder_depth + 1)
-            .map(|path| path.join("environment.toml"));
+    /// Follow the saved request to its current file and name.
+    pub fn set_location(&mut self, location: RequestLocation, cx: &mut Context<Self>) {
+        let path = location.environment_path();
+        let session = self.variable_sessions.for_path(path.as_deref());
 
-        self.variable_path = path;
+        self.variables.update(cx, |scope, cx| {
+            scope.path = path;
+            scope.session = session;
+            cx.notify();
+        });
 
-        if let Some(scope) = &self.variable_scope {
-            scope.update(cx, |scope, cx| {
-                scope.path = self.variable_path.clone();
-                scope.session = self
-                    .variable_sessions
-                    .for_path(self.variable_path.as_deref());
-                cx.notify();
-            });
-        }
-    }
-
-    pub fn set_variable_sessions(
-        &mut self,
-        sessions: environment::EnvironmentSessions,
-        cx: &mut App,
-    ) {
-        self.variable_sessions = sessions;
-
-        if let Some(scope) = &self.variable_scope {
-            scope.update(cx, |scope, cx| {
-                scope.session = self
-                    .variable_sessions
-                    .for_path(self.variable_path.as_deref());
-                cx.notify();
-            });
-        }
-    }
-
-    /// Use the workspace's active global environment when resolving variables.
-    pub fn set_environments(&mut self, environments: Entity<crate::Environments>, cx: &mut App) {
-        self.environments = Some(environments.clone());
-
-        if let Some(scope) = &self.variable_scope {
-            scope.update(cx, |scope, cx| {
-                scope.environments = Some(environments);
-                cx.notify();
-            });
-        }
-    }
-
-    pub(super) fn variables(&mut self, cx: &mut Context<Self>) -> Entity<VariableScope> {
-        self.variable_scope
-            .get_or_insert_with(|| {
-                cx.new(|_| VariableScope {
-                    path: self.variable_path.clone(),
-                    session: self
-                        .variable_sessions
-                        .for_path(self.variable_path.as_deref()),
-                    environments: self.environments.clone(),
-                })
-            })
-            .clone()
+        self.location = Some(location);
+        cx.notify();
     }
 
     pub fn mark_saved(&mut self, request: HttpRequest, cx: &mut Context<Self>) {
@@ -204,9 +166,7 @@ impl RequestDraft {
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(scope) = &self.variable_scope {
-            scope.update(cx, |_, cx| cx.notify());
-        }
+        self.variables.update(cx, |_, cx| cx.notify());
 
         // Initialize newly activated controls before drawing. Their setup can
         // notify GPUI; doing it inside render schedules an unnecessary frame.
@@ -221,11 +181,6 @@ impl RequestDraft {
         }
 
         self.refresh_generated_headers(cx);
-
-        self.response
-            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
-        self.split
-            .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
     }
 
     pub(super) fn url_state(
@@ -233,7 +188,7 @@ impl RequestDraft {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<InputState> {
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         // Unvisited tabs only need request data. Creating an InputState also
         // registers window and keystroke listeners, so wait until it is visible.
         self.url
@@ -296,7 +251,7 @@ impl RequestDraft {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<RequestFields> {
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         let is_headers = self.section == RequestSection::Headers;
         let slot = if is_headers {
             &mut self.headers
@@ -341,24 +296,7 @@ impl RequestDraft {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The first tab can render before it is focused. These panel states do
-        // not install window listeners or notify during construction.
-        self.response
-            .get_or_insert_with(|| cx.new(|cx| super::super::response_view::ResponseView::new(cx)));
-        self.split
-            .get_or_insert_with(|| cx.new(|_| ResizableState::default()));
-
-        let owner = cx.entity().downgrade();
-        let address = self
-            .address_view
-            .get_or_insert_with(|| cx.new(|_| RequestAddress(owner.clone())))
-            .clone();
-        let configuration = self
-            .configuration_view
-            .get_or_insert_with(|| cx.new(|_| RequestConfiguration(owner)))
-            .clone();
-
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
@@ -367,11 +305,15 @@ impl Render for RequestDraft {
             .pb_2()
             .gap_2()
             .text_sm()
-            .child(address.cached(StyleRefinement::default().w_full().h_20().flex_none()))
+            .child(
+                self.address
+                    .clone()
+                    .cached(StyleRefinement::default().w_full().h_20().flex_none()),
+            )
             .child(
                 div().flex_1().min_h_0().overflow_hidden().child(
                     v_resizable("request-response-split")
-                        .with_state(self.split.as_ref().expect("prepared request split"))
+                        .with_state(&self.split)
                         .child(
                             resizable_panel()
                                 .size(rems(20.).to_pixels(window.rem_size()))
@@ -380,13 +322,15 @@ impl Render for RequestDraft {
                                         ..rems(75.).to_pixels(window.rem_size()),
                                 )
                                 .child(
-                                    configuration.cached(StyleRefinement::default().size_full()),
+                                    self.configuration
+                                        .clone()
+                                        .cached(StyleRefinement::default().size_full()),
                                 ),
                         )
                         .child(
                             resizable_panel()
                                 .size_range(rems(12.).to_pixels(window.rem_size())..Pixels::MAX)
-                                .child(self.response.as_ref().expect("prepared response").clone()),
+                                .child(self.response.clone()),
                         ),
                 ),
             )

@@ -7,6 +7,7 @@ use gpui_kit::{
 
 use crate::main_view::Page;
 use crate::workspace::Workspace;
+use tab_ui::RequestLocation;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
@@ -109,7 +110,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         let tab = &view.tabs[0];
 
         assert_eq!(tab.method, Some(collection::Method::Get));
-        assert!(tab.request_path.is_none());
+        assert!(tab.location(cx).is_none());
 
         tab.draft()
     });
@@ -142,7 +143,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
 
         assert_eq!(view.selected, Some(1));
         assert_eq!(tab.method, Some(collection::Method::Get));
-        assert!(tab.request_path.is_none());
+        assert!(tab.location(cx).is_none());
         assert_ne!(draft, first);
         assert!(draft.read(cx).request.path.is_empty());
         assert!(
@@ -175,11 +176,13 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.open_request(
-                saved_path,
-                "saved".into(),
-                "Saved request".into(),
-                "Collection".into(),
-                Vec::new(),
+                RequestLocation {
+                    path: saved_path.to_path_buf(),
+                    id: "saved".into(),
+                    name: "Saved request".into(),
+                    collection: "Collection".into(),
+                    folders: Vec::new(),
+                },
                 &collection::HttpRequest {
                     method: collection::Method::Post,
                     ..Default::default()
@@ -200,13 +203,19 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
 
         assert_eq!(view.selected, Some(2));
         assert_eq!(tab.method, Some(collection::Method::Get));
-        assert!(tab.request_path.is_none());
+        assert!(tab.location(cx).is_none());
         assert!(matches!(
             draft.read(cx).request.method,
             collection::Method::Get
         ));
         assert!(draft.read(cx).request.path.is_empty());
-        assert_eq!(view.tabs[1].request_path.as_deref(), Some(saved_path));
+        assert_eq!(
+            view.tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_deref(),
+            Some(saved_path)
+        );
         assert_eq!(view.tabs[1].method, Some(collection::Method::Post));
     });
     // A resizer's settling frame can replay the cached page. Refresh before
@@ -265,7 +274,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
     });
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs[0].method, Some(collection::Method::Post));
-        assert!(view.read(cx).tabs[0].request_path.is_none());
+        assert!(view.read(cx).tabs[0].location(cx).is_none());
         assert_eq!(
             draft.read(cx).request.headers,
             [("Accept".into(), "application/json".into())]
@@ -341,7 +350,7 @@ fn tab_shortcuts_work_from_sidebar_and_wrap(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs[0].id, 4);
         assert_eq!(view.read(cx).selected, Some(0));
         assert_eq!(view.read(cx).tabs[0].method, Some(collection::Method::Get));
-        assert!(view.read(cx).tabs[0].request_path.is_none());
+        assert!(view.read(cx).tabs[0].location(cx).is_none());
     });
 }
 
@@ -626,20 +635,24 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.open_request(
-                first_path,
-                "first".into(),
-                "Same name".into(),
-                "Collection".into(),
-                Vec::new(),
+                RequestLocation {
+                    path: first_path.to_path_buf(),
+                    id: "first".into(),
+                    name: "Same name".into(),
+                    collection: "Collection".into(),
+                    folders: Vec::new(),
+                },
                 &collection::HttpRequest::default().into(),
                 cx,
             );
             view.open_request(
-                second_path,
-                "second".into(),
-                "Same name".into(),
-                "Collection".into(),
-                Vec::new(),
+                RequestLocation {
+                    path: second_path.to_path_buf(),
+                    id: "second".into(),
+                    name: "Same name".into(),
+                    collection: "Collection".into(),
+                    folders: Vec::new(),
+                },
                 &collection::HttpRequest {
                     method: collection::Method::Post,
                     ..Default::default()
@@ -658,11 +671,13 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view.open_request(
-                first_path,
-                "first".into(),
-                "Renamed request".into(),
-                "Renamed collection".into(),
-                Vec::new(),
+                RequestLocation {
+                    path: first_path.to_path_buf(),
+                    id: "first".into(),
+                    name: "Renamed request".into(),
+                    collection: "Renamed collection".into(),
+                    folders: Vec::new(),
+                },
                 &collection::HttpRequest {
                     method: collection::Method::Put,
                     ..Default::default()
@@ -679,10 +694,13 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
         assert_eq!(view.read(cx).tabs[1].method, Some(collection::Method::Get));
         assert_eq!(view.read(cx).tabs[1].draft(), first_page);
         let draft = view.read(cx).tabs[1].draft();
-        assert_eq!(draft.read(cx).name, "Renamed request");
         assert_eq!(
-            draft.read(cx).collection.as_deref(),
-            Some("Renamed collection")
+            draft.read(cx).location.as_ref().unwrap().name,
+            "Renamed request"
+        );
+        assert_eq!(
+            draft.read(cx).location.as_ref().unwrap().collection,
+            "Renamed collection"
         );
         assert_eq!(view.read(cx).tabs[2].title, "Same name");
         assert_eq!(view.read(cx).tabs[2].method, Some(collection::Method::Post));

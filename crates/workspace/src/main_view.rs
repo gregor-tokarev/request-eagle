@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::Path};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
@@ -14,7 +11,7 @@ use collection::Method;
 use collections_panel_ui::CollectionPanel;
 use tab_ui::{
     CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft,
-    SaveCollection,
+    RequestLocation, SaveCollection,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -106,8 +103,6 @@ impl Page {
 pub(crate) struct PageTab {
     pub(crate) id: u64,
     pub(crate) title: SharedString,
-    pub(crate) request_path: Option<PathBuf>,
-    pub(crate) request_id: Option<SharedString>,
     pub(crate) method: Option<Method>,
     dirty: bool,
     pub(crate) page: Page,
@@ -185,8 +180,6 @@ impl MainView {
         self.tabs.push(PageTab {
             id,
             title: title.into(),
-            request_path: None,
-            request_id: None,
             method: page.method(cx),
             dirty: page.is_dirty(cx),
             page,
@@ -200,79 +193,58 @@ impl MainView {
         index
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "The parameters mirror CollectionPanelEvent::OpenRequest; the workspace owns tab state, not sidebar events."
-    )]
+    /// Show a saved request, reusing its tab when it is open.
     pub(crate) fn open_request(
         &mut self,
-        path: &Path,
-        request_id: SharedString,
-        name: SharedString,
-        collection: SharedString,
-        folders: Vec<SharedString>,
+        location: RequestLocation,
         request: &collection::Request,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self.tabs.iter().position(|tab| {
-            tab.request_path.as_deref() == Some(path)
-                && tab.request_id.as_ref() == Some(&request_id)
-        }) {
-            self.tabs[index].title = name.clone();
-            if let Page::Request(draft) = &self.tabs[index].page {
-                draft.update(cx, |draft, cx| {
-                    draft.name = name;
-                    draft.collection = Some(collection);
-                    draft.set_variable_environment(path, folders.len(), cx);
-                    draft.folders = folders;
-                    cx.notify();
-                });
-            }
+        if let Some(index) = self.request_tab(&location.path, &location.id, cx) {
+            self.set_request_location(index, location, cx);
             self.select_tab(index, cx);
-
             return;
         }
 
         let collection::Request::Http(request) = request;
-        let mut draft = RequestDraft::from_saved(name.clone(), collection, request.clone());
-        draft.set_variable_environment(path, folders.len(), cx);
-        draft.folders = folders;
-        let index = self.open_draft(name, draft, cx);
-        self.tabs[index].request_path = Some(path.to_path_buf());
-        self.tabs[index].request_id = Some(request_id);
+        self.open_draft(location.name.clone(), request.clone(), Some(location), cx);
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "The parameters mirror CollectionPanelEvent::RequestRelocated while keeping the tab view independent of the sidebar."
-    )]
+    /// Follow a request renamed or moved in the sidebar.
     pub(crate) fn relocate_request(
         &mut self,
         previous_path: &Path,
-        path: &Path,
-        request_id: &SharedString,
-        name: SharedString,
-        collection: SharedString,
-        folders: Vec<SharedString>,
+        location: RequestLocation,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab) = self.tabs.iter_mut().find(|tab| {
-            tab.request_path.as_deref() == Some(previous_path)
-                && tab.request_id.as_ref() == Some(request_id)
-        }) {
-            tab.request_path = Some(path.to_path_buf());
-            tab.title = name.clone();
-
-            if let Page::Request(draft) = &tab.page {
-                draft.update(cx, |draft, cx| {
-                    draft.name = name;
-                    draft.collection = Some(collection);
-                    draft.set_variable_environment(path, folders.len(), cx);
-                    draft.folders = folders;
-                    cx.notify();
-                });
-            }
+        if let Some(index) = self.request_tab(previous_path, &location.id, cx) {
+            self.set_request_location(index, location, cx);
             cx.notify();
+        }
+    }
+
+    fn request_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
+        self.tabs.iter().position(|tab| match &tab.page {
+            Page::Request(draft) => draft
+                .read(cx)
+                .location
+                .as_ref()
+                .is_some_and(|location| location.path == path && location.id == id),
+            _ => false,
+        })
+    }
+
+    fn set_request_location(
+        &mut self,
+        index: usize,
+        location: RequestLocation,
+        cx: &mut Context<Self>,
+    ) {
+        let tab = &mut self.tabs[index];
+        tab.title = location.name.clone();
+
+        if let Page::Request(draft) = &tab.page {
+            draft.update(cx, |draft, cx| draft.set_location(location, cx));
         }
     }
 
@@ -346,19 +318,22 @@ impl MainView {
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
-        self.open_draft(title.into(), RequestDraft::new(), cx);
+        self.open_draft(title.into(), Default::default(), None, cx);
     }
 
     fn open_draft(
         &mut self,
         title: SharedString,
-        mut draft: RequestDraft,
+        request: collection::HttpRequest,
+        location: Option<RequestLocation>,
         cx: &mut Context<Self>,
-    ) -> usize {
-        draft.set_variable_sessions(self.variable_sessions.clone(), cx);
-        draft.set_environments(self.environments.clone(), cx);
-        let draft = cx.new(|_| draft);
-        self.open_tab(title, Page::Request(draft), cx)
+    ) {
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let draft =
+            cx.new(|cx| RequestDraft::new(request, location, sessions, Some(environments), cx));
+
+        self.open_tab(title, Page::Request(draft), cx);
     }
 
     fn environment_tab(&self, name: &str, cx: &App) -> Option<(usize, Entity<EnvironmentEditor>)> {
@@ -574,16 +549,14 @@ impl MainView {
             }
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
-                let (Some(path), Some(request_id)) =
-                    (tab.request_path.clone(), tab.request_id.clone())
-                else {
+                let Some(location) = draft.read(cx).location.clone() else {
                     save_request::open(cx.entity(), self.sidebar.clone(), id, request, window, cx);
                     cx.notify();
                     return;
                 };
 
                 let result = self.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.save_request(&path, &request_id, request.clone().into(), cx)
+                    sidebar.save_request(&location.path, &location.id, request.clone().into(), cx)
                 });
 
                 match result {
@@ -613,21 +586,18 @@ impl MainView {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        let tab = &mut self.tabs[index];
-        tab.request_path = Some(file.path.clone());
-        tab.request_id = Some(file.id.clone().into());
-        tab.title = file.name.clone().into();
+        let location = RequestLocation {
+            path: file.path.clone(),
+            id: file.id.clone().into(),
+            name: file.name.clone().into(),
+            collection: destination.collection.clone(),
+            folders: destination.folders.clone(),
+        };
+        self.set_request_location(index, location, cx);
 
-        if let Page::Request(draft) = &tab.page {
+        if let Page::Request(draft) = &self.tabs[index].page {
             let collection::Request::Http(request) = &file.request;
-
-            draft.update(cx, |draft, cx| {
-                draft.name = file.name.clone().into();
-                draft.collection = Some(destination.collection.clone());
-                draft.set_variable_environment(&file.path, destination.folders.len(), cx);
-                draft.folders = destination.folders.clone();
-                draft.mark_saved(request.clone(), cx);
-            });
+            draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
         }
 
         self.save_error = None;

@@ -76,7 +76,10 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
         assert_eq!(page.read(cx).path, collection);
         // The open request follows its collection's new directory.
         assert_eq!(
-            tabs.tabs[1].request_path.as_ref(),
+            tabs.tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
             Some(&collection.join("example.toml"))
         );
     });

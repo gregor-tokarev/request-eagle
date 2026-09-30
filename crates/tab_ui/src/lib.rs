@@ -30,4 +30,4 @@ pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
 pub use environment_editor::EnvironmentEditor;
 pub use environments::{Environments, EnvironmentsEvent};
-pub use request_draft::RequestDraft;
+pub use request_draft::{RequestDraft, RequestLocation};

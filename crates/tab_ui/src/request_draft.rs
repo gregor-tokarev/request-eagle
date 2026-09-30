@@ -19,7 +19,7 @@ mod variable_tests;
 #[cfg(test)]
 mod vim_tests;
 
-pub use draft::RequestDraft;
+pub use draft::{RequestDraft, RequestLocation};
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 mod test_support;

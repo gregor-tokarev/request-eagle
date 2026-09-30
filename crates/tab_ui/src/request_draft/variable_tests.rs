@@ -1,7 +1,9 @@
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 use request::Method;
 
-use super::{RequestDraft, draft::RequestSection};
+use std::path::Path;
+
+use super::{RequestDraft, RequestLocation, draft::RequestSection};
 
 fn setup(
     cx: &mut TestAppContext,
@@ -24,8 +26,8 @@ fn setup(
     let mut draft = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            let mut draft = RequestDraft::new();
-            draft.set_variable_environment(&directory.path().join("request.toml"), 0, cx);
+            let mut draft = super::tests::new_draft(cx);
+            draft.set_location(location(&directory.path().join("request.toml"), 0), cx);
             draft.prepare(window, cx);
             draft
         });
@@ -33,6 +35,17 @@ fn setup(
         gpui_kit::component::Root::new(view, window, cx)
     });
     (draft.unwrap(), cx, directory)
+}
+
+/// A saved request's location, `folders` deep in its collection.
+fn location(path: &Path, folders: usize) -> RequestLocation {
+    RequestLocation {
+        path: path.to_path_buf(),
+        id: "request".into(),
+        name: "Request".into(),
+        collection: "Collection".into(),
+        folders: vec!["Folder".into(); folders],
+    }
 }
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -272,20 +285,22 @@ async fn unresolved_variables_block_send_and_collection_scope_changes_with_the_r
             draft.send(window, cx);
             assert!(draft.task.is_some());
 
-            draft.set_variable_environment(
-                std::path::Path::new("/tmp/variable-test/Collection/Folder/request.toml"),
-                1,
+            draft.set_location(
+                location(
+                    Path::new("/tmp/variable-test/Collection/Folder/request.toml"),
+                    1,
+                ),
                 cx,
             );
             assert_eq!(
-                draft.variables(cx).read(cx).path.as_deref(),
+                draft.variables.read(cx).path.as_deref(),
                 Some(std::path::Path::new(
                     "/tmp/variable-test/Collection/environment.toml"
                 ))
             );
             assert!(
                 draft
-                    .variables(cx)
+                    .variables
                     .read(cx)
                     .values(cx)
                     .unwrap()
@@ -466,26 +481,33 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
 
     cx.update(|_, cx| {
         draft.update(cx, |draft, cx| {
-            draft.set_variable_environment(&a.join("request.toml"), 0, cx);
+            draft.set_location(location(&a.join("request.toml"), 0), cx);
             std::fs::rename(&a, &b).unwrap();
-            draft.set_variable_environment(&b.join("request.toml"), 0, cx);
+            draft.set_location(location(&b.join("request.toml"), 0), cx);
             std::fs::write(b.join("environment.toml"), "base_url = 'updated'").unwrap();
             std::fs::rename(&b, &a).unwrap();
-            draft.set_variable_environment(&a.join("request.toml"), 0, cx);
+            draft.set_location(location(&a.join("request.toml"), 0), cx);
 
             assert_eq!(
-                draft.variables(cx).read(cx).values(cx).unwrap().environment["base_url"],
+                draft.variables.read(cx).values(cx).unwrap().environment["base_url"],
                 "updated"
             );
 
             // Reopening a request must also refresh a reused path before preparation.
             std::fs::write(a.join("environment.toml"), "base_url = 'reopened'").unwrap();
-            let mut reopened = RequestDraft::new();
-            reopened.set_variable_environment(&a.join("request.toml"), 0, cx);
-            assert!(reopened.variable_scope.is_none());
+            let reopened = cx.new(|cx| {
+                RequestDraft::new(
+                    Default::default(),
+                    Some(location(&a.join("request.toml"), 0)),
+                    Default::default(),
+                    None,
+                    cx,
+                )
+            });
             assert_eq!(
                 reopened
-                    .variables(cx)
+                    .read(cx)
+                    .variables
                     .read(cx)
                     .values(cx)
                     .unwrap()
@@ -697,11 +719,10 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
         }
     });
     let (login, cx, directory) = setup(cx);
-    let sessions = environment::EnvironmentSessions::default();
+    let sessions = cx.read(|cx| login.read(cx).variable_sessions.clone());
     let original_file = std::fs::read_to_string(directory.path().join("environment.toml")).unwrap();
     cx.update(|window, cx| {
         login.update(cx, |draft, cx| {
-            draft.set_variable_sessions(sessions.clone(), cx);
             draft.request.path = format!("http://{address}/login");
             draft.request.scripts.post_response = "pm.environment.set('token', pm.response.json().token); pm.variables.set('scratch', 'local only');".into();
             draft.send(window, cx);
@@ -718,12 +739,16 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
 
     let protected = cx.update(|window, cx| {
         cx.new(|cx| {
-            let mut draft = RequestDraft::new();
-            draft.set_variable_sessions(sessions.clone(), cx);
-            draft.set_variable_environment(&directory.path().join("nested/protected.toml"), 1, cx);
+            let mut draft = RequestDraft::new(
+                Default::default(),
+                Some(location(&directory.path().join("nested/protected.toml"), 1)),
+                sessions.clone(),
+                None,
+                cx,
+            );
             draft.request.path = format!("http://{address}/protected");
             draft.request.headers = vec![("Authorization".into(), "Bearer {{token}}".into())];
-            let scope = draft.variables(cx);
+            let scope = draft.variables.clone();
             let values = scope.read(cx).values(cx).unwrap();
             assert_eq!(values.environment["token"], "response-token");
             assert!(!values.environment.contains_key("scratch"));
@@ -772,9 +797,9 @@ fn the_active_global_environment_overrides_collection_values(cx: &mut TestAppCon
 
     cx.update(|_, cx| {
         let environments = cx.new(|_| crate::Environments::new(catalog, None));
-        let scope = draft.update(cx, |draft, cx| {
-            draft.set_environments(environments.clone(), cx);
-            draft.variables(cx)
+        let scope = draft.read(cx).variables.clone();
+        scope.update(cx, |scope, _| {
+            scope.environments = Some(environments.clone())
         });
 
         let values = scope.read(cx).values(cx).unwrap();

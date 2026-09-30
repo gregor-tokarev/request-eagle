@@ -80,11 +80,18 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].title, "Create item");
         assert_eq!(tabs.tabs[1].method, Some(collection::Method::Post));
-        assert_eq!(tabs.tabs[1].request_path.as_ref(), Some(&file));
+        assert_eq!(
+            tabs.tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&file)
+        );
         let draft = tabs.tabs[1].draft();
         let data = draft.read(cx);
-        assert_eq!(data.name, "Create item");
-        assert_eq!(data.collection.as_deref(), Some("Saved API"));
+        let location = data.location.as_ref().unwrap();
+        assert_eq!(location.name, "Create item");
+        assert_eq!(location.collection, "Saved API");
         assert_eq!(data.request.path, url);
         assert_eq!(data.url_input().unwrap().read(cx).value(), url);
         assert_eq!(data.request.headers.len(), 2);
@@ -418,7 +425,13 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(2));
-        assert_eq!(tabs.tabs[2].request_path.as_ref(), Some(&fixture.file));
+        assert_eq!(
+            tabs.tabs[2]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&fixture.file)
+        );
     });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
@@ -449,8 +462,17 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     cx.simulate_keystrokes("enter");
     let renamed = fixture.directory.join("Renamed API/example.toml");
     cx.read(|cx| {
-        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&renamed));
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("Renamed API"));
+        assert_eq!(
+            tabs.read(cx).tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&renamed)
+        );
+        assert_eq!(
+            draft.read(cx).location.as_ref().unwrap().collection,
+            "Renamed API"
+        );
         assert!(draft.read(cx).is_dirty());
     });
     cx.simulate_keystrokes("secondary-s");
@@ -483,8 +505,17 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     cx.run_until_parked();
     let moved = fixture.directory.join("Other/example.toml");
     cx.read(|cx| {
-        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&moved));
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("Other"));
+        assert_eq!(
+            tabs.read(cx).tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&moved)
+        );
+        assert_eq!(
+            draft.read(cx).location.as_ref().unwrap().collection,
+            "Other"
+        );
     });
     edit_url(cx, "https://example.com/edited-after-move");
     cx.simulate_keystrokes("secondary-s");
@@ -553,7 +584,13 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
     cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3, "a new file needs its own draft");
-        assert_eq!(tabs.tabs[2].request_id.as_deref(), Some(before.id.as_str()));
+        assert_eq!(
+            tabs.tabs[2]
+                .location(cx)
+                .map(|location| location.id)
+                .as_deref(),
+            Some(before.id.as_str())
+        );
         assert_ne!(tabs.tabs[2].draft(), draft);
     });
     edit_url(cx, "https://example.com/new-draft");
@@ -619,9 +656,9 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
     cx.read(|cx| {
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("API"));
+        assert_eq!(draft.read(cx).location.as_ref().unwrap().collection, "API");
         assert_eq!(
-            draft.read(cx).folders,
+            draft.read(cx).location.as_ref().unwrap().folders,
             vec![gpui_kit::SharedString::from("API"), "V2".into()]
         );
     });
@@ -646,9 +683,9 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     cx.simulate_keystrokes("enter");
     cx.read(|cx| {
         assert_eq!(
-            draft.read(cx).folders,
+            draft.read(cx).location.as_ref().unwrap().folders,
             vec![gpui_kit::SharedString::from("Renamed folder"), "V2".into()]
         );
-        assert_eq!(draft.read(cx).name, "Example");
+        assert_eq!(draft.read(cx).location.as_ref().unwrap().name, "Example");
     });
 }

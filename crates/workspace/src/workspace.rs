@@ -20,7 +20,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
-use tab_ui::Environments;
+use tab_ui::{Environments, RequestLocation};
 use updater::Updater;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -118,16 +118,16 @@ impl Workspace {
                     collection,
                     folders,
                 } => {
+                    let location = RequestLocation {
+                        path: path.clone(),
+                        id: id.clone(),
+                        name: name.clone(),
+                        collection: collection.clone(),
+                        folders: folders.clone(),
+                    };
+
                     this.main_view.update(cx, |view, cx| {
-                        view.relocate_request(
-                            previous_path,
-                            path,
-                            id,
-                            name.clone(),
-                            collection.clone(),
-                            folders.clone(),
-                            cx,
-                        );
+                        view.relocate_request(previous_path, location, cx);
                     });
                 }
                 CollectionPanelEvent::OpenRequest {
@@ -138,16 +138,16 @@ impl Workspace {
                     folders,
                     request,
                 } => {
+                    let location = RequestLocation {
+                        path: path.clone(),
+                        id: id.clone(),
+                        name: name.clone(),
+                        collection: collection.clone(),
+                        folders: folders.clone(),
+                    };
+
                     this.main_view.update(cx, |view, cx| {
-                        view.open_request(
-                            path,
-                            id.clone(),
-                            name.clone(),
-                            collection.clone(),
-                            folders.clone(),
-                            request,
-                            cx,
-                        );
+                        view.open_request(location, request, cx);
                         view.prepare_active_tab(window, cx);
                     });
                 }
