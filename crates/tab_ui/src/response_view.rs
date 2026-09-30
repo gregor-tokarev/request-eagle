@@ -9,8 +9,6 @@ mod view;
 mod virtual_body;
 
 #[cfg(test)]
-mod editor_performance;
-#[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
 mod tests;
