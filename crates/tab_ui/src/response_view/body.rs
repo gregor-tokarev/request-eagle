@@ -6,7 +6,37 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::view::ResponseView;
+use super::{search::BodySearch, view::ResponseView, virtual_body::VirtualBody};
+
+/// The displayed response body. Raw text always uses the virtual viewer, which
+/// stays responsive for large responses; pretty JSON uses the highlighted editor.
+pub(super) enum Body {
+    Raw {
+        view: Entity<VirtualBody>,
+        search: Option<BodySearch>,
+    },
+    Pretty(Entity<ResponseBodyEditor>),
+}
+
+#[cfg(test)]
+impl Body {
+    pub(super) fn raw(&self) -> &Entity<VirtualBody> {
+        match self {
+            Body::Raw { view, .. } => view,
+            Body::Pretty(_) => panic!("expected the raw body"),
+        }
+    }
+
+    pub(super) fn search(&mut self) -> &mut BodySearch {
+        match self {
+            Body::Raw {
+                search: Some(search),
+                ..
+            } => search,
+            _ => panic!("expected an open raw body search"),
+        }
+    }
+}
 
 /// Cache the editor independently so selecting response details does not lay
 /// out and paint an unchanged (potentially large) response body again.
@@ -33,13 +63,16 @@ impl Render for ResponseBodyEditor {
 impl ResponseView {
     pub(super) fn body(&self, cx: &mut Context<Self>) -> AnyElement {
         let content = self.content.as_ref().unwrap();
+        let body = self.body.as_ref().unwrap();
+        let pretty = matches!(body, Body::Pretty(_));
+        let has_json = content.pretty.is_some();
         let view = cx.entity().downgrade();
 
         v_flex()
             .flex_1()
             .min_h_0()
             .gap_2()
-            .when(self.virtual_body.is_some(), |view| {
+            .when(!pretty, |view| {
                 view.capture_action(cx.listener(
                     |this, _: &gpui_kit::base::input::Search, window, cx| {
                         this.open_response_search(window, cx);
@@ -58,19 +91,13 @@ impl ResponseView {
                             .disabled(content.raw_only)
                             .ghost()
                             .small()
-                            .label(if self.pretty { "Pretty" } else { "Raw" })
+                            .label(if pretty { "Pretty" } else { "Raw" })
                             .when(!content.raw_only, |button| {
                                 button.icon(IconName::ChevronDown)
                             })
-                            .dropdown_menu(move |menu, _, cx| {
+                            .dropdown_menu(move |menu, _, _| {
                                 let raw_view = view.clone();
                                 let json_view = view.clone();
-                                let has_json = view.upgrade().is_some_and(|view| {
-                                    view.read(cx)
-                                        .content
-                                        .as_ref()
-                                        .is_some_and(|content| content.pretty.is_some())
-                                });
                                 menu.item(PopupMenuItem::new("Raw").on_click(
                                     move |_, window, cx| {
                                         let _ = raw_view.update(cx, |view, cx| {
@@ -119,13 +146,17 @@ impl ResponseView {
                             .accessibility_label("Toggle response line wrapping")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.wrap = !this.wrap;
-                                if let Some(editor) = &this.editor {
-                                    editor.update(cx, |editor, cx| {
-                                        editor.set_soft_wrap(this.wrap, window, cx)
-                                    });
-                                }
-                                if let Some(body) = &this.virtual_body {
-                                    body.update(cx, |body, cx| body.set_wrap(this.wrap, cx));
+                                match &this.body {
+                                    Some(Body::Raw { view, .. }) => {
+                                        view.update(cx, |view, cx| view.set_wrap(this.wrap, cx));
+                                    }
+                                    Some(Body::Pretty(editor)) => {
+                                        let editor = editor.read(cx).0.clone();
+                                        editor.update(cx, |editor, cx| {
+                                            editor.set_soft_wrap(this.wrap, window, cx)
+                                        });
+                                    }
+                                    None => {}
                                 }
                                 cx.notify();
                             })),
@@ -156,73 +187,55 @@ impl ResponseView {
                             })),
                     ),
             )
-            .when(self.body_search.is_some(), |view| {
-                view.child(self.body_search_bar(cx))
-            })
+            .when_some(
+                match body {
+                    Body::Raw { search, .. } => search.as_ref(),
+                    Body::Pretty(_) => None,
+                },
+                |view, search| view.child(Self::body_search_bar(search, cx)),
+            )
             .child(
                 div()
                     .debug_selector(|| "response-body".into())
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(if let Some(body) = &self.virtual_body {
-                        body.clone()
-                            .cached(StyleRefinement::default().size_full())
-                            .into_any_element()
-                    } else {
-                        self.editor_view
-                            .as_ref()
-                            .unwrap()
-                            .clone()
-                            .cached(StyleRefinement::default().size_full())
-                            .into_any_element()
-                    }),
+                    .child(
+                        match body {
+                            Body::Raw { view, .. } => AnyView::from(view.clone()),
+                            Body::Pretty(editor) => editor.clone().into(),
+                        }
+                        .cached(StyleRefinement::default().size_full()),
+                    ),
             )
             .into_any_element()
     }
 
-    pub(super) fn set_body_text(
-        &mut self,
-        text: SharedString,
-        language: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.body_search = None;
-        self.editor = None;
-        self.editor_view = None;
-        self.virtual_body = None;
-
-        if !self.pretty {
-            self.virtual_body =
-                Some(cx.new(|cx| super::virtual_body::VirtualBody::new(text, self.wrap, cx)));
-        } else {
-            let editor = cx.new(|cx| {
-                EditorState::new(window, cx)
-                    .language(language)
-                    .line_number(true)
-                    .soft_wrap(self.wrap)
-                    .searchable(true)
-                    .replaceable(false)
-                    .default_value(text)
-            });
-            self.editor_view = Some(cx.new(|_| ResponseBodyEditor(editor.clone())));
-            self.editor = Some(editor);
-        }
-    }
-
+    /// Show the pretty JSON editor when requested and available, else raw text.
     pub(super) fn set_pretty(&mut self, pretty: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(content) = &self.content {
-            self.pretty = pretty && !content.raw_only && content.pretty.is_some();
-            let text = if self.pretty {
-                content.pretty.as_ref().unwrap()
-            } else {
-                &content.raw
+        let Some(content) = &self.content else {
+            return;
+        };
+        let wrap = self.wrap;
+
+        self.body = Some(match content.pretty.clone().filter(|_| pretty) {
+            Some(text) => {
+                let editor = cx.new(|cx| {
+                    EditorState::new(window, cx)
+                        .language(content.language)
+                        .line_number(true)
+                        .soft_wrap(wrap)
+                        .searchable(true)
+                        .replaceable(false)
+                        .default_value(text)
+                });
+                Body::Pretty(cx.new(|_| ResponseBodyEditor(editor)))
             }
-            .clone();
-            let language = content.language;
-            self.set_body_text(text, language, window, cx);
-        }
+            None => Body::Raw {
+                view: cx.new(|cx| VirtualBody::new(content.raw.clone(), wrap, cx)),
+                search: None,
+            },
+        });
         cx.notify();
     }
 }

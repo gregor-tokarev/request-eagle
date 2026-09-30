@@ -13,7 +13,7 @@ const SCROLLBAR: Rems = rems(0.75);
 /// offsets indexes wrapped rows; only visible rows become shaped glyph layouts.
 /// In particular, a one-line JSON response never becomes one giant ShapedLine.
 pub(super) struct VirtualBody {
-    pub(super) text: Rope,
+    text: Rope,
     pub(super) source: SharedString,
     pub(super) focus: FocusHandle,
     rows: Vec<usize>,
@@ -89,7 +89,7 @@ impl VirtualBody {
         (self.scroll.y / ROW_HEIGHT.to_pixels(self.rem_size)).floor() as usize
     }
 
-    pub(super) fn row_range(&self, row: usize) -> Range<usize> {
+    fn row_range(&self, row: usize) -> Range<usize> {
         let start = self.rows[row.min(self.rows.len() - 1)];
         let mut end = self.rows.get(row + 1).copied().unwrap_or(self.source.len());
         if end > start && self.source.as_bytes()[end - 1] == b'\n' {
