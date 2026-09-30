@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use collections_panel_ui::{CollectionPanel, RequestMatch};
+use collections_panel_ui::{CollectionPanel, RequestMatch, method_color};
 use gpui_kit::component::{
     kbd::Kbd,
     list::{List, ListDelegate, ListItem, ListState},
@@ -227,29 +227,18 @@ impl CommandPalette {
                     .child(detail(command.category.into(), cx))
                     .when_some(command.binding.clone(), |row, binding| row.child(binding))
             }
-            Row::Request(request) => {
-                let theme = cx.theme();
-                let color = match request.method {
-                    "GET" => theme.success,
-                    "POST" => theme.warning,
-                    "PUT" | "PATCH" => theme.info,
-                    "HEAD" | "OPTIONS" => theme.muted_foreground,
-                    _ => theme.danger,
-                };
-
-                content
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(rems(3.5))
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color)
-                            .child(request.method),
-                    )
-                    .child(label(request.name.clone()))
-                    .child(detail(request.location.clone(), cx))
-            }
+            Row::Request(request) => content
+                .child(
+                    div()
+                        .flex_none()
+                        .w(rems(3.5))
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(method_color(request.method, cx))
+                        .child(request.method),
+                )
+                .child(label(request.name.clone()))
+                .child(detail(request.location.clone(), cx)),
             Row::Collection {
                 name, detail: text, ..
             } => content

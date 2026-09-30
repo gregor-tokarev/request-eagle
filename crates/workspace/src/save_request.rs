@@ -131,13 +131,7 @@ impl Render for SaveRequestDialog {
                     Some(parent) => destination.path.parent() == Some(parent.path.as_path()),
                     None => destination.folders.is_empty(),
                 };
-                inside
-                    && destination
-                        .folders
-                        .last()
-                        .unwrap_or(&destination.collection)
-                        .to_lowercase()
-                        .contains(&query)
+                inside && destination.name.to_lowercase().contains(&query)
             })
             .collect();
         let mut breadcrumbs = h_flex().gap_1().child(
@@ -156,11 +150,7 @@ impl Render for SaveRequestDialog {
                 .enumerate()
                 .filter(|(_, destination)| current.path.starts_with(&destination.path))
             {
-                let label = ancestor
-                    .folders
-                    .last()
-                    .unwrap_or(&ancestor.collection)
-                    .clone();
+                let label = ancestor.name.clone();
                 breadcrumbs = breadcrumbs
                     .child(
                         Icon::new(IconName::ChevronRight)
@@ -254,11 +244,7 @@ impl Render for SaveRequestDialog {
                                         )
                                     })
                                     .children(visible.into_iter().map(|(index, destination)| {
-                                        let label = destination
-                                            .folders
-                                            .last()
-                                            .unwrap_or(&destination.collection)
-                                            .clone();
+                                        let label = destination.name.clone();
                                         Button::new(("save-destination", index))
                                             .debug_selector(move || {
                                                 format!("save-destination-{index}")
