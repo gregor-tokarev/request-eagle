@@ -66,8 +66,9 @@ pub struct CollectionPanel {
     pub(super) unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
-    /// The row a click started on. Collapsing it can scroll another row
-    /// under the pointer, so the rest of a double click still targets it.
+    /// The branch the last click expanded or collapsed. That can scroll
+    /// another row under the pointer, so a double click keeps this target
+    /// unless the list is scrolled in between.
     pub(super) clicked: Option<PathBuf>,
     pub(super) search: Entity<InputState>,
     pub(super) query: String,
@@ -455,6 +456,9 @@ impl Render for CollectionPanel {
                         if event.click_count == 1 {
                             this.clicked = None;
                         }
+                    }))
+                    .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, _| {
+                        this.clicked = None;
                     }))
                     .child(if self.visible.is_empty() {
                         v_flex()

@@ -39,7 +39,6 @@ impl CollectionPanel {
             owner: cx.entity_id(),
         };
         let path = item.path.clone();
-        let clicked = item.path.clone();
         let focus = self.focus.clone();
         let rename = self
             .rename
@@ -250,29 +249,33 @@ impl CollectionPanel {
                 }
             }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                if event.click_count() == 1 {
-                    this.clicked = Some(clicked.clone());
-                }
-                let index = this
+                let double = event.click_count() == 2;
+                let first = this
                     .clicked
                     .as_ref()
-                    .and_then(|path| this.tree.items.iter().position(|item| &item.path == path))
-                    .unwrap_or(index);
+                    .and_then(|path| this.tree.items.iter().position(|item| &item.path == path));
+                let index = if double {
+                    first.unwrap_or(index)
+                } else {
+                    index
+                };
                 let Ok(row) = this.visible.binary_search(&index) else {
                     return;
                 };
                 let item = &this.tree.items[index];
                 let branch = item.is_branch();
                 let collection = item.kind == ItemKind::Collection;
+                let path = item.path.clone();
 
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
 
                 if branch {
                     this.toggle(index, cx);
+                    this.clicked = Some(path);
                 }
                 // A click expands a collection; its tab opens on double click.
-                if !collection || event.click_count() == 2 {
+                if !collection || (double && first == Some(index)) {
                     this.open(index, cx);
                 }
             }))
