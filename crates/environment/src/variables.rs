@@ -115,6 +115,21 @@ impl<'a> VariableResolver<'a> {
     }
 }
 
+/// Whether sending generates a value for `name`, without generating one.
+pub fn is_generated_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "$guid"
+            | "$randomUUID"
+            | "$isoTimestamp"
+            | "$timestamp"
+            | "$randomInt"
+            | "$randomBoolean"
+            | "$randomAlphaNumeric"
+            | "$randomEmail"
+    )
+}
+
 pub fn generate_variable(name: &str) -> Option<String> {
     Some(match name {
         "$guid" | "$randomUUID" => uuid::Uuid::new_v4().to_string(),

@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 /// Script changes that remain available for the workspace session without
@@ -9,9 +12,15 @@ use std::{
 #[derive(Clone, Debug, Default)]
 pub struct EnvironmentSession {
     changes: Arc<Mutex<BTreeMap<String, Option<String>>>>,
+    /// Counts committed updates, so tabs sharing the session notice changes.
+    revision: Arc<AtomicU64>,
 }
 
 impl EnvironmentSession {
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
     pub fn values(&self, mut base: HashMap<String, String>) -> HashMap<String, String> {
         let changes = self
             .changes
@@ -64,6 +73,9 @@ impl EnvironmentSession {
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
+        if !changes.is_empty() {
+            self.revision.fetch_add(1, Ordering::AcqRel);
+        }
 
         Ok(())
     }
