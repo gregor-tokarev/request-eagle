@@ -8,7 +8,7 @@ use gpui_kit::{
     http_client::{FakeHttpClient, Response},
 };
 
-use super::CheckForUpdates;
+use crate::actions::CheckForUpdates;
 use updater::UpdateStatus;
 
 #[gpui_kit::test]
@@ -33,7 +33,7 @@ fn menu_starts_check_and_opens_general(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         cx.set_http_client(http);
-        super::init(updater.clone(), cx);
+        crate::actions::init(updater.clone(), cx);
 
         let opened = opened.clone();
         cx.on_action(move |_: &workspace::OpenGeneralSettings, _| {
