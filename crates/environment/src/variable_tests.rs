@@ -1,4 +1,6 @@
-use crate::{GENERATED_VARIABLES, VariableError, VariableResolver};
+use crate::{
+    GENERATED_VARIABLES, VariableError, VariableResolver, generate_variable, is_generated_variable,
+};
 use std::collections::HashMap;
 
 #[test]
@@ -109,4 +111,18 @@ fn generated_values_follow_postman_formats() {
             .unwrap()
             .ends_with("@example.com")
     );
+}
+
+#[test]
+fn generated_names_match_the_values_sending_generates() {
+    for (name, _) in GENERATED_VARIABLES {
+        assert!(is_generated_variable(name));
+        assert!(generate_variable(name).is_some());
+    }
+    for name in ["$randomUUID", "$nope", "guid", "$"] {
+        assert_eq!(
+            is_generated_variable(name),
+            generate_variable(name).is_some()
+        );
+    }
 }

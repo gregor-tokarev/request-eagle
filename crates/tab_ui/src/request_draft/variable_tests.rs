@@ -230,6 +230,69 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "Each list holds the byte ranges of chips, sometimes just one."
+)]
+fn variables_show_as_chips_that_follow_edits_and_resolution(cx: &mut TestAppContext) {
+    let (draft, cx, directory) = setup(cx);
+    let url_chips = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let completion = draft.read(cx).url_completion.clone().unwrap();
+            completion.update(cx, |completion, cx| completion.chips(cx))
+        })
+    };
+
+    click(cx, "request-url");
+    cx.simulate_input("{{base_url}}/users/{{ id }}?raw={{!id}}");
+    assert_eq!(url_chips(cx), (vec![0..12], vec![19..27]));
+
+    // Chips stay plain text: the caret moves into them and edits resize them.
+    cx.simulate_keystrokes("home right right right");
+    cx.simulate_input("api_");
+    cx.simulate_keystrokes("end");
+    cx.simulate_input("&v={{message}}");
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).request.path,
+            "{{bapi_ase_url}}/users/{{ id }}?raw={{!id}}&v={{message}}"
+        )
+    });
+    assert_eq!(url_chips(cx), (vec![46..57], vec![0..16, 23..31]));
+
+    // Defining a variable resolves its chips the next time the tab is prepared.
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "base_url = 'https://example.com'\nmessage = 'hello'\nid = '7'\n\"$nope\" = 'x'\n",
+    )
+    .unwrap();
+    cx.update(|window, cx| draft.update(cx, |draft, cx| draft.prepare(window, cx)));
+    assert_eq!(url_chips(cx), (vec![23..31, 46..57], vec![0..16]));
+
+    // Replacing the whole body does not emit a change event, and `$` names
+    // resolve only as generated values, as when sending.
+    cx.update(|window, cx| {
+        draft.update(cx, |draft, cx| {
+            draft.set_method(Method::Post, cx);
+            draft.section = RequestSection::Body;
+            draft.prepare(window, cx);
+            draft.body.as_ref().unwrap().update(cx, |body, cx| {
+                body.set_value(
+                    "{\n  \"a\": \"{{message}}\",\n  \"g\": \"{{$guid}}{{$nope}}\",\n  \"b\": \"{{\"\n}",
+                    window,
+                    cx,
+                );
+            });
+        })
+    });
+    let body_chips = cx.update(|_, cx| {
+        let completion = draft.read(cx).body_completion.clone().unwrap();
+        completion.update(cx, |completion, cx| completion.chips(cx))
+    });
+    assert_eq!(body_chips, (vec![10..21, 32..41], vec![41..50]));
+}
+
+#[gpui_kit::test]
 fn variable_completion_handles_unicode_blur_and_window_edges_at_all_scales(
     cx: &mut TestAppContext,
 ) {
@@ -815,5 +878,112 @@ fn the_active_global_environment_overrides_collection_values(cx: &mut TestAppCon
                 .path,
             "https://staging.example.com/users"
         );
+    });
+}
+
+#[gpui_kit::test]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "Each list holds the byte ranges of chips, sometimes just one."
+)]
+fn switching_the_active_environment_recolors_chips(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("environment.toml"),
+        "base_url = 'https://example.com'\n",
+    )
+    .unwrap();
+    let catalog = environment::GlobalEnvironments::new(directory.path().join("environments"));
+    catalog.create("Staging").unwrap();
+    std::fs::write(catalog.path("Staging"), "token = 'staging'\n").unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+
+    let mut draft = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let environments = cx.new(|_| crate::Environments::new(catalog, None));
+        let view = cx.new(|cx| {
+            let request = request::HttpRequest {
+                path: "{{base_url}}/{{token}}".into(),
+                ..Default::default()
+            };
+            let location = location(&directory.path().join("request.toml"), 0);
+            let mut draft = RequestDraft::new(
+                request,
+                Some(location),
+                Default::default(),
+                Some(environments.clone()),
+                cx,
+            );
+            draft.prepare(window, cx);
+            draft
+        });
+        draft = Some((view.clone(), environments));
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let (draft, environments) = draft.unwrap();
+    let url_chips = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let completion = draft.read(cx).url_completion.clone().unwrap();
+            completion.update(cx, |completion, cx| completion.chips(cx))
+        })
+    };
+
+    assert_eq!(url_chips(cx), (vec![0..12], vec![13..22]));
+
+    // The field repaints on its own; the request's cached views don't.
+    let repaints = std::rc::Rc::new(std::cell::Cell::new(0));
+    let _repaints = cx.update(|_, cx| {
+        let completion = draft.read(cx).url_completion.clone().unwrap();
+        let repaints = repaints.clone();
+        cx.observe(&completion, move |_, _| repaints.set(repaints.get() + 1))
+    });
+    cx.update(|_, cx| {
+        environments.update(cx, |environments, cx| {
+            environments.set_active(Some("Staging".into()), cx)
+        })
+    });
+    assert!(repaints.get() > 0);
+    assert_eq!(url_chips(cx), (vec![0..12, 13..22], vec![]));
+}
+
+#[gpui_kit::test]
+fn names_follow_the_shared_session_and_survive_unreadable_files(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("environment.toml");
+    std::fs::write(&path, "base_url = 'https://example.com'\n").unwrap();
+    let sessions = environment::EnvironmentSessions::default();
+
+    cx.update(|cx| {
+        let mut scope = || {
+            cx.new(|_| crate::variables::VariableScope {
+                path: Some(path.clone()),
+                session: sessions.for_path(Some(&path)),
+                environments: None,
+                names: None,
+            })
+        };
+        let (this_tab, other_tab) = (scope(), scope());
+        let names = |cx: &mut gpui_kit::App| this_tab.update(cx, |scope, cx| scope.names(cx));
+
+        assert!(names(cx).contains("base_url"));
+        assert!(!names(cx).contains("token"));
+
+        // Another tab's script sets a value without notifying this tab.
+        other_tab
+            .read(cx)
+            .session
+            .apply(&[("token".to_string(), Some("new".to_string()))].into())
+            .unwrap();
+        assert!(names(cx).contains("token"));
+
+        // Sending still resolves session values when the file can't be read.
+        std::fs::write(&path, "base_url = = 'broken'\n").unwrap();
+        this_tab.update(cx, |scope, cx| scope.changed(cx));
+        assert!(names(cx).contains("token"));
+        assert!(!names(cx).contains("base_url"));
     });
 }

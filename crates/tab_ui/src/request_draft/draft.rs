@@ -88,10 +88,20 @@ impl RequestDraft {
         let environment_path = location
             .as_ref()
             .and_then(RequestLocation::environment_path);
+        // Switching the active environment changes which references resolve.
+        let subscriptions = environments
+            .iter()
+            .map(|environments| {
+                cx.observe(environments, |this: &mut Self, _, cx| {
+                    this.variables.update(cx, |scope, cx| scope.changed(cx));
+                })
+            })
+            .collect();
         let variables = cx.new(|_| VariableScope {
             session: sessions.for_path(environment_path.as_deref()),
             path: environment_path,
             environments,
+            names: None,
         });
 
         // Unlike the editors, these views do not install window listeners or
@@ -126,7 +136,7 @@ impl RequestDraft {
             executor: None,
             address,
             configuration,
-            _subscriptions: Vec::new(),
+            _subscriptions: subscriptions,
         }
     }
 
@@ -142,7 +152,7 @@ impl RequestDraft {
         self.variables.update(cx, |scope, cx| {
             scope.path = path;
             scope.session = session;
-            cx.notify();
+            scope.changed(cx);
         });
 
         self.location = Some(location);
@@ -166,7 +176,7 @@ impl RequestDraft {
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.variables.update(cx, |_, cx| cx.notify());
+        self.variables.update(cx, |scope, cx| scope.changed(cx));
 
         // Initialize newly activated controls before drawing. Their setup can
         // notify GPUI; doing it inside render schedules an unnecessary frame.
