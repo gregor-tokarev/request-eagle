@@ -1,4 +1,4 @@
-use environment::{Environment, EnvironmentLoadError, valid_variable_name};
+use environment::{Environment, valid_variable_name};
 use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
@@ -33,11 +33,6 @@ impl EnvironmentEditor {
     pub fn new(name: SharedString, environments: Entity<Environments>, cx: &App) -> Self {
         let (saved, load_error) = match Environment::from_file(environments.read(cx).path(&name)) {
             Ok(environment) => (sorted(environment.entries), None),
-            Err(EnvironmentLoadError::Read { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound =>
-            {
-                (Vec::new(), None)
-            }
             Err(error) => (Vec::new(), Some(error.to_string())),
         };
 

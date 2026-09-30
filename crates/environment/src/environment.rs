@@ -12,12 +12,19 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Loads an environment file. A missing file loads as an empty environment.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, EnvironmentLoadError> {
         let path = path.as_ref();
-        let source = fs::read_to_string(path).map_err(|source| EnvironmentLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let source = match fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(source) => {
+                return Err(EnvironmentLoadError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
 
         Self::from_toml(path, &source)
     }

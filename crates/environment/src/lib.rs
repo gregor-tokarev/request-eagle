@@ -1,6 +1,5 @@
 mod environment;
 mod global;
-mod registry;
 mod session;
 mod variables;
 
@@ -15,7 +14,6 @@ mod variable_tests;
 
 pub use environment::{Environment, EnvironmentLoadError, EnvironmentSaveError};
 pub use global::{GlobalEnvironmentError, GlobalEnvironments};
-pub use registry::EnvironmentRegistry;
 pub use session::{EnvironmentSession, EnvironmentSessions};
 pub use variables::{
     GENERATED_VARIABLES, VariableError, VariableResolver, VariableValues, generate_variable,

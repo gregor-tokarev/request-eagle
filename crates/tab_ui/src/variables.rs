@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use collection::{Collection, RequestScripts};
-use environment::{Environment, EnvironmentLoadError, EnvironmentSession, VariableValues};
+use environment::{Environment, EnvironmentSession, VariableValues};
 use gpui_kit::{App, Entity};
 
 use crate::Environments;
@@ -56,13 +56,7 @@ impl VariableScope {
 }
 
 fn read_entries(path: &Path) -> Result<std::collections::HashMap<String, String>, String> {
-    match Environment::from_file(path) {
-        Ok(environment) => Ok(environment.entries),
-        Err(EnvironmentLoadError::Read { source, .. })
-            if source.kind() == std::io::ErrorKind::NotFound =>
-        {
-            Ok(Default::default())
-        }
-        Err(error) => Err(error.to_string()),
-    }
+    Environment::from_file(path)
+        .map(|environment| environment.entries)
+        .map_err(|error| error.to_string())
 }
