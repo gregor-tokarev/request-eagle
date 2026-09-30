@@ -2,6 +2,7 @@ use environment::GlobalEnvironments;
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 use tab_ui::EnvironmentEditor;
 
+use crate::main_view::Page;
 use crate::workspace::{SidebarSection, Workspace};
 
 fn workspace(
@@ -45,15 +46,11 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 fn active_editor(layout: &Entity<Workspace>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {
     cx.read(|cx| {
         let view = layout.read(cx).main_view.read(cx);
-        let Ok(editor) = view.tabs[view.selected.unwrap()]
-            .page
-            .view()
-            .downcast::<EnvironmentEditor>()
-        else {
+        let Page::Environment(editor) = &view.tabs[view.selected.unwrap()].page else {
             panic!("an environment tab is selected");
         };
 
-        editor
+        editor.clone()
     })
 }
 
@@ -85,14 +82,7 @@ fn creates_names_activates_and_deletes_a_global_environment(cx: &mut TestAppCont
     cx.simulate_input("host");
     click(cx, "environment-value-0");
     cx.simulate_input("staging.example.com");
-    cx.read(|cx| {
-        assert!(
-            layout.read(cx).main_view.read(cx).tabs[1]
-                .page
-                .state(cx)
-                .dirty
-        )
-    });
+    cx.read(|cx| assert!(editor.read(cx).is_dirty()));
     cx.simulate_keystrokes("secondary-s");
     assert_eq!(
         environment::Environment::from_file(directory.path().join("Staging.toml"))

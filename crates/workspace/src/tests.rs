@@ -1,5 +1,6 @@
 use crate::actions::ToggleLeftSidebar;
 use crate::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
+use crate::main_view::{Page, PageTab};
 use crate::workspace::{Workspace, on_toggle_sidebar};
 use collection::CollectionRegistry;
 use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
@@ -14,6 +15,17 @@ pub(crate) fn environments(cx: &mut gpui_kit::App) -> gpui_kit::Entity<tab_ui::E
     use gpui_kit::AppContext as _;
 
     cx.new(|_| tab_ui::Environments::new(no_environments(), None))
+}
+
+impl PageTab {
+    /// The request draft shown in this tab.
+    pub(crate) fn draft(&self) -> gpui_kit::Entity<tab_ui::RequestDraft> {
+        let Page::Request(draft) = &self.page else {
+            panic!("{} is not a request tab", self.title);
+        };
+
+        draft.clone()
+    }
 }
 
 #[gpui_kit::test]

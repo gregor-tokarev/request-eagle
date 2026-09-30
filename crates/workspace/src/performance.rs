@@ -11,7 +11,6 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
-use tab_ui::RequestDraft;
 use tab_ui::test_support::ResponseContent;
 
 // Run serially, without other benchmarks competing for CPU:
@@ -560,12 +559,7 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
             )
         });
         let tabs = layout.read(cx).main_view.clone();
-        let draft = tabs.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let draft = tabs.read(cx).tabs[0].draft();
         draft.update(cx, |draft, cx| draft.prepare(window, cx));
         let response = draft.read(cx).response_for_test();
         response.update(cx, |view, cx| {

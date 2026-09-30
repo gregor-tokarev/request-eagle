@@ -1,10 +1,9 @@
 use std::{fs, time::Duration};
 
+use crate::main_view::Page;
+use crate::request_tab_tests::{SavedRequestFixture, click, edit_url};
 use gpui_kit::TestAppContext;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use tab_ui::CollectionPage;
-
-use super::request_tab_tests::{SavedRequestFixture, click, edit_url};
 
 #[gpui_kit::test]
 async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut TestAppContext) {
@@ -35,12 +34,11 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(2));
-        tabs.tabs[2]
-            .page
-            .view()
-            .downcast::<CollectionPage>()
-            .ok()
-            .unwrap()
+        let Page::Collection(page) = &tabs.tabs[2].page else {
+            panic!("a collection tab is selected");
+        };
+
+        page.clone()
     });
     // Opening it again selects the existing tab.
     click(cx, "collection-row-0");
@@ -116,7 +114,7 @@ fn deleting_a_collection_closes_its_tab(cx: &mut TestAppContext) {
         assert!(
             tabs.tabs
                 .iter()
-                .all(|tab| tab.page.view().downcast::<CollectionPage>().is_err())
+                .all(|tab| !matches!(tab.page, Page::Collection(_)))
         );
     });
 }

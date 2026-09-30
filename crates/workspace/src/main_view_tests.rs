@@ -1,14 +1,12 @@
 use std::path::Path;
 
 use gpui_kit::{
-    AppContext, Context, Entity, Focusable, InputEvent as _, InteractiveElement, IntoElement,
-    Modifiers, ParentElement, Render, ScrollDelta, ScrollWheelEvent, Styled, TestAppContext,
-    TouchPhase, VisualTestContext, Window, div, point, px, size,
+    Entity, Focusable, InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    TouchPhase, VisualTestContext, point, px, size,
 };
 
-use super::main_view::MainView;
+use crate::main_view::{MainView, Page};
 use crate::workspace::Workspace;
-use tab_ui::RequestDraft;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
@@ -32,14 +30,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestCont
 #[gpui_kit::test]
 fn search_shortcut_focuses_sidebar_from_tree_and_request_inputs(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
-    let draft = cx.read(|cx| {
-        layout.read(cx).main_view.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap()
-    });
+    let draft = cx.read(|cx| layout.read(cx).main_view.read(cx).tabs[0].draft());
     cx.update(|window, cx| {
         cx.set_reduce_motion(true);
         draft.update(cx, |draft, cx| {
@@ -117,10 +108,10 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         let view = view.read(cx);
         let tab = &view.tabs[0];
 
-        assert_eq!(tab.badge.map(|badge| badge.label), Some("GET"));
+        assert_eq!(tab.method, Some(collection::Method::Get));
         assert!(tab.request_path.is_none());
 
-        tab.page.view().downcast::<RequestDraft>().ok().unwrap()
+        tab.draft()
     });
 
     assert!(cx.debug_bounds("request-draft").is_some());
@@ -147,10 +138,10 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
     cx.read(|cx| {
         let view = view.read(cx);
         let tab = &view.tabs[1];
-        let draft = tab.page.view().downcast::<RequestDraft>().ok().unwrap();
+        let draft = tab.draft();
 
         assert_eq!(view.selected, Some(1));
-        assert_eq!(tab.badge.map(|badge| badge.label), Some("GET"));
+        assert_eq!(tab.method, Some(collection::Method::Get));
         assert!(tab.request_path.is_none());
         assert_ne!(draft, first);
         assert!(draft.read(cx).request.path.is_empty());
@@ -167,10 +158,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
 
     cx.simulate_keystrokes("secondary-1");
     cx.read(|cx| {
-        assert_eq!(
-            view.read(cx).tabs[0].page.view().entity_id(),
-            first.entity_id()
-        );
+        assert_eq!(view.read(cx).tabs[0].draft(), first);
         assert_eq!(
             first.read(cx).url_input().unwrap().read(cx).value(),
             "https://example.com/first"
@@ -208,10 +196,10 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
     cx.read(|cx| {
         let view = view.read(cx);
         let tab = &view.tabs[2];
-        let draft = tab.page.view().downcast::<RequestDraft>().ok().unwrap();
+        let draft = tab.draft();
 
         assert_eq!(view.selected, Some(2));
-        assert_eq!(tab.badge.map(|badge| badge.label), Some("GET"));
+        assert_eq!(tab.method, Some(collection::Method::Get));
         assert!(tab.request_path.is_none());
         assert!(matches!(
             draft.read(cx).request.method,
@@ -219,7 +207,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
         ));
         assert!(draft.read(cx).request.path.is_empty());
         assert_eq!(view.tabs[1].request_path.as_deref(), Some(saved_path));
-        assert_eq!(view.tabs[1].badge.map(|badge| badge.label), Some("POST"));
+        assert_eq!(view.tabs[1].method, Some(collection::Method::Post));
     });
     // A resizer's settling frame can replay the cached page. Refresh before
     // inspecting debug selectors, which are collected during a fresh layout.
@@ -233,14 +221,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
 ) {
     let (layout, cx) = workspace(cx);
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
-    let draft = cx.read(|cx| {
-        view.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap()
-    });
+    let draft = cx.read(|cx| view.read(cx).tabs[0].draft());
 
     for (selector, value) in [
         ("headers-key-0", "Accept"),
@@ -283,10 +264,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         })
     });
     cx.read(|cx| {
-        assert_eq!(
-            view.read(cx).tabs[0].badge.map(|badge| badge.label),
-            Some("POST")
-        );
+        assert_eq!(view.read(cx).tabs[0].method, Some(collection::Method::Post));
         assert!(view.read(cx).tabs[0].request_path.is_none());
         assert_eq!(
             draft.read(cx).request.headers,
@@ -305,14 +283,9 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
     cx.simulate_keystrokes("secondary-t");
     cx.read(|cx| {
         let view = view.read(cx);
-        let new_draft = view.tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let new_draft = view.tabs[1].draft();
 
-        assert_eq!(view.tabs[1].badge.map(|badge| badge.label), Some("GET"));
+        assert_eq!(view.tabs[1].method, Some(collection::Method::Get));
         assert!(new_draft.read(cx).request.headers.is_empty());
         assert!(new_draft.read(cx).request.query.is_none());
         assert!(new_draft.read(cx).request.body.is_none());
@@ -367,10 +340,7 @@ fn tab_shortcuts_work_from_sidebar_and_wrap(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs.len(), 1);
         assert_eq!(view.read(cx).tabs[0].id, 4);
         assert_eq!(view.read(cx).selected, Some(0));
-        assert_eq!(
-            view.read(cx).tabs[0].badge.map(|badge| badge.label),
-            Some("GET")
-        );
+        assert_eq!(view.read(cx).tabs[0].method, Some(collection::Method::Get));
         assert!(view.read(cx).tabs[0].request_path.is_none());
     });
 }
@@ -474,12 +444,7 @@ fn thousands_of_tabs_keep_selection_visible_and_offscreen_tabs_unrendered(cx: &m
     // Opening tabs in the background must not register thousands of input
     // listeners before those editors have ever been displayed.
     cx.read(|cx| {
-        let unseen = view.read(cx).tabs[500]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let unseen = view.read(cx).tabs[500].draft();
         assert!(unseen.read(cx).url_input().is_none());
     });
 
@@ -620,9 +585,9 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
         assert_eq!(view.tabs.len(), 2);
         assert_eq!(view.selected, Some(1));
         assert_eq!(view.tabs[1].title, "Get resource 0");
-        assert_eq!(view.tabs[1].badge.map(|badge| badge.label), Some("GET"));
+        assert_eq!(view.tabs[1].method, Some(collection::Method::Get));
 
-        view.tabs[1].page.view().entity_id()
+        view.tabs[1].draft()
     });
 
     assert!(cx.debug_bounds("tab-method-2").is_some());
@@ -638,7 +603,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
     cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(1));
-        assert_eq!(view.read(cx).tabs[1].page.view().entity_id(), first_page);
+        assert_eq!(view.read(cx).tabs[1].draft(), first_page);
     });
 
     cx.simulate_keystrokes("secondary-w");
@@ -647,7 +612,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(2));
         assert_eq!(view.read(cx).tabs[2].title, "Get resource 0");
-        assert_ne!(view.read(cx).tabs[2].page.view().entity_id(), first_page);
+        assert_ne!(view.read(cx).tabs[2].draft(), first_page);
     });
 }
 
@@ -688,7 +653,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
     let first_page = cx.read(|cx| {
         assert_eq!(view.read(cx).tabs.len(), 3);
 
-        view.read(cx).tabs[1].page.view().entity_id()
+        view.read(cx).tabs[1].draft()
     });
 
     cx.update(|_, cx| {
@@ -712,218 +677,59 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(1));
         assert_eq!(view.read(cx).tabs[1].title, "Renamed request");
-        assert_eq!(
-            view.read(cx).tabs[1].badge.map(|badge| badge.label),
-            Some("GET")
-        );
-        assert_eq!(view.read(cx).tabs[1].page.view().entity_id(), first_page);
-        let draft = view.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        assert_eq!(view.read(cx).tabs[1].method, Some(collection::Method::Get));
+        assert_eq!(view.read(cx).tabs[1].draft(), first_page);
+        let draft = view.read(cx).tabs[1].draft();
         assert_eq!(draft.read(cx).name, "Renamed request");
         assert_eq!(
             draft.read(cx).collection.as_deref(),
             Some("Renamed collection")
         );
         assert_eq!(view.read(cx).tabs[2].title, "Same name");
-        assert_eq!(
-            view.read(cx).tabs[2].badge.map(|badge| badge.label),
-            Some("POST")
-        );
+        assert_eq!(view.read(cx).tabs[2].method, Some(collection::Method::Post));
     });
-}
-
-struct StatefulPage(usize);
-
-impl tab_ui::TabPage for StatefulPage {}
-
-impl Render for StatefulPage {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let value = self.0;
-
-        div().debug_selector(move || format!("page-value-{value}"))
-    }
 }
 
 #[gpui_kit::test]
 fn switching_keeps_page_entities_and_renders_only_the_active_page(cx: &mut TestAppContext) {
-    cx.update(gpui_kit::init);
-    let (view, cx) =
-        cx.add_window_view(|window, cx| MainView::new(crate::tests::environments(cx), window, cx));
-    let page = cx.new(|_| StatefulPage(7));
-
-    cx.update(|_, cx| {
-        view.update(cx, |view, cx| {
-            view.open_tab("Dynamic page", page.clone(), cx)
-        });
-    });
-    assert!(cx.debug_bounds("page-value-7").is_some());
-
-    cx.update(|_, cx| {
-        view.update(cx, |view, cx| view.select_tab(0, cx));
-        page.update(cx, |page, cx| {
-            page.0 = 42;
-            cx.notify();
-        });
-    });
-    assert!(cx.debug_bounds("page-value-42").is_none());
-
-    cx.update(|_, cx| {
-        view.update(cx, |view, cx| view.select_tab(1, cx));
-    });
-    assert!(cx.debug_bounds("page-value-42").is_some());
-    cx.read(|cx| {
-        assert_eq!(
-            view.read(cx).tabs[1].page.view().entity_id(),
-            page.entity_id()
-        )
-    });
-}
-
-struct RenderCountPage {
-    renders: usize,
-    child: Entity<StatefulPage>,
-}
-
-impl tab_ui::TabPage for RenderCountPage {}
-
-impl Render for RenderCountPage {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.renders += 1;
-
-        div().size_full().child(self.child.clone())
-    }
-}
-
-#[gpui_kit::test]
-fn scrolling_tabs_reuses_the_page_but_child_changes_and_resize_redraw_it(cx: &mut TestAppContext) {
     let (layout, cx) = workspace(cx);
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
-    let child = cx.new(|_| StatefulPage(7));
-    let page = cx.new(|_| RenderCountPage {
-        renders: 0,
-        child: child.clone(),
-    });
 
-    cx.update(|_, cx| {
+    cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            for _ in 0..30 {
-                view.new_tab(cx);
-            }
-            view.open_tab("Counted page", page.clone(), cx);
+            view.open_collection(
+                Path::new("/collection"),
+                "API".into(),
+                Default::default(),
+                Default::default(),
+                cx,
+            );
+            view.focus(window, cx);
         });
     });
+    let page = cx.read(|cx| {
+        let Page::Collection(page) = &view.read(cx).tabs[1].page else {
+            panic!("a collection tab is selected");
+        };
 
-    let renders = cx.read(|cx| page.read(cx).renders);
-    let bar = cx.debug_bounds("main-tab-bar").unwrap();
-    cx.update(|window, cx| {
-        window.dispatch_event(
-            ScrollWheelEvent {
-                position: bar.center(),
-                delta: ScrollDelta::Pixels(point(px(1800.), px(0.))),
-                modifiers: Modifiers::default(),
-                touch_phase: TouchPhase::Moved,
-            }
-            .to_platform_input(),
-            cx,
-        );
+        page.clone()
     });
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("page-tab-32").is_none());
-    cx.read(|cx| assert_eq!(page.read(cx).renders, renders));
+    assert!(cx.debug_bounds("collection-page").is_some());
+    assert!(cx.debug_bounds("request-draft").is_none());
 
-    cx.update(|_, cx| {
-        child.update(cx, |child, cx| {
-            child.0 = 42;
-            cx.notify();
-        })
-    });
-    assert!(cx.debug_bounds("page-value-42").is_some());
-    let renders = cx.read(|cx| page.read(cx).renders);
+    cx.simulate_keystrokes("secondary-1");
+    assert!(cx.debug_bounds("collection-page").is_none());
+    assert!(cx.debug_bounds("request-draft").is_some());
 
-    cx.simulate_resize(size(px(1440.), px(900.)));
-    cx.read(|cx| assert!(page.read(cx).renders > renders));
-    assert!(cx.debug_bounds("page-value-42").is_some());
-}
-
-#[derive(Default)]
-struct ProtocolPage {
-    prepared: bool,
-    sends: usize,
-}
-
-impl tab_ui::TabPage for ProtocolPage {
-    fn tab_state(&self) -> tab_ui::TabState {
-        tab_ui::TabState {
-            badge: Some(tab_ui::TabBadge {
-                label: "RPC",
-                tone: tab_ui::TabBadgeTone::Info,
-            }),
-            icon: None,
-            dirty: self.sends > 0,
-        }
-    }
-
-    fn prepare(&mut self, _: &mut Window, _: &mut Context<Self>) {
-        self.prepared = true;
-    }
-
-    fn send(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.sends += 1;
-        cx.notify();
-    }
-}
-
-impl Render for ProtocolPage {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().child("Protocol page")
-    }
-}
-
-#[gpui_kit::test]
-fn non_http_pages_receive_tab_actions_and_report_unsaved_changes(cx: &mut TestAppContext) {
-    let (layout, cx) = workspace(cx);
-    let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
-    let page = cx.new(|_| ProtocolPage::default());
-
-    cx.update(|window, cx| {
-        tabs.update(cx, |tabs, cx| {
-            tabs.open_tab("Protocol page", page.clone(), cx);
-            tabs.focus(window, cx);
-        });
-    });
-    cx.read(|cx| assert!(page.read(cx).prepared));
-    cx.simulate_keystrokes("secondary-enter");
+    cx.simulate_keystrokes("secondary-2");
+    cx.update(|window, _| window.refresh());
+    assert!(cx.debug_bounds("collection-page").is_some());
+    assert!(cx.debug_bounds("request-draft").is_none());
     cx.read(|cx| {
-        assert_eq!(page.read(cx).sends, 1);
-        assert_eq!(
-            tabs.read(cx).tabs[1].badge.map(|badge| badge.label),
-            Some("RPC")
-        );
-    });
-    assert!(cx.debug_bounds("tab-dirty-2").is_some());
+        let Page::Collection(current) = &view.read(cx).tabs[1].page else {
+            panic!("the collection tab is kept");
+        };
 
-    cx.simulate_keystrokes("secondary-w");
-    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 2));
-    assert!(cx.debug_bounds("unsaved-request-prompt").is_some());
-    cx.simulate_keystrokes("secondary-w");
-    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
-
-    let passive_page = cx.new(|_| StatefulPage(7));
-    cx.update(|window, cx| {
-        tabs.update(cx, |tabs, cx| {
-            tabs.open_tab("Collection page", passive_page, cx);
-            tabs.focus(window, cx);
-        });
+        assert_eq!(*current, page);
     });
-    cx.simulate_keystrokes("secondary-enter");
-    cx.read(|cx| {
-        assert_eq!(page.read(cx).sends, 1);
-        assert_eq!(tabs.read(cx).tabs[1].badge.map(|badge| badge.label), None);
-    });
-    cx.simulate_keystrokes("secondary-w");
-    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
 }

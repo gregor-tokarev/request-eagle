@@ -444,35 +444,3 @@ impl Render for RequestConfiguration {
             .unwrap_or_else(|_| div())
     }
 }
-
-impl crate::TabPage for RequestDraft {
-    // Only the editor's expensive children are cached; response selection must
-    // not invalidate a cache around the entire request page.
-    const CACHE: bool = false;
-
-    fn tab_state(&self) -> crate::TabState {
-        use crate::TabBadgeTone;
-
-        crate::TabState {
-            badge: Some(crate::TabBadge {
-                label: self.request.method.as_str(),
-                tone: match self.request.method {
-                    Method::Get => TabBadgeTone::Success,
-                    Method::Post => TabBadgeTone::Warning,
-                    Method::Put => TabBadgeTone::Info,
-                    _ => TabBadgeTone::Danger,
-                },
-            }),
-            icon: None,
-            dirty: self.is_dirty(),
-        }
-    }
-
-    fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        RequestDraft::prepare(self, window, cx);
-    }
-
-    fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        RequestDraft::send(self, window, cx);
-    }
-}

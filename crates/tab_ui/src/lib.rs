@@ -1,12 +1,14 @@
-//! Tab content and its workspace interface. HTTP editing and response rendering
-//! live here; the workspace owns tab selection, closing, and collection storage.
-//! Collection, gRPC, and WebSocket pages implement `TabPage` independently.
+//! The pages shown in workspace tabs: HTTP request drafts with their responses,
+//! collection settings and global environment editors. The workspace owns tab
+//! selection, closing and collection storage.
+//!
+//! `Environments` lives here rather than in the workspace because request drafts
+//! resolve variables from the active global environment.
 
 mod actions;
 mod collection_page;
 mod environment_editor;
 mod environments;
-mod page;
 mod request_draft;
 mod request_fields;
 mod response_view;
@@ -28,5 +30,4 @@ pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
 pub use environment_editor::EnvironmentEditor;
 pub use environments::{Environments, EnvironmentsEvent};
-pub use page::{TabBadge, TabBadgeTone, TabPage, TabState, TabView};
 pub use request_draft::RequestDraft;

@@ -6,7 +6,6 @@ use std::{
 
 use super::main_view::MainView;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, component::Root};
-use tab_ui::RequestDraft;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -81,14 +80,7 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     let fixture = Fixture::new();
     fs::create_dir_all(fixture.0.join("API/Users")).unwrap();
     let (main, cx) = setup(&fixture, cx);
-    let draft = cx.read(|cx| {
-        main.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap()
-    });
+    let draft = cx.read(|cx| main.read(cx).tabs[0].draft());
     cx.simulate_keystrokes("secondary-s");
     assert!(cx.debug_bounds("save-request-dialog").is_some());
     click(cx, "cancel-save-request");
@@ -118,10 +110,7 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     let collection::Request::Http(saved) = file.request;
     cx.read(|cx| {
         assert_eq!(main.read(cx).tabs.len(), 1);
-        assert_eq!(
-            main.read(cx).tabs[0].page.view().entity_id(),
-            draft.entity_id()
-        );
+        assert_eq!(main.read(cx).tabs[0].draft(), draft);
         assert_eq!(draft.read(cx).request, saved);
         assert!(!draft.read(cx).is_dirty());
         assert_eq!(draft.read(cx).name, "Create user");

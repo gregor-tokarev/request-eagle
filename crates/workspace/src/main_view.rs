@@ -9,24 +9,106 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
 use crate::actions::{CloseTab, NewTab, SaveRequest};
+use collection::Method;
 use tab_ui::{
     CollectionPage, CollectionSettings, EnvironmentEditor, Environments, EnvironmentsEvent,
-    RequestDraft, SaveCollection, TabBadge, TabBadgeTone, TabPage, TabView,
+    RequestDraft, SaveCollection,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
 const TAB_WIDTH: Rems = rems(12.);
 const TAB_HEIGHT: Rems = rems(2.);
 
+/// The content of a tab. Each tab owns its page entity, preserving page state
+/// when switching tabs.
+#[derive(Clone)]
+pub(crate) enum Page {
+    Request(Entity<RequestDraft>),
+    Collection(Entity<CollectionPage>),
+    Environment(Entity<EnvironmentEditor>),
+}
+
+impl Page {
+    fn is_dirty(&self, cx: &App) -> bool {
+        match self {
+            Page::Request(draft) => draft.read(cx).is_dirty(),
+            Page::Collection(page) => page.read(cx).is_dirty(),
+            Page::Environment(editor) => editor.read(cx).is_dirty(),
+        }
+    }
+
+    /// The method shown before a request tab's title.
+    fn method(&self, cx: &App) -> Option<Method> {
+        match self {
+            Page::Request(draft) => Some(draft.read(cx).request.method),
+            Page::Collection(_) | Page::Environment(_) => None,
+        }
+    }
+
+    fn icon(&self) -> Option<&'static str> {
+        match self {
+            Page::Request(_) => None,
+            Page::Collection(_) => Some("icons/package.svg"),
+            Page::Environment(_) => Some("icons/globe.svg"),
+        }
+    }
+
+    /// Redraw the tab strip only when the tab's method or dirty marker changes.
+    fn observe(&self, id: u64, cx: &mut Context<MainView>) -> Subscription {
+        let on_change = move |this: &mut MainView, cx: &mut Context<MainView>| {
+            let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) else {
+                return;
+            };
+            let method = tab.page.method(cx);
+            let dirty = tab.page.is_dirty(cx);
+
+            if tab.method != method || tab.dirty != dirty {
+                tab.method = method;
+                tab.dirty = dirty;
+                cx.notify();
+            }
+        };
+
+        match self {
+            Page::Request(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
+            Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
+            Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
+        }
+    }
+
+    fn prepare(&self, window: &mut Window, cx: &mut App) {
+        match self {
+            Page::Request(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
+            Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
+            Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
+        }
+    }
+
+    fn render(&self) -> AnyElement {
+        match self {
+            // Only the request editor's expensive children are cached; selecting
+            // a response must not invalidate a cache around the entire page.
+            Page::Request(draft) => draft.clone().into_any_element(),
+            Page::Collection(page) => page
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            Page::Environment(editor) => editor
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+        }
+    }
+}
+
 pub(crate) struct PageTab {
     pub(crate) id: u64,
     pub(crate) title: SharedString,
     pub(crate) request_path: Option<PathBuf>,
     pub(crate) request_id: Option<SharedString>,
-    pub(crate) badge: Option<TabBadge>,
-    icon: Option<&'static str>,
+    pub(crate) method: Option<Method>,
     dirty: bool,
-    pub(crate) page: TabView,
+    pub(crate) page: Page,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,36 +189,23 @@ impl MainView {
         view
     }
 
-    /// Each tab owns its page entity, preserving page state when switching tabs.
-    pub(crate) fn open_tab<T: TabPage>(
+    fn open_tab(
         &mut self,
         title: impl Into<SharedString>,
-        page: Entity<T>,
+        page: Page,
         cx: &mut Context<Self>,
     ) -> usize {
         let id = self.next_id;
-        let state = page.read(cx).tab_state();
-        let subscription = cx.observe(&page, move |this, page, cx| {
-            let state = page.read(cx).tab_state();
-
-            if let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id)
-                && (tab.badge != state.badge || tab.dirty != state.dirty)
-            {
-                tab.badge = state.badge;
-                tab.dirty = state.dirty;
-                cx.notify();
-            }
-        });
+        let subscription = page.observe(id, cx);
 
         self.tabs.push(PageTab {
             id,
             title: title.into(),
             request_path: None,
             request_id: None,
-            badge: state.badge,
-            icon: state.icon,
-            dirty: state.dirty,
-            page: TabView::new(page),
+            method: page.method(cx),
+            dirty: page.is_dirty(cx),
+            page,
             _subscriptions: vec![subscription],
         });
         self.next_id += 1;
@@ -166,7 +235,7 @@ impl MainView {
                 && tab.request_id.as_ref() == Some(&request_id)
         }) {
             self.tabs[index].title = name.clone();
-            if let Ok(draft) = self.tabs[index].page.view().downcast::<RequestDraft>() {
+            if let Page::Request(draft) = &self.tabs[index].page {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
@@ -210,7 +279,7 @@ impl MainView {
             tab.request_path = Some(path.to_path_buf());
             tab.title = name.clone();
 
-            if let Ok(draft) = tab.page.view().downcast::<RequestDraft>() {
+            if let Page::Request(draft) = &tab.page {
                 draft.update(cx, |draft, cx| {
                     draft.name = name;
                     draft.collection = Some(collection);
@@ -238,7 +307,7 @@ impl MainView {
 
         let page = cx
             .new(|_| CollectionPage::new(path.to_path_buf(), name.to_string(), variables, scripts));
-        let index = self.open_tab(name, page.clone(), cx);
+        let index = self.open_tab(name, Page::Collection(page.clone()), cx);
         let id = self.tabs[index].id;
         let subscription = cx.subscribe(&page, move |this, _, _: &SaveCollection, cx| {
             if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
@@ -249,11 +318,9 @@ impl MainView {
     }
 
     fn collection_tab(&self, path: &Path, cx: &App) -> Option<usize> {
-        self.tabs.iter().position(|tab| {
-            tab.page
-                .view()
-                .downcast::<CollectionPage>()
-                .is_ok_and(|page| page.read(cx).path == path)
+        self.tabs.iter().position(|tab| match &tab.page {
+            Page::Collection(page) => page.read(cx).path == path,
+            _ => false,
         })
     }
 
@@ -280,7 +347,7 @@ impl MainView {
         let tab = &mut self.tabs[index];
         tab.title = name.clone();
 
-        if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+        if let Page::Collection(page) = &tab.page {
             page.update(cx, |page, cx| {
                 page.relocate(path.to_path_buf(), name.to_string(), window, cx)
             });
@@ -301,15 +368,20 @@ impl MainView {
     ) -> usize {
         draft.set_variable_sessions(self.variable_sessions.clone(), cx);
         draft.set_environments(self.environments.clone(), cx);
-        let page = cx.new(|_| draft);
-        self.open_tab(title, page, cx)
+        let draft = cx.new(|_| draft);
+        self.open_tab(title, Page::Request(draft), cx)
     }
 
     fn environment_tab(&self, name: &str, cx: &App) -> Option<(usize, Entity<EnvironmentEditor>)> {
-        self.tabs.iter().enumerate().find_map(|(index, tab)| {
-            let editor = tab.page.view().downcast::<EnvironmentEditor>().ok()?;
-            (editor.read(cx).name == name).then_some((index, editor))
-        })
+        self.tabs
+            .iter()
+            .enumerate()
+            .find_map(|(index, tab)| match &tab.page {
+                Page::Environment(editor) if editor.read(cx).name == name => {
+                    Some((index, editor.clone()))
+                }
+                _ => None,
+            })
     }
 
     /// Show a global environment's editor, reusing its tab when it is open.
@@ -325,7 +397,7 @@ impl MainView {
         } else {
             let environments = self.environments.clone();
             let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
-            self.open_tab(name, editor.clone(), cx);
+            self.open_tab(name, Page::Environment(editor.clone()), cx);
             editor
         };
 
@@ -363,7 +435,7 @@ impl MainView {
             EnvironmentsEvent::Renamed { from, to } => {
                 // The editor that renamed the environment may already use the new name.
                 for tab in &mut self.tabs {
-                    if let Ok(editor) = tab.page.view().downcast::<EnvironmentEditor>()
+                    if let Page::Environment(editor) = &tab.page
                         && [from, to].contains(&&editor.read(cx).name)
                     {
                         editor.update(cx, |editor, _| editor.name = to.clone());
@@ -432,7 +504,7 @@ impl MainView {
             return;
         }
 
-        if self.tabs[index].page.state(cx).dirty {
+        if self.tabs[index].page.is_dirty(cx) {
             self.select_tab(index, cx);
             self.pending_close = Some(self.tabs[index].id);
             cx.notify();
@@ -472,7 +544,7 @@ impl MainView {
             return;
         };
 
-        if let Ok(editor) = tab.page.view().downcast::<EnvironmentEditor>() {
+        if let Page::Environment(editor) = tab.page.clone() {
             let id = tab.id;
             // The editor shows its own save errors next to the variables.
             let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
@@ -487,7 +559,7 @@ impl MainView {
             return;
         }
 
-        if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+        if let Page::Collection(page) = &tab.page {
             let page = page.read(cx);
             match page.settings() {
                 Ok(settings) => {
@@ -504,7 +576,7 @@ impl MainView {
             return;
         }
 
-        let Ok(draft) = tab.page.view().downcast::<RequestDraft>() else {
+        let Page::Request(draft) = &tab.page else {
             return;
         };
         let (Some(path), Some(request_id)) = (tab.request_path.clone(), tab.request_id.clone())
@@ -542,7 +614,7 @@ impl MainView {
         tab.request_path = Some(file.path.clone());
         tab.request_id = Some(file.id.clone().into());
         tab.title = file.name.clone().into();
-        if let Ok(draft) = tab.page.view().downcast::<RequestDraft>() {
+        if let Page::Request(draft) = &tab.page {
             draft.update(cx, |draft, cx| {
                 draft.name = file.name.clone().into();
                 draft.collection = Some(destination.collection.clone());
@@ -578,7 +650,7 @@ impl MainView {
 
         match result {
             Ok(()) => {
-                if let Ok(draft) = self.tabs[index].page.view().downcast::<RequestDraft>() {
+                if let Page::Request(draft) = &self.tabs[index].page {
                     draft.update(cx, |draft, cx| draft.mark_saved(event.request.clone(), cx));
                     self.tabs[index].dirty = draft.read(cx).is_dirty();
                 }
@@ -610,7 +682,7 @@ impl MainView {
             Ok(path) => {
                 let tab = &mut self.tabs[index];
                 tab.title = event.settings.name.clone().into();
-                if let Ok(page) = tab.page.view().downcast::<CollectionPage>() {
+                if let Page::Collection(page) = &tab.page {
                     page.update(cx, |page, cx| {
                         page.mark_saved(path, event.settings.clone(), cx)
                     });
@@ -694,8 +766,10 @@ impl MainView {
     }
 
     pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.selected {
-            self.tabs[index].page.send(window, cx);
+        if let Some(index) = self.selected
+            && let Page::Request(draft) = &self.tabs[index].page
+        {
+            draft.update(cx, |draft, cx| draft.send(window, cx));
         }
     }
 
@@ -809,7 +883,7 @@ impl MainView {
                     this.bg(cx.theme().muted)
                 }
             })
-            .when_some(tab.icon, |this, icon| {
+            .when_some(tab.page.icon(), |this, icon| {
                 this.child(
                     Icon::default()
                         .path(icon)
@@ -818,12 +892,12 @@ impl MainView {
                         .text_color(cx.theme().muted_foreground),
                 )
             })
-            .when_some(tab.badge, |this, badge| {
-                let color = match badge.tone {
-                    TabBadgeTone::Success => cx.theme().success,
-                    TabBadgeTone::Warning => cx.theme().warning,
-                    TabBadgeTone::Info => cx.theme().info,
-                    TabBadgeTone::Danger => cx.theme().danger,
+            .when_some(tab.method, |this, method| {
+                let color = match method {
+                    Method::Get => cx.theme().success,
+                    Method::Post => cx.theme().warning,
+                    Method::Put => cx.theme().info,
+                    _ => cx.theme().danger,
                 };
 
                 this.child(
@@ -833,7 +907,7 @@ impl MainView {
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(color)
-                        .child(badge.label),
+                        .child(method.as_str()),
                 )
             })
             .child(

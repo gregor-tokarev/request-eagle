@@ -41,11 +41,7 @@ fn search_shortcut_preserves_response_search(cx: &mut TestAppContext) {
     });
     let view = cx.read(|cx| {
         layout.read(cx).main_view.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<tab_ui::RequestDraft>()
-            .ok()
-            .unwrap()
+            .draft()
             .read(cx)
             .response_for_test()
     });
@@ -109,11 +105,7 @@ fn minimum_workspace_keeps_request_fields_and_response_visible_at_each_zoom(
     });
     let response_view = cx.read(|cx| {
         layout.as_ref().unwrap().read(cx).main_view.read(cx).tabs[0]
-            .page
-            .view()
-            .downcast::<tab_ui::RequestDraft>()
-            .ok()
-            .unwrap()
+            .draft()
             .read(cx)
             .response_for_test()
     });

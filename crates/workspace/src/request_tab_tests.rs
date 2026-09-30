@@ -8,7 +8,8 @@ use collection::{CollectionRegistry, Method};
 use gpui_kit::{Modifiers, TestAppContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-use tab_ui::{CollectionPage, RequestDraft};
+use crate::main_view::Page;
+use tab_ui::RequestDraft;
 
 #[gpui_kit::test]
 async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
@@ -78,14 +79,9 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].title, "Create item");
-        assert_eq!(tabs.tabs[1].badge.map(|badge| badge.label), Some("POST"));
+        assert_eq!(tabs.tabs[1].method, Some(collection::Method::Post));
         assert_eq!(tabs.tabs[1].request_path.as_ref(), Some(&file));
-        let draft = tabs.tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let draft = tabs.tabs[1].draft();
         let data = draft.read(cx);
         assert_eq!(data.name, "Create item");
         assert_eq!(data.collection.as_deref(), Some("Saved API"));
@@ -158,8 +154,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(1));
-        assert_eq!(tabs.tabs[1].page.view().entity_id(), draft.entity_id());
-        assert_eq!(tabs.tabs[1].badge.map(|badge| badge.label), Some("PUT"));
+        assert_eq!(tabs.tabs[1].draft(), draft);
+        assert_eq!(tabs.tabs[1].method, Some(collection::Method::Put));
         assert_eq!(draft.read(cx).request.headers[0].1, "updated");
     });
     assert!(
@@ -181,12 +177,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
-        let reopened = tabs.tabs[2]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.tabs[2].draft();
         assert_ne!(reopened, draft);
         assert_eq!(reopened.read(cx).request.method, Method::Put);
         assert_eq!(reopened.read(cx).request.headers[0].1, "updated");
@@ -270,14 +261,7 @@ path = "https://example.com/original"
         });
         let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
         click(cx, "collection-row-1");
-        let draft = cx.read(|cx| {
-            tabs.read(cx).tabs[1]
-                .page
-                .view()
-                .downcast::<RequestDraft>()
-                .ok()
-                .unwrap()
-        });
+        let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
 
         (tabs, draft, cx)
     }
@@ -330,12 +314,7 @@ fn dirty_close_requires_an_explicit_discard_and_cancel_keeps_edits(cx: &mut Test
     assert_eq!(fs::read_to_string(&fixture.file).unwrap(), fixture.original);
     click(cx, "collection-row-1");
     cx.read(|cx| {
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(
             reopened.read(cx).request.path,
             "https://example.com/original"
@@ -373,12 +352,7 @@ fn save_and_close_persists_body_and_does_not_close_after_a_failed_save(cx: &mut 
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
     click(cx, "collection-row-1");
     cx.read(|cx| {
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(reopened.read(cx).request.body, draft.read(cx).request.body);
         assert!(!reopened.read(cx).is_dirty());
     });
@@ -434,13 +408,7 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.tabs[1].title, "API");
-        assert!(
-            tabs.tabs[1]
-                .page
-                .view()
-                .downcast::<CollectionPage>()
-                .is_ok()
-        );
+        assert!(matches!(tabs.tabs[1].page, Page::Collection(_)));
     });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
@@ -524,12 +492,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     click(cx, "collection-row-2");
     cx.read(|cx| {
         assert_eq!(tabs.read(cx).tabs.len(), 2);
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(
             reopened.read(cx).request.path,
             "https://example.com/edited-after-move"
@@ -591,7 +554,7 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3, "a new file needs its own draft");
         assert_eq!(tabs.tabs[2].request_id.as_deref(), Some(before.id.as_str()));
-        assert_ne!(tabs.tabs[2].page.view().entity_id(), draft.entity_id());
+        assert_ne!(tabs.tabs[2].draft(), draft);
     });
     edit_url(cx, "https://example.com/new-draft");
     cx.simulate_keystrokes("secondary-s");
@@ -654,14 +617,7 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     });
     click(cx, "collection-row-3");
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
-    let draft = cx.read(|cx| {
-        tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap()
-    });
+    let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
     cx.read(|cx| {
         assert_eq!(draft.read(cx).collection.as_deref(), Some("API"));
         assert_eq!(

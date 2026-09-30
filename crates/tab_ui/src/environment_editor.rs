@@ -131,7 +131,7 @@ impl EnvironmentEditor {
         Ok(())
     }
 
-    fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.name_input.is_some() {
             return;
         }
@@ -435,19 +435,5 @@ impl Render for EnvironmentEditor {
                 },
             )
             .child(self.table(cx))
-    }
-}
-
-impl crate::TabPage for EnvironmentEditor {
-    fn tab_state(&self) -> crate::TabState {
-        crate::TabState {
-            badge: None,
-            icon: Some("icons/globe.svg"),
-            dirty: self.is_dirty(),
-        }
-    }
-
-    fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        EnvironmentEditor::prepare(self, window, cx);
     }
 }

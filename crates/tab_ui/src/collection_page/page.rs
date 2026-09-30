@@ -356,17 +356,3 @@ impl Render for CollectionPage {
             )
     }
 }
-
-impl crate::TabPage for CollectionPage {
-    fn tab_state(&self) -> crate::TabState {
-        crate::TabState {
-            badge: None,
-            icon: Some("icons/package.svg"),
-            dirty: self.is_dirty(),
-        }
-    }
-
-    fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        CollectionPage::prepare(self, window, cx);
-    }
-}
