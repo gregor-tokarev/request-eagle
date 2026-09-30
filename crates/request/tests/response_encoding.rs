@@ -2,13 +2,18 @@ use std::{io::Write, time::Duration};
 
 use flate2::{Compression, write::GzEncoder};
 use request::{
-    Execution, ExecutionError, HttpError, HttpRequest, HttpVersion, Method, ProxyMode,
-    RequestExecutor, RequestPreferences, Response,
+    Execution, ExecutionError, HttpRequest, HttpVersion, Method, ProxyMode, RequestExecutor,
+    RequestPreferences, RequestVariables, Response,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
+use std::collections::HashMap;
+
+fn no_variables() -> RequestVariables {
+    RequestVariables::new(HashMap::new(), None)
+}
 
 fn gzip(body: &[u8]) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -53,11 +58,14 @@ async fn execute_response(
         ..RequestPreferences::default()
     })
     .unwrap()
-    .execute(HttpRequest {
-        method,
-        path: url,
-        ..HttpRequest::default()
-    })
+    .execute(
+        HttpRequest {
+            method,
+            path: url,
+            ..HttpRequest::default()
+        },
+        no_variables(),
+    )
     .await;
 
     (result, server.await)
@@ -99,10 +107,7 @@ fn rejects_malformed_truncated_and_corrupt_gzip_bodies() {
 
         for payload in [b"not gzip".to_vec(), Vec::new(), truncated, corrupt] {
             let (result, _) = execute_response(200, "gzip", &payload, Method::Get, 1).await;
-            assert!(matches!(
-                result,
-                Err(ExecutionError::Http(HttpError::DecodeBody(_)))
-            ));
+            assert!(matches!(result, Err(ExecutionError::DecodeBody(_))));
         }
     });
 }
@@ -235,10 +240,13 @@ fn gzip_decoding_respects_the_total_request_deadline() {
         preferences.proxy.mode = ProxyMode::Disabled;
         let result = RequestExecutor::new(&preferences)
             .unwrap()
-            .execute(HttpRequest {
-                path: url,
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: url,
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await;
         server.await;
 

@@ -3,7 +3,7 @@ use std::io::Read;
 use flate2::read::MultiGzDecoder;
 use http_client::http::{HeaderMap, header::CONTENT_ENCODING};
 
-use crate::{ExecutionError, HttpError};
+use crate::ExecutionError;
 
 pub(crate) async fn decode_body(
     headers: &HeaderMap,
@@ -56,7 +56,7 @@ pub(crate) async fn decode_body(
                     decoder
                         .take(limit_bytes.saturating_add(1))
                         .read_to_end(&mut decoded)
-                        .map_err(HttpError::DecodeBody)?;
+                        .map_err(ExecutionError::DecodeBody)?;
 
                     if decoded.len() as u64 > limit_bytes {
                         return Err(ExecutionError::ResponseTooLarge { limit_bytes });
@@ -65,7 +65,7 @@ pub(crate) async fn decode_body(
                 None => {
                     decoder
                         .read_to_end(&mut decoded)
-                        .map_err(HttpError::DecodeBody)?;
+                        .map_err(ExecutionError::DecodeBody)?;
                 }
             }
 

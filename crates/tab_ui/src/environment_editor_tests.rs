@@ -1,7 +1,7 @@
 use environment::GlobalEnvironments;
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 
-use crate::{EnvironmentEditor, Environments, TabPage};
+use crate::{EnvironmentEditor, Environments};
 
 fn setup(
     cx: &mut TestAppContext,
@@ -27,7 +27,7 @@ fn setup(
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
             let mut editor = EnvironmentEditor::new("Staging".into(), environments.clone(), cx);
-            TabPage::prepare(&mut editor, window, cx);
+            editor.prepare(window, cx);
             editor
         });
         editor = Some(view.clone());

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::HttpError;
+use crate::ExecutionError;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -157,8 +157,8 @@ impl ProxyPreferences {
     pub(crate) fn apply(
         &self,
         builder: reqwest::ClientBuilder,
-    ) -> Result<reqwest::ClientBuilder, HttpError> {
-        self.validate().map_err(HttpError::InvalidProxy)?;
+    ) -> Result<reqwest::ClientBuilder, ExecutionError> {
+        self.validate().map_err(ExecutionError::InvalidProxy)?;
 
         match self.mode {
             ProxyMode::System => return Ok(builder),
@@ -170,10 +170,11 @@ impl ProxyPreferences {
             ProxyProtocol::Http => "http",
             ProxyProtocol::Https => "https",
         };
-        let host = url::Host::parse(self.host.trim())
-            .map_err(|_| HttpError::InvalidProxy("Enter a valid proxy hostname or IP address."))?;
+        let host = url::Host::parse(self.host.trim()).map_err(|_| {
+            ExecutionError::InvalidProxy("Enter a valid proxy hostname or IP address.")
+        })?;
         let endpoint = reqwest::Url::parse(&format!("{scheme}://{host}:{}", self.port))
-            .map_err(|_| HttpError::InvalidProxy("Enter a valid proxy hostname and port."))?;
+            .map_err(|_| ExecutionError::InvalidProxy("Enter a valid proxy hostname and port."))?;
         let bypass = self
             .bypass
             .split(',')

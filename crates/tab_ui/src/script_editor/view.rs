@@ -205,7 +205,7 @@ impl ScriptEditor {
         });
         self.signatures[index] =
             Some(cx.new(|cx| ScriptSignature::new(editor.clone(), phase, window, cx)));
-        crate::script_intelligence::warm_up();
+        script_intelligence::warm_up();
         self._subscriptions.push(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {

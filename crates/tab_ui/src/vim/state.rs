@@ -276,6 +276,30 @@ impl Vim {
         self.select(cursor..cursor, cx);
     }
 
+    fn visual(&mut self, anchor: usize, cursor: usize, linewise: bool, cx: &mut Context<Self>) {
+        self.set_mode(
+            Mode::Visual {
+                anchor,
+                cursor,
+                linewise,
+            },
+            cx,
+        );
+        self.select(self.visual_range(cx).unwrap(), cx);
+    }
+
+    /// Move the cursor, extending the selection when in Visual mode.
+    fn move_cursor(&mut self, cursor: usize, cx: &mut Context<Self>) {
+        if let Mode::Visual {
+            anchor, linewise, ..
+        } = self.mode
+        {
+            self.visual(anchor, cursor, linewise, cx);
+        } else {
+            self.normal(cursor, cx);
+        }
+    }
+
     fn insert(&mut self, cursor: usize, cx: &mut Context<Self>) {
         self.set_mode(Mode::Insert, cx);
         self.reset_pending();
@@ -428,11 +452,7 @@ impl Vim {
             };
 
             if linewise && text.len() == 0 {
-                let content = value
-                    .strip_suffix("\r\n")
-                    .or_else(|| value.strip_suffix('\n'))
-                    .unwrap_or(&value);
-                value.truncate(content.len());
+                value.truncate(without_newline(&value).len());
             } else if linewise
                 && !before
                 && position == text.len()
@@ -440,11 +460,7 @@ impl Vim {
             {
                 let separator = newline(text, cursor);
                 separator_len = separator.len();
-                let pasted = value
-                    .strip_suffix("\r\n")
-                    .or_else(|| value.strip_suffix('\n'))
-                    .unwrap_or(&value);
-                value = format!("{separator}{pasted}");
+                value = format!("{separator}{}", without_newline(&value));
             }
         }
 
@@ -459,11 +475,7 @@ impl Vim {
             if matches!(self.mode, Mode::Visual { anchor, cursor, .. }
                 if text.offset_to_point(anchor.max(cursor)).row + 1 == text.lines_len())
             {
-                let content = value
-                    .strip_suffix("\r\n")
-                    .or_else(|| value.strip_suffix('\n'))
-                    .unwrap_or(&value);
-                value.truncate(content.len());
+                value.truncate(without_newline(&value).len());
             }
         } else if visual.is_some() && linewise {
             let separator = newline(text, start);
@@ -518,23 +530,7 @@ impl Vim {
             return (!cancel && !matches.is_empty()).then_some((operator, search.cursor, target));
         }
 
-        if let Mode::Visual {
-            anchor, linewise, ..
-        } = self.mode
-        {
-            self.set_mode(
-                Mode::Visual {
-                    anchor,
-                    cursor: target,
-                    linewise,
-                },
-                cx,
-            );
-            self.select(self.visual_range(cx).unwrap(), cx);
-        } else {
-            self.normal(target, cx);
-        }
-
+        self.move_cursor(target, cx);
         None
     }
 
@@ -745,16 +741,8 @@ impl Vim {
         } = self.mode
             && matches!(key, "o" | "O")
         {
-            self.set_mode(
-                Mode::Visual {
-                    anchor: cursor,
-                    cursor: anchor,
-                    linewise,
-                },
-                cx,
-            );
             self.desired_column = None;
-            self.select(self.visual_range(cx).unwrap(), cx);
+            self.visual(cursor, anchor, linewise, cx);
             return;
         }
 
@@ -884,21 +872,8 @@ impl Vim {
                 if operator == 'y' && linewise && movement.offset < cursor {
                     self.normal(movement.offset, cx);
                 }
-            } else if let Mode::Visual {
-                anchor, linewise, ..
-            } = self.mode
-            {
-                self.set_mode(
-                    Mode::Visual {
-                        anchor,
-                        cursor: normal_cursor(&text, movement.offset),
-                        linewise,
-                    },
-                    cx,
-                );
-                self.select(self.visual_range(cx).unwrap(), cx);
             } else {
-                self.normal(movement.offset, cx);
+                self.move_cursor(normal_cursor(&text, movement.offset), cx);
             }
 
             if operator.is_none() {
@@ -944,15 +919,7 @@ impl Vim {
                         Mode::Visual { anchor, .. } => anchor,
                         _ => cursor,
                     };
-                    self.set_mode(
-                        Mode::Visual {
-                            anchor,
-                            cursor,
-                            linewise,
-                        },
-                        cx,
-                    );
-                    self.select(self.visual_range(cx).unwrap(), cx);
+                    self.visual(anchor, cursor, linewise, cx);
                 }
             }
             "d" | "c" | "y" => self.operator = Some((key.chars().next().unwrap(), count)),
@@ -1028,21 +995,8 @@ impl Vim {
 
                     if let Some((operator, _)) = operator {
                         self.operate_search(operator, cursor, target, window, cx);
-                    } else if let Mode::Visual {
-                        anchor, linewise, ..
-                    } = self.mode
-                    {
-                        self.set_mode(
-                            Mode::Visual {
-                                anchor,
-                                cursor: target,
-                                linewise,
-                            },
-                            cx,
-                        );
-                        self.select(self.visual_range(cx).unwrap(), cx);
                     } else {
-                        self.normal(target, cx);
+                        self.move_cursor(target, cx);
                     }
                     self.desired_column = None;
                 }
@@ -1069,6 +1023,12 @@ impl Vim {
             ));
         }
     }
+}
+
+fn without_newline(text: &str) -> &str {
+    text.strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(text)
 }
 
 impl Focusable for Vim {

@@ -3,18 +3,20 @@ use std::{
     time::{Duration, Instant},
 };
 
+use std::collections::HashMap;
+
 use super::{
-    RequestScripts, ScriptPhase,
-    runtime::{Cancellation, post_response, pre_request},
+    RequestScripts, ScriptPhase, ScriptReport,
+    runtime::{self, Cancellation, ScriptState},
 };
 use crate::{
     Execution, ExecutionError, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method,
-    RequestExecutor, RequestPreferences, Response, StatusCode, Version,
+    RequestExecutor, RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
 fn scripted(source: &str) -> HttpRequest {
     HttpRequest {
-        path: "http://localhost/{{path}}".into(),
+        path: "http://localhost/".into(),
         scripts: RequestScripts {
             pre_request: source.into(),
             post_response: String::new(),
@@ -25,6 +27,38 @@ fn scripted(source: &str) -> HttpRequest {
 
 fn cancelled() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
+}
+
+fn executor() -> RequestExecutor {
+    RequestExecutor::new(&RequestPreferences::default()).unwrap()
+}
+
+fn no_variables() -> RequestVariables {
+    RequestVariables::new(HashMap::new(), None)
+}
+
+async fn pre_request(
+    request: HttpRequest,
+    variables: RequestVariables,
+) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
+    runtime::pre_request(request, variables, executor(), cancelled()).await
+}
+
+async fn post_response(
+    request: HttpRequest,
+    request_body: Option<bytes::Bytes>,
+    state: ScriptState,
+    execution: Execution,
+) -> Execution {
+    runtime::post_response(
+        request,
+        request_body,
+        state,
+        execution,
+        executor(),
+        cancelled(),
+    )
+    .await
 }
 
 #[test]
@@ -40,32 +74,27 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
             console.log("Sending", pm.request.url);
         "#,
         );
+        request.path = "http://localhost/{{path}}".into();
         request.headers = vec![("x-test".into(), "old".into())];
-        request.query = Some(vec![("q".into(), "{{value}}".into())]);
+        request.query = vec![("q".into(), "{{value}}".into())];
         let original = request.clone();
-        let (sent, vars, reports) = pre_request(request, cancelled()).await.unwrap();
+        let (sent, state, reports) = pre_request(request, no_variables()).await.unwrap();
 
         assert_eq!(sent.path, "http://localhost/hello");
         assert_eq!(sent.method, Method::Post);
-        assert_eq!(sent.headers, [("X-Test".into(), "a & b".into())]);
-        assert_eq!(sent.query.unwrap()[0].1, "a & b");
+        assert_eq!(
+            sent.headers,
+            [
+                ("X-Test".into(), "a & b".into()),
+                ("Content-Type".into(), "application/json".into())
+            ]
+        );
+        assert_eq!(sent.query[0].1, "a & b");
         assert_eq!(sent.body.unwrap(), br#"{"message":"a & b"}"#);
-        assert_eq!(vars.values["path"], "hello");
+        assert_eq!(state.variables.values["path"], "hello");
         assert_eq!(reports[0].logs.len(), 1);
         assert_eq!(original.path, "http://localhost/{{path}}");
         assert_eq!(original.method, Method::Get);
-    });
-}
-
-#[test]
-fn binary_bodies_and_unknown_variables_are_preserved() {
-    smol::block_on(async {
-        let mut request = scripted("pm.variables.set('other', '{{nested}}');");
-        request.method = Method::Post;
-        request.body = Some(vec![0, 255, 42]);
-        let (sent, _, _) = pre_request(request, cancelled()).await.unwrap();
-        assert_eq!(sent.body.unwrap(), [0, 255, 42]);
-        assert_eq!(sent.path, "http://localhost/{{path}}");
     });
 }
 
@@ -103,7 +132,7 @@ fn request_body_reads_preserve_bytes_and_edits_are_exported() {
             let mut request = scripted(source);
             request.method = Method::Post;
             request.body = body;
-            let (sent, _, _) = pre_request(request, cancelled()).await.unwrap();
+            let (sent, _, _) = pre_request(request, no_variables()).await.unwrap();
             assert_eq!(sent.body, expected, "{source}");
         }
     });
@@ -116,22 +145,13 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
         request.method = Method::Post;
         request.body = Some(vec![b'x'; 40 * 1024 * 1024]);
         let request_buffer = request.body.as_ref().unwrap().as_ptr();
-        let (mut request, variables, _) = pre_request(request, cancelled()).await.unwrap();
+        let (mut request, _, _) = pre_request(request, no_variables()).await.unwrap();
         assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
 
         request.scripts.post_response =
             "pm.response.to.have.status(200); throw new Error('after status');".into();
         request.scripts.pre_request.clear();
-        let (mut request, _, _) = super::runtime::pre_request_with_variables(
-            request,
-            cancelled(),
-            Some(crate::RequestVariables::new(
-                environment::VariableValues::default(),
-                None,
-            )),
-        )
-        .await
-        .unwrap();
+        let (mut request, state, _) = pre_request(request, no_variables()).await.unwrap();
         assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
         let request_body = request.body.take().map(bytes::Bytes::from);
         // Fits as bytes, but replacement characters would exceed the decode budget.
@@ -148,12 +168,16 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
                 metrics: HttpMetrics::default(),
             }),
         };
+        let first_state = ScriptState {
+            variables: state.variables.clone(),
+            session: None,
+            collection_post_response: String::new(),
+        };
         let mut result = post_response(
             request.clone(),
             request_body.clone(),
-            variables.clone(),
+            first_state,
             execution,
-            cancelled(),
         )
         .await;
         assert!(
@@ -167,7 +191,7 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
         assert_eq!(response.body.as_ptr(), response_buffer);
 
         request.scripts.post_response = "pm.response.text();".into();
-        result = post_response(request, request_body, variables, result, cancelled()).await;
+        result = post_response(request, request_body, state, result).await;
         assert!(
             result.scripts[1]
                 .error
@@ -185,56 +209,40 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
 #[test]
 fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
     smol::block_on(async {
-        let values = environment::VariableValues {
-            environment: [("value".into(), "from file".into())].into(),
-        };
+        let values = HashMap::from([("value".into(), "from file".into())]);
         let mut request = scripted(
             "pm.expect(pm.variables.get('value')).to.equal('from file'); pm.variables.set('path', 'created'); pm.variables.set('value', 'local');",
         );
+        request.path = "http://localhost/{{path}}".into();
         request.headers = vec![("X-Value".into(), "{{value}}/{{!value}}/{{$guid}}".into())];
-        request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
-        let (sent, vars, _) = super::runtime::pre_request_with_variables(
-            request,
-            cancelled(),
-            Some(crate::RequestVariables::new(values, None)),
-        )
-        .await
-        .unwrap();
+        request.query = vec![("id".into(), "{{$guid}}".into())];
+        let (sent, state, _) = pre_request(request, RequestVariables::new(values, None))
+            .await
+            .unwrap();
         assert_eq!(sent.path, "http://localhost/created");
-        assert_eq!(vars.values["value"], "local");
+        assert_eq!(state.variables.values["value"], "local");
         assert_eq!(
             sent.headers[0].1,
-            format!("local/{{{{value}}}}/{}", sent.query.unwrap()[0].1)
+            format!("local/{{{{value}}}}/{}", sent.query[0].1)
         );
 
         let mut request = scripted("pm.variables.set('path', 'fallback');");
+        request.path = "http://localhost/{{path}}".into();
         request.body = Some(vec![0, 255, 42]);
         request.method = Method::Post;
-        let context = crate::RequestVariables::new(
-            environment::VariableValues::default(),
-            Some("File unavailable".into()),
-        );
-        let (sent, _, _) =
-            super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
-                .await
-                .unwrap();
+        let variables = RequestVariables::new(HashMap::new(), Some("File unavailable".into()));
+        let (sent, _, _) = pre_request(request, variables).await.unwrap();
         assert_eq!(sent.path, "http://localhost/fallback");
         assert_eq!(sent.body.unwrap(), [0, 255, 42]);
 
         let mut request = scripted("pm.variables.set('path', 'x'.repeat(1024 * 1024));");
         request.path = format!("http://localhost/{}", "{{path}}".repeat(33));
-        let context = crate::RequestVariables::new(environment::VariableValues::default(), None);
-        let error = super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
-            .await
-            .unwrap_err();
+        let error = pre_request(request, no_variables()).await.unwrap_err();
         assert!(error.to_string().contains("output limit"), "{error}");
 
         let request =
             scripted("pm.request.url = 'https://example.com/{{' + 'x'.repeat(10000) + '}}';");
-        let context = crate::RequestVariables::new(environment::VariableValues::default(), None);
-        let error = super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
-            .await
-            .unwrap_err();
+        let error = pre_request(request, no_variables()).await.unwrap_err();
         let ExecutionError::Script { message, report } = error else {
             panic!("expected script failure")
         };
@@ -258,19 +266,15 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             request.method = before;
             request.path = "http://localhost/{{$guid}}".into();
             request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
-            request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
+            request.query = vec![("id".into(), "{{$guid}}".into())];
             request.body = Some(body.as_bytes().to_vec());
-            let values = environment::VariableValues {
-                environment: [("$guid".into(), "from file".into())].into(),
-            };
-            let context = crate::RequestVariables::new(values, None);
-            let (sent, _, _) =
-                super::runtime::pre_request_with_variables(request, cancelled(), Some(context))
-                    .await
-                    .unwrap();
+            let values = HashMap::from([("$guid".into(), "from file".into())]);
+            let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
+                .await
+                .unwrap();
             assert_eq!(sent.path, "http://localhost/fixed");
             assert_eq!(sent.headers[0].1, "fixed");
-            assert_eq!(sent.query.unwrap()[0].1, "fixed");
+            assert_eq!(sent.query[0].1, "fixed");
             assert_eq!(sent.body.as_deref(), expected.map(str::as_bytes));
         }
     });
@@ -291,7 +295,7 @@ fn response_tests_keep_failures_logs_and_response_data() {
             throw new Error('after tests');
         "#
         .into();
-        let (request, variables, scripts) = pre_request(request, cancelled()).await.unwrap();
+        let (request, state, scripts) = pre_request(request, no_variables()).await.unwrap();
         let mut headers = HeaderMap::new();
         headers.insert("content-type", "application/json".parse().unwrap());
         let execution = Execution {
@@ -305,7 +309,7 @@ fn response_tests_keep_failures_logs_and_response_data() {
                 metrics: HttpMetrics::default(),
             }),
         };
-        let result = post_response(request, None, variables, execution, cancelled()).await;
+        let result = post_response(request, None, state, execution).await;
         let report = &result.scripts[1];
         assert_eq!(report.phase, ScriptPhase::PostResponse);
         assert_eq!(report.tests.len(), 6);
@@ -335,7 +339,7 @@ fn exceptions_invalid_request_data_and_unhandled_rejections_fail_before_sending(
             "Promise.reject('bad'); void 0;",
             "pm.test('async', async () => {}); throw new Error('stop');",
         ] {
-            let error = pre_request(scripted(source), cancelled())
+            let error = pre_request(scripted(source), no_variables())
                 .await
                 .unwrap_err();
             assert!(
@@ -353,7 +357,7 @@ fn uncaught_errors_are_bounded_without_splitting_unicode() {
             "throw new Error('x'.repeat(8 * 1024 * 1024));",
             "throw new Error('🦅'.repeat(10000));",
         ] {
-            let error = pre_request(scripted(source), cancelled())
+            let error = pre_request(scripted(source), no_variables())
                 .await
                 .unwrap_err();
             let ExecutionError::Script { message, report } = error else {
@@ -371,11 +375,11 @@ fn uncaught_errors_are_bounded_without_splitting_unicode() {
 fn runtime_is_isolated_and_has_no_host_io() {
     smol::block_on(async {
         let source = "pm.test('sandbox', () => { for (const name of ['process', 'require', 'fetch', 'std', 'os']) pm.expect(typeof globalThis[name]).to.equal('undefined'); }); globalThis.leak = 42;";
-        let (_, _, reports) = pre_request(scripted(source), cancelled()).await.unwrap();
+        let (_, _, reports) = pre_request(scripted(source), no_variables()).await.unwrap();
         assert!(reports[0].tests[0].error.is_none());
         let (_, _, reports) = pre_request(
             scripted("pm.test('fresh', () => pm.expect(typeof leak).to.equal('undefined'));"),
-            cancelled(),
+            no_variables(),
         )
         .await
         .unwrap();
@@ -387,7 +391,7 @@ fn runtime_is_isolated_and_has_no_host_io() {
 fn loops_memory_and_output_are_bounded() {
     smol::block_on(async {
         let started = Instant::now();
-        let error = pre_request(scripted("while (true) {}"), cancelled())
+        let error = pre_request(scripted("while (true) {}"), no_variables())
             .await
             .unwrap_err();
         assert!(error.to_string().contains("time limit"));
@@ -397,14 +401,14 @@ fn loops_memory_and_output_are_bounded() {
                 scripted(
                     "const values = []; while (true) values.push(new Array(100000).fill(123));"
                 ),
-                cancelled()
+                no_variables()
             )
             .await
             .is_err()
         );
         let (_, _, reports) = pre_request(
             scripted("for (let i = 0; i < 600; i++) console.log('entry', i);"),
-            cancelled(),
+            no_variables(),
         )
         .await
         .unwrap();
@@ -412,7 +416,7 @@ fn loops_memory_and_output_are_bounded() {
         assert!(
             pre_request(
                 scripted("for (let i = 0; i < 501; i++) pm.test('test', () => {});"),
-                cancelled()
+                no_variables()
             )
             .await
             .is_err()
@@ -426,7 +430,12 @@ fn cancellation_interrupts_the_blocking_worker() {
         let cancellation = Cancellation::new();
         let flag = cancellation.0.clone();
         let started = Instant::now();
-        let run = smol::spawn(pre_request(scripted("while (true) {}"), flag));
+        let run = smol::spawn(runtime::pre_request(
+            scripted("while (true) {}"),
+            no_variables(),
+            executor(),
+            flag,
+        ));
         smol::Timer::after(Duration::from_millis(30)).await;
         drop(cancellation);
         let error = run.await.unwrap_err();
@@ -445,7 +454,9 @@ fn request_timeout_also_interrupts_scripts() {
         .unwrap();
         let started = Instant::now();
         assert!(matches!(
-            executor.execute(scripted("while (true) {} ")).await,
+            executor
+                .execute(scripted("while (true) {} "), no_variables())
+                .await,
             Err(ExecutionError::Timeout { .. })
         ));
         assert!(started.elapsed() < Duration::from_secs(1));
@@ -458,7 +469,7 @@ fn variable_expansion_cannot_allocate_an_unbounded_request() {
         let mut request = scripted("pm.variables.set('large', 'x'.repeat(1024 * 1024));");
         request.method = Method::Post;
         request.body = Some("{{large}}".repeat(40).into_bytes());
-        let error = pre_request(request, cancelled()).await.unwrap_err();
+        let error = pre_request(request, no_variables()).await.unwrap_err();
         assert!(error.to_string().contains("output limit"));
     });
 }

@@ -1,6 +1,5 @@
 use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use environment::VariableValues;
 use request::{HttpRequest, Method, RequestExecutor, RequestScripts, RequestVariables, Response};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
@@ -29,10 +28,8 @@ pub async fn run(
         );
     }
 
-    let mut values = VariableValues {
-        environment: collection.local_env().entries.clone(),
-    };
-    values.environment.extend(variables);
+    let mut values = collection.local_env().entries.clone();
+    values.extend(variables);
     let variables = RequestVariables::with_environment_session(values, None, Default::default())
         .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
@@ -41,7 +38,7 @@ pub async fn run(
     }
 
     let executor = RequestExecutor::new(&settings)?;
-    let execution = executor.execute_with_variables(request, variables).await?;
+    let execution = executor.execute(request, variables).await?;
     let Response::Http(response) = execution.response;
     let headers = response.headers.iter().map(|(name, value)| json!({
         "name": name.as_str(), "value": value.to_str().ok(), "value_base64": STANDARD.encode(value.as_bytes()),
@@ -75,7 +72,7 @@ impl From<RequestInput> for HttpRequest {
             },
             path: input.url,
             headers: input.headers,
-            query: (!input.query.is_empty()).then_some(input.query),
+            query: input.query,
             body: input.body.map(|body| match body {
                 Body::Text(text) => text.into_bytes(),
                 Body::Bytes(bytes) => bytes,
@@ -102,7 +99,7 @@ impl From<&HttpRequest> for RequestInput {
             },
             url: request.path.clone(),
             headers: request.headers.clone(),
-            query: request.query.clone().unwrap_or_default(),
+            query: request.query.clone(),
             body: request
                 .body
                 .as_ref()

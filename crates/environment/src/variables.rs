@@ -16,12 +16,6 @@ pub const GENERATED_VARIABLES: &[(&str, &str)] = &[
     ("$randomEmail", "A random address at example.com"),
 ];
 
-/// Values stay separate from completion metadata and are never written into drafts.
-#[derive(Clone, Default)]
-pub struct VariableValues {
-    pub environment: HashMap<String, String>,
-}
-
 pub fn valid_variable_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -43,13 +37,13 @@ pub enum VariableError {
 
 /// One resolver per send keeps repeated generated references consistent in that request.
 pub struct VariableResolver<'a> {
-    values: &'a VariableValues,
+    values: &'a HashMap<String, String>,
     generated: HashMap<String, String>,
     remaining: usize,
 }
 
 impl<'a> VariableResolver<'a> {
-    pub fn new(values: &'a VariableValues) -> Self {
+    pub fn new(values: &'a HashMap<String, String>) -> Self {
         Self {
             values,
             generated: HashMap::new(),
@@ -115,7 +109,6 @@ impl<'a> VariableResolver<'a> {
         }
 
         self.values
-            .environment
             .get(name)
             .cloned()
             .ok_or_else(|| VariableError::Unknown(name.into()))

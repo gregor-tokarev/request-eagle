@@ -9,8 +9,8 @@ The app uses the GPUI Kit 0.6.2 APIs already pinned in the workspace.
   keep focus rings outside clipping regions.
 - Use the relative spacing helpers: 2, 4, 8, 12, 16, 24 and 32 px at the
   default 16 px interface size. Labels stay close to their controls; sections
-  receive more space. Settings pages share their insets and width constraints
-  through `settings_ui::geometry`.
+  receive more space. Settings pages share their insets, width constraints,
+  sections and rows through `settings_ui::layout`.
 - Use `text_xs`, `text_sm`, `text_base`, `text_lg` and `text_xl` for interface
   hierarchy. HTTP methods and counts remain readable at the smallest tier.
 - Keep standard medium controls in forms and dialogs. Use small controls in

@@ -1,9 +1,10 @@
 use std::{net::TcpListener, sync::Arc};
 
 use request::{
-    ExecutionError, HttpError, HttpRequest, ProxyMode, ProxyPreferences, ProxyProtocol,
-    RequestExecutor, RequestPreferences, Response,
+    ExecutionError, HttpRequest, ProxyMode, ProxyPreferences, ProxyProtocol, RequestExecutor,
+    RequestPreferences, RequestVariables, Response,
 };
+use std::collections::HashMap;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, rustls};
 
@@ -63,15 +64,18 @@ async fn send(proxy: ProxyPreferences, url: String, override_host: bool) {
     })
     .unwrap();
     let result = executor
-        .execute(HttpRequest {
-            path: url,
-            headers: if override_host {
-                vec![("Host".into(), "virtual.invalid".into())]
-            } else {
-                vec![]
+        .execute(
+            HttpRequest {
+                path: url,
+                headers: if override_host {
+                    vec![("Host".into(), "virtual.invalid".into())]
+                } else {
+                    vec![]
+                },
+                ..HttpRequest::default()
             },
-            ..HttpRequest::default()
-        })
+            RequestVariables::new(HashMap::new(), None),
+        )
         .await
         .unwrap();
     let Response::Http(response) = result.response;
@@ -295,7 +299,7 @@ fn invalid_custom_proxy_is_rejected_before_sending() {
                 proxy,
                 ..RequestPreferences::default()
             }),
-            Err(ExecutionError::Http(HttpError::InvalidProxy(_)))
+            Err(ExecutionError::InvalidProxy(_))
         ));
     }
 

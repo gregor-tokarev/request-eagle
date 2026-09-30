@@ -6,8 +6,7 @@ use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    ExecutionError, HttpError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
-    RequestPreferences,
+    ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion, RequestPreferences,
 };
 
 #[derive(Clone)]
@@ -63,20 +62,18 @@ impl HttpExecutor {
     ) -> Result<HttpResponse, ExecutionError> {
         let started = Instant::now();
         let is_head = request.method.as_str() == "HEAD";
-        let mut url = Url::parse(&request.path).map_err(HttpError::InvalidUrl)?;
+        let mut url = Url::parse(&request.path).map_err(ExecutionError::InvalidUrl)?;
 
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(HttpError::UnsupportedScheme(url.scheme().to_owned()).into());
+            return Err(ExecutionError::UnsupportedScheme(url.scheme().to_owned()));
         }
 
         // Keep query pairs from the URL, including repeated keys, then append
         // the editor's pairs with URL encoding. Fragments are never sent.
         url.set_fragment(None);
 
-        if let Some(query) = &request.query
-            && !query.is_empty()
-        {
-            url.query_pairs_mut().extend_pairs(query);
+        if !request.query.is_empty() {
+            url.query_pairs_mut().extend_pairs(&request.query);
         }
 
         let request_body_bytes = body.as_ref().map_or(0, Bytes::len);
@@ -96,7 +93,7 @@ impl HttpExecutor {
             builder = builder.header(name.as_str(), value.as_str());
         }
 
-        let mut request = builder.body(body).map_err(HttpError::InvalidRequest)?;
+        let mut request = builder.body(body).map_err(ExecutionError::InvalidRequest)?;
 
         let host = validate_host(request.headers())?;
         let mut client = &self.client;
@@ -121,7 +118,7 @@ impl HttpExecutor {
                 // without changing the destination/TLS name or replaying a request.
                 client = override_client;
             } else {
-                return Err(HttpError::Http2HostOverride.into());
+                return Err(ExecutionError::Http2HostOverride);
             }
         }
 
@@ -152,7 +149,7 @@ impl HttpExecutor {
                     .take(limit_bytes + 1)
                     .read_to_end(&mut body)
                     .await
-                    .map_err(HttpError::ReadBody)?;
+                    .map_err(ExecutionError::ReadBody)?;
 
                 if body.len() as u64 > limit_bytes {
                     return Err(ExecutionError::ResponseTooLarge { limit_bytes });
@@ -162,7 +159,7 @@ impl HttpExecutor {
                 stream
                     .read_to_end(&mut body)
                     .await
-                    .map_err(HttpError::ReadBody)?;
+                    .map_err(ExecutionError::ReadBody)?;
             }
         }
 
@@ -205,7 +202,7 @@ impl HttpExecutor {
 fn build_client(
     preferences: &RequestPreferences,
     version: HttpVersion,
-) -> Result<Arc<reqwest_client::ReqwestClient>, HttpError> {
+) -> Result<Arc<reqwest_client::ReqwestClient>, ExecutionError> {
     let builder = reqwest::Client::builder()
         .use_rustls_tls()
         .danger_accept_invalid_certs(!preferences.ssl_certificate_verification)
@@ -223,12 +220,12 @@ fn build_client(
         .proxy
         .apply(builder)?
         .build()
-        .map_err(HttpError::Client)?;
+        .map_err(ExecutionError::Client)?;
 
     Ok(Arc::new(client.into()))
 }
 
-fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, HttpError> {
+fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, ExecutionError> {
     let mut hosts = headers.get_all(HOST).iter();
     let Some(value) = hosts.next() else {
         // The transport supplies the URL's host when there is no override.
@@ -236,18 +233,18 @@ fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, HttpError> {
     };
 
     if hosts.next().is_some() {
-        return Err(HttpError::MultipleHosts);
+        return Err(ExecutionError::MultipleHosts);
     }
 
-    let value = value.to_str().map_err(|_| HttpError::InvalidHost)?;
+    let value = value.to_str().map_err(|_| ExecutionError::InvalidHost)?;
     let authority = value
         .parse::<Authority>()
-        .map_err(|_| HttpError::InvalidHost)?;
+        .map_err(|_| ExecutionError::InvalidHost)?;
 
     // Generic header/authority syntax also accepts userinfo and nonnumeric ports.
     // Host permits only a hostname (or bracketed IPv6 address) and optional port.
     if value.contains('@') || url::Host::parse(authority.host()).is_err() {
-        return Err(HttpError::InvalidHost);
+        return Err(ExecutionError::InvalidHost);
     }
 
     let suffix = &value[authority.host().len()..];
@@ -256,7 +253,7 @@ fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, HttpError> {
         && suffix != ":"
         && !(suffix.starts_with(':') && authority.port_u16().is_some())
     {
-        return Err(HttpError::InvalidHost);
+        return Err(ExecutionError::InvalidHost);
     }
 
     Ok(Some(authority))

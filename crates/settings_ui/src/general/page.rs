@@ -1,12 +1,14 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, button::*, h_flex, progress::Progress,
-    switch::Switch, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, button::*, h_flex,
+    progress::Progress, switch::Switch, v_flex,
 };
 use gpui_kit::{prelude::*, *};
 
+use preferences::Preferences;
 use updater::{UpdateStatus, Updater};
 
 use super::request::RequestSettings;
+use crate::layout::{self, row, section};
 
 pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
@@ -22,7 +24,7 @@ impl GeneralSettings {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscription = cx.observe(&updater, |_, _, cx| cx.notify());
-        let preferences = cx.observe_global::<preferences::Preferences>(|_, cx| cx.notify());
+        let preferences = cx.observe_global::<Preferences>(|_, cx| cx.notify());
 
         Self {
             updater,
@@ -117,8 +119,6 @@ impl Render for GeneralSettings {
         let update_status = v_flex()
             .w_full()
             .gap_2()
-            .text_sm()
-            .text_color(cx.theme().muted_foreground)
             .child(
                 h_flex()
                     .w_full()
@@ -165,9 +165,27 @@ impl Render for GeneralSettings {
                 this.child("Download verified. Quit and relaunch to finish installing the update.")
             });
 
+        let vim_mode = div()
+            .debug_selector(|| "vim-mode".into())
+            .flex_shrink_0()
+            .child(
+                Switch::new("vim-mode")
+                    .accessibility_label("Vim mode")
+                    .checked(cx.global::<Preferences>().vim_mode)
+                    .on_click(cx.listener(|this, checked, _, cx| {
+                        this.error = preferences::update(cx, |preferences| {
+                            preferences.vim_mode = *checked;
+                        })
+                        .err()
+                        .map(|error| format!("Could not save Vim mode: {error}"));
+
+                        cx.notify();
+                    })),
+            );
+
         v_flex()
             .w_full()
-            .max_w(crate::geometry::PAGE_WIDTH)
+            .max_w(layout::PAGE_WIDTH)
             .gap_6()
             .child(
                 div()
@@ -175,85 +193,63 @@ impl Render for GeneralSettings {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("General"),
             )
+            .child(section("Updates").child(row(
+                format!("Request Eagle {}", updater.current_version()),
+                update_status,
+                div().flex_shrink_0().child(update_button),
+                cx,
+            )))
             .child(
-                v_flex()
-                    .w_full()
-                    .child(div().pb_3().text_lg().font_weight(FontWeight::SEMIBOLD).child("Updates"))
+                section("Editor")
                     .child(
-                        h_flex()
-                            .w_full()
-                            .items_start()
-                            .justify_between()
-                            .gap_4()
-                            .py_4()
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_1()
-                                    .child(div().font_weight(FontWeight::MEDIUM).child(format!(
-                                        "Request Eagle {}",
-                                        updater.current_version()
-                                    )))
-                                    .child(update_status),
-                            )
-                            .child(div().flex_shrink_0().child(update_button)),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .child(div().pb_3().text_lg().font_weight(FontWeight::SEMIBOLD).child("Editor"))
-                    .child(
-                        h_flex()
-                            .debug_selector(|| "vim-mode-row".into())
-                            .w_full()
-                            .items_start()
-                            .justify_between()
-                            .gap_4()
-                            .py_4()
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_1()
-                                    .child(div().font_weight(FontWeight::MEDIUM).child("Vim mode"))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("Use Vim keybindings in request body and script editors."),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .debug_selector(|| "vim-mode".into())
-                                    .flex_shrink_0()
-                                    .child(
-                                        Switch::new("vim-mode")
-                                            .accessibility_label("Vim mode")
-                                            .checked(cx.global::<preferences::Preferences>().vim_mode)
-                                            .on_click(cx.listener(|this, checked, _, cx| {
-                                                this.error = preferences::update(cx, |preferences| {
-                                                    preferences.vim_mode = *checked;
-                                                })
-                                                .err()
-                                                .map(|error| format!("Could not save Vim mode: {error}"));
-
-                                                cx.notify();
-                                            })),
-                                    ),
-                            ),
+                        row(
+                            "Vim mode",
+                            "Use Vim keybindings in request body and script editors.",
+                            vim_mode,
+                            cx,
+                        )
+                        .debug_selector(|| "vim-mode-row".into()),
                     )
                     .when_some(self.error.clone(), |this, error| {
                         this.child(div().text_sm().text_color(cx.theme().danger).child(error))
                     }),
             )
             .child(self.request.clone())
-            .child(super::cli::install_section(cx))
+            .child(
+                section("Agent CLI")
+                    .debug_selector(|| "cli-install-section".into())
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .py_4()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .child(div().font_weight(FontWeight::MEDIUM).child("Request Eagle CLI"))
+                            .child(div().text_color(cx.theme().muted_foreground).child(
+                                "Let AI agents manage saved collections, run requests, and edit settings from the terminal. The CLI works independently of the app and is a separate download for macOS and Linux.",
+                            ))
+                            .child(
+                                h_flex()
+                                    .pt_2()
+                                    .flex_wrap()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("download-cli")
+                                            .outline()
+                                            .label("Download CLI")
+                                            .icon(IconName::ExternalLink)
+                                            .on_click(|_, _, cx| cx.open_url("https://github.com/gregor-tokarev/request-eagle/releases/latest")),
+                                    )
+                                    .child(
+                                        Button::new("cli-instructions")
+                                            .ghost()
+                                            .label("Installation instructions")
+                                            .icon(IconName::ExternalLink)
+                                            .on_click(|_, _, cx| cx.open_url("https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md#install")),
+                                    ),
+                            ),
+                    ),
+            )
     }
 }

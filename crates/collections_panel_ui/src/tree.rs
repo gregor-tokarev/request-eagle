@@ -3,8 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use collection::{CollectionRegistry, Entry, FileEntry, Request};
+use collection::{CollectionRegistry, Entry, FileEntry};
+
 use gpui_kit::SharedString;
+use request::Request;
 
 use super::search::SearchIndex;
 
@@ -41,20 +43,17 @@ pub(super) struct CollectionTree {
 
 impl CollectionTree {
     pub fn new(collections: &CollectionRegistry) -> Self {
-        let mut tree = Self {
-            items: Vec::new(),
-            roots: Vec::new(),
-            search: SearchIndex::new([]),
-        };
+        let mut items = Vec::new();
+        let mut roots = Vec::new();
         let mut search_texts = Vec::new();
 
         for collection in collections.collections() {
-            let index = tree.items.len();
+            let index = items.len();
             let name = path_name(&collection.path);
 
-            tree.roots.push(index);
+            roots.push(index);
             search_texts.push(name.clone());
-            tree.items.push(TreeItem {
+            items.push(TreeItem {
                 label: name.into(),
                 path: collection.path.clone(),
                 kind: ItemKind::Collection,
@@ -63,82 +62,57 @@ impl CollectionTree {
                 end: 0,
                 request_count: 0,
             });
-            tree.add_entries(&collection.entries, index, &mut search_texts);
+            add_entries(&mut items, &collection.entries, index, &mut search_texts);
         }
 
-        tree.search = SearchIndex::new(search_texts);
+        Self {
+            items,
+            roots,
+            search: SearchIndex::new(search_texts),
+        }
+    }
 
-        tree
+    pub fn index_of(&self, path: &Path) -> Option<usize> {
+        self.items.iter().position(|item| item.path == path)
+    }
+
+    /// The collection and folders that contain an item. A collection is its
+    /// own location.
+    pub fn location(&self, index: usize) -> (SharedString, Vec<SharedString>) {
+        let mut labels = Vec::new();
+        let mut parent = self.items[index].parent;
+        while let Some(index) = parent {
+            labels.push(self.items[index].label.clone());
+            parent = self.items[index].parent;
+        }
+
+        let collection = labels
+            .pop()
+            .unwrap_or_else(|| self.items[index].label.clone());
+        labels.reverse();
+
+        (collection, labels)
     }
 
     pub fn request_changed(&self, file: &FileEntry) -> bool {
-        self.items
-            .iter()
-            .position(|item| item.path == file.path)
-            .is_some_and(|index| {
-                let Request::Http(request) = &file.request;
-                let method = request.method.as_str();
+        self.index_of(&file.path).is_some_and(|index| {
+            let (method, search_text) = request_row(file);
 
-                self.items[index].label.as_ref() != file.name
-                    || self.items[index].kind != ItemKind::Request(method)
-                    || self.search.document(index)
-                        != format!("{method} {} {}", file.name, request.path).to_lowercase()
-            })
+            self.items[index].label.as_ref() != file.name
+                || self.items[index].kind != ItemKind::Request(method)
+                || self.search.document(index) != search_text.to_lowercase()
+        })
     }
 
     pub fn update_request(&mut self, file: &FileEntry) {
-        let Some(index) = self.items.iter().position(|item| item.path == file.path) else {
+        let Some(index) = self.index_of(&file.path) else {
             return;
         };
-        let Request::Http(request) = &file.request;
-        let method = request.method.as_str();
+        let (method, search_text) = request_row(file);
+
         self.items[index].label = file.name.clone().into();
         self.items[index].kind = ItemKind::Request(method);
-        self.search
-            .update(index, format!("{method} {} {}", file.name, request.path));
-    }
-
-    fn add_entries(&mut self, entries: &[Entry], parent: usize, search_texts: &mut Vec<String>) {
-        for entry in entries {
-            let index = self.items.len();
-            let depth = self.items[parent].depth + 1;
-
-            match entry {
-                Entry::Directory(folder) => {
-                    search_texts.push(folder.name.clone());
-                    self.items.push(TreeItem {
-                        label: folder.name.clone().into(),
-                        path: folder.path.clone(),
-                        kind: ItemKind::Folder,
-                        depth,
-                        parent: Some(parent),
-                        end: 0,
-                        request_count: 0,
-                    });
-                    self.add_entries(&folder.entries, index, search_texts);
-                    self.items[parent].request_count += self.items[index].request_count;
-                }
-                Entry::File(file) => {
-                    let Request::Http(request) = &file.request;
-                    let method = request.method.as_str();
-
-                    search_texts.push(format!("{method} {} {}", file.name, request.path));
-
-                    self.items.push(TreeItem {
-                        label: file.name.clone().into(),
-                        path: file.path.clone(),
-                        kind: ItemKind::Request(method),
-                        depth,
-                        parent: Some(parent),
-                        end: index + 1,
-                        request_count: 1,
-                    });
-                    self.items[parent].request_count += 1;
-                }
-            }
-        }
-
-        self.items[parent].end = self.items.len();
+        self.search.update(index, search_text);
     }
 
     /// Nonempty queries use the substring index. The sidebar caches the empty
@@ -198,4 +172,58 @@ fn path_name(path: &Path) -> String {
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
         .into_owned()
+}
+
+fn add_entries(
+    items: &mut Vec<TreeItem>,
+    entries: &[Entry],
+    parent: usize,
+    search_texts: &mut Vec<String>,
+) {
+    for entry in entries {
+        let index = items.len();
+        let depth = items[parent].depth + 1;
+
+        match entry {
+            Entry::Directory(folder) => {
+                search_texts.push(folder.name.clone());
+                items.push(TreeItem {
+                    label: folder.name.clone().into(),
+                    path: folder.path.clone(),
+                    kind: ItemKind::Folder,
+                    depth,
+                    parent: Some(parent),
+                    end: 0,
+                    request_count: 0,
+                });
+                add_entries(items, &folder.entries, index, search_texts);
+                items[parent].request_count += items[index].request_count;
+            }
+            Entry::File(file) => {
+                let (method, search_text) = request_row(file);
+                search_texts.push(search_text);
+
+                items.push(TreeItem {
+                    label: file.name.clone().into(),
+                    path: file.path.clone(),
+                    kind: ItemKind::Request(method),
+                    depth,
+                    parent: Some(parent),
+                    end: index + 1,
+                    request_count: 1,
+                });
+                items[parent].request_count += 1;
+            }
+        }
+    }
+
+    items[parent].end = items.len();
+}
+
+/// A request row's method and the text the sidebar filter matches.
+fn request_row(file: &FileEntry) -> (&'static str, String) {
+    let Request::Http(request) = &file.request;
+    let method = request.method.as_str();
+
+    (method, format!("{method} {} {}", file.name, request.path))
 }

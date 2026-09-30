@@ -8,21 +8,37 @@ use std::collections::BTreeMap;
 actions!(keybindings_service_tests, [FirstAction, OtherAction]);
 
 #[test]
-fn replaces_a_binding_at_runtime() {
+fn replaces_a_binding_at_runtime_and_keeps_unmanaged_bindings() {
     let mut app = TestApp::new();
 
-    app.update(|cx| set_binding("cmd-q", FirstAction, None, cx).unwrap());
+    app.update(|cx| {
+        cx.bind_keys([KeyBinding::new("cmd-o", OtherAction, None)]);
+        register(
+            FirstAction,
+            "First command",
+            "",
+            "Application",
+            Some("cmd-q"),
+            None,
+            cx,
+        )
+        .unwrap();
+    });
     assert_eq!(
         actions_for("cmd-q", &app),
         vec!["keybindings_service_tests::FirstAction"]
     );
 
-    app.update(|cx| set_binding("cmd-w", FirstAction, None, cx).unwrap());
+    app.update(|cx| set_override(FirstAction::name_for_type(), Some("cmd-w"), cx).unwrap());
 
     assert!(actions_for("cmd-q", &app).is_empty());
     assert_eq!(
         actions_for("cmd-w", &app),
         vec!["keybindings_service_tests::FirstAction"]
+    );
+    assert_eq!(
+        actions_for("cmd-o", &app),
+        vec!["keybindings_service_tests::OtherAction"]
     );
     app.read_global::<KeybindingsService, _>(|_, cx| {
         assert_eq!(
@@ -36,28 +52,21 @@ fn replaces_a_binding_at_runtime() {
 }
 
 #[test]
-fn keeps_bindings_that_the_service_does_not_own() {
-    let mut app = TestApp::new();
-
-    app.update(|cx| {
-        cx.bind_keys([KeyBinding::new("cmd-o", OtherAction, None)]);
-        set_binding("cmd-q", FirstAction, None, cx).unwrap();
-        set_binding("cmd-w", FirstAction, None, cx).unwrap();
-    });
-
-    assert_eq!(
-        actions_for("cmd-o", &app),
-        vec!["keybindings_service_tests::OtherAction"]
-    );
-}
-
-#[test]
 fn invalid_replacement_leaves_the_current_binding_active() {
     let mut app = TestApp::new();
 
     app.update(|cx| {
-        set_binding("cmd-q", FirstAction, None, cx).unwrap();
-        assert!(set_binding("cmd-a-b", FirstAction, None, cx).is_err());
+        register(
+            FirstAction,
+            "First command",
+            "",
+            "Application",
+            Some("cmd-q"),
+            None,
+            cx,
+        )
+        .unwrap();
+        assert!(set_override(FirstAction::name_for_type(), Some("cmd-a-b"), cx).is_err());
     });
 
     assert_eq!(
@@ -284,7 +293,7 @@ fn startup_checks_defaults_against_saved_shortcuts_and_preserves_valid_swaps() {
 }
 
 #[test]
-fn startup_keeps_fixed_shortcuts_and_can_reset_a_disabled_unassigned_command() {
+fn startup_disables_a_conflicting_override_and_can_reset_an_unassigned_command() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("keybindings.json");
     std::fs::write(
@@ -296,7 +305,16 @@ fn startup_keeps_fixed_shortcuts_and_can_reset_a_disabled_unassigned_command() {
     let mut app = TestApp::new();
     app.update(|cx| {
         load_overrides(path.clone(), cx).unwrap();
-        set_binding("cmd-q", OtherAction, None, cx).unwrap();
+        register(
+            OtherAction,
+            "Other command",
+            "",
+            "Workspace",
+            Some("cmd-q"),
+            None,
+            cx,
+        )
+        .unwrap();
         register(
             FirstAction,
             "First command",
@@ -308,14 +326,21 @@ fn startup_keeps_fixed_shortcuts_and_can_reset_a_disabled_unassigned_command() {
         )
         .unwrap();
 
-        let command = &commands(cx)[0];
+        let first = |cx: &App| {
+            commands(cx)
+                .into_iter()
+                .find(|command| command.id == FirstAction::name_for_type())
+                .unwrap()
+        };
+
+        let command = first(cx);
         assert!(command.binding.is_none());
         assert!(command.binding_error.is_some());
         assert!(command.is_modified());
 
         reset_command(FirstAction::name_for_type(), cx).unwrap();
-        assert!(commands(cx)[0].binding_error.is_none());
-        assert!(!commands(cx)[0].is_modified());
+        assert!(first(cx).binding_error.is_none());
+        assert!(!first(cx).is_modified());
     });
 
     assert_eq!(
@@ -459,38 +484,6 @@ fn reset_restores_an_unassigned_default() {
     });
 
     assert!(actions_for("cmd-k", &app).is_empty());
-}
-
-#[test]
-fn fixed_shortcuts_stay_out_of_settings_but_still_prevent_conflicts() {
-    let mut app = TestApp::new();
-
-    app.update(|cx| {
-        set_binding("cmd-q", OtherAction, None, cx).unwrap();
-        register(
-            FirstAction,
-            "First command",
-            "",
-            "Workspace",
-            Some("cmd-b"),
-            None,
-            cx,
-        )
-        .unwrap();
-
-        assert_eq!(commands(cx).len(), 1);
-        assert!(matches!(
-            set_override(FirstAction::name_for_type(), Some("cmd-q"), cx),
-            Err(KeybindingError::Conflict(_))
-        ));
-
-        reset_all(cx).unwrap();
-    });
-
-    assert_eq!(
-        actions_for("cmd-q", &app),
-        vec![OtherAction::name_for_type()]
-    );
 }
 
 fn actions_for(keystrokes: &str, app: &TestApp) -> Vec<&'static str> {

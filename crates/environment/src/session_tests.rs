@@ -1,15 +1,13 @@
+use std::collections::HashMap;
 use std::{collections::BTreeMap, path::Path};
 
-use crate::{EnvironmentSession, EnvironmentSessions, VariableValues};
+use crate::{EnvironmentSession, EnvironmentSessions};
 
-fn file_values() -> VariableValues {
-    VariableValues {
-        environment: [
-            ("base_url".into(), "https://example.com".into()),
-            ("token".into(), "file token".into()),
-        ]
-        .into(),
-    }
+fn file_values() -> HashMap<String, String> {
+    HashMap::from([
+        ("base_url".into(), "https://example.com".into()),
+        ("token".into(), "file token".into()),
+    ])
 }
 
 #[test]
@@ -25,20 +23,15 @@ fn session_changes_override_file_values_without_mutating_the_source() {
         .unwrap();
 
     let values = session.values(base.clone());
-    assert_eq!(values.environment["token"], "response token");
-    assert_eq!(values.environment["resource_id"], "42");
-    assert!(!values.environment.contains_key("base_url"));
-    assert_eq!(base.environment["token"], "file token");
-    assert_eq!(base.environment["base_url"], "https://example.com");
+    assert_eq!(values["token"], "response token");
+    assert_eq!(values["resource_id"], "42");
+    assert!(!values.contains_key("base_url"));
+    assert_eq!(base["token"], "file token");
+    assert_eq!(base["base_url"], "https://example.com");
 
     let mut refreshed = file_values();
-    refreshed
-        .environment
-        .insert("external_edit".into(), "new".into());
-    assert_eq!(
-        session.values(refreshed).environment["external_edit"],
-        "new"
-    );
+    refreshed.insert("external_edit".into(), "new".into());
+    assert_eq!(session.values(refreshed)["external_edit"], "new");
 }
 
 #[test]
@@ -55,26 +48,21 @@ fn session_registry_shares_tabs_but_isolates_collections_and_workspaces() {
     drop(login);
 
     let next_request = workspace.clone().for_path(Some(path));
-    assert_eq!(
-        next_request.values(file_values()).environment["token"],
-        "login token"
-    );
+    assert_eq!(next_request.values(file_values())["token"], "login token");
     assert_eq!(
         workspace
             .for_path(Some(Path::new("/workspace/two/environment.toml")))
-            .values(file_values())
-            .environment["token"],
+            .values(file_values())["token"],
         "file token"
     );
     assert_eq!(
-        workspace.for_path(None).values(file_values()).environment["token"],
+        workspace.for_path(None).values(file_values())["token"],
         "file token"
     );
     assert_eq!(
         EnvironmentSessions::default()
             .for_path(Some(path))
-            .values(file_values())
-            .environment["token"],
+            .values(file_values())["token"],
         "file token"
     );
 
@@ -86,7 +74,7 @@ fn session_registry_shares_tabs_but_isolates_collections_and_workspaces() {
         )]))
         .unwrap();
     assert_eq!(
-        workspace.for_path(None).values(file_values()).environment["token"],
+        workspace.for_path(None).values(file_values())["token"],
         "untitled token"
     );
 }
@@ -114,9 +102,9 @@ fn concurrent_requests_merge_only_their_changes() {
     });
 
     let values = session.values(file_values());
-    assert_eq!(values.environment["token"], "new token");
-    assert_eq!(values.environment["resource_id"], "42");
-    assert_eq!(values.environment["base_url"], "https://example.com");
+    assert_eq!(values["token"], "new token");
+    assert_eq!(values["resource_id"], "42");
+    assert_eq!(values["base_url"], "https://example.com");
 }
 
 #[test]
@@ -124,7 +112,6 @@ fn clearing_a_snapshot_does_not_remove_an_unseen_concurrent_value() {
     let session = EnvironmentSession::default();
     let clear_changes = session
         .values(file_values())
-        .environment
         .into_keys()
         .map(|key| (key, None))
         .collect();
@@ -137,7 +124,7 @@ fn clearing_a_snapshot_does_not_remove_an_unseen_concurrent_value() {
     session.apply(&clear_changes).unwrap();
 
     assert_eq!(
-        session.values(file_values()).environment,
+        session.values(file_values()),
         [("new_key".into(), "concurrent".into())].into()
     );
 }
@@ -158,7 +145,7 @@ fn oversized_updates_fail_atomically_and_replacements_release_value_bytes() {
             .is_err()
     );
     assert_eq!(
-        session.values(VariableValues::default()).environment,
+        session.values(HashMap::new()),
         [("token".into(), "valid".into())].into()
     );
 
@@ -185,10 +172,5 @@ fn changed_name_count_is_bounded_even_for_deleted_values() {
     let changes = (0..4097).map(|index| (index.to_string(), None)).collect();
 
     assert!(session.apply(&changes).is_err());
-    assert!(
-        session
-            .values(VariableValues::default())
-            .environment
-            .is_empty()
-    );
+    assert!(session.values(HashMap::new()).is_empty());
 }

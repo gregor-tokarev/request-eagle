@@ -100,16 +100,8 @@ impl CollectionPanel {
                 self.rename = None;
                 self.pending_delete = None;
                 self.error = None;
-                self.query.clear();
-                self.search
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                // Preserve the moved subtree's collapsed state while revealing its new parent.
-                self.collapsed.retain(|&index| {
-                    let path = &self.tree.items[index].path;
-                    path == source || !destination.starts_with(path)
-                });
-                self.rebuild_tree(Some(&destination), Some((source, &destination)), cx);
-                if let Some(row) = self.selected_row {
+                self.reveal(&destination, Some((source, &destination)), window, cx);
+                if let Some(row) = self.selected_row() {
                     self.select_row(row, cx);
                 }
                 window.focus(&self.focus, cx);

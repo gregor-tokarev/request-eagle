@@ -6,7 +6,6 @@ use gpui_kit::*;
 use request::StatusCode;
 
 use super::{
-    content::size_label,
     timing::{duration_label, timing_details},
     view::ResponseView,
 };
@@ -162,6 +161,14 @@ fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) 
                 .cursor_text()
                 .child(SelectableText::new((id, 1usize), value).document_order(order * 2 + 1)),
         )
+}
+
+fn size_label(bytes: usize) -> String {
+    match bytes {
+        0..1024 => format!("{bytes} B"),
+        1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.),
+        _ => format!("{:.1} MB", bytes as f64 / 1_048_576.),
+    }
 }
 
 fn bytes_label(bytes: usize) -> String {

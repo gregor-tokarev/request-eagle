@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::fs;
 
 use collection::CollectionRegistry;
 use gpui_kit::{
@@ -11,38 +6,22 @@ use gpui_kit::{
     MouseDownEvent, MouseUpEvent, TestAppContext, VisualTestContext, component::Root, px, size,
 };
 
+use tempfile::TempDir;
+
 use super::CollectionPanel;
 
-static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+pub(super) fn fixture() -> TempDir {
+    let fixture = tempfile::tempdir().unwrap();
+    let path = fixture.path();
+    fs::create_dir_all(path.join("API/Users")).unwrap();
+    fs::create_dir_all(path.join("Other")).unwrap();
+    fs::write(path.join("API/Users/list.toml"), "id = 'list'\nname = 'List users'\nschema_version = 1\n[request]\ntype = 'http'\nmethod = 'GET'\npath = '/users'\n").unwrap();
 
-pub(super) struct Fixture(pub(super) PathBuf);
-
-impl Fixture {
-    pub(super) fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "request-eagle-sidebar-edits-{}-{}-{}",
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(path.join("API/Users")).unwrap();
-        fs::create_dir_all(path.join("Other")).unwrap();
-        fs::write(path.join("API/Users/list.toml"), "id = 'list'\nname = 'List users'\nschema_version = 1\n[request]\ntype = 'http'\nmethod = 'GET'\npath = '/users'\n").unwrap();
-        Self(path)
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+    fixture
 }
 
 pub(super) fn sidebar<'a>(
-    fixture: &Fixture,
+    fixture: &TempDir,
     cx: &'a mut TestAppContext,
 ) -> (Entity<CollectionPanel>, &'a mut VisualTestContext) {
     cx.update(|cx| {
@@ -54,7 +33,7 @@ pub(super) fn sidebar<'a>(
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
             CollectionPanel::new(
-                CollectionRegistry::from_path(&fixture.0).unwrap(),
+                CollectionRegistry::from_path(fixture.path()).unwrap(),
                 window,
                 cx,
             )
@@ -93,7 +72,7 @@ fn click_row(
 
 #[gpui_kit::test]
 fn f2_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-2", MouseButton::Left, 2);
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
@@ -101,7 +80,7 @@ fn f2_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppCont
     cx.run_until_parked();
     assert!(cx.debug_bounds("sidebar-rename-editor").is_some());
     cx.simulate_keystrokes("backspace");
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
     cx.simulate_input("All users");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
@@ -110,7 +89,7 @@ fn f2_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppCont
         assert_eq!(sidebar.read(cx).tree.items[2].label, "All users");
     });
     assert!(
-        fs::read_to_string(fixture.0.join("API/Users/list.toml"))
+        fs::read_to_string(fixture.path().join("API/Users/list.toml"))
             .unwrap()
             .contains("All users")
     );
@@ -127,14 +106,14 @@ fn f2_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppCont
 
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
     assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
     cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
     cx.simulate_keystrokes("backspace backspace space");
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    assert!(!fixture.0.join("API/Users/list.toml").exists());
+    assert!(!fixture.path().join("API/Users/list.toml").exists());
     cx.read(|cx| {
         assert_eq!(sidebar.read(cx).tree.items[0].request_count, 0);
         assert_eq!(sidebar.read(cx).selected, Some(2));
@@ -143,7 +122,7 @@ fn f2_renames_and_editor_backspace_and_escape_do_not_delete(cx: &mut TestAppCont
 
 #[gpui_kit::test]
 fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-2", MouseButton::Left, 1);
     click_row(cx, "collection-row-3", MouseButton::Right, 1);
@@ -154,29 +133,29 @@ fn context_menu_targets_clicked_collection_and_can_rename_then_delete(cx: &mut T
     cx.simulate_input("Renamed");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed").is_dir());
-    assert!(!fixture.0.join("Other").exists());
+    assert!(fixture.path().join("Renamed").is_dir());
+    assert!(!fixture.path().join("Other").exists());
     click_row(cx, "collection-row-3", MouseButton::Right, 1);
     cx.simulate_keystrokes("down down down down down down enter");
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed").exists());
+    assert!(fixture.path().join("Renamed").exists());
     cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
     click_row(cx, "cancel-sidebar-delete", MouseButton::Left, 1);
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed").exists());
+    assert!(fixture.path().join("Renamed").exists());
     assert!(cx.debug_bounds("sidebar-delete-prompt").is_none());
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
     click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
     cx.run_until_parked();
-    assert!(!fixture.0.join("Renamed").exists());
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(!fixture.path().join("Renamed").exists());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
     cx.read(|cx| assert_eq!(sidebar.read(cx).tree.roots.len(), 1));
 }
 
 #[gpui_kit::test]
 fn context_menu_restores_tree_focus_and_tracks_its_target_after_insertion(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
     click_row(cx, "collection-row-3", MouseButton::Right, 1);
@@ -188,7 +167,7 @@ fn context_menu_restores_tree_focus_and_tracks_its_target_after_insertion(cx: &m
         sidebar.update(cx, |sidebar, cx| {
             sidebar
                 .collections
-                .create_folder(&fixture.0.join("API"))
+                .create_folder(&fixture.path().join("API"))
                 .unwrap();
             sidebar.rebuild_tree(None, None, cx);
         });
@@ -198,18 +177,18 @@ fn context_menu_restores_tree_focus_and_tracks_its_target_after_insertion(cx: &m
         let sidebar = sidebar.read(cx);
         assert_eq!(
             sidebar.rename.as_ref().unwrap().path,
-            fixture.0.join("Other")
+            fixture.path().join("Other")
         );
     });
     cx.simulate_input("Still Other");
     cx.simulate_keystrokes("enter");
-    assert!(fixture.0.join("Still Other").is_dir());
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(fixture.path().join("Still Other").is_dir());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
 }
 
 #[gpui_kit::test]
 fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-0", MouseButton::Left, 2);
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
@@ -226,17 +205,17 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
+    assert!(fixture.path().join("Renamed API/Users/list.toml").exists());
 
     cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
     cx.simulate_input("List users");
     cx.run_until_parked();
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
+    assert!(fixture.path().join("Renamed API/Users/list.toml").exists());
     cx.simulate_keystrokes("down down down backspace");
     cx.run_until_parked();
-    assert!(fixture.0.join("Renamed API/Users/list.toml").exists());
+    assert!(fixture.path().join("Renamed API/Users/list.toml").exists());
     cx.update(|window, cx| assert!(sidebar.read(cx).delete_focus.is_focused(window)));
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
@@ -246,7 +225,7 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
     cx.run_until_parked();
     click_row(cx, "confirm-sidebar-delete", MouseButton::Left, 1);
     cx.run_until_parked();
-    assert!(!fixture.0.join("Renamed API/Users/list.toml").exists());
+    assert!(!fixture.path().join("Renamed API/Users/list.toml").exists());
     cx.read(|cx| {
         assert!(sidebar.read(cx).visible.is_empty());
         assert!(sidebar.read(cx).selected.is_none());
@@ -255,7 +234,7 @@ fn rename_errors_allow_correction_and_search_backspace_keeps_files(cx: &mut Test
 
 #[gpui_kit::test]
 fn moving_selection_or_filtering_cancels_pending_deletion(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-2", MouseButton::Left, 1);
     cx.simulate_keystrokes("backspace");
@@ -264,20 +243,20 @@ fn moving_selection_or_filtering_cancels_pending_deletion(cx: &mut TestAppContex
     cx.simulate_keystrokes("down");
     cx.run_until_parked();
     cx.read(|cx| assert!(sidebar.read(cx).pending_delete.is_none()));
-    assert!(fixture.0.join("API/Users/list.toml").exists());
+    assert!(fixture.path().join("API/Users/list.toml").exists());
     cx.simulate_keystrokes("backspace");
     cx.run_until_parked();
     assert!(cx.debug_bounds("sidebar-delete-prompt").is_some());
     cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
     cx.run_until_parked();
     cx.read(|cx| assert!(sidebar.read(cx).pending_delete.is_none()));
-    assert!(fixture.0.join("Other").exists());
+    assert!(fixture.path().join("Other").exists());
 }
 
 #[gpui_kit::test]
 fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
-    fs::remove_dir_all(&fixture.0).unwrap();
+    let fixture = fixture();
+    fs::remove_dir_all(fixture.path()).unwrap();
     let (sidebar, cx) = sidebar(&fixture, cx);
     cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
     cx.simulate_keystrokes("tab");
@@ -298,7 +277,7 @@ fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAp
     cx.simulate_input("My API");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    assert!(fixture.0.join("My API").is_dir());
+    assert!(fixture.path().join("My API").is_dir());
 
     click_row(cx, "collection-row-0", MouseButton::Right, 1);
     cx.simulate_keystrokes("down down enter");
@@ -307,7 +286,7 @@ fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAp
     cx.simulate_input("Nested");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    assert!(fixture.0.join("My API/Nested").is_dir());
+    assert!(fixture.path().join("My API/Nested").is_dir());
 
     click_row(cx, "collection-row-1", MouseButton::Right, 1);
     cx.simulate_keystrokes("down enter");
@@ -315,7 +294,7 @@ fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAp
     cx.simulate_input("My request");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    let path = fixture.0.join("My API/Nested/New Request.toml");
+    let path = fixture.path().join("My API/Nested/New Request.toml");
     assert!(fs::read_to_string(path).unwrap().contains("My request"));
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
@@ -326,7 +305,7 @@ fn creates_a_collection_folder_and_request_from_an_empty_sidebar(cx: &mut TestAp
 
 #[gpui_kit::test]
 fn creation_clears_filter_expands_parent_and_keeps_default_name_on_escape(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = fixture();
     let (sidebar, cx) = sidebar(&fixture, cx);
     click_row(cx, "collection-row-0", MouseButton::Left, 1);
     cx.update(|window, cx| sidebar.read(cx).search.focus_handle(cx).focus(window, cx));
@@ -345,7 +324,7 @@ fn creation_clears_filter_expands_parent_and_keeps_default_name_on_escape(cx: &m
     });
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
-    assert!(fixture.0.join("API/New Request.toml").exists());
+    assert!(fixture.path().join("API/New Request.toml").exists());
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(

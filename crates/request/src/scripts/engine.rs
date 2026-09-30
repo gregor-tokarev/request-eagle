@@ -18,10 +18,10 @@ use serde::Deserialize;
 
 use super::{
     ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
-    network::{Network, NetworkOptions},
+    network::Network,
     variables::{Variables, dynamic_variable},
 };
-use crate::Method;
+use crate::{Method, RequestExecutor};
 
 const TIME_LIMIT: Duration = Duration::from_secs(2);
 const WALL_LIMIT: Duration = Duration::from_secs(30);
@@ -99,7 +99,7 @@ pub(super) fn run(
     request_body: &mut Option<Bytes>,
     mut response_body: Option<&mut Vec<u8>>,
     cancelled: Arc<AtomicBool>,
-    network_options: Option<NetworkOptions>,
+    executor: &RequestExecutor,
 ) -> (Option<ScriptOutput>, ScriptReport) {
     // Callbacks own the buffers while QuickJS runs. Restore them after the
     // runtime is dropped, including on script errors, without copying bytes.
@@ -174,7 +174,7 @@ pub(super) fn run(
                 let expect: Function = cx.eval(include_str!("assertions.js"))?;
                 let dynamic = Function::new(cx.clone(), |name: String| dynamic_variable(&name))?;
                 let read_body = body_reader(cx.clone(), bodies.clone())?;
-                let send = network.binding(cx.clone(), network_options)?;
+                let send = network.binding(cx.clone(), executor)?;
                 let utilities = super::utilities::bindings(cx.clone())?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
                 let mut args = Args::new(cx.clone(), 8);

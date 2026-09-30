@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::Request;
+use request::Request;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]

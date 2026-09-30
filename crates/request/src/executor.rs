@@ -3,14 +3,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{Execution, ExecutionError, Request, RequestPreferences, Response, http::HttpExecutor};
+use bytes::Bytes;
+
+use crate::{
+    Execution, ExecutionError, HttpRequest, RequestPreferences, RequestVariables, Response,
+    http::HttpExecutor, scripts,
+};
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
 /// Construct a new executor when request preferences change.
 #[derive(Clone)]
 pub struct RequestExecutor {
-    http: HttpExecutor,
-    timeout: Option<Duration>,
+    pub(crate) http: HttpExecutor,
+    pub(crate) timeout: Option<Duration>,
 }
 
 impl RequestExecutor {
@@ -22,71 +27,50 @@ impl RequestExecutor {
         })
     }
 
-    /// Takes a snapshot immediately, so editing the source cannot change a run.
-    /// Accepts owned or borrowed `Request` and `HttpRequest` values.
-    /// Dropping the returned future cancels the run, including a pending body read.
-    pub fn execute<R: Into<Request>>(
+    /// Run the request's scripts and send it, resolving variables after the
+    /// pre-request scripts. The future owns its inputs, so editing the source
+    /// cannot change a run. Dropping it cancels the run, including a pending
+    /// body read.
+    pub fn execute(
         &self,
-        request: R,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
-        self.execute_inner(request, None)
-    }
-
-    /// Resolve collection and script variables together after the pre-request script.
-    pub fn execute_with_variables<R: Into<Request>>(
-        &self,
-        request: R,
-        variables: crate::RequestVariables,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
-        self.execute_inner(request, Some(variables))
-    }
-
-    fn execute_inner<R: Into<Request>>(
-        &self,
-        request: R,
-        variables: Option<crate::RequestVariables>,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<R> {
-        let request = request.into();
+        request: HttpRequest,
+        variables: RequestVariables,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
         let executor = self.clone();
 
         async move {
-            let cancellation = crate::scripts::Cancellation::new();
-            let mut scripts = Vec::new();
+            let cancellation = scripts::Cancellation::new();
+            let mut reports = Vec::new();
             let run = async {
-                match request {
-                    Request::Http(request) => {
-                        let (mut request, variables, reports) =
-                            crate::scripts::pre_request_with_network(
-                                request,
-                                cancellation.0.clone(),
-                                variables,
-                                Some(crate::scripts::NetworkOptions {
-                                    http: executor.http.clone(),
-                                    timeout: executor.timeout,
-                                }),
-                            )
-                            .await?;
-                        scripts = reports;
+                let (mut request, state, pre_reports) = scripts::pre_request(
+                    request,
+                    variables,
+                    executor.clone(),
+                    cancellation.0.clone(),
+                )
+                .await?;
+                reports = pre_reports;
 
-                        let sent_at = Instant::now();
-                        let has_post_script = !request.scripts.post_response.trim().is_empty()
-                            || !variables.collection_post_response.trim().is_empty();
-                        let body = request.body.take().map(bytes::Bytes::from);
-                        let post_body = if has_post_script { body.clone() } else { None };
-                        let response = executor.http.execute(&request, body).await?;
-                        let post_request = has_post_script.then_some((request, post_body));
-                        let execution = Execution {
-                            response: Response::Http(response),
-                            elapsed: sent_at.elapsed(),
-                            scripts: std::mem::take(&mut scripts),
-                        };
+                let sent_at = Instant::now();
+                let body = request.body.take().map(Bytes::from);
 
-                        Ok((post_request, variables, execution))
-                    }
-                }
+                // Only a post-response script reads the sent body. Otherwise
+                // HTTP owns the upload and releases it before the download.
+                let has_post_script = !request.scripts.post_response.trim().is_empty()
+                    || !state.collection_post_response.trim().is_empty();
+                let post_body = if has_post_script { body.clone() } else { None };
+
+                let response = executor.http.execute(&request, body).await?;
+                let execution = Execution {
+                    response: Response::Http(response),
+                    elapsed: sent_at.elapsed(),
+                    scripts: std::mem::take(&mut reports),
+                };
+
+                Ok((request, post_body, state, execution))
             };
 
-            let (post_request, variables, execution) = match executor.timeout {
+            let (request, body, state, execution) = match executor.timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;
@@ -98,33 +82,27 @@ impl RequestExecutor {
                 None => run.await,
             }
             .map_err(|error| {
-                if scripts.is_empty() {
+                if reports.is_empty() {
                     error
                 } else {
                     ExecutionError::ScriptedRequest {
                         source: Box::new(error),
-                        reports: scripts,
+                        reports,
                     }
                 }
             })?;
 
             // Once the response is complete, its script uses the separate script
             // deadline. A request timeout must not discard a received response.
-            match post_request {
-                Some((request, body)) => Ok(crate::scripts::post_response_with_network(
-                    request,
-                    body,
-                    variables,
-                    execution,
-                    cancellation.0.clone(),
-                    Some(crate::scripts::NetworkOptions {
-                        http: executor.http.clone(),
-                        timeout: executor.timeout,
-                    }),
-                )
-                .await),
-                None => Ok(execution),
-            }
+            Ok(scripts::post_response(
+                request,
+                body,
+                state,
+                execution,
+                executor,
+                cancellation.0.clone(),
+            )
+            .await)
         }
     }
 }

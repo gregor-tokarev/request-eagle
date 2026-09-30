@@ -1,10 +1,9 @@
-use crate::{GENERATED_VARIABLES, VariableError, VariableResolver, VariableValues};
+use crate::{GENERATED_VARIABLES, VariableError, VariableResolver};
+use std::collections::HashMap;
 
 #[test]
 fn escapes_literal_braces_without_resolving_colliding_names_or_other_sources() {
-    let values = VariableValues {
-        environment: [("customer".into(), "resolved customer".into())].into(),
-    };
+    let values = HashMap::from([("customer".into(), "resolved customer".into())]);
     let mut resolver = VariableResolver::new(&values);
     assert_eq!(
         resolver
@@ -32,13 +31,10 @@ fn escapes_literal_braces_without_resolving_colliding_names_or_other_sources() {
 
 #[test]
 fn resolves_multiple_sources_without_recursively_expanding_values() {
-    let values = VariableValues {
-        environment: [
-            ("host".into(), "https://example.com".into()),
-            ("literal".into(), "{{leave_me}}".into()),
-        ]
-        .into(),
-    };
+    let values = HashMap::from([
+        ("host".into(), "https://example.com".into()),
+        ("literal".into(), "{{leave_me}}".into()),
+    ]);
     let mut resolver = VariableResolver::new(&values);
     assert!(
         resolver
@@ -59,7 +55,7 @@ fn resolves_multiple_sources_without_recursively_expanding_values() {
 
 #[test]
 fn generated_values_are_valid_and_stable_for_one_send() {
-    let values = VariableValues::default();
+    let values = HashMap::new();
     let mut resolver = VariableResolver::new(&values);
     for (name, _) in GENERATED_VARIABLES {
         let template = format!("{{{{{name}}}}}");
@@ -86,7 +82,7 @@ fn generated_values_are_valid_and_stable_for_one_send() {
 
 #[test]
 fn generated_values_follow_postman_formats() {
-    let values = VariableValues::default();
+    let values = HashMap::new();
     let mut resolver = VariableResolver::new(&values);
     let timestamp = resolver
         .resolve("{{$timestamp}}")

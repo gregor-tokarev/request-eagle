@@ -35,8 +35,6 @@ pub fn run() {
             objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion(),
         );
 
-        keybindings_service::init(cx);
-
         let Some(home) = std::env::home_dir() else {
             eprintln!("Failed to load preferences: could not locate the home directory.");
             cx.quit();
@@ -71,16 +69,22 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
     actions::init(updater.clone(), cx);
 
-    let collections = match std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR") {
-        Some(path) => collection::CollectionRegistry::from_path(path),
-        None => collection::CollectionRegistry::load(),
-    }
-    .expect("Failed to load collections");
+    let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".request-eagle/collections"));
+    let collections = collection::CollectionRegistry::from_path(collections_directory)
+        .expect("Failed to load collections");
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
+        window
+            .observe_window_appearance(|window, cx| {
+                request_eagle_theme::apply_preferences(window.appearance(), cx);
+            })
+            .detach();
+
         let workspace = workspace::init(collections, environments, updater, window, cx);
         let view = cx.new(|_| ApplicationView { workspace });
 

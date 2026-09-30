@@ -7,7 +7,7 @@ use http_client::{
     },
 };
 
-use crate::HttpError;
+use crate::ExecutionError;
 
 const REDIRECT_LIMIT: u32 = 100;
 
@@ -16,7 +16,7 @@ pub(crate) async fn send(
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
-) -> Result<Response<AsyncBody>, HttpError> {
+) -> Result<Response<AsyncBody>, ExecutionError> {
     let (mut parts, mut body) = request.into_parts();
     let mut redirects = 0;
 
@@ -29,7 +29,7 @@ pub(crate) async fn send(
         let response = client
             .send(Request::from_parts(parts.clone(), body.clone().into()))
             .await
-            .map_err(HttpError::Transport)?;
+            .map_err(ExecutionError::Transport)?;
 
         if !follow {
             return Ok(response);
@@ -57,11 +57,13 @@ pub(crate) async fn send(
         redirects += 1;
 
         if redirects >= REDIRECT_LIMIT {
-            return Err(HttpError::Transport(anyhow::anyhow!("too many redirects")));
+            return Err(ExecutionError::Transport(anyhow::anyhow!(
+                "too many redirects"
+            )));
         }
 
         if !matches!(next.scheme(), "http" | "https") {
-            return Err(HttpError::UnsupportedScheme(next.scheme().to_owned()));
+            return Err(ExecutionError::UnsupportedScheme(next.scheme().to_owned()));
         }
 
         if matches!(status, 301..=303) {

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use collection::{HttpRequest, Method};
-use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{Context, Entity, Modifiers, TestAppContext, VisualTestContext};
+use request::{HttpRequest, Method};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, draft::RequestSection};
@@ -16,6 +16,11 @@ pub(crate) fn element_bounds(
     cx.debug_bounds(selector)
 }
 
+/// An unsaved, empty draft that does not use global environments.
+pub(crate) fn new_draft(cx: &mut Context<RequestDraft>) -> RequestDraft {
+    RequestDraft::new(HttpRequest::default(), None, Default::default(), None, cx)
+}
+
 pub(super) fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -24,7 +29,7 @@ pub(super) fn draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut Visu
     });
 
     cx.add_window_view(|window, cx| {
-        let mut draft = RequestDraft::new();
+        let mut draft = new_draft(cx);
         draft.prepare(window, cx);
         draft
     })

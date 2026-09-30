@@ -1,10 +1,10 @@
-use collection::Method;
 use gpui_kit::component::{
     button::*,
     input::{Editor, EditorState, InputEvent},
     *,
 };
 use gpui_kit::*;
+use request::Method;
 
 use super::draft::RequestDraft;
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
@@ -38,7 +38,7 @@ impl RequestDraft {
                 .placeholder("Enter JSON request body")
                 .default_value(value)
         });
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         self.body_vim = Some(cx.new(|cx| crate::vim::Vim::new(body.clone(), cx)));
         self.body_completion =
             Some(cx.new(|cx| {

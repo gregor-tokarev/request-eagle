@@ -174,10 +174,8 @@ fn benchmark_collections(request_count: usize) -> CollectionRegistry {
 
     // Load synthetic requests through the real parser, outside the timed region.
     // Never load or modify the user's collections or preferences.
-    let directory = std::env::temp_dir().join(format!(
-        "request-eagle-search-benchmark-{}-{request_count}",
-        std::process::id()
-    ));
+    let directory = tempfile::tempdir().unwrap();
+    let directory = directory.path();
     for index in 0..request_count {
         let folder = directory.join(format!(
             "collection-{:02}/folder-{:02}",
@@ -190,9 +188,7 @@ fn benchmark_collections(request_count: usize) -> CollectionRegistry {
         )).unwrap();
     }
 
-    let collections = CollectionRegistry::from_path(&directory).unwrap();
-    fs::remove_dir_all(directory).unwrap();
-    collections
+    CollectionRegistry::from_path(directory).unwrap()
 }
 
 #[test]

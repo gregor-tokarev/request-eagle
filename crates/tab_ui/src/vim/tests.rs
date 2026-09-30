@@ -626,8 +626,8 @@ fn grapheme_navigation_crosses_rope_chunks_in_both_directions() {
     expected.push(source.len());
 
     for pair in expected.windows(2) {
-        assert_eq!(super::grapheme::next(&rope, pair[0]), pair[1]);
-        assert_eq!(super::grapheme::previous(&rope, pair[1]), pair[0]);
+        assert_eq!(super::motions::next(&rope, pair[0]), pair[1]);
+        assert_eq!(super::motions::previous(&rope, pair[1]), pair[0]);
     }
 }
 

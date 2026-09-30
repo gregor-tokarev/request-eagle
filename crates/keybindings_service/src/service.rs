@@ -51,7 +51,7 @@ impl Command {
     }
 }
 
-pub fn init(cx: &mut App) {
+fn init(cx: &mut App) {
     if !cx.has_global::<KeybindingsService>() {
         cx.set_global(KeybindingsService::default());
     }
@@ -89,8 +89,7 @@ pub fn storage_error(cx: &App) -> Option<&str> {
 }
 
 /// Register each user-facing command once, with its built-in shortcut.
-/// Register fixed bindings first. If a resolved shortcut conflicts with an
-/// earlier binding, leave this command unassigned and report the error in
+/// If a resolved shortcut conflicts with an earlier binding, leave this command unassigned and report the error in
 /// Settings. Keep the saved value until the user repairs or resets it.
 pub fn register<A: Action>(
     action: A,
@@ -259,24 +258,6 @@ pub fn reset_all(cx: &mut App) -> Result<(), KeybindingError> {
     })
 }
 
-/// Sets the active binding for an action. Calling this again replaces the
-/// previous binding immediately without clearing bindings owned by GPUI or
-/// other services.
-pub fn set_binding<A: Action>(
-    keystrokes: &str,
-    action: A,
-    context: Option<&str>,
-    cx: &mut App,
-) -> Result<(), KeybindingError> {
-    let binding = Binding::new(keystrokes, context)?;
-
-    init(cx);
-
-    cx.update_global::<KeybindingsService, _>(|service, cx| {
-        service.replace_binding(Box::new(action), Some(binding), cx)
-    })
-}
-
 pub fn binding_for<A: Action>(cx: &App) -> Option<&Binding> {
     cx.try_global::<KeybindingsService>()?
         .bindings
@@ -360,17 +341,7 @@ impl KeybindingsService {
                     || keys.starts_with(&format!("{other_keys} "))
                     || other_keys.starts_with(&format!("{keys} ")))
             {
-                let label = self
-                    .commands
-                    .get(other.action_name)
-                    .map(|command| command.label)
-                    .unwrap_or_else(|| {
-                        other
-                            .action_name
-                            .rsplit("::")
-                            .next()
-                            .unwrap_or(other.action_name)
-                    });
+                let label = self.commands[other.action_name].label;
 
                 return Err(KeybindingError::Conflict(label));
             }

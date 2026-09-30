@@ -10,15 +10,15 @@ pub enum Request {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: Method,
-    /// An absolute HTTP or HTTPS URL when executing the request.
+    /// An HTTP or HTTPS URL, which may contain `{{variables}}`.
     pub path: String,
 
     #[serde(default)]
     pub headers: Vec<(String, String)>,
     #[serde(default)]
     pub body: Option<Vec<u8>>,
-    #[serde(default)]
-    pub query: Option<Vec<(String, String)>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "crate::RequestScripts::is_empty")]
     pub scripts: crate::RequestScripts,
 }
@@ -50,18 +50,6 @@ impl HttpRequest {
 impl From<HttpRequest> for Request {
     fn from(request: HttpRequest) -> Self {
         Self::Http(request)
-    }
-}
-
-impl From<&HttpRequest> for Request {
-    fn from(request: &HttpRequest) -> Self {
-        Self::Http(request.clone())
-    }
-}
-
-impl From<&Request> for Request {
-    fn from(request: &Request) -> Self {
-        request.clone()
     }
 }
 
