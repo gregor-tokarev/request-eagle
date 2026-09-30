@@ -119,7 +119,7 @@ impl RequestDraft {
                 Err(error) => return (None, Err(error)),
             };
             let result = executor
-                .execute_with_variables(request, variables)
+                .execute(request, variables)
                 .await
                 .map(super::super::response_view::ResponseContent::new);
 

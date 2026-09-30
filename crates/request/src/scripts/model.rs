@@ -49,13 +49,13 @@ impl ScriptReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ScriptTest {
     pub name: String,
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ScriptLog {
     pub level: String,
     pub message: String,

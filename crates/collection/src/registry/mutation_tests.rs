@@ -163,7 +163,7 @@ request_custom = 'keep the request metadata'
     };
 
     registry
-        .update_request(&path, "list", (&updated).into())
+        .update_request(&path, "list", updated.clone().into())
         .unwrap();
 
     let cached = registry.file(&path).unwrap();
@@ -364,7 +364,7 @@ query = [
     request.path = "https://example.com/edited".into();
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -376,7 +376,7 @@ query = [
     request.headers[0].1 = "text/plain".into();
     request.query.as_mut().unwrap()[0].1 = "2".into();
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -427,7 +427,7 @@ query = [
     request.query.as_mut().unwrap().remove(0);
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -448,7 +448,7 @@ query = [
     request.query.as_mut().unwrap()[0].1 = "c".into();
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();

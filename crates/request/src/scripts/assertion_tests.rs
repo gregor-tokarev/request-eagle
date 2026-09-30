@@ -1,7 +1,9 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
+use environment::VariableValues;
+
 use super::{RequestScripts, runtime::pre_request};
-use crate::HttpRequest;
+use crate::{HttpRequest, RequestExecutor, RequestPreferences, RequestVariables};
 
 fn check(cases: &[(&str, bool)]) {
     let source = cases
@@ -16,8 +18,13 @@ fn check(cases: &[(&str, bool)]) {
         },
         ..Default::default()
     };
-    let (_, _, reports) =
-        smol::block_on(pre_request(request, Arc::new(AtomicBool::new(false)))).unwrap();
+    let (_, _, reports) = smol::block_on(pre_request(
+        request,
+        RequestVariables::new(VariableValues::default(), None),
+        RequestExecutor::new(&RequestPreferences::default()).unwrap(),
+        Arc::new(AtomicBool::new(false)),
+    ))
+    .unwrap();
 
     assert_eq!(reports[0].tests.len(), cases.len());
     for (test, (source, pass)) in reports[0].tests.iter().zip(cases) {

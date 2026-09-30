@@ -9,7 +9,7 @@ pub struct RequestVariables {
     pub(crate) values: VariableValues,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
-    environment_error: Option<String>,
+    pub(crate) environment_error: Option<String>,
 }
 
 impl RequestVariables {
@@ -54,51 +54,59 @@ impl RequestVariables {
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
         let scripted = !request.scripts.pre_request.trim().is_empty();
-        self.resolve_owned(request.clone(), scripted, false, &mut BTreeMap::new())
+        resolve_request(
+            &self.values,
+            self.environment_error.as_deref(),
+            request.clone(),
+            scripted,
+            false,
+            &mut BTreeMap::new(),
+        )
     }
+}
 
-    /// `scripted` reports whether a collection or request pre-request script ran.
-    pub(crate) fn resolve_owned(
-        &self,
-        request: HttpRequest,
-        scripted: bool,
-        body_changed: bool,
-        generated: &mut BTreeMap<String, String>,
-    ) -> Result<HttpRequest, String> {
-        let mut resolver = VariableResolver::new(&self.values);
-        for (name, value) in generated.iter() {
-            resolver.override_generated(name.clone(), value.clone());
-        }
-        if scripted || !request.scripts.is_empty() {
-            resolver.limit_output(32 * 1024 * 1024);
-        }
-        // Only scripts can introduce these reserved names; collection values
-        // were filtered when this send snapshot was created.
-        if scripted {
-            for (name, value) in &self.values.environment {
-                if name.starts_with('$') {
-                    resolver.override_generated(name.clone(), value.clone());
-                }
-            }
-        }
-        let resolved = request.resolve_with(&mut resolver, body_changed);
-        // Keep generated values for the post-response phase, separate from
-        // local overrides so unsetting an override restores the cached value.
-        for (name, value) in resolver.generated_values() {
-            if !self.values.environment.contains_key(name) {
-                generated.insert(name.clone(), value.clone());
-            }
-        }
-        resolved.map_err(|error| {
-            if let VariableError::Unknown(name) = &error
-                && !name.starts_with('$')
-                && let Some(message) = &self.environment_error
-            {
-                return message.clone();
-            }
-            error.to_string()
-        })
+/// `scripted` reports whether a collection or request pre-request script ran.
+pub(crate) fn resolve_request(
+    values: &VariableValues,
+    environment_error: Option<&str>,
+    request: HttpRequest,
+    scripted: bool,
+    body_changed: bool,
+    generated: &mut BTreeMap<String, String>,
+) -> Result<HttpRequest, String> {
+    let mut resolver = VariableResolver::new(values);
+    for (name, value) in generated.iter() {
+        resolver.override_generated(name.clone(), value.clone());
     }
+    if scripted || !request.scripts.is_empty() {
+        resolver.limit_output(32 * 1024 * 1024);
+    }
+    // Only scripts can introduce these reserved names; collection values
+    // were filtered when this send snapshot was created.
+    if scripted {
+        for (name, value) in &values.environment {
+            if name.starts_with('$') {
+                resolver.override_generated(name.clone(), value.clone());
+            }
+        }
+    }
+    let resolved = request.resolve_with(&mut resolver, body_changed);
+    // Keep generated values for the post-response phase, separate from
+    // local overrides so unsetting an override restores the cached value.
+    for (name, value) in resolver.generated_values() {
+        if !values.environment.contains_key(name) {
+            generated.insert(name.clone(), value.clone());
+        }
+    }
+    resolved.map_err(|error| {
+        if let VariableError::Unknown(name) = &error
+            && !name.starts_with('$')
+            && let Some(message) = environment_error
+        {
+            return message.to_owned();
+        }
+        error.to_string()
+    })
 }
 
 impl HttpRequest {

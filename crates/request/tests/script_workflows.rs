@@ -10,8 +10,7 @@ use std::{
 };
 
 use environment::{EnvironmentSession, VariableValues};
-
-use crate::{
+use request::{
     ExecutionError, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables,
 };
 
@@ -107,6 +106,10 @@ fn variables(session: &EnvironmentSession) -> RequestVariables {
     RequestVariables::with_environment_session(VariableValues::default(), None, session.clone())
 }
 
+fn no_variables() -> RequestVariables {
+    RequestVariables::new(VariableValues::default(), None)
+}
+
 #[test]
 fn response_tokens_survive_execution_and_locals_do_not() {
     let server = Server::new();
@@ -116,14 +119,11 @@ fn response_tokens_survive_execution_and_locals_do_not() {
         "pm.variables.set('local', 'only this request');",
         "pm.environment.set('token', pm.response.json().token);",
     );
-    let login_before = login.clone();
-    smol::block_on(executor.execute_with_variables(&login, variables(&session))).unwrap();
+    smol::block_on(executor.execute(login, variables(&session))).unwrap();
     let mut next = server.request("pm.expect(pm.variables.has('local')).to.be.false;", "");
     next.headers
         .push(("Authorization".into(), "Bearer {{token}}".into()));
-    smol::block_on(executor.execute_with_variables(&next, variables(&session))).unwrap();
-    assert_eq!(login, login_before);
-    assert_eq!(next.headers[0].1, "Bearer {{token}}");
+    smol::block_on(executor.execute(next.clone(), variables(&session))).unwrap();
     assert!(
         server.requests.lock().unwrap()[1]
             .to_lowercase()
@@ -131,7 +131,7 @@ fn response_tokens_survive_execution_and_locals_do_not() {
     );
 
     let isolated = EnvironmentSession::default();
-    assert!(smol::block_on(executor.execute_with_variables(next, variables(&isolated))).is_err());
+    assert!(smol::block_on(executor.execute(next, variables(&isolated))).is_err());
     assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
 
@@ -149,12 +149,11 @@ fn async_auth_calls_resolve_variables_and_modify_only_the_outgoing_request() {
         pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + response.json().token});
         pm.test('token returned', () => response.to.have.status(200));
     "#, "pm.test('authorized', () => pm.expect(pm.response.json().request).to.include('session-token'));");
-    let result = smol::block_on(server.executor().execute(&request)).unwrap();
+    let result = smol::block_on(server.executor().execute(request, no_variables())).unwrap();
     assert_eq!(result.scripts.len(), 2);
     assert!(result.scripts.iter().all(
         |report| report.error.is_none() && report.tests.iter().all(|test| test.error.is_none())
     ));
-    assert!(request.headers.is_empty());
     let received = server.requests.lock().unwrap();
     assert_eq!(received.len(), 2);
     assert!(received[0].starts_with("POST /token "));
@@ -193,7 +192,9 @@ fn malformed_subrequest_templates_fail_before_sending() {
             }
             let source =
                 format!("pm.variables.set('token', 'resolved'); await pm.sendRequest({config});");
-            let error = smol::block_on(executor.execute(server.request(&source, ""))).unwrap_err();
+            let error =
+                smol::block_on(executor.execute(server.request(&source, ""), no_variables()))
+                    .unwrap_err();
             let ExecutionError::Script { message, .. } = error else {
                 panic!("Expected a script error for {field}: {template}, got {error}");
             };
@@ -226,7 +227,7 @@ fn subrequests_preserve_escaped_literals_and_resolve_nested_names_once() {
         "",
     );
 
-    smol::block_on(server.executor().execute(request)).unwrap();
+    smol::block_on(server.executor().execute(request, no_variables())).unwrap();
 
     let received = server.requests.lock().unwrap();
     assert_eq!(received.len(), 2);
@@ -248,7 +249,7 @@ fn subrequests_ignore_templates_in_literal_and_expanded_url_fragments() {
         "",
     );
 
-    smol::block_on(server.executor().execute(request)).unwrap();
+    smol::block_on(server.executor().execute(request, no_variables())).unwrap();
 
     let received = server.requests.lock().unwrap();
     assert_eq!(received.len(), 3);
@@ -275,7 +276,7 @@ fn get_and_head_calls_omit_bodies_before_parsing_resolving_or_serializing() {
         "",
     );
 
-    smol::block_on(server.executor().execute(request)).unwrap();
+    smol::block_on(server.executor().execute(request, no_variables())).unwrap();
 
     let received = server.requests.lock().unwrap();
     assert_eq!(received.len(), 19);
@@ -307,7 +308,7 @@ fn async_tests_and_unawaited_callbacks_finish_before_reporting() {
         });
         pm.test('async failure', async () => { await Promise.resolve(); pm.expect(1).to.equal(2); });
     "#);
-    let result = smol::block_on(server.executor().execute(request)).unwrap();
+    let result = smol::block_on(server.executor().execute(request, no_variables())).unwrap();
     let report = &result.scripts[0];
     assert!(report.error.is_none(), "{:?}", report.error);
     assert_eq!(report.tests.len(), 3);
@@ -338,7 +339,7 @@ fn callback_errors_are_not_called_twice_or_silently_swallowed() {
     "#,
         "",
     );
-    smol::block_on(server.executor().execute(request)).unwrap();
+    smol::block_on(server.executor().execute(request, no_variables())).unwrap();
 }
 
 #[test]
@@ -354,7 +355,7 @@ fn promise_errors_and_unresolved_async_tests_fail_without_sending() {
         let request = server.request(source, "");
         assert!(
             matches!(
-                smol::block_on(server.executor().execute(request)),
+                smol::block_on(server.executor().execute(request, no_variables())),
                 Err(ExecutionError::Script { .. })
             ),
             "{source}"
@@ -381,8 +382,7 @@ fn local_overrides_reveal_environment_when_unset_and_failed_phases_do_not_commit
     "#,
         "pm.environment.set('token', 'post'); throw Error('discard changes');",
     );
-    let result =
-        smol::block_on(executor.execute_with_variables(request, variables(&session))).unwrap();
+    let result = smol::block_on(executor.execute(request, variables(&session))).unwrap();
     assert!(result.scripts[1].error.is_some());
     assert_eq!(
         session.values(VariableValues::default()).environment["token"],
@@ -392,7 +392,7 @@ fn local_overrides_reveal_environment_when_unset_and_failed_phases_do_not_commit
         "pm.environment.set('token', 'failed'); throw Error('discard');",
         "",
     );
-    assert!(smol::block_on(executor.execute_with_variables(request, variables(&session))).is_err());
+    assert!(smol::block_on(executor.execute(request, variables(&session))).is_err());
     assert_eq!(
         session.values(VariableValues::default()).environment["token"],
         "pre"
@@ -411,7 +411,7 @@ fn skip_preserves_reason_and_does_not_send_queued_or_main_requests() {
     "#,
         "throw Error('must not run post-response');",
     );
-    let error = smol::block_on(server.executor().execute(request)).unwrap_err();
+    let error = smol::block_on(server.executor().execute(request, no_variables())).unwrap_err();
     let ExecutionError::Skipped { reason, report } = error else {
         panic!("{error:?}")
     };
@@ -433,7 +433,7 @@ fn crypto_and_schema_helpers_are_available_in_real_request_scripts() {
         const result = pm.schema.validate(pm.response.json(), {properties: {id: {minimum: 100}}});
         pm.test('error location', () => pm.expect(result.errors[0].instancePath).to.equal('/id'));
     "#);
-    let result = smol::block_on(server.executor().execute(request)).unwrap();
+    let result = smol::block_on(server.executor().execute(request, no_variables())).unwrap();
     assert!(result.scripts.iter().all(|report| report.error.is_none()));
     assert!(result.scripts[1].tests[0].error.is_none());
     assert!(
@@ -454,13 +454,13 @@ fn script_calls_inherit_response_limits_and_timeout() {
     preferences.max_response_size_mb = 1;
     let executor = RequestExecutor::new(&preferences).unwrap();
     let request = server.request("await pm.sendRequest('BASE/large');", "");
-    let error = smol::block_on(executor.execute(request)).unwrap_err();
+    let error = smol::block_on(executor.execute(request, no_variables())).unwrap_err();
     assert!(error.to_string().contains("limit"), "{error}");
     preferences.timeout_ms = 30;
     let executor = RequestExecutor::new(&preferences).unwrap();
     let request = server.request("await pm.sendRequest('BASE/slow');", "");
     let start = Instant::now();
-    assert!(smol::block_on(executor.execute(request)).is_err());
+    assert!(smol::block_on(executor.execute(request, no_variables())).is_err());
     assert!(start.elapsed() < Duration::from_secs(1));
     assert!(
         !server
@@ -480,9 +480,7 @@ fn cancellation_during_script_http_does_not_commit_environment_or_send_main() {
         "pm.environment.set('token', 'cancelled'); await pm.sendRequest('BASE/slow');",
         "",
     );
-    let future = server
-        .executor()
-        .execute_with_variables(request, variables(&session));
+    let future = server.executor().execute(request, variables(&session));
     smol::block_on(smol::future::or(
         async {
             let _ = future.await;
@@ -508,8 +506,8 @@ fn cancellation_during_script_http_does_not_commit_environment_or_send_main() {
     );
 }
 
-fn collection_scripts(pre: &str, post: &str) -> Result<crate::RequestScripts, String> {
-    Ok(crate::RequestScripts {
+fn collection_scripts(pre: &str, post: &str) -> Result<request::RequestScripts, String> {
+    Ok(request::RequestScripts {
         pre_request: pre.into(),
         post_response: post.into(),
     })
@@ -530,12 +528,7 @@ fn collection_scripts_run_before_the_request_scripts_in_each_phase() {
         "pm.environment.set('token', pm.response.json().token);",
     ));
 
-    let execution = smol::block_on(
-        server
-            .executor()
-            .execute_with_variables(&request, variables),
-    )
-    .unwrap();
+    let execution = smol::block_on(server.executor().execute(request, variables)).unwrap();
 
     let labels: Vec<_> = execution
         .scripts
@@ -569,12 +562,7 @@ fn a_failing_request_script_keeps_the_collection_report_and_sends_nothing() {
     let variables = RequestVariables::new(VariableValues::default(), None)
         .with_collection_scripts(collection_scripts("console.log('collection ran');", ""));
 
-    let error = smol::block_on(
-        server
-            .executor()
-            .execute_with_variables(&request, variables),
-    )
-    .unwrap_err();
+    let error = smol::block_on(server.executor().execute(request, variables)).unwrap_err();
 
     let ExecutionError::ScriptedRequest { source, reports } = error else {
         panic!("expected both script reports, got {error}");
@@ -600,12 +588,8 @@ fn unreadable_collection_scripts_stop_the_send() {
     let variables = RequestVariables::new(VariableValues::default(), None)
         .with_collection_scripts(Err("Could not read the collection scripts".into()));
 
-    let error = smol::block_on(
-        server
-            .executor()
-            .execute_with_variables(server.request("", ""), variables),
-    )
-    .unwrap_err();
+    let error =
+        smol::block_on(server.executor().execute(server.request("", ""), variables)).unwrap_err();
 
     let ExecutionError::Script { message, report } = error else {
         panic!("expected a script error, got {error}");
