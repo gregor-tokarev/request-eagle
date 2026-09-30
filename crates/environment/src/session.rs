@@ -73,7 +73,9 @@ impl EnvironmentSession {
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
-        self.revision.fetch_add(1, Ordering::AcqRel);
+        if !changes.is_empty() {
+            self.revision.fetch_add(1, Ordering::AcqRel);
+        }
 
         Ok(())
     }

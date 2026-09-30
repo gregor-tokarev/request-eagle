@@ -188,6 +188,10 @@ fn every_tab_sees_the_revision_of_committed_updates() {
         .unwrap();
     assert_eq!(other_tab.revision(), 1);
 
+    // Scripts without environment changes, like `pm.test` only, change nothing.
+    sender.apply(&BTreeMap::new()).unwrap();
+    assert_eq!(other_tab.revision(), 1);
+
     // A rejected update leaves the values, and therefore the revision, alone.
     assert!(
         sender
