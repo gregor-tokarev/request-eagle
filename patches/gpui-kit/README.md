@@ -1,11 +1,12 @@
 # GPUI Kit editor fixes
 
-The workspace pins seven changed files on top of GPUI Kit **0.6.2**:
+The workspace pins eight changed files on top of GPUI Kit **0.6.2**:
 
 - Upstream tag: `v0.6.2`, commit `122c36f7be19ea0e179107c067b679efccb7d66a`.
-- Patched commit: [`45c222ca2a43bcaa67a4c43f0cba62b1e2e74461`](https://github.com/gregor-tokarev/gpui-kit/commit/45c222ca2a43bcaa67a4c43f0cba62b1e2e74461).
+- Patched commit: [`c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547`](https://github.com/gregor-tokarev/gpui-kit/commit/c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547).
 - Completion changes: [0001-current-frame-completion-position.patch](0001-current-frame-completion-position.patch).
 - Query reuse: [0002-cache-syntax-queries.patch](0002-cache-syntax-queries.patch), applied after the first patch.
+- Vim cursor support: [0003-vim-cursor-support.patch](0003-vim-cursor-support.patch), applied after the second patch.
 
 Inputs previously published their caret geometry during paint, after popups
 had already chosen a position using the previous frame. Typing therefore
@@ -45,6 +46,13 @@ Request Eagle compiles JSON and JavaScript queries on the background executor
 alongside preference loading and awaits both before opening its first workspace.
 This avoids compiling the same JavaScript queries during each editor's first
 redraw, including when opening an empty Scripts editor immediately after launch.
+
+The third patch supports Vim's block cursor. `set_caret_hidden` hides only the
+painted caret, and `scroll_to_offset` reveals the Vim cursor rather than an edge
+of the Visual selection. `range_to_bounds` now returns `None` for offsets above
+or below the laid-out lines instead of resolving them to the first visible line,
+so the block disappears with its line. Base tests cover all three; Request
+Eagle's Vim tests check the block in Normal, Visual, and Visual Line mode.
 
 When upstream includes equivalent behavior, remove these overrides and this
 directory together, retaining the app regression tests.

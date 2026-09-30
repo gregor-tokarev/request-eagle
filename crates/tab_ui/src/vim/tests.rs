@@ -163,6 +163,101 @@ fn block_cursor_follows_wrapping_scrolling_and_interface_size(cx: &mut TestAppCo
     }
 }
 
+#[gpui_kit::test]
+fn visual_block_cursor_follows_the_active_end_and_replaces_the_caret(cx: &mut TestAppContext) {
+    let (view, cx) = setup(cx, "abcdef\nsecond", true);
+    // The editor only paints its caret in an active window.
+    cx.update(|window, _| window.activate_window());
+    let paint = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let block = super::cursor::layout(&view.read(cx).vim, window, cx);
+            let (caret, _) = view.read(cx).editor.read(cx).cursor_layout().unwrap();
+            let caret = gpui_kit::Bounds::from_corners(
+                window.pixel_snap_point(caret.origin),
+                window.pixel_snap_point(caret.bottom_right()),
+            )
+            .scale(window.scale_factor());
+            let caret_painted = window
+                .painted_quads()
+                .iter()
+                .any(|quad| quad.bounds == caret);
+
+            (block.map(|block| block.bounds), caret_painted)
+        })
+    };
+
+    // Normal-mode blocks mark where the cursor belongs on each character.
+    cx.simulate_keystrokes("l");
+    let (first, caret_painted) = paint(cx);
+    assert!(first.is_some() && !caret_painted);
+    cx.simulate_keystrokes("2 l");
+    let (third, _) = paint(cx);
+
+    for (keys, block) in [("2 h v 2 l", third), ("o", first), ("escape j V k", first)] {
+        cx.simulate_keystrokes(keys);
+        assert_eq!(paint(cx), (block, false), "{keys}");
+    }
+
+    cx.simulate_keystrokes("escape i");
+    assert_eq!(paint(cx), (None, true));
+}
+
+#[gpui_kit::test]
+fn visual_selections_scroll_with_the_vim_cursor(cx: &mut TestAppContext) {
+    use gpui_kit::{px, size};
+
+    let lines = "line\n".repeat(200);
+    // A wrapped line taller than the editor: Visual Line mode must reveal its
+    // first character, not the start of the next line.
+    let tall_line = format!("short\n{}\nend", "wrapped ".repeat(2000));
+
+    for (text, keys) in [
+        (&lines, "V 1 0 0 j"),
+        (&lines, "G V 1 0 0 k"),
+        (&lines, "v 1 5 0 j"),
+        (&lines, "G v 1 5 0 k"),
+        (&tall_line, "j V"),
+    ] {
+        let (view, cx) = setup(cx, text, true);
+        cx.simulate_resize(size(px(400.), px(200.)));
+        cx.simulate_keystrokes(keys);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let block = super::cursor::layout(&view.read(cx).vim, window, cx).unwrap();
+            assert!(
+                block.clip.contains(&block.bounds.center()),
+                "{keys}: {:?} outside {:?}",
+                block.bounds,
+                block.clip
+            );
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn block_cursor_hides_when_its_line_scrolls_out_of_view(cx: &mut TestAppContext) {
+    use gpui_kit::{point, px, size};
+
+    let (view, cx) = setup(cx, &"line\n".repeat(200), true);
+    cx.simulate_resize(size(px(400.), px(200.)));
+    cx.simulate_keystrokes("l l");
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_some());
+
+        let editor = view.read(cx).editor.clone();
+        let line_height = editor.read(cx).line_height().unwrap();
+        editor.update(cx, |editor, cx| {
+            editor.set_scroll_offset(point(px(0.), -line_height * 50.), cx)
+        });
+    });
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+        assert!(super::cursor::layout(&view.read(cx).vim, window, cx).is_none());
+    });
+}
+
 fn setup<'a>(
     cx: &'a mut TestAppContext,
     value: &str,
@@ -638,7 +733,7 @@ fn unsupported_g_sequences_never_execute_their_suffix(cx: &mut TestAppContext) {
     for keys in ["g x", "g i", "g u", "g o", "g p", "g d", "2 g x"] {
         cx.simulate_keystrokes(keys);
         assert_eq!(value(&view, cx), "bc", "{keys}");
-        cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+        cx.read(|cx| assert!(view.read(cx).vim.read(cx).is_normal()));
     }
     cx.simulate_keystrokes("l g g");
     assert_eq!(cursor(&view, cx), 0);
@@ -1065,7 +1160,7 @@ fn visual_unsupported_insert_commands_do_not_enter_insert_mode(cx: &mut TestAppC
         let (view, cx) = setup(cx, "abcd", true);
         cx.simulate_keystrokes(&format!("v l {key} w escape"));
         assert_eq!(value(&view, cx), "abcd");
-        cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+        cx.read(|cx| assert!(view.read(cx).vim.read(cx).is_normal()));
     }
 }
 
@@ -1122,7 +1217,7 @@ fn refocusing_the_editor_abandons_a_pending_search_motion(cx: &mut TestAppContex
     });
     cx.simulate_keystrokes("l");
     assert_eq!(cursor(&view, cx), 5);
-    cx.read(|cx| assert!(view.read(cx).vim.read(cx).normal_editor().is_some()));
+    cx.read(|cx| assert!(view.read(cx).vim.read(cx).is_normal()));
 }
 
 #[gpui_kit::test]
@@ -1551,10 +1646,7 @@ fn application_search_highlights_preserve_vim_selection(cx: &mut TestAppContext)
                         selection,
                         "{before} {binding} {navigation}"
                     );
-                    assert_eq!(
-                        view.read(cx).vim.read(cx).normal_editor().is_some(),
-                        before == "l"
-                    );
+                    assert_eq!(view.read(cx).vim.read(cx).is_normal(), before == "l");
                 });
             }
             cx.simulate_keystrokes("escape");
@@ -1591,10 +1683,7 @@ fn operators_apply_prompted_and_repeated_search_motions(cx: &mut TestAppContext)
             assert_eq!(value(&view, cx), expected, "{keys}, prompted={prompted}");
             cx.read(|cx| {
                 assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), copied);
-                assert_eq!(
-                    view.read(cx).vim.read(cx).normal_editor().is_none(),
-                    inserting
-                );
+                assert_eq!(!view.read(cx).vim.read(cx).is_normal(), inserting);
             });
             if inserting {
                 cx.simulate_input("new ");
