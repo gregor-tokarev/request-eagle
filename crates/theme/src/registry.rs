@@ -40,7 +40,7 @@ pub fn themes(cx: &App) -> &[Rc<ThemeConfig>] {
     &cx.global::<ThemeCatalog>().0
 }
 
-pub fn config(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
+pub(crate) fn config(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
     themes(cx).iter().find(|theme| theme.name == name).cloned()
 }
 

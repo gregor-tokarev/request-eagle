@@ -9,4 +9,4 @@ mod contrast_tests;
 mod tests;
 
 pub use appearance::apply_preferences;
-pub use registry::{apply, config, init, themes};
+pub use registry::{apply, init, themes};

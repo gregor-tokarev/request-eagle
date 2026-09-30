@@ -23,9 +23,9 @@ pub fn apply_preferences(appearance: WindowAppearance, cx: &mut App) {
         (&preferences.light_theme, &defaults.light_theme)
     };
 
-    let config = crate::config(name, cx)
+    let config = crate::registry::config(name, cx)
         .filter(|theme| theme.mode == mode)
-        .or_else(|| crate::config(fallback, cx))
+        .or_else(|| crate::registry::config(fallback, cx))
         .expect("default appearance themes should be bundled");
 
     let theme = Theme::global_mut(cx);

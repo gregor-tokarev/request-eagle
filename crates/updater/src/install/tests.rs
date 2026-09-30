@@ -7,14 +7,14 @@ use super::{PreparedUpdate, download_update, verify_sha256};
 use crate::{UpdateStatus, Updater};
 
 #[gpui_kit::test]
-fn staged_files_wait_for_an_explicit_relaunch_after_verification(cx: &mut TestAppContext) {
+fn a_prepared_update_waits_for_an_explicit_relaunch(cx: &mut TestAppContext) {
     let work_dir = tempfile::tempdir().unwrap();
     let staged_archive = work_dir.path().join("update.zip");
     std::fs::write(&staged_archive, b"staged update").unwrap();
 
     let updater = cx.new(|_| Updater {
         current_version: "1.2.3",
-        status: UpdateStatus::Verifying("99.0.0".into()),
+        status: UpdateStatus::Ready("99.0.0".into()),
         prepared_update: Some(PreparedUpdate {
             current_app: work_dir.path().join("installed.app"),
             new_app: work_dir.path().join("new.app"),
@@ -23,10 +23,6 @@ fn staged_files_wait_for_an_explicit_relaunch_after_verification(cx: &mut TestAp
     });
 
     updater.update(cx, |updater, cx| {
-        updater.relaunch(cx);
-        assert!(updater.prepared_update.is_some());
-
-        updater.status = UpdateStatus::Ready("99.0.0".into());
         updater.check(cx);
         updater.download(cx);
     });

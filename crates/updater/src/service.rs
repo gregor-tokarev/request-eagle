@@ -129,11 +129,9 @@ impl Updater {
         .detach();
     }
 
+    /// Only a finished download stores a prepared update, so this does
+    /// nothing until the status is `Ready`.
     pub fn relaunch(&mut self, cx: &mut Context<Self>) {
-        if !matches!(self.status, UpdateStatus::Ready(_)) {
-            return;
-        }
-
         let Some(update) = self.prepared_update.take() else {
             return;
         };

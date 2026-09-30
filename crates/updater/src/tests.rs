@@ -3,7 +3,8 @@ use gpui_kit::{
     http_client::{FakeHttpClient, Response},
 };
 
-use super::{UpdateStatus, Updater, check_for_update};
+use crate::service::check_for_update;
+use crate::{UpdateStatus, Updater};
 
 #[gpui_kit::test]
 fn checks_against_the_application_version(cx: &mut TestAppContext) {
