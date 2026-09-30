@@ -396,15 +396,11 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            EnvironmentsEvent::Renamed { from, to } => {
-                // The editor that renamed the environment may already use the new name.
-                for tab in &mut self.tabs {
-                    if let Page::Environment(editor) = &tab.page
-                        && [from, to].contains(&&editor.read(cx).name)
-                    {
-                        editor.update(cx, |editor, _| editor.name = to.clone());
-                        tab.title = to.clone();
-                    }
+            EnvironmentsEvent::Renamed { to, .. } => {
+                // Only the environment's editor renames it, and it already
+                // uses the new name.
+                if let Some((index, _)) = self.environment_tab(to, cx) {
+                    self.tabs[index].title = to.clone();
                 }
             }
             EnvironmentsEvent::Deleted(name) => {
