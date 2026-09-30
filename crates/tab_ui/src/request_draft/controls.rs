@@ -1,4 +1,3 @@
-use collection::Method;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -8,23 +7,17 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::Method;
+use request_eagle_theme::method_color;
 
 use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
 
-fn method_color(method: Method, cx: &App) -> Hsla {
-    match method {
-        Method::Get => cx.theme().success,
-        Method::Post => cx.theme().warning,
-        Method::Put | Method::Patch => cx.theme().info,
-        Method::Head | Method::Options => cx.theme().muted_foreground,
-        Method::Delete => cx.theme().danger,
-    }
-}
-
 impl RequestDraft {
     pub(super) fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let location = self.location.as_ref();
+
         h_flex()
             .flex_none()
             .h_10()
@@ -43,36 +36,47 @@ impl RequestDraft {
                     .gap_1()
                     .text_sm()
                     .overflow_hidden()
-                    .when_some(self.collection.clone(), |row, collection| {
-                        row.child(
-                            div()
-                                .debug_selector(|| "request-collection".into())
-                                .flex_none()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(collection),
-                        )
-                        .child(
-                            Icon::new(IconName::ChevronRight)
-                                .size_3()
-                                .text_color(cx.theme().muted_foreground),
-                        )
-                    })
-                    .children(self.folders.iter().enumerate().map(|(index, folder)| {
-                        h_flex()
-                            .flex_none()
-                            .gap_1()
-                            .child(
+                    .when_some(
+                        location.map(|location| location.collection.clone()),
+                        |row, collection| {
+                            row.child(
                                 div()
-                                    .debug_selector(move || format!("request-folder-{index}"))
+                                    .debug_selector(|| "request-collection".into())
+                                    .flex_none()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(folder.clone()),
+                                    .child(collection),
                             )
                             .child(
                                 Icon::new(IconName::ChevronRight)
                                     .size_3()
                                     .text_color(cx.theme().muted_foreground),
                             )
-                    }))
+                        },
+                    )
+                    .children(
+                        location
+                            .into_iter()
+                            .flat_map(|location| &location.folders)
+                            .enumerate()
+                            .map(|(index, folder)| {
+                                h_flex()
+                                    .flex_none()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .debug_selector(move || {
+                                                format!("request-folder-{index}")
+                                            })
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(folder.clone()),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size_3()
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                            }),
+                    )
                     .child(
                         div()
                             .debug_selector(|| "request-name".into())
@@ -80,7 +84,9 @@ impl RequestDraft {
                             .text_ellipsis()
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(self.name.clone()),
+                            .child(location.map_or("Untitled Request".into(), |location| {
+                                location.name.clone()
+                            })),
                     ),
             )
     }
@@ -111,7 +117,7 @@ impl RequestDraft {
                         div()
                             .debug_selector(|| "request-method-label".into())
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(method_color(method, cx))
+                            .text_color(method_color(method.as_str(), cx))
                             .child(method.as_str()),
                     )
                     .child(
@@ -139,7 +145,7 @@ impl RequestDraft {
                         PopupMenuItem::element(move |_, cx| {
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(method_color(option, cx))
+                                .text_color(method_color(option.as_str(), cx))
                                 .child(option.as_str())
                         })
                         .checked(option == method)
@@ -223,9 +229,7 @@ impl RequestDraft {
                 .children(sections.into_iter().map(|(label, section)| {
                     let selected = section == Some(self.section);
                     let count = match section {
-                        Some(RequestSection::Params) => {
-                            self.request.query.as_ref().map_or(0, Vec::len)
-                        }
+                        Some(RequestSection::Params) => self.request.query.len(),
                         Some(RequestSection::Headers) => {
                             self.request.headers.len() + self.generated_headers.len()
                         }

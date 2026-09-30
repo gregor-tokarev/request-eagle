@@ -111,6 +111,7 @@ fn checking_survives_closing_settings_and_does_not_open_a_window(cx: &mut TestAp
 
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         cx.set_http_client(http);
     });
 
@@ -185,6 +186,7 @@ fn failed_check_can_be_retried_from_general(cx: &mut TestAppContext) {
 
     cx.update(|cx| {
         gpui_kit::init(cx);
+        preferences::init(cx);
         cx.set_http_client(http);
     });
 

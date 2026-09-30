@@ -1,23 +1,24 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-use environment::{EnvironmentSession, VariableError, VariableResolver, VariableValues};
+use environment::{EnvironmentSession, VariableError, VariableResolver};
 
 use crate::{HttpRequest, RequestScripts};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
-    pub(crate) values: VariableValues,
+    pub(crate) values: HashMap<String, String>,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
-    environment_error: Option<String>,
+    pub(crate) environment_error: Option<String>,
 }
 
 impl RequestVariables {
-    pub fn new(mut values: VariableValues, environment_error: Option<String>) -> Self {
+    pub fn new(mut values: HashMap<String, String>, environment_error: Option<String>) -> Self {
         if environment_error.is_some() {
-            values.environment.clear();
+            values.clear();
         } else {
-            values.environment.retain(|name, _| !name.starts_with('$'));
+            values.retain(|name, _| !name.starts_with('$'));
         }
         Self {
             values,
@@ -37,16 +38,13 @@ impl RequestVariables {
     /// Read the current session overlay while retaining file-read errors for
     /// references that cannot be satisfied by the session itself.
     pub fn with_environment_session(
-        values: VariableValues,
+        values: HashMap<String, String>,
         environment_error: Option<String>,
         session: EnvironmentSession,
     ) -> Self {
         let mut variables = Self::new(values, environment_error);
         variables.values = session.values(variables.values);
-        variables
-            .values
-            .environment
-            .retain(|name, _| !name.starts_with('$'));
+        variables.values.retain(|name, _| !name.starts_with('$'));
         variables.session = Some(session);
 
         variables
@@ -54,56 +52,67 @@ impl RequestVariables {
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
         let scripted = !request.scripts.pre_request.trim().is_empty();
-        self.resolve_owned(request.clone(), scripted, false, &mut BTreeMap::new())
+        resolve_request(
+            &self.values,
+            self.environment_error.as_deref(),
+            request.clone(),
+            scripted,
+            false,
+            &mut BTreeMap::new(),
+        )
     }
+}
 
-    /// `scripted` reports whether a collection or request pre-request script ran.
-    pub(crate) fn resolve_owned(
-        &self,
-        request: HttpRequest,
-        scripted: bool,
-        body_changed: bool,
-        generated: &mut BTreeMap<String, String>,
-    ) -> Result<HttpRequest, String> {
-        let mut resolver = VariableResolver::new(&self.values);
-        for (name, value) in generated.iter() {
-            resolver.override_generated(name.clone(), value.clone());
-        }
-        if scripted || !request.scripts.is_empty() {
-            resolver.limit_output(32 * 1024 * 1024);
-        }
-        // Only scripts can introduce these reserved names; collection values
-        // were filtered when this send snapshot was created.
-        if scripted {
-            for (name, value) in &self.values.environment {
-                if name.starts_with('$') {
-                    resolver.override_generated(name.clone(), value.clone());
-                }
-            }
-        }
-        let resolved = request.resolve_with(&mut resolver, body_changed);
-        // Keep generated values for the post-response phase, separate from
-        // local overrides so unsetting an override restores the cached value.
-        for (name, value) in resolver.generated_values() {
-            if !self.values.environment.contains_key(name) {
-                generated.insert(name.clone(), value.clone());
-            }
-        }
-        resolved.map_err(|error| {
-            if let VariableError::Unknown(name) = &error
-                && !name.starts_with('$')
-                && let Some(message) = &self.environment_error
-            {
-                return message.clone();
-            }
-            error.to_string()
-        })
+/// `scripted` reports whether a collection or request pre-request script ran.
+pub(crate) fn resolve_request(
+    values: &HashMap<String, String>,
+    environment_error: Option<&str>,
+    request: HttpRequest,
+    scripted: bool,
+    body_changed: bool,
+    generated: &mut BTreeMap<String, String>,
+) -> Result<HttpRequest, String> {
+    let mut resolver = VariableResolver::new(values);
+    for (name, value) in generated.iter() {
+        resolver.override_generated(name.clone(), value.clone());
     }
+    if scripted || !request.scripts.is_empty() {
+        resolver.limit_output(32 * 1024 * 1024);
+    }
+    // Only scripts can introduce these reserved names; collection values
+    // were filtered when this send snapshot was created.
+    if scripted {
+        for (name, value) in values {
+            if name.starts_with('$') {
+                resolver.override_generated(name.clone(), value.clone());
+            }
+        }
+    }
+    let resolved = request.resolve_with(&mut resolver, body_changed);
+    // Keep generated values for the post-response phase, separate from
+    // local overrides so unsetting an override restores the cached value.
+    for (name, value) in resolver.generated_values() {
+        if !values.contains_key(name) {
+            generated.insert(name.clone(), value.clone());
+        }
+    }
+    resolved.map_err(|error| {
+        if let VariableError::Unknown(name) = &error
+            && !name.starts_with('$')
+            && let Some(message) = environment_error
+        {
+            return message.to_owned();
+        }
+        error.to_string()
+    })
 }
 
 impl HttpRequest {
     /// Resolve a send snapshot, preserving the saved request and editable draft.
-    pub fn resolve_variables(&self, values: &VariableValues) -> Result<Self, VariableError> {
+    pub fn resolve_variables(
+        &self,
+        values: &HashMap<String, String>,
+    ) -> Result<Self, VariableError> {
         self.clone()
             .resolve_with(&mut VariableResolver::new(values), false)
     }
@@ -116,11 +125,7 @@ impl HttpRequest {
         let mut request = self;
         request.path = resolve_url(&request.path, resolver)?;
 
-        for (key, value) in request
-            .headers
-            .iter_mut()
-            .chain(request.query.iter_mut().flatten())
-        {
+        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = resolver.resolve(key)?;
             *value = resolver.resolve(value)?;
         }

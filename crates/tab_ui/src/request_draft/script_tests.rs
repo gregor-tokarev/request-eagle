@@ -33,7 +33,7 @@ fn script_draft(cx: &mut TestAppContext) -> (Entity<RequestDraft>, &mut VisualTe
     let mut draft = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            let mut view = RequestDraft::new();
+            let mut view = super::tests::new_draft(cx);
             view.prepare(window, cx);
             view
         });
@@ -83,7 +83,7 @@ fn vim_edits_update_body_and_both_script_drafts(cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
-            draft.set_method(collection::Method::Post, cx);
+            draft.set_method(request::Method::Post, cx);
             draft.section = RequestSection::Body;
             draft
                 .body_state(window, cx)
@@ -271,7 +271,7 @@ async fn saved_and_edited_scripts_run_on_send_without_confirmation(cx: &mut Test
                         .post_response
                         .push_str(" console.log('edited');");
                 } else {
-                    *draft = RequestDraft::from_saved("Saved".into(), "API".into(), saved.clone());
+                    *draft = RequestDraft::new(saved.clone(), None, Default::default(), None, cx);
                 }
                 draft.prepare(window, cx);
                 cx.notify();

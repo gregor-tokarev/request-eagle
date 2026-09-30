@@ -24,6 +24,7 @@ pub enum ExecutionError {
 
     #[error("{0}")]
     Variables(String),
+
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
 
@@ -33,12 +34,6 @@ pub enum ExecutionError {
     #[error("maximum response size is too large")]
     InvalidResponseLimit,
 
-    #[error(transparent)]
-    Http(#[from] HttpError),
-}
-
-#[derive(Debug, Error)]
-pub enum HttpError {
     #[error("invalid proxy settings: {0}")]
     InvalidProxy(&'static str),
 
@@ -72,6 +67,7 @@ pub enum HttpError {
 
     #[error("could not read the HTTP response body: {0}")]
     ReadBody(#[source] io::Error),
+
     #[error("could not decode the gzip response body: {0}")]
     DecodeBody(#[source] io::Error),
 }

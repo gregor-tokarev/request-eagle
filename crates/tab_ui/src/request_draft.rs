@@ -2,6 +2,7 @@ mod body;
 mod controls;
 mod draft;
 mod execution;
+mod fields;
 
 #[cfg(test)]
 pub(crate) mod script_completion_tests;
@@ -19,7 +20,7 @@ mod variable_tests;
 #[cfg(test)]
 mod vim_tests;
 
-pub use draft::RequestDraft;
+pub use draft::{RequestDraft, RequestLocation};
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 mod test_support;

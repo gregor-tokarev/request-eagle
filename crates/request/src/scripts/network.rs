@@ -1,7 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use futures::{
@@ -12,19 +12,13 @@ use rquickjs::{Ctx, Exception, Function, Promise};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{HttpRequest, Method, http::HttpExecutor};
+use crate::{HttpRequest, Method, RequestExecutor};
 
 const REQUEST_LIMIT: usize = 32;
 const REQUEST_BYTES: usize = 1024 * 1024;
 const RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 const TOTAL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const CONCURRENT_REQUESTS: usize = 4;
-
-#[derive(Clone)]
-pub(crate) struct NetworkOptions {
-    pub http: HttpExecutor,
-    pub timeout: Option<Duration>,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,13 +43,12 @@ impl<'js> Network<'js> {
     pub fn binding(
         &self,
         cx: Ctx<'js>,
-        options: Option<NetworkOptions>,
+        executor: &RequestExecutor,
     ) -> rquickjs::Result<Function<'js>> {
         let state = self.clone();
+        let http = executor.http.with_response_limit(RESPONSE_BYTES);
+        let timeout = executor.timeout;
         Function::new(cx, move |cx: Ctx<'js>, source: String| {
-            let options = options.as_ref().ok_or_else(|| {
-                Exception::throw_message(&cx, "HTTP calls require a request executor")
-            })?;
             if state.count.get() >= REQUEST_LIMIT {
                 return Err(Exception::throw_range(
                     &cx,
@@ -78,8 +71,7 @@ impl<'js> Network<'js> {
                 Exception::throw_type(&cx, &format!("Invalid script HTTP request: {error}"))
             })?;
             let (promise, resolve, reject) = Promise::new(&cx)?;
-            let http = options.http.with_response_limit(RESPONSE_BYTES);
-            let timeout = options.timeout;
+            let http = http.clone();
             let response_bytes = state.response_bytes.clone();
             state.count.set(state.count.get() + 1);
 

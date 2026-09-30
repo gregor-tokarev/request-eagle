@@ -15,6 +15,7 @@ use super::{
     tree::ItemKind,
 };
 use collection::MovePlacement;
+use request_eagle_theme::method_color;
 
 impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -124,48 +125,38 @@ impl CollectionPanel {
                     .when(drop_position == Some(MovePlacement::Inside), |this| {
                         this.bg(theme.info.opacity(0.25))
                     })
-                    .child(if branch {
-                        // Collections are the roots of the tree; folders only
-                        // group requests inside them.
-                        let icon = match (item.kind, expanded) {
-                            (ItemKind::Collection, _) => Icon::default().path("icons/package.svg"),
-                            (_, true) => Icon::new(IconName::FolderOpen),
-                            (_, false) => Icon::new(IconName::FolderClosed),
-                        };
-
-                        h_flex()
-                            .gap_1()
-                            .flex_none()
-                            .text_color(theme.muted_foreground)
-                            .child(
-                                Icon::new(if expanded {
-                                    IconName::ChevronDown
-                                } else {
-                                    IconName::ChevronRight
-                                })
-                                .size_3(),
-                            )
-                            .child(icon.size(rems(0.875)))
-                            .into_any_element()
-                    } else {
-                        let ItemKind::Request(method) = item.kind else {
-                            unreachable!()
-                        };
-                        let color = match method {
-                            "GET" => theme.success,
-                            "POST" => theme.warning,
-                            "PUT" | "PATCH" => theme.info,
-                            "HEAD" | "OPTIONS" => theme.muted_foreground,
-                            _ => theme.danger,
-                        };
-
-                        div()
+                    .child(match item.kind {
+                        ItemKind::Request(method) => div()
                             .flex_none()
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(color)
-                            .child(method)
-                            .into_any_element()
+                            .text_color(method_color(method, cx))
+                            .child(method),
+                        // Collections are the roots of the tree; folders only
+                        // group requests inside them.
+                        kind => {
+                            let icon = match (kind, expanded) {
+                                (ItemKind::Collection, _) => {
+                                    Icon::default().path("icons/package.svg")
+                                }
+                                (_, true) => Icon::new(IconName::FolderOpen),
+                                (_, false) => Icon::new(IconName::FolderClosed),
+                            };
+
+                            h_flex()
+                                .gap_1()
+                                .flex_none()
+                                .text_color(theme.muted_foreground)
+                                .child(
+                                    Icon::new(if expanded {
+                                        IconName::ChevronDown
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .size_3(),
+                                )
+                                .child(icon.size(rems(0.875)))
+                        }
                     })
                     .child(if let Some(rename) = rename {
                         div()
@@ -344,9 +335,7 @@ impl CollectionPanel {
                             let path = rename_path.clone();
                             window.defer(cx, move |window, cx| {
                                 let _ = view.update(cx, |this, cx| {
-                                    if let Some(index) =
-                                        this.tree.items.iter().position(|item| item.path == path)
-                                    {
+                                    if let Some(index) = this.tree.index_of(&path) {
                                         this.begin_rename(index, window, cx);
                                     }
                                 });
@@ -369,9 +358,7 @@ impl CollectionPanel {
                             let path = delete_path.clone();
                             window.defer(cx, move |window, cx| {
                                 let _ = view.update(cx, |this, cx| {
-                                    if let Some(index) =
-                                        this.tree.items.iter().position(|item| item.path == path)
-                                    {
+                                    if let Some(index) = this.tree.index_of(&path) {
                                         this.request_delete(index, window, cx);
                                     }
                                 });

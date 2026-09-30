@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result, bail};
-use collection::{CollectionRegistry, Entry, FileEntry, MovePlacement, Request};
+use collection::{CollectionRegistry, Entry, FileEntry, MovePlacement};
+use request::Request;
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
@@ -89,7 +90,7 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
     Ok(json!({"path": path}))
 }
 
-pub fn request_json(file: &FileEntry) -> Value {
+fn request_json(file: &FileEntry) -> Value {
     let Request::Http(request) = &file.request;
     json!({"path": file.path, "id": file.id, "name": file.name, "request": RequestInput::from(request)})
 }
@@ -120,7 +121,7 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
     }
 }
 
-pub fn validate_paths(registry: &CollectionRegistry) -> Result<()> {
+fn validate_paths(registry: &CollectionRegistry) -> Result<()> {
     fn visit(entries: &[Entry]) -> Result<()> {
         for entry in entries {
             entry

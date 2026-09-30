@@ -5,8 +5,9 @@ and password are serialized together into an OS credential entry. The
 JSON file contains only `proxy_credentials_id`, an opaque UUID. Neither field is
 written to JSON, including when other preferences are saved.
 
-- macOS uses Keychain through GPUI's native credential API. The item's server is
-  `request-eagle.proxy/<UUID>` and its account is the fixed label `proxy`. The
+- macOS uses Keychain through `security-framework`. Items are internet passwords
+  (matching entries saved by earlier versions through GPUI) whose server is
+  `request-eagle.proxy/<UUID>` and whose account is the fixed label `proxy`. The
   actual username is inside the encrypted value, alongside the password.
 - Linux uses `oo7` and the desktop Secret Service, supported by GNOME Keyring and
   KWallet with Secret Service enabled. Items are labeled `Request Eagle proxy`.

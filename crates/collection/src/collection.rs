@@ -8,10 +8,12 @@ use std::{
 use environment::Environment;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
+use toml_edit::{DocumentMut, Item};
 use uuid::Uuid;
 
-use crate::{CollectionEditError, DirEntry, Entry, FileEntry, RequestScripts};
+use crate::toml_merge::merge_table;
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry};
+use request::RequestScripts;
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
 const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
@@ -30,7 +32,7 @@ struct CollectionSettings {
 }
 
 impl Collection {
-    pub fn from_path(
+    pub(crate) fn from_path(
         path: impl AsRef<Path>,
         local_env: Environment,
     ) -> Result<Self, CollectionLoadError> {
@@ -133,19 +135,6 @@ impl Collection {
             self.local_env.path.clone(),
             self.path.join(SETTINGS_FILE_NAME),
         ]
-    }
-
-    pub fn save_files(&mut self) -> Result<(), CollectionSaveError> {
-        fs::create_dir_all(&self.path).map_err(|source| CollectionSaveError::Write {
-            path: self.path.clone(),
-            source,
-        })?;
-
-        for entry in &mut self.entries {
-            save_entry(entry)?;
-        }
-
-        Ok(())
     }
 
     pub fn local_env(&self) -> &Environment {
@@ -279,24 +268,6 @@ pub(crate) fn load_file(path: &Path) -> Result<FileEntry, CollectionLoadError> {
     Ok(entry)
 }
 
-fn save_entry(entry: &mut Entry) -> Result<(), CollectionSaveError> {
-    match entry {
-        Entry::File(file) => save_file(file),
-        Entry::Directory(directory) => {
-            fs::create_dir_all(&directory.path).map_err(|source| CollectionSaveError::Write {
-                path: directory.path.clone(),
-                source,
-            })?;
-
-            for entry in &mut directory.entries {
-                save_entry(entry)?;
-            }
-
-            Ok(())
-        }
-    }
-}
-
 pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError> {
     if let Some(parent) = entry.path.parent() {
         fs::create_dir_all(parent).map_err(|source| CollectionSaveError::Write {
@@ -351,170 +322,6 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
     entry.raw_content = raw_content;
 
     Ok(())
-}
-
-fn merge_table(target: &mut dyn TableLike, updates: &dyn TableLike) {
-    for (key, update) in updates.iter() {
-        if let Some(current) = target.get_mut(key) {
-            merge_item(current, update);
-        } else {
-            target.insert(key, update.clone());
-        }
-    }
-}
-
-fn merge_item(target: &mut Item, update: &Item) {
-    if let (Some(target), Some(update)) = (target.as_table_like_mut(), update.as_table_like()) {
-        merge_table(target, update);
-
-        return;
-    }
-
-    match (target, update) {
-        (Item::Value(target), Item::Value(update)) => merge_value(target, update),
-        (target, update) => *target = update.clone(),
-    }
-}
-
-fn merge_value(target: &mut Value, update: &Value) {
-    match (target, update) {
-        (Value::String(target), Value::String(update)) if target.value() == update.value() => {}
-        (Value::Integer(target), Value::Integer(update)) if target.value() == update.value() => {}
-        (Value::Float(target), Value::Float(update)) if target.value() == update.value() => {}
-        (Value::Boolean(target), Value::Boolean(update)) if target.value() == update.value() => {}
-        (Value::Datetime(target), Value::Datetime(update)) if target.value() == update.value() => {}
-        (Value::Array(target), Value::Array(update)) => {
-            if target
-                .iter()
-                .chain(update.iter())
-                .all(|value| string_pair(value).is_some())
-            {
-                merge_key_value_rows(target, update);
-
-                return;
-            }
-
-            while target.len() > update.len() {
-                target.remove(target.len() - 1);
-            }
-
-            for (index, value) in update.iter().enumerate() {
-                if let Some(current) = target.get_mut(index) {
-                    merge_value(current, value);
-                } else {
-                    target.push_formatted(value.clone());
-                }
-            }
-        }
-        (Value::InlineTable(target), Value::InlineTable(update)) => merge_table(target, update),
-        (target, update) => {
-            let decor = target.decor().clone();
-            *target = update.clone();
-            *target.decor_mut() = decor;
-        }
-    }
-}
-
-fn string_pair(value: &Value) -> Option<(&str, &str)> {
-    let values = value.as_array()?;
-    if values.len() != 2 {
-        return None;
-    }
-
-    Some((values.get(0)?.as_str()?, values.get(1)?.as_str()?))
-}
-
-fn merge_key_value_rows(target: &mut Array, update: &Array) {
-    let mut rows: Vec<_> = target
-        .iter()
-        .cloned()
-        .map(|value| Some((value, String::new())))
-        .collect();
-
-    // TOML attaches comments after a comma to the next value or the array tail.
-    // Associate same-line comments with their preceding row before moving rows.
-    for index in 1..rows.len() {
-        let (value, _) = rows[index].as_mut().unwrap();
-        let prefix = value
-            .decor()
-            .prefix()
-            .and_then(|prefix| prefix.as_str())
-            .unwrap_or_default()
-            .to_owned();
-        let (comment, prefix) = split_row_comment(&prefix);
-        value.decor_mut().set_prefix(prefix);
-        rows[index - 1].as_mut().unwrap().1 = comment.to_owned();
-    }
-
-    let trailing = target.trailing().as_str().unwrap_or_default().to_owned();
-    let trailing = if let Some(Some((_, comment))) = rows.last_mut() {
-        let (row_comment, trailing) = split_row_comment(&trailing);
-        *comment = row_comment.to_owned();
-        trailing
-    } else {
-        &trailing
-    };
-
-    // Reserve exact matches first so duplicate keys retain their own annotations.
-    let mut matched: Vec<_> = update
-        .iter()
-        .map(|value| {
-            let index = rows.iter().position(|row| {
-                row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current) == string_pair(value))
-            })?;
-
-            rows[index].take()
-        })
-        .collect();
-
-    target.clear();
-    let mut preceding_comment = String::new();
-
-    for (value, matched) in update.iter().zip(&mut matched) {
-        if matched.is_none() {
-            let key = string_pair(value).unwrap().0;
-            if let Some(index) = rows.iter().position(|row| {
-                row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current).unwrap().0 == key)
-            }) {
-                *matched = rows[index].take();
-            }
-        }
-
-        let (mut current, following_comment) = matched
-            .take()
-            .unwrap_or_else(|| (value.clone(), String::new()));
-        merge_value(&mut current, value);
-        let prefix = current
-            .decor()
-            .prefix()
-            .and_then(|prefix| prefix.as_str())
-            .unwrap_or_default();
-        let prefix = join_row_comment(&preceding_comment, prefix);
-        current.decor_mut().set_prefix(prefix);
-        target.push_formatted(current);
-        preceding_comment = following_comment;
-    }
-
-    target.set_trailing(join_row_comment(&preceding_comment, trailing));
-}
-
-fn split_row_comment(text: &str) -> (&str, &str) {
-    let end = text.find('\n').unwrap_or(text.len());
-    if text[..end].contains('#') {
-        text.split_at(end)
-    } else {
-        ("", text)
-    }
-}
-
-fn join_row_comment(comment: &str, following: &str) -> String {
-    if !comment.is_empty() && !following.starts_with(['\r', '\n']) {
-        format!("{comment}\n{following}")
-    } else {
-        format!("{comment}{following}")
-    }
 }
 
 fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {

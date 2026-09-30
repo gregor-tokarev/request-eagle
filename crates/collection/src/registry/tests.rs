@@ -27,7 +27,7 @@ fn loads_collection_directories_in_name_order() {
 
     let registry = CollectionRegistry::from_path(&root).unwrap();
 
-    assert_eq!(registry.len(), 2);
+    assert_eq!(registry.collections().len(), 2);
     assert_eq!(registry.collections()[0].path, alpha);
     assert_eq!(registry.collections()[1].path, beta);
     assert_eq!(
@@ -45,5 +45,5 @@ fn missing_collections_directory_loads_an_empty_registry() {
 
     let registry = CollectionRegistry::from_path(root).unwrap();
 
-    assert!(registry.is_empty());
+    assert!(registry.collections().is_empty());
 }

@@ -1,7 +1,7 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::*;
 
-/// The item count shown beside a request or response section label.
+/// The item count shown beside a request, response or collection section label.
 pub(crate) fn section_count(count: usize, selected: bool, cx: &App) -> Div {
     div()
         .flex_none()

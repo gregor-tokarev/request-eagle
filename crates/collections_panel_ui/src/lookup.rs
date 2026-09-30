@@ -56,7 +56,7 @@ impl CollectionPanel {
 
     /// Open a collection or request in a tab, as if its row were activated.
     pub fn open_at(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(index) = self.tree.items.iter().position(|item| item.path == path) {
+        if let Some(index) = self.tree.index_of(path) {
             self.open(index, cx);
         }
     }
@@ -72,19 +72,18 @@ fn request_matches(tree: &CollectionTree, query: &str, limit: usize) -> Vec<Requ
                 return None;
             };
 
-            let mut folders = Vec::new();
-            let mut parent = item.parent;
-            while let Some(index) = parent {
-                folders.push(tree.items[index].label.as_ref());
-                parent = tree.items[index].parent;
+            let (collection, folders) = tree.location(index);
+            let mut location = collection.to_string();
+            for folder in folders {
+                location.push_str(" › ");
+                location.push_str(&folder);
             }
-            folders.reverse();
 
             Some(RequestMatch {
                 path: item.path.clone(),
                 name: item.label.clone(),
                 method,
-                location: folders.join(" › ").into(),
+                location: location.into(),
             })
         })
         .take(limit)

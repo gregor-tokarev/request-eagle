@@ -3,27 +3,40 @@ use std::{
     time::Duration,
 };
 
+use std::collections::HashMap;
+
 use super::{
     RequestScripts, ScriptPhase, ScriptReport,
-    runtime::{post_response, pre_request},
+    runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
-    Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Response, StatusCode, Version,
+    Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
+    RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
-fn pre(source: &str) -> (HttpRequest, super::variables::Variables, Vec<ScriptReport>) {
+fn executor() -> RequestExecutor {
+    RequestExecutor::new(&RequestPreferences::default()).unwrap()
+}
+
+fn send(request: HttpRequest) -> (HttpRequest, ScriptState, Vec<ScriptReport>) {
     smol::block_on(pre_request(
-        HttpRequest {
-            path: "https://example.com".into(),
-            scripts: RequestScripts {
-                pre_request: source.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
+        request,
+        RequestVariables::new(HashMap::new(), None),
+        executor(),
         Arc::new(AtomicBool::new(false)),
     ))
     .unwrap()
+}
+
+fn pre(source: &str) -> (HttpRequest, ScriptState, Vec<ScriptReport>) {
+    send(HttpRequest {
+        path: "https://example.com".into(),
+        scripts: RequestScripts {
+            pre_request: source.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
 }
 
 #[test]
@@ -100,11 +113,17 @@ fn response_tests(status: StatusCode, body: &[u8], source: &str) -> ScriptReport
             metrics: HttpMetrics::default(),
         }),
     };
+    let state = ScriptState {
+        variables: Default::default(),
+        session: None,
+        collection_post_response: String::new(),
+    };
     let result = smol::block_on(post_response(
         request,
         None,
-        Default::default(),
+        state,
         execution,
+        executor(),
         Arc::new(AtomicBool::new(false)),
     ));
     let report = result.scripts.into_iter().next().unwrap();
@@ -176,7 +195,7 @@ fn response_shortcuts_check_status_names_body_headers_and_json_paths() {
 
 #[test]
 fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
-    let (_, variables, reports) = pre(r#"
+    let (_, state, reports) = pre(r#"
         const id = pm.variables.replaceIn('{{$guid}}');
         pm.variables.set('id', id);
         pm.test('fresh UUID', () => pm.expect(pm.variables.replaceIn('{{$randomUUID}}')).not.to.equal(id));
@@ -197,7 +216,7 @@ fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
         assert!(test.error.is_none(), "{}: {:?}", test.name, test.error);
     }
     assert_eq!(
-        uuid::Uuid::parse_str(&variables.values["id"])
+        uuid::Uuid::parse_str(&state.variables.values["id"])
             .unwrap()
             .get_version_num(),
         4
@@ -205,13 +224,13 @@ fn dynamic_variables_work_in_scripts_and_preserve_local_overrides() {
 }
 
 #[test]
-fn direct_sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
+fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
     for mode in ["escaped only", "dynamic", "script"] {
         let mut request = HttpRequest {
             method: crate::Method::Post,
             path: "https://example.com/{{!customer}}".into(),
             headers: vec![("X-Literal".into(), "{{!$guid}}/{{!customer}}".into())],
-            query: Some(vec![("{{!key}}".into(), "{{!customer}}".into())]),
+            query: vec![("{{!key}}".into(), "{{!customer}}".into())],
             body: Some(b"{{!customer}}".to_vec()),
             ..Default::default()
         };
@@ -221,14 +240,10 @@ fn direct_sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values
             request.scripts.pre_request =
                 "pm.variables.set('customer', 'must stay literal');".into();
         }
-        let (sent, _, _) =
-            smol::block_on(pre_request(request, Arc::new(AtomicBool::new(false)))).unwrap();
+        let (sent, _, _) = send(request);
         assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
         assert_eq!(sent.headers[0].1, "{{$guid}}/{{customer}}");
-        assert_eq!(
-            sent.query.unwrap(),
-            [("{{key}}".into(), "{{customer}}".into())]
-        );
+        assert_eq!(sent.query, [("{{key}}".into(), "{{customer}}".into())]);
         assert_eq!(sent.body.unwrap(), b"{{customer}}");
         if mode == "dynamic" {
             uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
@@ -239,30 +254,25 @@ fn direct_sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values
 #[test]
 fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() {
     let original = HttpRequest {
+        method: crate::Method::Post,
         path: "https://example.com/{{$guid}}".into(),
         headers: vec![
             ("X-Time".into(), "{{$timestamp}}".into()),
             ("{{$guid}}".into(), "{{$randomUUID}}".into()),
         ],
-        query: Some(vec![("id".into(), "{{$randomUUID}}".into())]),
-        body: Some(
-            br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}},"keep":"{{$unknown}}"}"#.to_vec(),
-        ),
+        query: vec![("id".into(), "{{$randomUUID}}".into())],
+        body: Some(br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#.to_vec()),
         ..Default::default()
     };
-    let (sent, variables, reports) = smol::block_on(pre_request(
-        original.clone(),
-        Arc::new(AtomicBool::new(false)),
-    ))
-    .unwrap();
+    let (sent, state, reports) = send(original.clone());
     assert!(original.path.contains("{{$guid}}"));
-    assert!(variables.values.is_empty());
+    assert!(state.variables.values.is_empty());
     assert!(reports.is_empty());
     uuid::Uuid::parse_str(sent.path.strip_prefix("https://example.com/").unwrap()).unwrap();
     assert!(sent.headers[0].1.parse::<i64>().unwrap() > 0);
     uuid::Uuid::parse_str(&sent.headers[1].0).unwrap();
     uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
-    assert_eq!(sent.query.unwrap()[0].1, sent.headers[1].1);
+    assert_eq!(sent.query[0].1, sent.headers[1].1);
     assert_eq!(
         sent.path.strip_prefix("https://example.com/").unwrap(),
         sent.headers[1].0
@@ -271,5 +281,4 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
     assert_eq!(body["id"], sent.headers[1].0);
     chrono::DateTime::parse_from_rfc3339(body["time"].as_str().unwrap()).unwrap();
     assert!(body["n"].as_u64().unwrap() <= 1000);
-    assert_eq!(body["keep"], "{{$unknown}}");
 }

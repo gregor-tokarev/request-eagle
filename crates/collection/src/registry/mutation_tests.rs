@@ -5,9 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{
-    CollectionEditError, CollectionRegistry, Entry, FileEntry, HttpRequest, Method, Request,
-};
+use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
+
+use request::{HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -83,7 +83,13 @@ fn rename_preserves_request_content_and_rebases_nested_paths_and_environment() {
         .rename(&root.join("Renamed API"), "RENAMED API")
         .unwrap();
     assert_eq!(registry.collections()[0].path, root.join("RENAMED API"));
-    assert_eq!(CollectionRegistry::from_path(root).unwrap().len(), 2);
+    assert_eq!(
+        CollectionRegistry::from_path(root)
+            .unwrap()
+            .collections()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -125,7 +131,7 @@ fn delete_persists_for_requests_folders_and_collections() {
     registry.delete(&root.join("API")).unwrap();
     assert!(!root.join("API").exists());
     let reloaded = CollectionRegistry::from_path(root).unwrap();
-    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(reloaded.collections()[0].path, root.join("Other"));
 }
 
@@ -159,11 +165,11 @@ request_custom = 'keep the request metadata'
         path: "https://example.com/v2/users".into(),
         headers: vec![("Accept".into(), "application/json".into())],
         body: Some(b"new body".to_vec()),
-        query: Some(vec![("page".into(), "2".into())]),
+        query: vec![("page".into(), "2".into())],
     };
 
     registry
-        .update_request(&path, "list", (&updated).into())
+        .update_request(&path, "list", updated.clone().into())
         .unwrap();
 
     let cached = registry.file(&path).unwrap();
@@ -194,7 +200,7 @@ request_custom = 'keep the request metadata'
 
     let cleared = HttpRequest {
         body: None,
-        query: None,
+        query: Vec::new(),
         ..updated
     };
     registry
@@ -202,7 +208,7 @@ request_custom = 'keep the request metadata'
         .unwrap();
     let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request;
     assert_eq!(reloaded.body, None);
-    assert_eq!(reloaded.query, None);
+    assert!(reloaded.query.is_empty());
 }
 
 #[test]
@@ -364,7 +370,7 @@ query = [
     request.path = "https://example.com/edited".into();
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -374,9 +380,9 @@ query = [
     );
 
     request.headers[0].1 = "text/plain".into();
-    request.query.as_mut().unwrap()[0].1 = "2".into();
+    request.query[0].1 = "2".into();
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -424,10 +430,10 @@ query = [
     let mut registry = CollectionRegistry::from_path(root).unwrap();
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone();
     request.headers.remove(0);
-    request.query.as_mut().unwrap().remove(0);
+    request.query.remove(0);
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -444,11 +450,11 @@ query = [
 
     request.headers.reverse();
     request.headers[0].1 = "two".into();
-    request.query.as_mut().unwrap().reverse();
-    request.query.as_mut().unwrap()[0].1 = "c".into();
+    request.query.reverse();
+    request.query[0].1 = "c".into();
 
     registry
-        .update_request(&path, "list", (&request).into())
+        .update_request(&path, "list", request.clone().into())
         .unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -480,7 +486,7 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
     let root = &fixture.0;
     let collection = root.join("API");
     let mut registry = CollectionRegistry::from_path(root).unwrap();
-    let scripts = crate::RequestScripts {
+    let scripts = request::RequestScripts {
         pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
         post_response: String::new(),
     };
@@ -517,7 +523,7 @@ fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables(
     let environment = collection.join("environment.toml");
     let mut registry = CollectionRegistry::from_path(root).unwrap();
     let variables = registry.collections()[0].local_env().entries.clone();
-    let scripts = crate::RequestScripts {
+    let scripts = request::RequestScripts {
         pre_request: String::new(),
         post_response: "pm.test('ok', () => {});".into(),
     };
@@ -569,7 +575,7 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
         .local_env()
         .entries
         .clone();
-    let scripts = |source: &str| crate::RequestScripts {
+    let scripts = |source: &str| request::RequestScripts {
         pre_request: source.into(),
         post_response: String::new(),
     };

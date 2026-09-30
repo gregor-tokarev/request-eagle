@@ -8,9 +8,8 @@ use environment::EnvironmentSaveError;
 use thiserror::Error;
 
 use crate::collection::{is_reserved, load_file, save_file};
-use crate::{
-    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, Request, RequestScripts,
-};
+use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry};
+use request::{Request, RequestScripts};
 
 impl CollectionRegistry {
     /// Saves a request without replacing its identity or externally edited metadata.

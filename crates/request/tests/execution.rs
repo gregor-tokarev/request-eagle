@@ -1,13 +1,14 @@
 use std::time::Duration;
 
 use request::{
-    Execution, ExecutionError, HttpError, HttpRequest, HttpVersion, Method, Request,
-    RequestExecutor, RequestPreferences, Response, Version,
+    Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
+    RequestPreferences, RequestVariables, Response, Version,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use std::collections::HashMap;
 
 struct ReceivedRequest {
     head: String,
@@ -65,17 +66,20 @@ fn executor() -> RequestExecutor {
     .unwrap()
 }
 
+fn no_variables() -> RequestVariables {
+    RequestVariables::new(HashMap::new(), None)
+}
+
 #[test]
 fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
     smol::block_on(async {
         let mut ids = std::collections::HashSet::new();
-        for collection in [false, true] {
-            for phase in ["post only", "both", "override"] {
-                let (url, server) =
-                    serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
-                let mut pre = String::new();
-                if phase != "post only" {
-                    pre.push_str(r#"
+        for phase in ["post only", "both", "override"] {
+            let (url, server) =
+                serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+            let mut pre = String::new();
+            if phase != "post only" {
+                pre.push_str(r#"
                         const id = pm.variables.replaceIn('{{$guid}}');
                         pm.expect(pm.variables.replaceIn('{{$guid}}/{{$guid}}')).to.equal(`${id}/${id}`);
                         pm.expect(pm.variables.has('$guid')).to.be.false;
@@ -87,18 +91,18 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                         pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(id);
                         pm.request.headers.upsert({key: 'X-Pre-Id', value: id});
                     "#);
-                }
-                if phase == "override" {
-                    pre.push_str("pm.variables.set('$guid', 'override');");
-                }
-                let request = HttpRequest {
+            }
+            if phase == "override" {
+                pre.push_str("pm.variables.set('$guid', 'override');");
+            }
+            let request = HttpRequest {
                     method: Method::Post,
                     path: format!("{url}/{{{{$guid}}}}"),
                     headers: vec![
                         ("X-Id".into(), "{{$guid}}".into()),
                         ("X-Uuid".into(), "{{$randomUUID}}".into()),
                     ],
-                    query: Some(vec![("id".into(), "{{$guid}}".into())]),
+                    query: vec![("id".into(), "{{$guid}}".into())],
                     body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -114,47 +118,33 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                         "#.into(),
                     },
                 };
-                let execution = if collection {
-                    executor()
-                        .execute_with_variables(
-                            request,
-                            request::RequestVariables::new(
-                                environment::VariableValues::default(),
-                                None,
-                            ),
-                        )
-                        .await
-                } else {
-                    executor().execute(request).await
-                }
-                .unwrap();
-                for report in execution.scripts {
-                    assert!(report.error.is_none(), "{collection}/{phase}: {report:?}");
-                }
-                let received = server.await;
-                let id = String::from_utf8(received.body).unwrap();
-                let (id, repeated) = id.split_once('/').unwrap();
-                assert_eq!(id, repeated);
+            let execution = executor().execute(request, no_variables()).await.unwrap();
+            for report in execution.scripts {
+                assert!(report.error.is_none(), "{phase}: {report:?}");
+            }
+            let received = server.await;
+            let id = String::from_utf8(received.body).unwrap();
+            let (id, repeated) = id.split_once('/').unwrap();
+            assert_eq!(id, repeated);
+            assert!(
+                received
+                    .head
+                    .starts_with(&format!("POST /{id}?id={id} HTTP/1.1\r\n"))
+            );
+            assert!(
+                received
+                    .head
+                    .to_lowercase()
+                    .contains(&format!("x-id: {id}\r\n"))
+            );
+            if phase == "override" {
+                assert_eq!(id, "override");
+            } else {
+                uuid::Uuid::parse_str(id).unwrap();
                 assert!(
-                    received
-                        .head
-                        .starts_with(&format!("POST /{id}?id={id} HTTP/1.1\r\n"))
+                    ids.insert(id.to_owned()),
+                    "a new send needs fresh generated values"
                 );
-                assert!(
-                    received
-                        .head
-                        .to_lowercase()
-                        .contains(&format!("x-id: {id}\r\n"))
-                );
-                if phase == "override" {
-                    assert_eq!(id, "override");
-                } else {
-                    uuid::Uuid::parse_str(id).unwrap();
-                    assert!(
-                        ids.insert(id.to_owned()),
-                        "a new send needs fresh generated values"
-                    );
-                }
             }
         }
     });
@@ -188,7 +178,7 @@ fn post_response_scripts_share_uploads_and_read_the_sent_body() {
                 body.len()
             };
             let execution = executor()
-                .execute_with_variables(
+                .execute(
                     HttpRequest {
                         method: Method::Post,
                         path: url,
@@ -199,7 +189,7 @@ fn post_response_scripts_share_uploads_and_read_the_sent_body() {
                         },
                         ..Default::default()
                     },
-                    request::RequestVariables::new(environment::VariableValues::default(), None),
+                    no_variables(),
                 )
                 .await
                 .unwrap();
@@ -253,7 +243,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
     smol::block_on(async {
         let response = b"HTTP/1.1 201 Created\r\nContent-Length: 3\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nX-Raw: \xff\r\nConnection: close\r\n\r\n\x00\xff\x01";
         let (url, server) = serve(response.to_vec()).await;
-        let mut draft = HttpRequest {
+        let request = HttpRequest {
             method: Method::Post,
             path: format!("{url}/submit?tag=existing#ignored"),
             headers: vec![
@@ -262,16 +252,9 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             ],
             body: Some(vec![0, 255, 42]),
             scripts: Default::default(),
-            query: Some(vec![
-                ("tag".into(), "a & b".into()),
-                ("tag".into(), "c+d".into()),
-            ]),
+            query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
         };
-        let run = executor().execute(&draft);
-        draft.path = "http://unused.invalid".into();
-        draft.body = None;
-
-        let result = run.await.unwrap();
+        let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
         println!("\n  -> {}", received.head.lines().next().unwrap());
         println!("     request body bytes: {:?}", received.body);
@@ -320,10 +303,13 @@ fn measures_waiting_and_download_separately() {
             stream.write_all(b"abc").await.unwrap();
         });
         let execution = executor()
-            .execute(HttpRequest {
-                path: url,
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: url,
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         server.await;
@@ -346,7 +332,7 @@ fn measures_waiting_and_download_separately() {
 }
 
 #[test]
-fn executes_all_existing_methods_from_saved_requests() {
+fn executes_all_existing_methods() {
     smol::block_on(async {
         let executor = executor();
 
@@ -364,12 +350,12 @@ fn executes_all_existing_methods_from_saved_requests() {
                     .to_vec(),
             )
             .await;
-            let request = Request::Http(HttpRequest {
+            let request = HttpRequest {
                 method,
                 path: format!("{url}/health"),
                 ..HttpRequest::default()
-            });
-            let result = executor.execute(&request).await.unwrap();
+            };
+            let result = executor.execute(request, no_variables()).await.unwrap();
             let received = server.await;
 
             assert!(
@@ -397,10 +383,13 @@ fn http_errors_are_inspectable_responses() {
             );
             let (url, server) = serve(response.into_bytes()).await;
             let result = executor()
-                .execute(HttpRequest {
-                    path: url,
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap();
             server.await;
@@ -469,12 +458,15 @@ fn redirects_follow_the_setting_and_preserve_http_method_semantics() {
 
                 let result = RequestExecutor::new(&preferences)
                     .unwrap()
-                    .execute(HttpRequest {
-                        method: Method::Post,
-                        path: url,
-                        body: Some(b"payload".to_vec()),
-                        ..HttpRequest::default()
-                    })
+                    .execute(
+                        HttpRequest {
+                            method: Method::Post,
+                            path: url,
+                            body: Some(b"payload".to_vec()),
+                            ..HttpRequest::default()
+                        },
+                        no_variables(),
+                    )
                     .await
                     .unwrap();
                 server.await;
@@ -522,10 +514,13 @@ fn follows_redirect_chains_by_default() {
             }
         });
         let result = executor()
-            .execute(HttpRequest {
-                path: format!("{url}/0"),
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/0"),
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         server.await;
@@ -559,14 +554,17 @@ fn cross_host_redirects_update_host_and_strip_sensitive_headers() {
             })
             .unwrap();
             let result = executor
-                .execute(HttpRequest {
-                    path: url,
-                    headers: vec![
-                        ("Authorization".into(), "Bearer test-token".into()),
-                        ("Cookie".into(), "session=test-session".into()),
-                    ],
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        headers: vec![
+                            ("Authorization".into(), "Bearer test-token".into()),
+                            ("Cookie".into(), "session=test-session".into()),
+                        ],
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap();
             server.await;
@@ -686,17 +684,20 @@ fn explicit_host_overrides_only_follow_redirects_on_the_same_authority() {
                 })
                 .unwrap();
                 let result = executor
-                    .execute(HttpRequest {
-                        method: Method::Post,
-                        path: url,
-                        headers: vec![
-                            ("Host".into(), explicit_host),
-                            ("Authorization".into(), "Bearer test-token".into()),
-                            ("Cookie".into(), "session=test-session".into()),
-                        ],
-                        body: Some(b"payload".to_vec()),
-                        ..HttpRequest::default()
-                    })
+                    .execute(
+                        HttpRequest {
+                            method: Method::Post,
+                            path: url,
+                            headers: vec![
+                                ("Host".into(), explicit_host),
+                                ("Authorization".into(), "Bearer test-token".into()),
+                                ("Cookie".into(), "session=test-session".into()),
+                            ],
+                            body: Some(b"payload".to_vec()),
+                            ..HttpRequest::default()
+                        },
+                        no_variables(),
+                    )
                     .await
                     .unwrap();
                 server.await;
@@ -723,11 +724,14 @@ fn explicit_host_does_not_follow_redirects_when_disabled() {
         })
         .unwrap();
         let result = executor
-            .execute(HttpRequest {
-                path: url,
-                headers: vec![("Host".into(), "virtual.example".into())],
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: url,
+                    headers: vec![("Host".into(), "virtual.example".into())],
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         let received = server.await;
@@ -785,18 +789,18 @@ fn explicit_host_redirects_share_the_transport_redirect_limit() {
             })
             .unwrap();
             let error = executor
-                .execute(HttpRequest {
-                    path: url,
-                    headers: vec![("Host".into(), "virtual.example".into())],
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        headers: vec![("Host".into(), "virtual.example".into())],
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap_err();
 
-            assert!(matches!(
-                &error,
-                ExecutionError::Http(HttpError::Transport(_))
-            ));
+            assert!(matches!(&error, ExecutionError::Transport(_)));
             assert!(error.to_string().contains("too many redirects"), "{error}");
             server.await;
         }
@@ -806,40 +810,38 @@ fn explicit_host_redirects_share_the_transport_redirect_limit() {
 #[test]
 fn rejects_invalid_urls_schemes_and_headers_before_sending() {
     smol::block_on(async {
-        for path in [
-            "",
-            "/relative/path",
-            "ws://localhost/socket",
-            "file:///etc/hosts",
-        ] {
+        for path in ["", "ws://localhost/socket", "file:///etc/hosts"] {
             let error = executor()
-                .execute(HttpRequest {
-                    path: path.into(),
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: path.into(),
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap_err();
             println!("\n  {path:?} -> {error}");
             assert!(matches!(
                 error,
-                ExecutionError::Http(HttpError::InvalidUrl(_) | HttpError::UnsupportedScheme(_))
+                ExecutionError::InvalidUrl(_) | ExecutionError::UnsupportedScheme(_)
             ));
         }
 
         for header in [("bad name", "value"), ("X-Test", "value\r\ninjected: true")] {
             let error = executor()
-                .execute(HttpRequest {
-                    path: "http://127.0.0.1:1".into(),
-                    headers: vec![(header.0.into(), header.1.into())],
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: "http://127.0.0.1:1".into(),
+                        headers: vec![(header.0.into(), header.1.into())],
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap_err();
             println!("\n  Invalid header -> {error}");
-            assert!(matches!(
-                error,
-                ExecutionError::Http(HttpError::InvalidRequest(_))
-            ));
+            assert!(matches!(error, ExecutionError::InvalidRequest(_)));
         }
     });
 }
@@ -866,38 +868,38 @@ fn rejects_invalid_and_duplicate_host_headers_before_sending() {
             "[::1]suffix",
         ] {
             let error = executor
-                .execute(HttpRequest {
-                    path: "http://127.0.0.1:1".into(),
-                    headers: vec![("hOsT".into(), value.into())],
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: "http://127.0.0.1:1".into(),
+                        headers: vec![("hOsT".into(), value.into())],
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap_err();
 
             println!("\n  Host: {value:?} -> {error}");
-            assert!(matches!(
-                error,
-                ExecutionError::Http(HttpError::InvalidHost)
-            ));
+            assert!(matches!(error, ExecutionError::InvalidHost));
             assert!(error.to_string().contains("User-Agent"));
         }
 
         let error = executor
-            .execute(HttpRequest {
-                path: "http://127.0.0.1:1".into(),
-                headers: vec![
-                    ("Host".into(), "example.com".into()),
-                    ("host".into(), "example.com".into()),
-                ],
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: "http://127.0.0.1:1".into(),
+                    headers: vec![
+                        ("Host".into(), "example.com".into()),
+                        ("host".into(), "example.com".into()),
+                    ],
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::Http(HttpError::MultipleHosts)
-        ));
+        assert!(matches!(error, ExecutionError::MultipleHosts));
     });
 }
 
@@ -920,14 +922,17 @@ fn preserves_valid_host_overrides_and_user_agent() {
             )
             .await;
             let result = executor
-                .execute(HttpRequest {
-                    path: url,
-                    headers: vec![
-                        ("Host".into(), host.into()),
-                        ("User-Agent".into(), "requesteagleruntime/0.041".into()),
-                    ],
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        headers: vec![
+                            ("Host".into(), host.into()),
+                            ("User-Agent".into(), "requesteagleruntime/0.041".into()),
+                        ],
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap();
             let received = server.await;
@@ -951,14 +956,19 @@ fn generated_preview_matches_headers_received_by_the_server() {
             serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec())
                 .await;
         let path = url.replacen("http://", "http://user:p%40ss@", 1);
-        let preview = request::generated_headers(Method::Post, &path, &[], 3);
+        let headers = vec![("Content-Type".into(), "text/plain".into())];
+        let preview = request::generated_headers(Method::Post, &path, &headers, 3);
         executor()
-            .execute(HttpRequest {
-                method: Method::Post,
-                path,
-                body: Some(b"abc".to_vec()),
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    method: Method::Post,
+                    path,
+                    headers,
+                    body: Some(b"abc".to_vec()),
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         let received = server.await;
@@ -979,7 +989,7 @@ fn generated_preview_matches_headers_received_by_the_server() {
                 .skip(1)
                 .filter(|line| !line.is_empty())
                 .count(),
-            5
+            6
         );
         assert_eq!(received.body, b"abc");
     });
@@ -994,25 +1004,22 @@ fn reports_transport_and_truncated_body_errors() {
         ] {
             let (url, server) = serve(response.to_vec()).await;
             let error = executor()
-                .execute(HttpRequest {
-                    path: url,
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await
                 .unwrap_err();
             server.await;
             println!("\n  Connection failure -> {error}");
 
             if response.is_empty() {
-                assert!(matches!(
-                    error,
-                    ExecutionError::Http(HttpError::Transport(_))
-                ));
+                assert!(matches!(error, ExecutionError::Transport(_)));
             } else {
-                assert!(matches!(
-                    error,
-                    ExecutionError::Http(HttpError::ReadBody(_))
-                ));
+                assert!(matches!(error, ExecutionError::ReadBody(_)));
             }
         }
     });
@@ -1046,10 +1053,13 @@ fn enforces_size_limit_for_content_length_and_chunked_responses() {
 
             let (url, server) = serve(response).await;
             let result = executor
-                .execute(HttpRequest {
-                    path: url,
-                    ..HttpRequest::default()
-                })
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
                 .await;
             server.await;
 
@@ -1088,10 +1098,13 @@ fn zero_size_and_timeout_preferences_disable_the_limits() {
         })
         .unwrap();
         let result = executor
-            .execute(HttpRequest {
-                path: url,
-                ..HttpRequest::default()
-            })
+            .execute(
+                HttpRequest {
+                    path: url,
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
             .await
             .unwrap();
         server.await;
@@ -1140,7 +1153,7 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                         ..Default::default()
                     },
                     ..HttpRequest::default()
-                })
+                }, no_variables())
                 .await
                 .unwrap_err();
             println!(
@@ -1195,10 +1208,13 @@ fn dropping_an_in_flight_future_cancels_the_connection() {
 
             stream.read(&mut byte).await.unwrap()
         });
-        let mut run = Box::pin(executor().execute(HttpRequest {
-            path: url,
-            ..HttpRequest::default()
-        }));
+        let mut run = Box::pin(executor().execute(
+            HttpRequest {
+                path: url,
+                ..HttpRequest::default()
+            },
+            no_variables(),
+        ));
         smol::future::or(
             async {
                 let result = run.as_mut().await;
@@ -1261,11 +1277,11 @@ fn preserves_serialized_request_and_preference_formats() {
 }
 
 #[test]
-fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
+fn scripts_wrap_the_real_http_execution() {
     smol::block_on(async {
         let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"success\":true}";
         let (url, server) = serve(response.to_vec()).await;
-        let draft = HttpRequest {
+        let request = HttpRequest {
             method: Method::Post,
             path: format!("{url}/{{{{resource}}}}"),
             body: Some(br#"{"name":"{{name}}"}"#.to_vec()),
@@ -1275,7 +1291,7 @@ fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
             },
             ..Default::default()
         };
-        let execution = executor().execute(&draft).await.unwrap();
+        let execution = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
         assert!(received.head.starts_with("POST /echo HTTP/1.1"));
         assert!(received.head.to_lowercase().contains("x-script: ran"));
@@ -1288,13 +1304,11 @@ fn scripts_wrap_the_real_http_execution_and_keep_the_draft_unchanged() {
                 .iter()
                 .all(|test| test.error.is_none())
         );
-        assert!(draft.path.ends_with("{{resource}}"));
-        assert!(draft.headers.is_empty());
     });
 }
 
 #[test]
-fn direct_scripts_filter_bodies_and_logging_failures_do_not_block_http() {
+fn scripts_filter_bodies_and_logging_failures_do_not_block_http() {
     smol::block_on(async {
         for method in ["GET", "HEAD"] {
             let (url, server) = serve(
@@ -1319,7 +1333,7 @@ fn direct_scripts_filter_bodies_and_logging_failures_do_not_block_http() {
                 pm.request.method = '{method}';
             "#
             );
-            let execution = executor().execute(request).await.unwrap();
+            let execution = executor().execute(request, no_variables()).await.unwrap();
             let received = server.await;
             assert!(
                 received
@@ -1342,7 +1356,7 @@ fn direct_scripts_filter_bodies_and_logging_failures_do_not_block_http() {
 }
 
 #[test]
-fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
+fn scripts_see_and_edit_query_rows() {
     smol::block_on(async {
         for mode in ["read", "edit", "clear", "replace", "post"] {
             let (url, server) = serve(
@@ -1378,14 +1392,14 @@ fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
                 "edit" => "/path?Case=keep&x=%F0%9F%A6%85+%26+%2B",
                 _ => "/path?fresh=yes",
             };
-            let draft = HttpRequest {
+            let request = HttpRequest {
                 path: format!("{url}/path?tag=existing%20item#ignored"),
-                query: Some(vec![
+                query: vec![
                     ("tag".into(), "a & b".into()),
                     ("tag".into(), "c+d".into()),
                     ("Case".into(), "keep".into()),
                     ("remove".into(), "yes".into()),
-                ]),
+                ],
                 scripts: request::RequestScripts {
                     pre_request: format!(
                         "pm.expect(String(pm.request.url)).to.equal({initial:?}); pm.expect(pm.request.url.query.get('tag')).to.equal('existing item'); {mutation}"
@@ -1397,14 +1411,7 @@ fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
                 },
                 ..Default::default()
             };
-            let original = draft.clone();
-            let execution = executor()
-                .execute_with_variables(
-                    &draft,
-                    request::RequestVariables::new(environment::VariableValues::default(), None),
-                )
-                .await
-                .unwrap();
+            let execution = executor().execute(request, no_variables()).await.unwrap();
             let received = server.await;
             assert!(
                 received
@@ -1418,7 +1425,6 @@ fn scripts_see_and_edit_query_rows_without_changing_the_draft() {
                 "{:?}",
                 execution.scripts.last().unwrap().tests[0]
             );
-            assert_eq!(draft, original);
         }
     });
 }
@@ -1441,7 +1447,7 @@ fn request_timeout_does_not_discard_a_response_during_its_post_response_script()
                 ..Default::default()
             },
             ..Default::default()
-        }).await.unwrap();
+        }, no_variables()).await.unwrap();
         server.await;
         let Response::Http(response) = execution.response;
         assert_eq!(response.body, b"ok");

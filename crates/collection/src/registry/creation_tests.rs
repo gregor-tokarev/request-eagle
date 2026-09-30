@@ -2,7 +2,9 @@ use std::{fs, path::PathBuf};
 
 use uuid::Uuid;
 
-use crate::{CollectionRegistry, Entry, Method, Request};
+use crate::{CollectionRegistry, Entry};
+
+use request::{Method, Request};
 
 struct Fixture(PathBuf);
 
@@ -31,7 +33,7 @@ fn creates_collections_folders_and_requests_that_survive_reload() {
     assert!(request.is_file());
     assert!(root_request.is_file());
     let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
-    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(
         reloaded.collections()[0].local_env().path,
         collection.join("environment.toml")
@@ -98,7 +100,7 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
     let fixture = Fixture::new();
     let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
     let parent = registry.create_collection().unwrap();
-    let request = crate::HttpRequest {
+    let request = request::HttpRequest {
         method: Method::Post,
         path: "https://example.test/new".into(),
         body: Some(b"draft body".to_vec()),

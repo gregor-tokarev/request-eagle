@@ -2,7 +2,7 @@
 
 This crate owns the request data shared by saved collections and drafts, request
 preferences, and the executor. It does not depend on GPUI application or UI types.
-`collection` and `preferences` re-export their original types, so their imports and
+`preferences` re-exports the request preference types, so its imports and
 serialized files remain compatible.
 
 TLS certificate verification is enabled by default. New profiles and preference
@@ -10,22 +10,31 @@ files that omit `ssl_certificate_verification` verify server certificates. An
 explicit stored value is preserved, including `false` saved by older versions.
 
 ```rust,no_run
-use request::{HttpRequest, RequestExecutor, RequestPreferences, Response};
+use std::collections::HashMap;
+
+use request::{HttpRequest, RequestExecutor, RequestPreferences, RequestVariables, Response};
 
 let executor = RequestExecutor::new(&RequestPreferences::default())?;
-let draft = HttpRequest {
-    path: "https://example.com/api".into(),
+let request = HttpRequest {
+    path: "https://example.com/{{route}}".into(),
     ..HttpRequest::default()
 };
+let values = HashMap::from([("route".into(), "api".into())]);
 
-// Also accepts a saved Request, by value or reference. The returned future owns
-// a snapshot and can be spawned on a background executor without borrowing a tab.
-let run = executor.execute(&draft);
+// The returned future owns its inputs and can be spawned on a background
+// executor without borrowing a tab.
+let run = executor.execute(request, RequestVariables::new(values, None));
 let execution = smol::block_on(run)?;
 let Response::Http(response) = execution.response;
 println!("{}: {} bytes in {:?}", response.status, response.body.len(), execution.elapsed);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`execute` runs the pre-request scripts, resolves `{{variables}}` in the URL,
+headers, query and body, applies the editor's send defaults
+(`HttpRequest::prepare_for_send`: an `https://` scheme for URLs without one, no
+body for GET and HEAD, and a JSON `Content-Type` for bodies without one), sends
+the request, then runs the post-response scripts.
 
 The executor reuses its HTTP connection pool. Construct a new executor when
 preferences change. HTTP/HTTPS execution supports GET, POST, PUT, PATCH, DELETE,
@@ -57,14 +66,8 @@ counts are retained. Partial byte-range responses and unsupported content encodi
 remain unchanged. Malformed input, transport failures, corrupt
 gzip streams, truncated bodies, timeouts, and oversized responses return typed errors.
 
-URLs must be absolute and already resolved. Collection environment substitution,
-authentication editors, and UI Send actions are outside this module.
-
 `Request` and `Response` are protocol enums. HTTP details live in `http.rs`, while
-`executor.rs` dispatches requests. Add WebSocket, GraphQL, gRPC, or another protocol
-with its own request/response variants and execution module. A streaming protocol
-can return a session handle in its response variant instead of an HTTP-style
-buffered body. Only HTTP/HTTPS is implemented today.
+`executor.rs` runs the scripts and sends the request. Only HTTP/HTTPS is implemented.
 
 Run local-server tests, with request/response and error output:
 
@@ -79,11 +82,11 @@ reason and script report without an HTTP response.
 
 To retain `pm.environment` changes between executions, pass
 `RequestVariables::with_environment_session(file_values, file_error, session)`
-to `execute_with_variables`. Reuse the same `environment::EnvironmentSession`
-handle for requests sharing an environment and create a fresh snapshot for each
-execution. `execute` and `RequestVariables::new` have no persistent session;
-their script values last only for that execution. Session changes are in-memory
-and do not write environment files.
+to `execute`. Reuse the same `environment::EnvironmentSession` handle for
+requests sharing an environment and create a fresh snapshot for each execution.
+`RequestVariables::new` has no persistent session; its script values last only
+for that execution. Session changes are in-memory and do not write environment
+files.
 
 TLS tests generate fresh self-signed certificates and private keys in memory for
 their loopback servers. No certificate or key fixtures are stored on disk.

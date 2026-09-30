@@ -22,7 +22,6 @@ request = { path = "../request" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
-smol = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -32,6 +31,7 @@ oo7 = { version = "0.6", default-features = false, features = ["async-std", "nat
 security-framework = "3"
 security-framework-sys = "2"
 core-foundation = "0.10"
+smol = "2"
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }

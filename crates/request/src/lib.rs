@@ -1,12 +1,8 @@
 //! Request data and execution without application or UI state.
 //!
-//! `RequestExecutor::execute` snapshots a saved `Request` or a draft's
-//! `HttpRequest` and returns a cancellable, sendable future. It can be awaited
-//! on GPUI's background executor, smol, or Tokio.
-//!
-//! Add future protocols as `Request` / `Response` variants with their own
-//! execution modules. Streaming protocols can return a session in their
-//! response variant; they do not have to use the buffered HTTP response.
+//! `RequestExecutor::execute` takes an owned `HttpRequest` and its
+//! `RequestVariables`, and returns a cancellable, sendable future. It can be
+//! awaited on GPUI's background executor, smol, or Tokio.
 
 mod error;
 mod executor;
@@ -23,7 +19,7 @@ mod variables;
 
 pub use scripts::{RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
-pub use error::{ExecutionError, HttpError};
+pub use error::ExecutionError;
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};

@@ -7,8 +7,6 @@ use lsp_types::{
 use request::ScriptPhase;
 use ropey::{Rope, extra::esoterica::ropes_are_instances};
 
-use crate::script_intelligence;
-
 // GPUI Kit 0.6.2's editor positions count Unicode scalar values, while the
 // language service returns standard LSP UTF-16 columns. Keep the conversion at
 // the editor boundary so a preceding emoji cannot shift or corrupt an edit.
@@ -137,7 +135,7 @@ impl HoverProvider for ScriptCompletions {
 }
 
 #[cfg(test)]
-pub(crate) fn completion_items(
+pub(super) fn completion_items(
     text: &Rope,
     offset: usize,
     phase: ScriptPhase,

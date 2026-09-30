@@ -1,7 +1,7 @@
-use collection::{HttpRequest, Method};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::RequestExecutor;
+use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
 
@@ -95,10 +95,10 @@ impl RequestDraft {
         }
 
         self.prepare(window, cx);
-        let response = self.response.as_ref().unwrap().clone();
+        let response = self.response.clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         let request = self.request.clone();
         let variables = scope.read(cx).request_variables(cx);
         let preferences = cx
@@ -119,9 +119,9 @@ impl RequestDraft {
                 Err(error) => return (None, Err(error)),
             };
             let result = executor
-                .execute_with_variables(request, variables)
+                .execute(request, variables)
                 .await
-                .map(super::super::response_view::ResponseContent::new);
+                .map(crate::response_view::ResponseContent::new);
 
             (Some((preferences, executor)), result)
         });
@@ -142,9 +142,7 @@ impl RequestDraft {
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self.task = None;
 
-        if let Some(response) = &self.response {
-            response.update(cx, |response, cx| response.cancel(cx));
-        }
+        self.response.update(cx, |response, cx| response.cancel(cx));
 
         cx.notify();
     }

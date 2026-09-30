@@ -1,12 +1,10 @@
-use environment::VariableValues;
 use request::{HttpRequest, Method};
+use std::collections::HashMap;
 
 #[test]
 fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
     let session = environment::EnvironmentSession::default();
-    let file_values = VariableValues {
-        environment: [("token".into(), "saved value".into())].into(),
-    };
+    let file_values = HashMap::from([("token".into(), "saved value".into())]);
     session
         .apply(&[("token".into(), Some("response token".into()))].into())
         .unwrap();
@@ -35,7 +33,7 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         "Bearer refreshed token"
     );
     assert_eq!(draft.headers[0].1, "Bearer {{token}}");
-    assert_eq!(file_values.environment["token"], "saved value");
+    assert_eq!(file_values["token"], "saved value");
 }
 
 #[test]
@@ -45,7 +43,7 @@ fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
         .apply(&[("token".into(), Some("session token".into()))].into())
         .unwrap();
     let variables = request::RequestVariables::with_environment_session(
-        VariableValues::default(),
+        HashMap::new(),
         Some("Invalid environment file".into()),
         session,
     );
@@ -68,14 +66,12 @@ fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
 
 #[test]
 fn escaped_references_remain_literal_in_every_request_field() {
-    let values = VariableValues {
-        environment: [("customer".into(), "must not replace".into())].into(),
-    };
+    let values = HashMap::from([("customer".into(), "must not replace".into())]);
     let draft = HttpRequest {
         method: Method::Post,
         path: "https://example.com/{{!customer}}".into(),
         headers: vec![("X-{{!customer}}".into(), "{{!missing}}".into())],
-        query: Some(vec![("{{!customer}}".into(), "{{!$guid}}".into())]),
+        query: vec![("{{!customer}}".into(), "{{!$guid}}".into())],
         body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
         ..Default::default()
     };
@@ -86,7 +82,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         ("X-{{customer}}".into(), "{{missing}}".into())
     );
     assert_eq!(
-        resolved.query.unwrap()[0],
+        resolved.query[0],
         ("{{customer}}".into(), "{{$guid}}".into())
     );
     assert_eq!(
@@ -97,14 +93,11 @@ fn escaped_references_remain_literal_in_every_request_field() {
 
 #[test]
 fn resolves_every_request_field_in_a_snapshot() {
-    let values = VariableValues {
-        environment: [
-            ("base_url".into(), "https://example.com".into()),
-            ("key".into(), "message".into()),
-            ("value".into(), "🦅 hello".into()),
-        ]
-        .into(),
-    };
+    let values = HashMap::from([
+        ("base_url".into(), "https://example.com".into()),
+        ("key".into(), "message".into()),
+        ("value".into(), "🦅 hello".into()),
+    ]);
     let draft = HttpRequest {
         method: Method::Post,
         path: "{{base_url}}/echo?id={{$guid}}".into(),
@@ -112,7 +105,7 @@ fn resolves_every_request_field_in_a_snapshot() {
             ("X-{{key}}".into(), "{{value}}".into()),
             ("X-Request-ID".into(), "{{$guid}}".into()),
         ],
-        query: Some(vec![("{{key}}".into(), "{{$guid}}".into())]),
+        query: vec![("{{key}}".into(), "{{$guid}}".into())],
         body: Some(br#"{"value":"{{value}}","id":"{{$guid}}"}"#.to_vec()),
         ..Default::default()
     };
@@ -121,7 +114,7 @@ fn resolves_every_request_field_in_a_snapshot() {
     assert_eq!(draft, before);
     assert!(outgoing.path.starts_with("https://example.com/echo?id="));
     assert_eq!(outgoing.headers[0], ("X-message".into(), "🦅 hello".into()));
-    let id = &outgoing.query.as_ref().unwrap()[0].1;
+    let id = &outgoing.query[0].1;
     assert!(outgoing.path.ends_with(id));
     assert_eq!(&outgoing.headers[1].1, id);
     assert_eq!(
@@ -131,14 +124,11 @@ fn resolves_every_request_field_in_a_snapshot() {
 }
 #[test]
 fn url_fragments_do_not_resolve_or_validate_unsent_references() {
-    let values = environment::VariableValues {
-        environment: [
-            ("host".into(), "example.com".into()),
-            ("base_url".into(), "https://example.com/path#local".into()),
-            ("fragment".into(), "#local".into()),
-        ]
-        .into(),
-    };
+    let values = HashMap::from([
+        ("host".into(), "example.com".into()),
+        ("base_url".into(), "https://example.com/path#local".into()),
+        ("fragment".into(), "#local".into()),
+    ]);
     for (path, expected) in [
         ("https://example.com/#{{missing}}", "https://example.com/"),
         ("https://{{host}}/#{{unclosed", "https://example.com/"),

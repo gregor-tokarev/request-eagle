@@ -9,8 +9,6 @@ use lsp_types::{Documentation, ParameterLabel, SignatureHelp, SignatureInformati
 use request::ScriptPhase;
 use ropey::{Rope, extra::esoterica::ropes_are_instances};
 
-use crate::script_intelligence;
-
 pub(super) struct ScriptSignature {
     editor: Entity<EditorState>,
     phase: ScriptPhase,

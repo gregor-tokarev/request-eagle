@@ -1,14 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    fs,
-    rc::Rc,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{cell::RefCell, collections::HashSet, fs, rc::Rc, sync::Arc};
 
 use collection::CollectionRegistry;
 use gpui_kit::component::Root;
@@ -22,18 +12,9 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
-static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
-
 pub(super) fn collections() -> CollectionRegistry {
-    let directory = std::env::temp_dir().join(format!(
-        "request-eagle-sidebar-test-{}-{}-{}",
-        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let directory = tempfile::tempdir().unwrap();
+    let directory = directory.path();
 
     for name in ["Example API", "Status API"] {
         let collection = directory.join(name);
@@ -78,10 +59,7 @@ pub(super) fn collections() -> CollectionRegistry {
         )).unwrap();
     }
 
-    let result = CollectionRegistry::from_path(&directory);
-    fs::remove_dir_all(directory).unwrap();
-
-    result.unwrap()
+    CollectionRegistry::from_path(directory).unwrap()
 }
 
 #[test]
@@ -115,6 +93,20 @@ fn tree_preserves_hierarchy_and_filters_collapsed_collections() {
             .iter()
             .any(|item| item.label == "environment.toml")
     );
+
+    let comment = tree
+        .items
+        .iter()
+        .position(|item| item.kind == ItemKind::Request("POST"))
+        .unwrap();
+    assert_eq!(
+        tree.location(comment),
+        (
+            "Example API".into(),
+            vec!["Posts".into(), "Comments".into()]
+        )
+    );
+    assert_eq!(tree.location(tree.roots[1]), ("Status API".into(), vec![]));
 
     for collection in collections.collections() {
         assert!(

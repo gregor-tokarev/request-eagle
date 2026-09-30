@@ -1,14 +1,13 @@
 use gpui_kit::base::{ElementExt as _, Tab, Tabs, TextSelectionScopeId};
 use gpui_kit::component::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
-    input::EditorState,
     kbd::Kbd,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ExecutionError;
 
-use super::body::ResponseBodyEditor;
+use super::body::Body;
 use super::content::ResponseContent;
 use crate::actions::SendRequest;
 
@@ -24,17 +23,14 @@ enum Section {
 pub struct ResponseView {
     pub(super) focus: FocusHandle,
     pub(super) content: Option<ResponseContent>,
-    pub(super) editor: Option<Entity<EditorState>>,
-    pub(super) editor_view: Option<Entity<ResponseBodyEditor>>,
+    /// Present exactly when `content` is.
+    pub(super) body: Option<Body>,
     pub(super) message: SharedString,
-    pub(super) loading: bool,
+    loading: bool,
     error: bool,
     pub(super) scripts: Vec<request::ScriptReport>,
     section: Section,
-    pub(super) pretty: bool,
     pub(super) wrap: bool,
-    pub(super) virtual_body: Option<Entity<super::virtual_body::VirtualBody>>,
-    pub(super) body_search: Option<super::search::BodySearch>,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
     pub(super) detail_open: [bool; 3],
@@ -46,17 +42,13 @@ impl ResponseView {
         Self {
             focus: cx.focus_handle(),
             content: None,
-            editor: None,
-            editor_view: None,
+            body: None,
             message: "Send a request to see the response".into(),
             loading: false,
             error: false,
             scripts: Vec::new(),
             section: Section::Body,
-            pretty: false,
             wrap: true,
-            virtual_body: None,
-            body_search: None,
             headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
             detail_open: [false; 3],
@@ -66,11 +58,8 @@ impl ResponseView {
 
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
         self.content = None;
+        self.body = None;
         self.scripts.clear();
-        self.editor = None;
-        self.editor_view = None;
-        self.body_search = None;
-        self.virtual_body = None;
         self.loading = true;
         self.error = false;
         self.message = "Sending request…".into();
@@ -90,13 +79,11 @@ impl ResponseView {
         cx: &mut Context<Self>,
     ) {
         self.loading = false;
-        self.body_search = None;
-        self.virtual_body = None;
         self.scripts.clear();
 
         match result {
-            Ok(content) => {
-                self.scripts = content.execution.scripts.clone();
+            Ok(mut content) => {
+                self.scripts = std::mem::take(&mut content.execution.scripts);
                 if self.scripts.iter().any(|report| {
                     report.error.is_some() || report.tests.iter().any(|test| test.error.is_some())
                 }) {
@@ -104,40 +91,35 @@ impl ResponseView {
                 }
                 self.headers_list.reset(content.headers.len());
                 self.cookies_list.reset(content.cookies.len());
-                self.pretty = content.pretty.is_some();
-                let text = content.pretty.as_ref().unwrap_or(&content.raw).clone();
-                self.set_body_text(text, content.language, window, cx);
                 self.content = Some(content);
+                self.set_pretty(true, window, cx);
                 self.error = false;
             }
             Err(error) => {
+                self.message = error.to_string().into();
+
                 // Earlier scripts' reports wrap a failure or skip in a later script.
-                let (source, reports) = match &error {
-                    ExecutionError::ScriptedRequest { source, reports } => {
-                        (&**source, Some(reports))
-                    }
+                let (source, reports) = match error {
+                    ExecutionError::ScriptedRequest { source, reports } => (*source, Some(reports)),
                     error => (error, None),
                 };
-                let skipped = matches!(source, ExecutionError::Skipped { .. });
+                self.error = !matches!(source, ExecutionError::Skipped { .. });
                 match source {
                     ExecutionError::Skipped { report, .. } => {
-                        self.scripts = vec![(**report).clone()];
+                        self.scripts = vec![*report];
                         self.section = Section::Body;
                     }
                     ExecutionError::Script { report, .. } => {
-                        self.scripts = vec![(**report).clone()];
+                        self.scripts = vec![*report];
                         self.section = Section::Tests;
                     }
                     _ => {}
                 }
                 if let Some(reports) = reports {
-                    self.scripts = reports.clone();
+                    self.scripts = reports;
                 }
                 self.content = None;
-                self.editor = None;
-                self.editor_view = None;
-                self.error = !skipped;
-                self.message = error.to_string().into();
+                self.body = None;
             }
         }
 
@@ -148,10 +130,11 @@ impl ResponseView {
         let headers = self
             .content
             .as_ref()
-            .map_or(0, |content| content.http().headers.len());
-        let cookies = self.content.as_ref().map_or(0, |content| {
-            content.http().headers.get_all("set-cookie").iter().count()
-        });
+            .map_or(0, |content| content.headers.len());
+        let cookies = self
+            .content
+            .as_ref()
+            .map_or(0, |content| content.cookies.len());
 
         h_flex()
             .flex_none()
@@ -213,73 +196,69 @@ impl ResponseView {
             .child(div().flex_1())
             .when(self.content.is_some(), |row| row.child(self.metadata(cx)))
     }
+
+    fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
+        let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
+        let header = if self.loading {
+            EmptyHeader::new()
+                .media(media.child(Icon::new(IconName::Loader).with_animation(
+                    "response-loading",
+                    Animation::new(std::time::Duration::from_secs(1)).repeat(),
+                    |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+                )))
+                .title(EmptyTitle::new().child(self.message.clone()))
+        } else if self.error {
+            EmptyHeader::new()
+                .media(
+                    media.child(Icon::new(IconName::TriangleAlert).text_color(cx.theme().danger)),
+                )
+                .title(EmptyTitle::new().child("Request failed"))
+                .description(EmptyDescription::new().child(self.message.clone()))
+        } else {
+            EmptyHeader::new()
+                .media(media.child(Icon::default().path("icons/send-horizontal.svg")))
+                .title(EmptyTitle::new().child(self.message.clone()))
+                .when_some(
+                    Kbd::binding_for_action(&SendRequest, Some("Workspace"), window),
+                    |header, kbd| {
+                        header.description(
+                            EmptyDescription::new().child(
+                                h_flex()
+                                    .justify_center()
+                                    .gap_1()
+                                    .child("Press")
+                                    .child(kbd)
+                                    .child("to send"),
+                            ),
+                        )
+                    },
+                )
+        };
+
+        div()
+            .debug_selector(|| "response-empty".into())
+            .flex()
+            .flex_1()
+            .min_h_0()
+            .child(Empty::new().header(header))
+            .into_any_element()
+    }
 }
 
 impl Render for ResponseView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = if self.section == Section::Tests
-            && !self.loading
-            && (self.content.is_some() || !self.scripts.is_empty())
-        {
-            self.script_results(false, cx)
-        } else if self.section == Section::Console
-            && !self.loading
-            && (self.content.is_some() || !self.scripts.is_empty())
-        {
-            self.script_results(true, cx)
-        } else if self.content.is_some() {
-            match self.section {
-                Section::Body => self.body(cx),
-                Section::Headers => self.headers(false, cx),
-                Section::Cookies => self.headers(true, cx),
-                Section::Tests | Section::Console => unreachable!(),
-            }
-        } else {
-            let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
-            let header =
-                if self.loading {
-                    EmptyHeader::new()
-                        .media(media.child(Icon::new(IconName::Loader).with_animation(
-                            "response-loading",
-                            Animation::new(std::time::Duration::from_secs(1)).repeat(),
-                            |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
-                        )))
-                        .title(EmptyTitle::new().child(self.message.clone()))
-                } else if self.error {
-                    EmptyHeader::new()
-                        .media(media.child(
-                            Icon::new(IconName::TriangleAlert).text_color(cx.theme().danger),
-                        ))
-                        .title(EmptyTitle::new().child("Request failed"))
-                        .description(EmptyDescription::new().child(self.message.clone()))
-                } else {
-                    EmptyHeader::new()
-                        .media(media.child(Icon::default().path("icons/send-horizontal.svg")))
-                        .title(EmptyTitle::new().child(self.message.clone()))
-                        .when_some(
-                            Kbd::binding_for_action(&SendRequest, Some("Workspace"), window),
-                            |header, kbd| {
-                                header.description(
-                                    EmptyDescription::new().child(
-                                        h_flex()
-                                            .justify_center()
-                                            .gap_1()
-                                            .child("Press")
-                                            .child(kbd)
-                                            .child("to send"),
-                                    ),
-                                )
-                            },
-                        )
-                };
+        // Starting a request clears the response and scripts, so a loading
+        // view always falls through to the empty state.
+        let has_results = self.content.is_some() || !self.scripts.is_empty();
+        let has_response = self.content.is_some();
 
-            div()
-                .debug_selector(|| "response-empty".into())
-                .flex()
-                .flex_1()
-                .min_h_0()
-                .child(Empty::new().header(header))
-                .into_any_element()
+        let content = match self.section {
+            Section::Tests if has_results => self.script_results(false, cx),
+            Section::Console if has_results => self.script_results(true, cx),
+            Section::Body if has_response => self.body(cx),
+            Section::Headers if has_response => self.headers(false, cx),
+            Section::Cookies if has_response => self.headers(true, cx),
+            _ => self.empty_state(window, cx),
         };
 
         v_flex()
@@ -306,9 +285,7 @@ impl Render for ResponseView {
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().border)
-            .when(self.content.is_some() || !self.scripts.is_empty(), |view| {
-                view.child(self.toolbar(cx))
-            })
+            .when(has_results, |view| view.child(self.toolbar(cx)))
             .when(
                 self.error
                     && !self.scripts.is_empty()

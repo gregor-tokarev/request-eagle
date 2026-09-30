@@ -1,6 +1,33 @@
-mod handlers;
+use gpui_kit::{App, Entity, actions};
 
-#[cfg(test)]
-mod tests;
+actions!(request_eagle, [CheckForUpdates, Quit]);
 
-pub use handlers::{CheckForUpdates, Quit, init};
+pub fn init(updater: Entity<updater::Updater>, cx: &mut App) {
+    keybindings_service::register(
+        CheckForUpdates,
+        "Check for updates",
+        "Look for a newer version of Request Eagle.",
+        "Application",
+        None,
+        None,
+        cx,
+    )
+    .expect("check for updates command should be valid");
+
+    keybindings_service::register(
+        Quit,
+        "Quit Request Eagle",
+        "Close every window and quit the application.",
+        "Application",
+        Some("secondary-q"),
+        None,
+        cx,
+    )
+    .expect("default quit keybinding should be valid");
+
+    cx.on_action(move |_: &CheckForUpdates, cx| {
+        updater.update(cx, |updater, cx| updater.check(cx));
+        cx.defer(|cx| cx.dispatch_action(&workspace::OpenGeneralSettings));
+    })
+    .on_action(|_: &Quit, cx| cx.quit());
+}

@@ -8,7 +8,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
-use super::view::ResponseView;
+use super::{body::Body, view::ResponseView};
 
 pub(super) struct BodySearch {
     pub(super) input: Entity<InputState>,
@@ -56,60 +56,68 @@ impl BodySearch {
 
 impl ResponseView {
     pub(super) fn open_response_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.virtual_body.is_none() {
-            if let Some(editor) = &self.editor {
-                editor.update(cx, |editor, cx| editor.open_search(false, cx));
-            }
-            return;
-        }
+        match &mut self.body {
+            Some(Body::Raw { search, .. }) => {
+                let search = search.get_or_insert_with(|| {
+                    let input =
+                        cx.new(|cx| InputState::new(window, cx).placeholder("Search response"));
+                    let subscription =
+                        cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
+                            if matches!(event, InputEvent::Change) {
+                                this.update_body_search(cx);
+                            }
+                        });
 
-        if self.body_search.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search response"));
-            let subscription =
-                cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        this.update_body_search(window, cx);
+                    BodySearch {
+                        input,
+                        matches: Vec::new(),
+                        current: 0,
+                        query_len: 0,
+                        case_sensitive: false,
+                        _subscription: subscription,
                     }
                 });
-            self.body_search = Some(BodySearch {
-                input,
-                matches: Vec::new(),
-                current: 0,
-                query_len: 0,
-                case_sensitive: false,
-                _subscription: subscription,
-            });
+                search.input.update(cx, |input, cx| {
+                    input.select_all(window, cx);
+                    input.focus(window, cx);
+                });
+                cx.notify();
+            }
+            Some(Body::Pretty(editor)) => {
+                let editor = editor.read(cx).0.clone();
+                editor.update(cx, |editor, cx| editor.open_search(false, cx));
+            }
+            None => {}
         }
+    }
 
-        self.body_search
-            .as_ref()
-            .unwrap()
-            .input
-            .update(cx, |input, cx| {
-                input.select_all(window, cx);
-                input.focus(window, cx);
-            });
+    fn update_body_search(&mut self, cx: &mut Context<Self>) {
+        let Some(Body::Raw {
+            view,
+            search: Some(search),
+        }) = &mut self.body
+        else {
+            return;
+        };
+
+        search.update_query(&view.read(cx).source, &search.input.read(cx).value());
+        let range = search.current_range();
+        view.update(cx, |view, cx| view.select_match(range, cx));
         cx.notify();
     }
 
-    fn update_body_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(search) = &mut self.body_search else {
-            return;
-        };
-        let Some(body) = &self.virtual_body else {
-            return;
-        };
-        search.update_query(&body.read(cx).source, &search.input.read(cx).value());
-        self.select_body_match(window, cx);
-    }
-
-    fn move_body_match(&mut self, previous: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(search) = &mut self.body_search else {
+    fn move_body_match(&mut self, previous: bool, cx: &mut Context<Self>) {
+        let Some(Body::Raw {
+            view,
+            search: Some(search),
+        }) = &mut self.body
+        else {
             return;
         };
         if search.matches.is_empty() {
             return;
         }
+
         if previous {
             search.current = if search.current == 0 {
                 search.matches.len() - 1
@@ -119,36 +127,31 @@ impl ResponseView {
         } else {
             search.current = (search.current + 1) % search.matches.len();
         }
-        self.select_body_match(window, cx);
-    }
-
-    fn select_body_match(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let search = self.body_search.as_ref().unwrap();
         let range = search.current_range();
-        if let Some(body) = &self.virtual_body {
-            body.update(cx, |body, cx| body.select_match(range, cx));
-        }
+        view.update(cx, |view, cx| view.select_match(range, cx));
         cx.notify();
     }
 
     fn close_body_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.body_search = None;
-        if let Some(body) = &self.virtual_body {
-            body.update(cx, |body, cx| {
-                body.select_match(None, cx);
-                window.focus(&body.focus, cx);
+        if let Some(Body::Raw { view, search }) = &mut self.body {
+            *search = None;
+            view.update(cx, |view, cx| {
+                view.select_match(None, cx);
+                window.focus(&view.focus, cx);
             });
         }
         cx.notify();
     }
 
-    pub(super) fn body_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let search = self.body_search.as_ref().unwrap();
+    pub(super) fn body_search_bar(
+        search: &BodySearch,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         h_flex()
             .debug_selector(|| "response-body-search".into())
             .gap_1()
-            .capture_action(cx.listener(|this, action: &Enter, window, cx| {
-                this.move_body_match(action.shift, window, cx);
+            .capture_action(cx.listener(|this, action: &Enter, _, cx| {
+                this.move_body_match(action.shift, cx);
                 cx.stop_propagation();
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
@@ -169,11 +172,15 @@ impl ResponseView {
                     .label("Aa")
                     .selected(search.case_sensitive)
                     .tooltip("Match case")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if let Some(search) = &mut this.body_search {
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(Body::Raw {
+                            search: Some(search),
+                            ..
+                        }) = &mut this.body
+                        {
                             search.case_sensitive = !search.case_sensitive;
                         }
-                        this.update_body_search(window, cx);
+                        this.update_body_search(cx);
                     })),
             )
             .child(div().text_xs().child(search.label()))
@@ -184,9 +191,7 @@ impl ResponseView {
                     .icon(IconName::ChevronLeft)
                     .accessibility_label("Previous match")
                     .disabled(search.matches.is_empty())
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.move_body_match(true, window, cx)),
-                    ),
+                    .on_click(cx.listener(|this, _, _, cx| this.move_body_match(true, cx))),
             )
             .child(
                 Button::new("response-search-next")
@@ -195,9 +200,7 @@ impl ResponseView {
                     .icon(IconName::ChevronRight)
                     .accessibility_label("Next match")
                     .disabled(search.matches.is_empty())
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.move_body_match(false, window, cx)),
-                    ),
+                    .on_click(cx.listener(|this, _, _, cx| this.move_body_match(false, cx))),
             )
             .child(
                 Button::new("response-search-close")
@@ -214,7 +217,7 @@ impl ResponseView {
 
 #[cfg(test)]
 mod tests {
-    use super::ResponseView;
+    use super::{Body, ResponseView};
     use crate::response_view::virtual_body::VirtualBody;
     use gpui_kit::{AppContext as _, SharedString, TestAppContext};
 
@@ -233,14 +236,17 @@ mod tests {
 
         let (view, cx) = cx.add_window_view(|window, cx| {
             let mut view = ResponseView::new(cx);
-            view.virtual_body = Some(cx.new(|cx| VirtualBody::new(source.clone(), true, cx)));
+            view.body = Some(Body::Raw {
+                view: cx.new(|cx| VirtualBody::new(source.clone(), true, cx)),
+                search: None,
+            });
             view.open_response_search(window, cx);
             view
         });
 
-        cx.update(|window, cx| {
+        cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                let search = view.body_search.as_mut().unwrap();
+                let search = view.body.as_mut().unwrap().search();
                 let allocated = crate::test_allocator::allocated_by(|| {
                     search.update_query(&source, query);
                 });
@@ -248,13 +254,13 @@ mod tests {
                 assert_eq!(search.matches, [first, first + step, first + 2 * step]);
                 assert_eq!(search.label(), "1/3");
 
-                view.move_body_match(true, window, cx);
-                assert_eq!(view.body_search.as_ref().unwrap().label(), "3/3");
-                view.move_body_match(false, window, cx);
-                let body = view.virtual_body.as_ref().unwrap().read(cx);
+                view.move_body_match(true, cx);
+                assert_eq!(view.body.as_mut().unwrap().search().label(), "3/3");
+                view.move_body_match(false, cx);
+                let body = view.body.as_ref().unwrap().raw().read(cx);
                 assert_eq!(body.selection, first..first + query.len());
 
-                let search = view.body_search.as_mut().unwrap();
+                let search = view.body.as_mut().unwrap().search();
                 let buffer = search.matches.as_ptr();
                 search.case_sensitive = true;
                 search.update_query(&source, query);

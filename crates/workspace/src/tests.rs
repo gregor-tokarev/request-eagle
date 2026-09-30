@@ -1,41 +1,118 @@
+use std::fs;
+
 use crate::actions::ToggleLeftSidebar;
-use crate::layout::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
-use crate::workspace::{Layout, on_toggle_sidebar};
+use crate::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
+use crate::main_view::{Page, PageTab};
+use crate::workspace::{Workspace, on_toggle_sidebar};
 use collection::CollectionRegistry;
-use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
+use environment::GlobalEnvironments;
+use gpui_kit::{
+    AppContext as _, Entity, Focusable, Modifiers, TestAppContext, VisualTestContext,
+    component::Root, px,
+};
 use settings_ui::CloseSettings;
 
-/// A catalog in a missing directory, for tests that do not use global environments.
-pub(crate) fn no_environments() -> environment::GlobalEnvironments {
-    environment::GlobalEnvironments::new("/nonexistent/request-eagle/environments")
-}
-
-pub(crate) fn environments(cx: &mut gpui_kit::App) -> gpui_kit::Entity<tab_ui::Environments> {
-    use gpui_kit::AppContext as _;
-
-    cx.new(|_| tab_ui::Environments::new(no_environments(), None))
-}
-
-#[gpui_kit::test]
-fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
+/// Set up the globals the workspace uses, with animations reduced.
+pub(crate) fn init(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         preferences::init(cx);
         request_eagle_theme::init(cx);
         crate::actions::init(cx);
-        // Overrides saved before CloseSettings moved crates must still resolve.
+        cx.set_reduce_motion(true);
+    });
+}
+
+/// A workspace in a new window. Like the application, it is inside a Root,
+/// which shows dialogs.
+pub(crate) fn workspace(
+    collections: CollectionRegistry,
+    environments: GlobalEnvironments,
+    cx: &mut TestAppContext,
+) -> (Entity<Workspace>, &mut VisualTestContext) {
+    let mut workspace = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Workspace::new(
+                collections,
+                environments,
+                updater::init("1.2.3", cx),
+                window,
+                cx,
+            )
+        });
+        workspace = Some(view.clone());
+
+        Root::new(view, window, cx)
+    });
+
+    (workspace.unwrap(), cx)
+}
+
+/// A catalog in a missing directory, for tests that do not use global environments.
+pub(crate) fn no_environments() -> GlobalEnvironments {
+    GlobalEnvironments::new("/nonexistent/request-eagle/environments")
+}
+
+/// Collections of GET requests, loaded through the real parser: 100 requests
+/// per collection, in folders of 20. Their files are removed once loaded.
+pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
+    if request_count == 0 {
+        return CollectionRegistry::new();
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+
+    for index in 0..request_count {
+        let folder = directory.path().join(format!(
+            "collection-{:02}/folder-{:02}",
+            index / 100,
+            index % 100 / 20
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(format!("request-{index:04}.toml")), format!(
+            "id = \"request-{index}\"\nname = \"Get resource {index}\"\nschema_version = 1\n[request]\ntype = \"http\"\nmethod = \"GET\"\npath = \"/resources/{index}\"\nheaders = []\n"
+        )).unwrap();
+    }
+
+    CollectionRegistry::from_path(directory.path()).unwrap()
+}
+
+/// Click an element, found in a fresh layout.
+pub(crate) fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    cx.update(|window, _| window.refresh());
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("missing {selector}"));
+    cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+    cx.simulate_click(bounds.center(), Modifiers::default());
+}
+
+impl PageTab {
+    /// The request draft shown in this tab.
+    pub(crate) fn draft(&self) -> gpui_kit::Entity<tab_ui::RequestDraft> {
+        let Page::Request(draft) = &self.page else {
+            panic!("{} is not a request tab", self.title);
+        };
+
+        draft.clone()
+    }
+
+    /// Where the tab's request is saved.
+    pub(crate) fn location(&self, cx: &gpui_kit::App) -> Option<tab_ui::RequestLocation> {
+        self.draft().read(cx).location.clone()
+    }
+}
+
+#[gpui_kit::test]
+fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
+    init(cx);
+    // Overrides saved before CloseSettings moved crates must still resolve.
+    cx.update(|cx| {
         keybindings_service::set_override("workspace::CloseSettings", Some("ctrl-w"), cx).unwrap();
     });
 
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
-            CollectionRegistry::new(),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    let (layout, cx) = workspace(CollectionRegistry::new(), no_environments(), cx);
 
     let settings = cx.read(|cx| layout.read(cx).settings.clone());
     assert!(cx.debug_bounds("settings").is_none());
@@ -80,23 +157,8 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn toggle_sidebar_action(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        cx.set_reduce_motion(true);
-        crate::actions::init(cx);
-    });
-
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
-            CollectionRegistry::new(),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = workspace(CollectionRegistry::new(), no_environments(), cx);
     cx.update(|_, cx| on_toggle_sidebar(&layout, cx));
 
     let sidebar_visible =
@@ -158,22 +220,8 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        collections_panel_ui::init(cx);
-    });
-
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
-            crate::performance::collections(2),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = workspace(collections(2), no_environments(), cx);
     cx.update(|window, cx| {
         window.activate_window();
         assert!(layout.read(cx).sidebar.focus_handle(cx).is_focused(window));

@@ -29,7 +29,39 @@ pub(super) struct PreparedUpdate {
 
 impl PreparedUpdate {
     pub(super) fn launch_installer(self) -> Result<(), String> {
-        launch_installer(&self.current_app, &self.new_app, self.work_dir.path())?;
+        const SCRIPT: &str = r#"
+pid="$1"
+current_app="$2"
+new_app="$3"
+work_dir="$4"
+backup="${current_app}.previous"
+
+while kill -0 "$pid" 2>/dev/null; do
+  sleep 0.2
+done
+
+rm -rf "$backup"
+if mv "$current_app" "$backup" && mv "$new_app" "$current_app"; then
+  open "$current_app"
+  rm -rf "$backup" "$work_dir"
+else
+  rm -rf "$current_app"
+  mv "$backup" "$current_app"
+  open "$current_app"
+fi
+"#;
+
+        Command::new("/bin/sh")
+            .args(["-c", SCRIPT, "request-eagle-updater"])
+            .arg(std::process::id().to_string())
+            .arg(&self.current_app)
+            .arg(&self.new_app)
+            .arg(self.work_dir.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("Could not start the update installer: {error}"))?;
 
         // The installer now owns these files and removes them after relaunch.
         let _ = self.work_dir.keep();
@@ -246,44 +278,6 @@ fn verify_apple_signature(app: &Path) -> Result<(), String> {
             String::from_utf8_lossy(&gatekeeper.stderr).trim()
         ));
     }
-
-    Ok(())
-}
-
-fn launch_installer(current_app: &Path, new_app: &Path, work_dir: &Path) -> Result<(), String> {
-    const SCRIPT: &str = r#"
-pid="$1"
-current_app="$2"
-new_app="$3"
-work_dir="$4"
-backup="${current_app}.previous"
-
-while kill -0 "$pid" 2>/dev/null; do
-  sleep 0.2
-done
-
-rm -rf "$backup"
-if mv "$current_app" "$backup" && mv "$new_app" "$current_app"; then
-  open "$current_app"
-  rm -rf "$backup" "$work_dir"
-else
-  rm -rf "$current_app"
-  mv "$backup" "$current_app"
-  open "$current_app"
-fi
-"#;
-
-    Command::new("/bin/sh")
-        .args(["-c", SCRIPT, "request-eagle-updater"])
-        .arg(std::process::id().to_string())
-        .arg(current_app)
-        .arg(new_app)
-        .arg(work_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("Could not start the update installer: {error}"))?;
 
     Ok(())
 }

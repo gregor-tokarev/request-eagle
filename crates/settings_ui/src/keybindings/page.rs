@@ -9,9 +9,9 @@ use keybindings_service::{self as keybindings, Command};
 use std::collections::HashMap;
 
 use super::{
+    keycaps::shortcut,
     recorder::Recording,
     row::{CommandRow, row_button},
-    shortcut,
 };
 
 pub(crate) struct KeybindingsPage {
@@ -252,32 +252,31 @@ impl KeybindingsPage {
             return self.render_command(command, compact, cx).into_any_element();
         }
 
-        let page = cx.entity().downgrade();
-        let row = self.rows.entry(command.id).or_insert_with(|| {
-            cx.new(|_| CommandRow {
-                command: command.clone(),
-                page: page.clone(),
-            })
-        });
-        if row.read(cx).command != *command {
+        let row = match self.rows.get(command.id) {
+            Some(row) if row.read(cx).command == *command => row.clone(),
             // Replace the cached content and handlers with the new binding.
-            *row = cx.new(|_| CommandRow {
-                command: command.clone(),
-                page,
-            });
-        }
+            _ => {
+                let page = cx.entity().downgrade();
+                let row = cx.new(|_| CommandRow {
+                    command: command.clone(),
+                    page,
+                });
+                self.rows.insert(command.id, row.clone());
+
+                row
+            }
+        };
 
         // GPUI invalidates cached views when their bounds/text style change or
         // the window refreshes. Theme application already refreshes all windows.
-        row.clone()
-            .cached(StyleRefinement::default().w_full().h(rems(3.5)).flex_none())
+        row.cached(StyleRefinement::default().w_full().h(rems(3.5)).flex_none())
             .into_any_element()
     }
 }
 
 impl Render for KeybindingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = crate::geometry::is_narrow(window);
+        let compact = crate::layout::is_narrow(window);
 
         let mut commands = keybindings::commands(cx);
         commands.sort_by_key(|command| command.label);
@@ -299,7 +298,7 @@ impl Render for KeybindingsPage {
             .w_full()
             .h_full()
             .min_h_0()
-            .max_w(crate::geometry::PAGE_WIDTH)
+            .max_w(crate::layout::PAGE_WIDTH)
             .gap_6()
             .child(
                 h_flex()
@@ -404,35 +403,4 @@ impl Render for KeybindingsPage {
                 )
             })
     }
-}
-
-fn search_text(value: &str) -> String {
-    value
-        .to_lowercase()
-        .replace('⌘', " cmd ")
-        .replace("command", "cmd")
-        .replace("super", "cmd")
-        .replace('⌃', " ctrl ")
-        .replace("control", "ctrl")
-        .replace('⌥', " alt ")
-        .replace("option", "alt")
-        .replace('⇧', " shift ")
-        .replace('⎋', " escape ")
-        .replace(['-', '+'], " ")
-}
-
-pub(super) fn matches_search(command: &Command, query: &str) -> bool {
-    let keys = command
-        .binding
-        .as_ref()
-        .map(|b| b.keystrokes.as_str())
-        .unwrap_or("not set unassigned");
-    let text = search_text(&format!(
-        "{} {} {} {} {}",
-        command.label, command.description, command.category, command.id, keys
-    ));
-
-    search_text(query)
-        .split_whitespace()
-        .all(|word| text.contains(word))
 }
