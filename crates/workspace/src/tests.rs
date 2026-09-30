@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::actions::ToggleLeftSidebar;
+use crate::actions::{NewTab, ToggleLeftSidebar};
 use crate::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
 use crate::main_view::{Page, PageTab};
 use crate::workspace::{Workspace, on_toggle_sidebar};
@@ -245,4 +245,43 @@ fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut Test
     cx.update(|window, cx| {
         assert!(layout.read(cx).sidebar.focus_handle(cx).is_focused(window));
     });
+}
+
+#[gpui_kit::test]
+fn sidebar_sections_fold_and_reopen(cx: &mut TestAppContext) {
+    init(cx);
+    let directory = tempfile::tempdir().unwrap();
+    let (layout, cx) = workspace(
+        collections(2),
+        GlobalEnvironments::new(directory.path()),
+        cx,
+    );
+    let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
+
+    // Cached sections record their bounds in a fresh layout.
+    let height = |cx: &mut VisualTestContext, selector| {
+        cx.update(|window, _| window.refresh());
+        cx.debug_bounds(selector).map(|bounds| bounds.size.height)
+    };
+
+    // Open sections share the sidebar height.
+    let environments = height(cx, "environments-sidebar").unwrap();
+    assert_eq!(height(cx, "collections-sidebar"), Some(environments));
+
+    // A folded section gives its height away, and its rows give up focus.
+    click(cx, "collections-section");
+    assert_eq!(height(cx, "collections-sidebar"), None);
+    assert!(height(cx, "environments-sidebar").unwrap() > environments);
+    cx.update(|window, cx| assert!(window.is_action_available(&NewTab, cx)));
+
+    click(cx, "collections-section");
+    assert!(height(cx, "collections-sidebar").is_some());
+    cx.update(|window, _| assert!(sidebar_focus.is_focused(window)));
+
+    // Creating from a folded section opens it.
+    click(cx, "environments-section");
+    assert_eq!(height(cx, "environments-sidebar"), None);
+    click(cx, "new-environment");
+    assert!(height(cx, "environments-sidebar").is_some());
+    cx.read(|cx| assert_eq!(layout.read(cx).main_view.read(cx).tabs.len(), 2));
 }

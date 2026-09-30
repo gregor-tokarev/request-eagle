@@ -22,7 +22,7 @@ pub(super) struct RenameEditor {
 }
 
 impl CollectionPanel {
-    pub(super) fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let result = self.collections.create_collection();
         self.finish_creation(result, window, cx);
     }
