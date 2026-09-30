@@ -10,6 +10,7 @@ fn http(item: &ImportedItem) -> (&str, &HttpRequest) {
             name,
             request: Request::Http(request),
         } => (name, request),
+        ImportedItem::Request { name, .. } => panic!("{name} is not an HTTP request"),
         ImportedItem::Folder { name, .. } => panic!("{name} is a folder"),
     }
 }
