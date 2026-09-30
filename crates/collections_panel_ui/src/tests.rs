@@ -343,6 +343,22 @@ fn double_click_opens_a_collection_without_toggling_it(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn arrow_keys_override_a_collection_click_that_is_still_waiting(cx: &mut TestAppContext) {
+    let (sidebar, _, cx) = clicking_sidebar(cx);
+    let position = cx.debug_bounds(row_selector(0)).unwrap().center();
+
+    click_at(cx, position, 1);
+    cx.simulate_keystrokes("left");
+    wait_for_double_click(cx);
+    assert!(is_collapsed(&sidebar, 0, cx));
+
+    click_at(cx, position, 1);
+    cx.simulate_keystrokes("right");
+    wait_for_double_click(cx);
+    assert!(!is_collapsed(&sidebar, 0, cx));
+}
+
+#[gpui_kit::test]
 fn slow_double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
     let (sidebar, opened, cx) = clicking_sidebar(cx);
     let (path, selector, position) = last_collection(&sidebar, cx);

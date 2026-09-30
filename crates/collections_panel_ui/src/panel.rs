@@ -355,6 +355,13 @@ impl CollectionPanel {
             window.focus(&self.focus, cx);
         }
 
+        // Expanding or collapsing from the keyboard overrides a click that is
+        // still waiting to.
+        if matches!(event.keystroke.key.as_str(), "space" | "left" | "right") {
+            self.pending_toggle = None;
+            self.clicked = None;
+        }
+
         match event.keystroke.key.as_str() {
             "down" => self.select_row(
                 self.selected_row()
