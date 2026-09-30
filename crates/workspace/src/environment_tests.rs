@@ -4,7 +4,7 @@ use tab_ui::EnvironmentEditor;
 
 use crate::main_view::Page;
 use crate::tests::{click, init};
-use crate::workspace::{SidebarSection, Workspace};
+use crate::workspace::Workspace;
 
 fn workspace(
     cx: &mut TestAppContext,
@@ -33,11 +33,6 @@ fn active_editor(layout: &Entity<Workspace>, cx: &VisualTestContext) -> Entity<E
 #[gpui_kit::test]
 fn creates_names_activates_and_deletes_a_global_environment(cx: &mut TestAppContext) {
     let (layout, cx, directory) = workspace(cx);
-    cx.update(|window, cx| {
-        layout.update(cx, |layout, cx| {
-            layout.show_sidebar_section(SidebarSection::Environments, window, cx)
-        })
-    });
 
     // A new environment opens with its name selected, ready to be typed over.
     click(cx, "new-environment");

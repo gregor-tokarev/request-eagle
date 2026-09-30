@@ -131,7 +131,10 @@ impl RequestDraft {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.executor = executor;
                 this.task = None;
-                scope.update(cx, |_, cx| cx.notify());
+                scope.update(cx, |scope, cx| scope.changed(cx));
+                // Scripts may have changed variables that other visible tabs of
+                // the collection share; redraw so their chips recolor.
+                window.refresh();
                 response.update(cx, |response, cx| response.finish(result, window, cx));
                 cx.notify();
             });

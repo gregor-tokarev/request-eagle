@@ -13,7 +13,9 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{panel::CollectionPanel, tree::path_name};
 
 impl CollectionPanel {
-    pub(super) fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens a dialog that imports a Postman collection or an OpenAPI
+    /// specification as a new collection.
+    pub fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = cx.entity().downgrade();
         let dialog = cx.new(|_| ImportDialog {
             panel,

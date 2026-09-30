@@ -77,8 +77,10 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
 }
 
-fn choose(cx: &mut VisualTestContext, file: &Path) {
-    click(cx, "import-collection");
+fn choose(sidebar: &Entity<CollectionPanel>, cx: &mut VisualTestContext, file: &Path) {
+    cx.update(|window, cx| {
+        sidebar.update(cx, |sidebar, cx| sidebar.open_import_dialog(window, cx))
+    });
     click(cx, "choose-import-file");
 
     let file = file.to_path_buf();
@@ -109,7 +111,7 @@ fn importing_a_file_adds_and_selects_a_collection(cx: &mut TestAppContext) {
     let collections = directory.path().join("collections");
     let (sidebar, cx) = sidebar(&collections, cx);
 
-    choose(cx, &file);
+    choose(&sidebar, cx, &file);
 
     assert!(cx.debug_bounds("import-dialog").is_none());
     assert!(collections.join("Pet Store/Pets/List pets.toml").is_file());
@@ -134,7 +136,7 @@ fn skipped_requests_are_listed_after_importing(cx: &mut TestAppContext) {
     let collections = directory.path().join("collections");
     let (sidebar, cx) = sidebar(&collections, cx);
 
-    choose(cx, &file);
+    choose(&sidebar, cx, &file);
 
     assert!(cx.debug_bounds("import-summary").is_some());
     cx.read(|cx| assert_eq!(sidebar.read(cx).tree.roots.len(), 1));
@@ -151,7 +153,7 @@ fn unsupported_files_keep_the_dialog_open_with_an_error(cx: &mut TestAppContext)
     let collections = directory.path().join("collections");
     let (sidebar, cx) = sidebar(&collections, cx);
 
-    choose(cx, &file);
+    choose(&sidebar, cx, &file);
 
     assert!(cx.debug_bounds("import-dialog").is_some());
     assert!(cx.debug_bounds("import-error").is_some());

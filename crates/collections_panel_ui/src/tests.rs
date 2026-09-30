@@ -361,7 +361,7 @@ fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
-fn keyboard_can_tab_through_the_header_buttons_into_the_tree(cx: &mut TestAppContext) {
+fn keyboard_can_tab_from_search_into_the_tree(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         request_eagle_theme::init(cx);
@@ -383,8 +383,7 @@ fn keyboard_can_tab_through_the_header_buttons_into_the_tree(cx: &mut TestAppCon
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
 
-    // New Collection and Import come before the tree.
-    cx.simulate_keystrokes("tab tab tab");
+    cx.simulate_keystrokes("tab");
     cx.run_until_parked();
     cx.update(|window, cx| {
         assert!(sidebar.focus_handle(cx).is_focused(window));
@@ -393,7 +392,7 @@ fn keyboard_can_tab_through_the_header_buttons_into_the_tree(cx: &mut TestAppCon
     cx.simulate_keystrokes("down");
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(1)));
 
-    cx.simulate_keystrokes("shift-tab shift-tab shift-tab");
+    cx.simulate_keystrokes("shift-tab");
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
@@ -428,20 +427,19 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert_eq!(sidebar.tree.items[selected].label, "Get post 7");
     });
 
-    // Import and New Collection sit between the tree and the search.
-    cx.simulate_keystrokes("shift-tab shift-tab shift-tab up");
+    cx.simulate_keystrokes("shift-tab up");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.last().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab shift-tab shift-tab enter");
+    cx.simulate_keystrokes("shift-tab enter");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.first().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab shift-tab shift-tab left space right shift-up");
+    cx.simulate_keystrokes("shift-tab left space right shift-up");
     cx.update(|window, cx| {
         let search = &sidebar.read(cx).search;
         assert!(search.focus_handle(cx).is_focused(window));
@@ -456,9 +454,7 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert!(sidebar.read(cx).visible.is_empty());
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
-    cx.simulate_keystrokes(
-        "tab tab tab down up home end left right enter space shift-tab shift-tab shift-tab",
-    );
+    cx.simulate_keystrokes("tab down up home end left right enter space shift-tab");
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });

@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use collection::Collection;
 
 use environment::{Environment, EnvironmentSession};
-use gpui_kit::{App, Entity};
+use gpui_kit::{App, Context, Entity};
 use request::RequestScripts;
 
 use crate::Environments;
@@ -13,9 +14,38 @@ pub(crate) struct VariableScope {
     pub path: Option<PathBuf>,
     pub session: EnvironmentSession,
     pub environments: Option<Entity<Environments>>,
+    /// Names that resolve and the session revision they were read at,
+    /// shared by every field of the request.
+    pub names: Option<(u64, Rc<HashSet<String>>)>,
 }
 
 impl VariableScope {
+    /// The files, session or active environment may have changed.
+    pub fn changed(&mut self, cx: &mut Context<Self>) {
+        self.names = None;
+        cx.notify();
+    }
+
+    /// Environment names a reference resolves to. Other tabs of the collection
+    /// can change the shared session, so its revision is checked every time.
+    pub fn names(&mut self, cx: &App) -> Rc<HashSet<String>> {
+        let revision = self.session.revision();
+        if let Some((read_at, names)) = &self.names
+            && *read_at == revision
+        {
+            return names.clone();
+        }
+
+        // Sending still resolves session values when a file can't be read.
+        let values = self
+            .values(cx)
+            .unwrap_or_else(|_| self.session.values(HashMap::new()));
+        let names = Rc::new(values.into_keys().collect::<HashSet<_>>());
+        self.names = Some((revision, names.clone()));
+
+        names
+    }
+
     /// Reload file values so external edits appear on the next send or
     /// completion. The active global environment overrides the collection's.
     fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
