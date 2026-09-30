@@ -25,6 +25,8 @@ mod environment_editor_tests;
 mod test_allocator;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+#[cfg(test)]
+mod variable_input_tests;
 
 pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
