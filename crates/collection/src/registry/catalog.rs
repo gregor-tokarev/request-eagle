@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -9,7 +8,7 @@ use thiserror::Error;
 
 use crate::{Collection, CollectionLoadError, Entry, FileEntry};
 
-const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
+pub(super) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
 #[derive(Default)]
 pub struct CollectionRegistry {
@@ -20,17 +19,6 @@ pub struct CollectionRegistry {
 impl CollectionRegistry {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn add(&mut self, collection: Collection) {
-        self.collections.push(collection);
-    }
-
-    /// Loads collections from `~/.request-eagle/collections`.
-    pub fn load() -> Result<Self, CollectionRegistryLoadError> {
-        let home = dirs::home_dir().ok_or(CollectionRegistryLoadError::HomeDirectoryUnavailable)?;
-
-        Self::from_path(home.join(".request-eagle").join("collections"))
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CollectionRegistryLoadError> {
@@ -75,23 +63,12 @@ impl CollectionRegistry {
             }
 
             let environment_path = collection_path.join(ENVIRONMENT_FILE_NAME);
-            let environment = match Environment::from_file(&environment_path) {
-                Ok(environment) => environment,
-                Err(EnvironmentLoadError::Read { source, .. })
-                    if source.kind() == io::ErrorKind::NotFound =>
-                {
-                    Environment {
-                        path: environment_path,
-                        entries: HashMap::new(),
-                    }
+            let environment = Environment::from_file(&environment_path).map_err(|source| {
+                CollectionRegistryLoadError::Environment {
+                    path: environment_path,
+                    source: Box::new(source),
                 }
-                Err(source) => {
-                    return Err(CollectionRegistryLoadError::Environment {
-                        path: environment_path,
-                        source: Box::new(source),
-                    });
-                }
-            };
+            })?;
 
             let collection =
                 Collection::from_path(&collection_path, environment).map_err(|source| {
@@ -100,7 +77,7 @@ impl CollectionRegistry {
                         source: Box::new(source),
                     }
                 })?;
-            registry.add(collection);
+            registry.collections.push(collection);
         }
 
         Ok(registry)
@@ -117,14 +94,6 @@ impl CollectionRegistry {
                 .flatten()
         })
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.collections.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.collections.len()
-    }
 }
 
 fn find_file<'a>(entries: &'a [Entry], path: &Path) -> Option<&'a FileEntry> {
@@ -139,9 +108,6 @@ fn find_file<'a>(entries: &'a [Entry], path: &Path) -> Option<&'a FileEntry> {
 
 #[derive(Debug, Error)]
 pub enum CollectionRegistryLoadError {
-    #[error("could not determine the user's home directory")]
-    HomeDirectoryUnavailable,
-
     #[error("failed to read collections from {}: {source}", .path.display())]
     Read { path: PathBuf, source: io::Error },
 
@@ -156,13 +122,4 @@ pub enum CollectionRegistryLoadError {
         path: PathBuf,
         source: Box<CollectionLoadError>,
     },
-}
-
-impl FromIterator<Collection> for CollectionRegistry {
-    fn from_iter<T: IntoIterator<Item = Collection>>(collections: T) -> Self {
-        Self {
-            collections: collections.into_iter().collect(),
-            ..Self::new()
-        }
-    }
 }

@@ -30,7 +30,7 @@ struct CollectionSettings {
 }
 
 impl Collection {
-    pub fn from_path(
+    pub(crate) fn from_path(
         path: impl AsRef<Path>,
         local_env: Environment,
     ) -> Result<Self, CollectionLoadError> {
@@ -133,19 +133,6 @@ impl Collection {
             self.local_env.path.clone(),
             self.path.join(SETTINGS_FILE_NAME),
         ]
-    }
-
-    pub fn save_files(&mut self) -> Result<(), CollectionSaveError> {
-        fs::create_dir_all(&self.path).map_err(|source| CollectionSaveError::Write {
-            path: self.path.clone(),
-            source,
-        })?;
-
-        for entry in &mut self.entries {
-            save_entry(entry)?;
-        }
-
-        Ok(())
     }
 
     pub fn local_env(&self) -> &Environment {
@@ -277,24 +264,6 @@ pub(crate) fn load_file(path: &Path) -> Result<FileEntry, CollectionLoadError> {
     entry.raw_content = raw_content;
 
     Ok(entry)
-}
-
-fn save_entry(entry: &mut Entry) -> Result<(), CollectionSaveError> {
-    match entry {
-        Entry::File(file) => save_file(file),
-        Entry::Directory(directory) => {
-            fs::create_dir_all(&directory.path).map_err(|source| CollectionSaveError::Write {
-                path: directory.path.clone(),
-                source,
-            })?;
-
-            for entry in &mut directory.entries {
-                save_entry(entry)?;
-            }
-
-            Ok(())
-        }
-    }
 }
 
 pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError> {

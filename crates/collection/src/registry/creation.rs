@@ -8,6 +8,7 @@ use std::{
 use environment::Environment;
 use uuid::Uuid;
 
+use super::catalog::ENVIRONMENT_FILE_NAME;
 use super::mutations::find_entry;
 use crate::collection::is_reserved;
 use crate::{
@@ -28,7 +29,7 @@ impl CollectionRegistry {
             path: path.clone(),
             entries: Vec::new(),
             local_env: Environment {
-                path: path.join("environment.toml"),
+                path: path.join(ENVIRONMENT_FILE_NAME),
                 entries: HashMap::new(),
             },
             scripts: Default::default(),

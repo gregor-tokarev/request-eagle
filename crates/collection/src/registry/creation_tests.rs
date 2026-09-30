@@ -31,7 +31,7 @@ fn creates_collections_folders_and_requests_that_survive_reload() {
     assert!(request.is_file());
     assert!(root_request.is_file());
     let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
-    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(
         reloaded.collections()[0].local_env().path,
         collection.join("environment.toml")

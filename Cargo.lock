@@ -1171,7 +1171,6 @@ dependencies = [
 name = "collection"
 version = "0.1.0"
 dependencies = [
- "dirs 6.0.0",
  "environment",
  "request",
  "serde",

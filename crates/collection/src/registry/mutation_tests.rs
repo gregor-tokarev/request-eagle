@@ -83,7 +83,13 @@ fn rename_preserves_request_content_and_rebases_nested_paths_and_environment() {
         .rename(&root.join("Renamed API"), "RENAMED API")
         .unwrap();
     assert_eq!(registry.collections()[0].path, root.join("RENAMED API"));
-    assert_eq!(CollectionRegistry::from_path(root).unwrap().len(), 2);
+    assert_eq!(
+        CollectionRegistry::from_path(root)
+            .unwrap()
+            .collections()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -125,7 +131,7 @@ fn delete_persists_for_requests_folders_and_collections() {
     registry.delete(&root.join("API")).unwrap();
     assert!(!root.join("API").exists());
     let reloaded = CollectionRegistry::from_path(root).unwrap();
-    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(reloaded.collections()[0].path, root.join("Other"));
 }
 
