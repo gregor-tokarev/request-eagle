@@ -62,7 +62,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         crate::actions::init(cx);
     });
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
+        crate::workspace::Workspace::new(
             collections,
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),
@@ -207,14 +207,14 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
 
 static NEXT_SAVED_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
-pub(super) struct SavedRequestFixture {
-    pub(super) directory: std::path::PathBuf,
-    pub(super) file: std::path::PathBuf,
+pub(crate) struct SavedRequestFixture {
+    pub(crate) directory: std::path::PathBuf,
+    pub(crate) file: std::path::PathBuf,
     original: String,
 }
 
 impl SavedRequestFixture {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
             "request-eagle-save-{}-{}-{}",
             std::process::id(),
@@ -244,11 +244,11 @@ path = "https://example.com/original"
         }
     }
 
-    pub(super) fn open<'a>(
+    pub(crate) fn open<'a>(
         &self,
         cx: &'a mut TestAppContext,
     ) -> (
-        gpui_kit::Entity<crate::layout::main_view::MainView>,
+        gpui_kit::Entity<crate::main_view::MainView>,
         gpui_kit::Entity<RequestDraft>,
         &'a mut gpui_kit::VisualTestContext,
     ) {
@@ -260,7 +260,7 @@ path = "https://example.com/original"
         });
         let registry = CollectionRegistry::from_path(&self.directory).unwrap();
         let (layout, cx) = cx.add_window_view(|window, cx| {
-            crate::workspace::Layout::new(
+            crate::workspace::Workspace::new(
                 registry,
                 crate::tests::no_environments(),
                 updater::init("1.2.3", cx),
@@ -289,7 +289,7 @@ impl Drop for SavedRequestFixture {
     }
 }
 
-pub(super) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
+pub(crate) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
     cx.update(|window, _| window.refresh());
     let bounds = cx
         .debug_bounds(selector)
@@ -298,7 +298,7 @@ pub(super) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str
     cx.simulate_click(bounds.center(), Modifiers::default());
 }
 
-pub(super) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
+pub(crate) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
     click(cx, "request-url");
     cx.simulate_keystrokes("secondary-a");
     cx.simulate_input(url);
@@ -415,7 +415,7 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     });
     let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
+        crate::workspace::Workspace::new(
             registry,
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),
@@ -644,7 +644,7 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     });
     let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
+        crate::workspace::Workspace::new(
             registry,
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),

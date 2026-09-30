@@ -7,10 +7,10 @@ use gpui_kit::{
 };
 
 use super::main_view::MainView;
-use crate::workspace::Layout;
+use crate::workspace::Workspace;
 use tab_ui::RequestDraft;
 
-fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext) {
+fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         preferences::init(cx);
@@ -19,7 +19,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Layout>, &mut VisualTestContext
     });
 
     cx.add_window_view(|window, cx| {
-        Layout::new(
+        Workspace::new(
             collection::CollectionRegistry::new(),
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),
@@ -594,7 +594,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
+        Workspace::new(
             crate::performance::collections(2),
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),

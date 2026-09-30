@@ -1,6 +1,6 @@
 use crate::actions::ToggleLeftSidebar;
-use crate::layout::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
-use crate::workspace::{Layout, on_toggle_sidebar};
+use crate::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
+use crate::workspace::{Workspace, on_toggle_sidebar};
 use collection::CollectionRegistry;
 use gpui_kit::{Focusable, Modifiers, TestAppContext, px};
 use settings_ui::CloseSettings;
@@ -28,7 +28,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
+        Workspace::new(
             CollectionRegistry::new(),
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),
@@ -89,7 +89,7 @@ fn toggle_sidebar_action(cx: &mut TestAppContext) {
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
+        Workspace::new(
             CollectionRegistry::new(),
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),
@@ -166,7 +166,7 @@ fn collection_panel_receives_initial_focus_and_keyboard_navigation(cx: &mut Test
     });
 
     let (layout, cx) = cx.add_window_view(|window, cx| {
-        Layout::new(
+        Workspace::new(
             crate::performance::collections(2),
             crate::tests::no_environments(),
             updater::init("1.2.3", cx),

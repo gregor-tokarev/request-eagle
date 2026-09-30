@@ -210,7 +210,7 @@ impl CommandPalette {
     }
 
     #[cfg(test)]
-    pub(super) fn request_count(&self) -> usize {
+    pub(crate) fn request_count(&self) -> usize {
         self.groups[REQUESTS].len()
     }
 

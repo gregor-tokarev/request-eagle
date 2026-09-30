@@ -2,11 +2,11 @@ use environment::GlobalEnvironments;
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 use tab_ui::EnvironmentEditor;
 
-use crate::workspace::{Layout, SidebarSection};
+use crate::workspace::{SidebarSection, Workspace};
 
 fn workspace(
     cx: &mut TestAppContext,
-) -> (Entity<Layout>, &mut VisualTestContext, tempfile::TempDir) {
+) -> (Entity<Workspace>, &mut VisualTestContext, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let catalog = GlobalEnvironments::new(directory.path());
     cx.update(|cx| {
@@ -19,7 +19,7 @@ fn workspace(
     let mut layout = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            Layout::new(
+            Workspace::new(
                 collection::CollectionRegistry::new(),
                 catalog,
                 updater::init("1.2.3", cx),
@@ -42,7 +42,7 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     cx.simulate_click(bounds.center(), Modifiers::default());
 }
 
-fn active_editor(layout: &Entity<Layout>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {
+fn active_editor(layout: &Entity<Workspace>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {
     cx.read(|cx| {
         let view = layout.read(cx).main_view.read(cx);
         let Ok(editor) = view.tabs[view.selected.unwrap()]

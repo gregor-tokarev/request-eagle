@@ -18,21 +18,21 @@ use tab_ui::{
 const TAB_WIDTH: Rems = rems(12.);
 const TAB_HEIGHT: Rems = rems(2.);
 
-pub(super) struct PageTab {
-    pub(super) id: u64,
-    pub(super) title: SharedString,
-    pub(super) request_path: Option<PathBuf>,
-    pub(super) request_id: Option<SharedString>,
-    pub(super) badge: Option<TabBadge>,
+pub(crate) struct PageTab {
+    pub(crate) id: u64,
+    pub(crate) title: SharedString,
+    pub(crate) request_path: Option<PathBuf>,
+    pub(crate) request_id: Option<SharedString>,
+    pub(crate) badge: Option<TabBadge>,
     icon: Option<&'static str>,
     dirty: bool,
-    pub(super) page: TabView,
+    pub(crate) page: TabView,
     _subscriptions: Vec<Subscription>,
 }
 
 pub(crate) struct MainView {
-    pub(super) tabs: Vec<PageTab>,
-    pub(super) selected: Option<usize>,
+    pub(crate) tabs: Vec<PageTab>,
+    pub(crate) selected: Option<usize>,
     next_id: u64,
     scroll: ScrollHandle,
     scroll_to_tab: Option<usize>,
@@ -40,7 +40,7 @@ pub(crate) struct MainView {
     pending_close: Option<u64>,
     save_error: Option<String>,
     variable_sessions: environment::EnvironmentSessions,
-    pub(super) environments: Entity<Environments>,
+    pub(crate) environments: Entity<Environments>,
     environment_picker: Entity<EnvironmentPicker>,
     _environment_subscriptions: [Subscription; 2],
 }
@@ -427,7 +427,7 @@ impl MainView {
         }
     }
 
-    pub(super) fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(crate) fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.tabs.len() {
             return;
         }

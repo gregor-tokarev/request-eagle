@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::actions::*;
-use crate::layout::{
+use crate::{
     bottom_panel::BottomPanel,
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
@@ -24,27 +24,27 @@ use tab_ui::Environments;
 use updater::Updater;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SidebarSection {
+pub(crate) enum SidebarSection {
     Collections,
     Environments,
 }
 
-pub(super) struct Layout {
+pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
-    pub(super) sidebar: Entity<CollectionPanel>,
-    pub(super) environment_panel: Entity<EnvironmentPanel>,
-    pub(super) sidebar_section: SidebarSection,
-    pub(super) main_view: Entity<MainView>,
+    pub(crate) sidebar: Entity<CollectionPanel>,
+    pub(crate) environment_panel: Entity<EnvironmentPanel>,
+    pub(crate) sidebar_section: SidebarSection,
+    pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
-    pub(super) main_split: Entity<ResizableState>,
-    pub(super) sidebar_visible: Entity<bool>,
+    pub(crate) main_split: Entity<ResizableState>,
+    pub(crate) sidebar_visible: Entity<bool>,
 
-    pub(super) settings: Entity<Settings>,
-    pub(super) settings_visible: bool,
+    pub(crate) settings: Entity<Settings>,
+    pub(crate) settings_visible: bool,
     previous_focus: Option<FocusHandle>,
 
-    pub(super) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
+    pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
@@ -56,8 +56,8 @@ pub(super) struct Layout {
     _appearance_subscription: Subscription,
 }
 
-impl Layout {
-    pub(super) fn new(
+impl Workspace {
+    pub(crate) fn new(
         collections: CollectionRegistry,
         environments: GlobalEnvironments,
         updater: Entity<Updater>,
@@ -182,7 +182,7 @@ impl Layout {
         let request_save_subscription = cx.subscribe_in(
             &main_view,
             window,
-            |this, view, event: &crate::layout::main_view::RequestSaveRequested, window, cx| {
+            |this, view, event: &crate::main_view::RequestSaveRequested, window, cx| {
                 let result = this.sidebar.update(cx, |sidebar, cx| {
                     sidebar.save_request(
                         &event.path,
@@ -198,15 +198,15 @@ impl Layout {
         let new_request_save_subscription = cx.subscribe_in(
             &main_view,
             window,
-            |this, view, event: &crate::layout::main_view::NewRequestSaveRequested, window, cx| {
-                crate::layout::save_request::open(view, &this.sidebar, event, window, cx);
+            |this, view, event: &crate::main_view::NewRequestSaveRequested, window, cx| {
+                crate::save_request::open(view, &this.sidebar, event, window, cx);
             },
         );
 
         let collection_save_subscription = cx.subscribe_in(
             &main_view,
             window,
-            |this, view, event: &crate::layout::main_view::CollectionSaveRequested, window, cx| {
+            |this, view, event: &crate::main_view::CollectionSaveRequested, window, cx| {
                 let settings = &event.settings;
                 let result = this.sidebar.update(cx, |sidebar, cx| {
                     sidebar.save_collection(
@@ -247,7 +247,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.settings_visible {
             self.previous_focus = window.focused(cx);
             self.settings_visible = true;
@@ -259,7 +259,7 @@ impl Layout {
         cx.notify();
     }
 
-    pub(super) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.settings_visible {
             return;
         }
@@ -275,7 +275,7 @@ impl Layout {
         cx.notify();
     }
 
-    pub(super) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .command_palette
             .as_ref()
@@ -320,7 +320,7 @@ impl Layout {
         self.command_palette = Some(palette.downgrade());
     }
 
-    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_visible.update(cx, |visible, cx| {
             *visible = !*visible;
 
@@ -328,7 +328,7 @@ impl Layout {
         });
     }
 
-    pub(super) fn show_sidebar_section(
+    pub(crate) fn show_sidebar_section(
         &mut self,
         section: SidebarSection,
         window: &mut Window,
@@ -409,16 +409,16 @@ impl Layout {
     }
 }
 
-fn on_open_settings(layout: &Entity<Layout>, window: AnyWindowHandle, cx: &mut App) {
-    let layout = layout.downgrade();
-    let general_layout = layout.clone();
+fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
+    let workspace = workspace.downgrade();
+    let general_workspace = workspace.clone();
 
     cx.on_action(move |_: &OpenGeneralSettings, cx| {
-        let layout = general_layout.clone();
+        let workspace = general_workspace.clone();
 
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
-                let _ = layout.update(cx, |this, cx| {
+                let _ = workspace.update(cx, |this, cx| {
                     this.open_settings(window, cx);
 
                     this.settings.update(cx, |settings, cx| {
@@ -432,11 +432,11 @@ fn on_open_settings(layout: &Entity<Layout>, window: AnyWindowHandle, cx: &mut A
     });
 
     cx.on_action(move |_: &OpenSettings, cx| {
-        let layout = layout.clone();
+        let workspace = workspace.clone();
 
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
-                let _ = layout.update(cx, |this, cx| this.open_settings(window, cx));
+                let _ = workspace.update(cx, |this, cx| this.open_settings(window, cx));
 
                 window.activate_window();
             });
@@ -444,33 +444,33 @@ fn on_open_settings(layout: &Entity<Layout>, window: AnyWindowHandle, cx: &mut A
     });
 }
 
-pub(super) fn on_toggle_command_palette(
-    layout: &Entity<Layout>,
+pub(crate) fn on_toggle_command_palette(
+    workspace: &Entity<Workspace>,
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
-    let layout = layout.downgrade();
+    let workspace = workspace.downgrade();
 
     cx.on_action(move |_: &ToggleCommandPalette, cx| {
-        let layout = layout.clone();
+        let workspace = workspace.clone();
 
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
-                let _ = layout.update(cx, |this, cx| this.toggle_command_palette(window, cx));
+                let _ = workspace.update(cx, |this, cx| this.toggle_command_palette(window, cx));
             });
         });
     });
 }
 
-pub(super) fn on_toggle_sidebar(layout: &Entity<Layout>, cx: &mut App) {
-    let layout = layout.clone();
+pub(crate) fn on_toggle_sidebar(workspace: &Entity<Workspace>, cx: &mut App) {
+    let workspace = workspace.clone();
 
     cx.on_action(move |_: &ToggleLeftSidebar, cx| {
-        layout.update(cx, |this, cx| this.toggle_sidebar(cx));
+        workspace.update(cx, |this, cx| this.toggle_sidebar(cx));
     });
 }
 
-impl Render for Layout {
+impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Keep the screen entities alive, but only lay out the visible screen.
         // GPUI still requests child layouts beneath display: none containers.
@@ -615,10 +615,10 @@ pub fn init(
 ) -> AnyView {
     crate::actions::init(cx);
 
-    let layout = cx.new(|cx| Layout::new(collections, environments, updater, window, cx));
-    on_toggle_sidebar(&layout, cx);
-    on_open_settings(&layout, window.window_handle(), cx);
-    on_toggle_command_palette(&layout, window.window_handle(), cx);
+    let workspace = cx.new(|cx| Workspace::new(collections, environments, updater, window, cx));
+    on_toggle_sidebar(&workspace, cx);
+    on_open_settings(&workspace, window.window_handle(), cx);
+    on_toggle_command_palette(&workspace, window.window_handle(), cx);
 
-    layout.into()
+    workspace.into()
 }

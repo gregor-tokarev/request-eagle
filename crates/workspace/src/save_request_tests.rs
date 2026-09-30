@@ -42,7 +42,7 @@ fn setup<'a>(
     let mut main = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let layout = cx.new(|cx| {
-            crate::workspace::Layout::new(
+            crate::workspace::Workspace::new(
                 registry,
                 crate::tests::no_environments(),
                 updater::init("1.2.3", cx),
