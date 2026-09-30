@@ -41,11 +41,6 @@ impl EnvironmentPanel {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn environments(&self) -> Entity<Environments> {
-        self.environments.clone()
-    }
-
     fn name(&self, index: usize, cx: &App) -> Option<SharedString> {
         self.environments.read(cx).names().get(index).cloned()
     }

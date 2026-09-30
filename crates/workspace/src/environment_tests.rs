@@ -71,7 +71,7 @@ fn creates_names_activates_and_deletes_a_global_environment(cx: &mut TestAppCont
     // "No Environment".
     click(cx, "environment-picker");
     cx.simulate_keystrokes("down enter");
-    let environments = cx.read(|cx| layout.read(cx).environment_panel.read(cx).environments());
+    let environments = cx.read(|cx| layout.read(cx).main_view.read(cx).environments.clone());
     cx.read(|cx| assert_eq!(environments.read(cx).active().unwrap(), "Staging"));
 
     // Each opening starts with an empty search. A leftover "stag" would leave
@@ -118,7 +118,7 @@ fn creating_from_the_picker_closes_it_and_selects_the_new_name(cx: &mut TestAppC
     let editor = active_editor(&layout, cx);
     cx.read(|cx| assert_eq!(editor.read(cx).name, "QA"));
     assert!(directory.path().join("QA.toml").exists());
-    let environments = cx.read(|cx| layout.read(cx).environment_panel.read(cx).environments());
+    let environments = cx.read(|cx| layout.read(cx).main_view.read(cx).environments.clone());
     cx.read(|cx| assert!(environments.read(cx).active().is_none()));
 
     // The first click after creating reaches the table instead of a stale menu.

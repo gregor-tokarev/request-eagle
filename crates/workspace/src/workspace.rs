@@ -33,7 +33,7 @@ pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
     pub(crate) sidebar: Entity<CollectionPanel>,
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
-    pub(crate) sidebar_section: SidebarSection,
+    sidebar_section: SidebarSection,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -46,7 +46,6 @@ pub(crate) struct Workspace {
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
-    _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
     _settings_subscription: Subscription,
@@ -66,8 +65,8 @@ impl Workspace {
         });
 
         let sidebar_visible = cx.new(|_| true);
+        // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
-        let sidebar_visibility_subscription = cx.observe(&sidebar_visible, |_, _, cx| cx.notify());
 
         let settings = cx.new(|cx| Settings::new(updater, window, cx));
         let settings_subscription = cx.subscribe_in(
@@ -191,7 +190,6 @@ impl Workspace {
             settings_visible: false,
             previous_focus: None,
             command_palette: None,
-            _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
             _settings_subscription: settings_subscription,
@@ -278,6 +276,8 @@ impl Workspace {
 
             cx.notify();
         });
+
+        cx.notify();
     }
 
     pub(crate) fn show_sidebar_section(
@@ -467,6 +467,7 @@ impl Render for Workspace {
                     cx.notify();
                 });
                 this.sidebar_section = SidebarSection::Collections;
+                cx.notify();
 
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
