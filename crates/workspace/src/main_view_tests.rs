@@ -257,10 +257,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
             draft.read(cx).request.headers,
             [("Accept".into(), "application/json".into())]
         );
-        assert_eq!(
-            draft.read(cx).request.query,
-            [("page".into(), "2".into())]
-        );
+        assert_eq!(draft.read(cx).request.query, [("page".into(), "2".into())]);
         assert_eq!(
             draft.read(cx).request.body.as_deref(),
             Some(b"hello".as_slice())
