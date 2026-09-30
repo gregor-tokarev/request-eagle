@@ -21,7 +21,6 @@ impl CollectionPanel {
         let index = self.visible[row];
         let item = &self.tree.items[index];
         let branch = item.is_branch();
-        let collection = item.kind == ItemKind::Collection;
         let expanded = !self.query.is_empty() || !self.collapsed.contains(&index);
         let selected = self.selected == Some(index);
         let theme = cx.theme();
@@ -39,6 +38,7 @@ impl CollectionPanel {
             owner: cx.entity_id(),
         };
         let path = item.path.clone();
+        let clicked = item.path.clone();
         let focus = self.focus.clone();
         let rename = self
             .rename
@@ -259,6 +259,21 @@ impl CollectionPanel {
                 }
             }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if event.click_count() == 1 {
+                    this.clicked = Some(clicked.clone());
+                }
+                let index = this
+                    .clicked
+                    .as_ref()
+                    .and_then(|path| this.tree.items.iter().position(|item| &item.path == path))
+                    .unwrap_or(index);
+                let Ok(row) = this.visible.binary_search(&index) else {
+                    return;
+                };
+                let item = &this.tree.items[index];
+                let branch = item.is_branch();
+                let collection = item.kind == ItemKind::Collection;
+
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
 

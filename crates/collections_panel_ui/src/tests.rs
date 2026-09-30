@@ -1,6 +1,8 @@
 use std::{
+    cell::RefCell,
     collections::HashSet,
     fs,
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -10,10 +12,13 @@ use std::{
 
 use collection::CollectionRegistry;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Focusable, Modifiers, TestAppContext, px, size};
+use gpui_kit::{
+    AppContext, Focusable, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext,
+    px, size,
+};
 
 use super::{
-    CollectionPanel,
+    CollectionPanel, CollectionPanelEvent,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -215,6 +220,80 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     cx.run_until_parked();
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(last)));
     assert!(cx.debug_bounds(last_selector).is_some());
+}
+
+#[gpui_kit::test]
+fn double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::init(cx);
+    });
+
+    let (sidebar, cx) =
+        cx.add_window_view(|window, cx| CollectionPanel::new(collections(), window, cx));
+    cx.simulate_resize(size(px(300.), px(500.)));
+    cx.update(|window, _| window.activate_window());
+
+    let opened = Rc::new(RefCell::new(Vec::new()));
+    cx.update(|_, cx| {
+        let opened = opened.clone();
+        cx.subscribe(
+            &sidebar,
+            move |_, event: &CollectionPanelEvent, _| match event {
+                CollectionPanelEvent::OpenRequest { path, .. }
+                | CollectionPanelEvent::OpenCollection { path, .. } => {
+                    opened.borrow_mut().push(path.clone())
+                }
+                _ => {}
+            },
+        )
+        .detach();
+    });
+
+    // At the bottom of the list, collapsing the last collection scrolls the
+    // rows above it under the pointer.
+    cx.update(|window, cx| {
+        let focus = sidebar.read(cx).focus.clone();
+        focus.focus(window, cx);
+    });
+    cx.simulate_keystrokes("end");
+    cx.run_until_parked();
+
+    let (index, path) = cx.read(|cx| {
+        let tree = &sidebar.read(cx).tree;
+        let index = tree
+            .items
+            .iter()
+            .position(|item| item.label == "Status API")
+            .unwrap();
+        (index, tree.items[index].path.clone())
+    });
+    let selector: &'static str = Box::leak(format!("collection-row-{index}").into_boxed_str());
+    let position = cx.debug_bounds(selector).unwrap().center();
+
+    for click_count in 1..=2 {
+        cx.simulate_event(MouseDownEvent {
+            button: MouseButton::Left,
+            position,
+            click_count,
+            ..Default::default()
+        });
+        cx.simulate_event(MouseUpEvent {
+            button: MouseButton::Left,
+            position,
+            click_count,
+            ..Default::default()
+        });
+        cx.run_until_parked();
+
+        if click_count == 1 {
+            assert!(opened.borrow().is_empty());
+            assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
+        }
+    }
+
+    assert_eq!(*opened.borrow(), [path]);
 }
 
 #[gpui_kit::test]

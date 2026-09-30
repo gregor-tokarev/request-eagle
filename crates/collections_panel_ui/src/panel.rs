@@ -65,6 +65,9 @@ pub struct CollectionPanel {
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
     pub(super) selected_row: Option<usize>,
+    /// The row a click started on. Collapsing it can scroll another row
+    /// under the pointer, so the rest of a double click still targets it.
+    pub(super) clicked: Option<PathBuf>,
     pub(super) search: Entity<InputState>,
     pub(super) query: String,
     pub(super) scroll_handle: UniformListScrollHandle,
@@ -115,6 +118,7 @@ impl CollectionPanel {
             collapsed: HashSet::new(),
             selected: None,
             selected_row: None,
+            clicked: None,
             search,
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
@@ -515,6 +519,11 @@ impl Render for CollectionPanel {
                     .on_action(cx.listener(Self::delete_selected))
                     .capture_key_down(cx.listener(Self::on_delete_key_down))
                     .on_key_down(cx.listener(Self::on_key_down))
+                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                        if event.click_count == 1 {
+                            this.clicked = None;
+                        }
+                    }))
                     .child(if self.visible.is_empty() {
                         v_flex()
                             .p_4()
