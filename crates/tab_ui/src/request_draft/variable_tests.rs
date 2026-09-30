@@ -1,5 +1,6 @@
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
 use request::Method;
+use std::collections::HashMap;
 
 use std::path::Path;
 
@@ -298,15 +299,7 @@ async fn unresolved_variables_block_send_and_collection_scope_changes_with_the_r
                     "/tmp/variable-test/Collection/environment.toml"
                 ))
             );
-            assert!(
-                draft
-                    .variables
-                    .read(cx)
-                    .values(cx)
-                    .unwrap()
-                    .environment
-                    .is_empty()
-            );
+            assert!(draft.variables.read(cx).values(cx).unwrap().is_empty());
         });
     });
     let started = std::time::Instant::now();
@@ -395,9 +388,7 @@ async fn unavailable_environment_only_blocks_requests_using_environment_variable
 #[test]
 fn environment_errors_are_reported_only_for_environment_references() {
     use request::RequestVariables;
-    let values = environment::VariableValues {
-        environment: [("base_url".into(), "https://cached.example".into())].into(),
-    };
+    let values = HashMap::from([("base_url".into(), "https://cached.example".into())]);
     let mut request = request::HttpRequest {
         path: "{{ base_url }}".into(),
         ..Default::default()
@@ -489,7 +480,7 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
             draft.set_location(location(&a.join("request.toml"), 0), cx);
 
             assert_eq!(
-                draft.variables.read(cx).values(cx).unwrap().environment["base_url"],
+                draft.variables.read(cx).values(cx).unwrap()["base_url"],
                 "updated"
             );
 
@@ -505,13 +496,7 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
                 )
             });
             assert_eq!(
-                reopened
-                    .read(cx)
-                    .variables
-                    .read(cx)
-                    .values(cx)
-                    .unwrap()
-                    .environment["base_url"],
+                reopened.read(cx).variables.read(cx).values(cx).unwrap()["base_url"],
                 "reopened"
             );
         })
@@ -520,13 +505,10 @@ fn renaming_collections_back_to_an_old_path_reloads_environment_values(cx: &mut 
 
 #[test]
 fn environment_errors_are_reported_in_every_request_field() {
-    use environment::VariableValues;
     use request::HttpRequest;
     use request::RequestVariables;
 
-    let values = VariableValues {
-        environment: [("message".into(), "cached value".into())].into(),
-    };
+    let values = HashMap::from([("message".into(), "cached value".into())]);
     for field in 0..6 {
         let mut request = HttpRequest {
             method: Method::Post,
@@ -750,8 +732,8 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
             draft.request.headers = vec![("Authorization".into(), "Bearer {{token}}".into())];
             let scope = draft.variables.clone();
             let values = scope.read(cx).values(cx).unwrap();
-            assert_eq!(values.environment["token"], "response-token");
-            assert!(!values.environment.contains_key("scratch"));
+            assert_eq!(values["token"], "response-token");
+            assert!(!values.contains_key("scratch"));
             draft.send(window, cx);
             draft
         })
@@ -803,19 +785,16 @@ fn the_active_global_environment_overrides_collection_values(cx: &mut TestAppCon
         });
 
         let values = scope.read(cx).values(cx).unwrap();
-        assert_eq!(values.environment["base_url"], "https://example.com");
-        assert!(!values.environment.contains_key("token"));
+        assert_eq!(values["base_url"], "https://example.com");
+        assert!(!values.contains_key("token"));
 
         environments.update(cx, |environments, cx| {
             environments.set_active(Some("Staging".into()), cx)
         });
         let values = scope.read(cx).values(cx).unwrap();
-        assert_eq!(
-            values.environment["base_url"],
-            "https://staging.example.com"
-        );
-        assert_eq!(values.environment["message"], "hello");
-        assert_eq!(values.environment["token"], "staging");
+        assert_eq!(values["base_url"], "https://staging.example.com");
+        assert_eq!(values["message"], "hello");
+        assert_eq!(values["token"], "staging");
 
         let request = request::HttpRequest {
             path: "{{base_url}}/users".into(),

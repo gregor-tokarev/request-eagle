@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use environment::VariableValues;
 use flate2::{Compression, write::GzEncoder};
 use request::{
     Execution, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences, RequestVariables,
@@ -10,6 +9,7 @@ use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
+use std::collections::HashMap;
 
 async fn execute_range(
     headers: Vec<(String, String)>,
@@ -58,7 +58,7 @@ async fn execute_range(
             headers,
             ..HttpRequest::default()
         },
-        RequestVariables::new(VariableValues::default(), None),
+        RequestVariables::new(HashMap::new(), None),
     )
     .await
     .unwrap();

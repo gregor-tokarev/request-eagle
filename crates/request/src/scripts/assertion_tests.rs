@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use environment::VariableValues;
+use std::collections::HashMap;
 
 use super::{RequestScripts, runtime::pre_request};
 use crate::{HttpRequest, RequestExecutor, RequestPreferences, RequestVariables};
@@ -20,7 +20,7 @@ fn check(cases: &[(&str, bool)]) {
     };
     let (_, _, reports) = smol::block_on(pre_request(
         request,
-        RequestVariables::new(VariableValues::default(), None),
+        RequestVariables::new(HashMap::new(), None),
         RequestExecutor::new(&RequestPreferences::default()).unwrap(),
         Arc::new(AtomicBool::new(false)),
     ))

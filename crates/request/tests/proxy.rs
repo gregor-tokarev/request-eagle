@@ -1,10 +1,10 @@
 use std::{net::TcpListener, sync::Arc};
 
-use environment::VariableValues;
 use request::{
     ExecutionError, HttpRequest, ProxyMode, ProxyPreferences, ProxyProtocol, RequestExecutor,
     RequestPreferences, RequestVariables, Response,
 };
+use std::collections::HashMap;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, rustls};
 
@@ -74,7 +74,7 @@ async fn send(proxy: ProxyPreferences, url: String, override_host: bool) {
                 },
                 ..HttpRequest::default()
             },
-            RequestVariables::new(VariableValues::default(), None),
+            RequestVariables::new(HashMap::new(), None),
         )
         .await
         .unwrap();

@@ -1,23 +1,24 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-use environment::{EnvironmentSession, VariableError, VariableResolver, VariableValues};
+use environment::{EnvironmentSession, VariableError, VariableResolver};
 
 use crate::{HttpRequest, RequestScripts};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
-    pub(crate) values: VariableValues,
+    pub(crate) values: HashMap<String, String>,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
     pub(crate) environment_error: Option<String>,
 }
 
 impl RequestVariables {
-    pub fn new(mut values: VariableValues, environment_error: Option<String>) -> Self {
+    pub fn new(mut values: HashMap<String, String>, environment_error: Option<String>) -> Self {
         if environment_error.is_some() {
-            values.environment.clear();
+            values.clear();
         } else {
-            values.environment.retain(|name, _| !name.starts_with('$'));
+            values.retain(|name, _| !name.starts_with('$'));
         }
         Self {
             values,
@@ -37,16 +38,13 @@ impl RequestVariables {
     /// Read the current session overlay while retaining file-read errors for
     /// references that cannot be satisfied by the session itself.
     pub fn with_environment_session(
-        values: VariableValues,
+        values: HashMap<String, String>,
         environment_error: Option<String>,
         session: EnvironmentSession,
     ) -> Self {
         let mut variables = Self::new(values, environment_error);
         variables.values = session.values(variables.values);
-        variables
-            .values
-            .environment
-            .retain(|name, _| !name.starts_with('$'));
+        variables.values.retain(|name, _| !name.starts_with('$'));
         variables.session = Some(session);
 
         variables
@@ -67,7 +65,7 @@ impl RequestVariables {
 
 /// `scripted` reports whether a collection or request pre-request script ran.
 pub(crate) fn resolve_request(
-    values: &VariableValues,
+    values: &HashMap<String, String>,
     environment_error: Option<&str>,
     request: HttpRequest,
     scripted: bool,
@@ -84,7 +82,7 @@ pub(crate) fn resolve_request(
     // Only scripts can introduce these reserved names; collection values
     // were filtered when this send snapshot was created.
     if scripted {
-        for (name, value) in &values.environment {
+        for (name, value) in values {
             if name.starts_with('$') {
                 resolver.override_generated(name.clone(), value.clone());
             }
@@ -94,7 +92,7 @@ pub(crate) fn resolve_request(
     // Keep generated values for the post-response phase, separate from
     // local overrides so unsetting an override restores the cached value.
     for (name, value) in resolver.generated_values() {
-        if !values.environment.contains_key(name) {
+        if !values.contains_key(name) {
             generated.insert(name.clone(), value.clone());
         }
     }
@@ -111,7 +109,10 @@ pub(crate) fn resolve_request(
 
 impl HttpRequest {
     /// Resolve a send snapshot, preserving the saved request and editable draft.
-    pub fn resolve_variables(&self, values: &VariableValues) -> Result<Self, VariableError> {
+    pub fn resolve_variables(
+        &self,
+        values: &HashMap<String, String>,
+    ) -> Result<Self, VariableError> {
         self.clone()
             .resolve_with(&mut VariableResolver::new(values), false)
     }

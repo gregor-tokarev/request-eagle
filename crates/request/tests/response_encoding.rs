@@ -1,6 +1,5 @@
 use std::{io::Write, time::Duration};
 
-use environment::VariableValues;
 use flate2::{Compression, write::GzEncoder};
 use request::{
     Execution, ExecutionError, HttpRequest, HttpVersion, Method, ProxyMode, RequestExecutor,
@@ -10,9 +9,10 @@ use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
+use std::collections::HashMap;
 
 fn no_variables() -> RequestVariables {
-    RequestVariables::new(VariableValues::default(), None)
+    RequestVariables::new(HashMap::new(), None)
 }
 
 fn gzip(body: &[u8]) -> Vec<u8> {

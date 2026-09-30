@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Range;
 
 use environment::GENERATED_VARIABLES;
@@ -152,10 +153,7 @@ impl VariableInput {
                 let scope = self.scope.read(cx);
                 self.environment_names = scope
                     .values(cx)
-                    .unwrap_or_else(|_| {
-                        scope.session.values(environment::VariableValues::default())
-                    })
-                    .environment
+                    .unwrap_or_else(|_| scope.session.values(HashMap::new()))
                     .into_keys()
                     .filter(|name| environment::valid_variable_name(name))
                     .collect();

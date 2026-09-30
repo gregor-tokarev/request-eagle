@@ -1,6 +1,5 @@
 use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use environment::VariableValues;
 use request::{HttpRequest, Method, RequestExecutor, RequestScripts, RequestVariables, Response};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
@@ -29,10 +28,8 @@ pub async fn run(
         );
     }
 
-    let mut values = VariableValues {
-        environment: collection.local_env().entries.clone(),
-    };
-    values.environment.extend(variables);
+    let mut values = collection.local_env().entries.clone();
+    values.extend(variables);
     let variables = RequestVariables::with_environment_session(values, None, Default::default())
         .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;

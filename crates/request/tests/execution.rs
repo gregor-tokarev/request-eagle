@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use environment::VariableValues;
 use request::{
     Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
     RequestPreferences, RequestVariables, Response, Version,
@@ -9,6 +8,7 @@ use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use std::collections::HashMap;
 
 struct ReceivedRequest {
     head: String,
@@ -67,7 +67,7 @@ fn executor() -> RequestExecutor {
 }
 
 fn no_variables() -> RequestVariables {
-    RequestVariables::new(VariableValues::default(), None)
+    RequestVariables::new(HashMap::new(), None)
 }
 
 #[test]

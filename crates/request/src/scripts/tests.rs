@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use environment::VariableValues;
+use std::collections::HashMap;
 
 use super::{
     RequestScripts, ScriptPhase, ScriptReport,
@@ -34,7 +34,7 @@ fn executor() -> RequestExecutor {
 }
 
 fn no_variables() -> RequestVariables {
-    RequestVariables::new(VariableValues::default(), None)
+    RequestVariables::new(HashMap::new(), None)
 }
 
 async fn pre_request(
@@ -209,9 +209,7 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
 #[test]
 fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
     smol::block_on(async {
-        let values = VariableValues {
-            environment: [("value".into(), "from file".into())].into(),
-        };
+        let values = HashMap::from([("value".into(), "from file".into())]);
         let mut request = scripted(
             "pm.expect(pm.variables.get('value')).to.equal('from file'); pm.variables.set('path', 'created'); pm.variables.set('value', 'local');",
         );
@@ -232,8 +230,7 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
         request.path = "http://localhost/{{path}}".into();
         request.body = Some(vec![0, 255, 42]);
         request.method = Method::Post;
-        let variables =
-            RequestVariables::new(VariableValues::default(), Some("File unavailable".into()));
+        let variables = RequestVariables::new(HashMap::new(), Some("File unavailable".into()));
         let (sent, _, _) = pre_request(request, variables).await.unwrap();
         assert_eq!(sent.path, "http://localhost/fallback");
         assert_eq!(sent.body.unwrap(), [0, 255, 42]);
@@ -271,9 +268,7 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
             request.query = Some(vec![("id".into(), "{{$guid}}".into())]);
             request.body = Some(body.as_bytes().to_vec());
-            let values = VariableValues {
-                environment: [("$guid".into(), "from file".into())].into(),
-            };
+            let values = HashMap::from([("$guid".into(), "from file".into())]);
             let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
                 .await
                 .unwrap();

@@ -4,8 +4,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::VariableValues;
-
 /// Script changes that remain available for the workspace session without
 /// changing the environment file. Deleted values mask their file-backed value.
 #[derive(Clone, Debug, Default)]
@@ -14,7 +12,7 @@ pub struct EnvironmentSession {
 }
 
 impl EnvironmentSession {
-    pub fn values(&self, mut base: VariableValues) -> VariableValues {
+    pub fn values(&self, mut base: HashMap<String, String>) -> HashMap<String, String> {
         let changes = self
             .changes
             .lock()
@@ -22,9 +20,9 @@ impl EnvironmentSession {
 
         for (name, value) in changes.iter() {
             if let Some(value) = value {
-                base.environment.insert(name.clone(), value.clone());
+                base.insert(name.clone(), value.clone());
             } else {
-                base.environment.remove(name);
+                base.remove(name);
             }
         }
 

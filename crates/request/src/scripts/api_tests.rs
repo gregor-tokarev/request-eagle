@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use environment::VariableValues;
+use std::collections::HashMap;
 
 use super::{
     RequestScripts, ScriptPhase, ScriptReport,
@@ -21,7 +21,7 @@ fn executor() -> RequestExecutor {
 fn send(request: HttpRequest) -> (HttpRequest, ScriptState, Vec<ScriptReport>) {
     smol::block_on(pre_request(
         request,
-        RequestVariables::new(VariableValues::default(), None),
+        RequestVariables::new(HashMap::new(), None),
         executor(),
         Arc::new(AtomicBool::new(false)),
     ))

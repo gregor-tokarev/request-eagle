@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -9,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use environment::{EnvironmentSession, VariableValues};
+use environment::EnvironmentSession;
 use request::{
     ExecutionError, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables,
 };
@@ -103,11 +104,11 @@ impl Drop for Server {
 }
 
 fn variables(session: &EnvironmentSession) -> RequestVariables {
-    RequestVariables::with_environment_session(VariableValues::default(), None, session.clone())
+    RequestVariables::with_environment_session(HashMap::new(), None, session.clone())
 }
 
 fn no_variables() -> RequestVariables {
-    RequestVariables::new(VariableValues::default(), None)
+    RequestVariables::new(HashMap::new(), None)
 }
 
 #[test]
@@ -384,19 +385,13 @@ fn local_overrides_reveal_environment_when_unset_and_failed_phases_do_not_commit
     );
     let result = smol::block_on(executor.execute(request, variables(&session))).unwrap();
     assert!(result.scripts[1].error.is_some());
-    assert_eq!(
-        session.values(VariableValues::default()).environment["token"],
-        "pre"
-    );
+    assert_eq!(session.values(HashMap::new())["token"], "pre");
     let request = server.request(
         "pm.environment.set('token', 'failed'); throw Error('discard');",
         "",
     );
     assert!(smol::block_on(executor.execute(request, variables(&session))).is_err());
-    assert_eq!(
-        session.values(VariableValues::default()).environment["token"],
-        "pre"
-    );
+    assert_eq!(session.values(HashMap::new())["token"], "pre");
 }
 
 #[test]
@@ -490,12 +485,7 @@ fn cancellation_during_script_http_does_not_commit_environment_or_send_main() {
         },
     ));
     thread::sleep(Duration::from_millis(100));
-    assert!(
-        session
-            .values(VariableValues::default())
-            .environment
-            .is_empty()
-    );
+    assert!(session.values(HashMap::new()).is_empty());
     assert!(
         !server
             .requests
@@ -559,7 +549,7 @@ fn collection_scripts_run_before_the_request_scripts_in_each_phase() {
 fn a_failing_request_script_keeps_the_collection_report_and_sends_nothing() {
     let server = Server::new();
     let request = server.request("throw new Error('request failed');", "");
-    let variables = RequestVariables::new(VariableValues::default(), None)
+    let variables = RequestVariables::new(HashMap::new(), None)
         .with_collection_scripts(collection_scripts("console.log('collection ran');", ""));
 
     let error = smol::block_on(server.executor().execute(request, variables)).unwrap_err();
@@ -585,7 +575,7 @@ fn a_failing_request_script_keeps_the_collection_report_and_sends_nothing() {
 #[test]
 fn unreadable_collection_scripts_stop_the_send() {
     let server = Server::new();
-    let variables = RequestVariables::new(VariableValues::default(), None)
+    let variables = RequestVariables::new(HashMap::new(), None)
         .with_collection_scripts(Err("Could not read the collection scripts".into()));
 
     let error =

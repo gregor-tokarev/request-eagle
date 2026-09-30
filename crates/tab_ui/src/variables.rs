@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use collection::{Collection, RequestScripts};
-use environment::{Environment, EnvironmentSession, VariableValues};
+use environment::{Environment, EnvironmentSession};
 use gpui_kit::{App, Entity};
 
 use crate::Environments;
@@ -15,21 +16,21 @@ pub(crate) struct VariableScope {
 impl VariableScope {
     /// Reload file values so external edits appear on the next send or
     /// completion. The active global environment overrides the collection's.
-    fn file_values(&self, cx: &App) -> Result<VariableValues, String> {
-        let mut values = VariableValues::default();
+    fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
+        let mut values = HashMap::new();
         let active = self
             .environments
             .as_ref()
             .and_then(|environments| environments.read(cx).active_path());
 
         for path in self.path.iter().chain(active.iter()) {
-            values.environment.extend(read_entries(path)?);
+            values.extend(read_entries(path)?);
         }
 
         Ok(values)
     }
 
-    pub fn values(&self, cx: &App) -> Result<VariableValues, String> {
+    pub fn values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
         self.file_values(cx)
             .map(|values| self.session.values(values))
     }
@@ -37,7 +38,7 @@ impl VariableScope {
     pub fn request_variables(&self, cx: &App) -> request::RequestVariables {
         let (values, error) = match self.file_values(cx) {
             Ok(values) => (values, None),
-            Err(error) => (VariableValues::default(), Some(error)),
+            Err(error) => (HashMap::new(), Some(error)),
         };
 
         request::RequestVariables::with_environment_session(values, error, self.session.clone())

@@ -82,9 +82,7 @@ pub(crate) async fn pre_request(
         let mut reports = Vec::new();
         let mut state = ScriptState {
             variables: Variables {
-                environment: std::mem::take(&mut values.environment)
-                    .into_iter()
-                    .collect(),
+                environment: std::mem::take(&mut values).into_iter().collect(),
                 ..Default::default()
             },
             session,
@@ -159,7 +157,7 @@ pub(crate) async fn pre_request(
             request.body = None;
         }
 
-        values.environment = state
+        values = state
             .variables
             .environment
             .iter()

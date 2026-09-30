@@ -1,15 +1,15 @@
 use std::{net::TcpListener, sync::Arc};
 
-use environment::VariableValues;
 use request::{
     ExecutionError, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
     RequestVariables, Response, Version,
 };
+use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, rustls};
 
 fn no_variables() -> RequestVariables {
-    RequestVariables::new(VariableValues::default(), None)
+    RequestVariables::new(HashMap::new(), None)
 }
 
 fn tls_config() -> rustls::ServerConfig {
