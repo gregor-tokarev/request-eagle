@@ -7,6 +7,8 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::*, *};
 use preferences::{HttpVersion, Preferences, RequestPreferences};
 
+use crate::layout::{row, section};
+
 const HTTP_VERSIONS: [(HttpVersion, &str); 3] = [
     (HttpVersion::Auto, "Auto"),
     (HttpVersion::Http1_1, "HTTP/1.1"),
@@ -25,11 +27,7 @@ pub(super) struct RequestSettings {
 
 impl RequestSettings {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let preferences = cx
-            .try_global::<Preferences>()
-            .cloned()
-            .unwrap_or_default()
-            .request;
+        let preferences = cx.global::<Preferences>().request.clone();
         let selected = HTTP_VERSIONS
             .iter()
             .position(|(version, _)| *version == preferences.http_version)
@@ -108,8 +106,6 @@ impl RequestSettings {
             },
         );
 
-        preferences::init(cx);
-
         Self {
             http_version,
             timeout,
@@ -137,39 +133,6 @@ fn valid_number(value: &str) -> bool {
         || (value.bytes().all(|byte| byte.is_ascii_digit()) && value.parse::<u64>().is_ok())
 }
 
-fn request_row(
-    title: &'static str,
-    description: &'static str,
-    control: impl IntoElement,
-    cx: &App,
-) -> impl IntoElement {
-    h_flex()
-        .w_full()
-        .items_start()
-        .justify_between()
-        .flex_wrap()
-        .gap_4()
-        .py_4()
-        .border_t_1()
-        .border_color(cx.theme().border)
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w(rems(13.75))
-                .gap_1()
-                .child(div().font_weight(FontWeight::MEDIUM).child(title))
-                .when(!description.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(description),
-                    )
-                }),
-        )
-        .child(div().w_40().flex_shrink_0().child(control))
-}
-
 impl Render for RequestSettings {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let verify_ssl = cx
@@ -178,43 +141,41 @@ impl Render for RequestSettings {
             .ssl_certificate_verification;
         let follow_all_redirects = cx.global::<Preferences>().request.follow_all_redirects;
 
-        v_flex()
-            .w_full()
-            .child(
-                div()
-                    .pb_3()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Request"),
-            )
-            .child(request_row(
+        section("Request")
+            .child(row(
                 "HTTP version",
                 "Select the HTTP version to use for sending the request.",
-                Select::new(&self.http_version)
-                    .accessibility_label("HTTP version")
-                    .w_full(),
+                div().w_40().flex_shrink_0().child(
+                    Select::new(&self.http_version)
+                        .accessibility_label("HTTP version")
+                        .w_full(),
+                ),
                 cx,
             ))
-            .child(request_row(
+            .child(row(
                 "Request timeout",
                 "Set how long a request should wait for a response before timing out. To never time out, set to 0.",
-                Input::new(&self.timeout)
-                    .suffix(div().text_color(cx.theme().muted_foreground).child("ms"))
-                    .w_full(),
+                div().w_40().flex_shrink_0().child(
+                    Input::new(&self.timeout)
+                        .suffix(div().text_color(cx.theme().muted_foreground).child("ms"))
+                        .w_full(),
+                ),
                 cx,
             ))
-            .child(request_row(
+            .child(row(
                 "Max response size",
                 "Set the maximum size of a response to download. To download a response of any size, set to 0.",
-                Input::new(&self.max_response_size)
-                    .suffix(div().text_color(cx.theme().muted_foreground).child("MB"))
-                    .w_full(),
+                div().w_40().flex_shrink_0().child(
+                    Input::new(&self.max_response_size)
+                        .suffix(div().text_color(cx.theme().muted_foreground).child("MB"))
+                        .w_full(),
+                ),
                 cx,
             ))
-            .child(request_row(
+            .child(row(
                 "SSL certificate verification",
                 "Verify the server certificate before sending requests. Disabling this allows untrusted certificates.",
-                h_flex().justify_end().child(
+                h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("ssl-certificate-verification")
                         .accessibility_label("SSL certificate verification")
                         .checked(verify_ssl)
@@ -224,10 +185,10 @@ impl Render for RequestSettings {
                 ),
                 cx,
             ))
-            .child(request_row(
+            .child(row(
                 "Follow all redirects",
                 "Automatically follow HTTP redirects to the final response.",
-                h_flex().justify_end().child(
+                h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("follow-all-redirects")
                         .accessibility_label("Follow all redirects")
                         .checked(follow_all_redirects)

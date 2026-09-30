@@ -1,4 +1,4 @@
-use super::{KeybindingsPage, matches_search};
+use super::{KeybindingsPage, search::matches_search};
 use crate::CloseSettings;
 use gpui_kit::{
     Action, AppContext as _, Context, Entity, Global, InteractiveElement as _, IntoElement,
