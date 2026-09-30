@@ -1,8 +1,9 @@
 use environment::GlobalEnvironments;
-use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 use tab_ui::EnvironmentEditor;
 
 use crate::main_view::Page;
+use crate::tests::{click, init};
 use crate::workspace::{SidebarSection, Workspace};
 
 fn workspace(
@@ -10,37 +11,12 @@ fn workspace(
 ) -> (Entity<Workspace>, &mut VisualTestContext, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let catalog = GlobalEnvironments::new(directory.path());
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
 
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            Workspace::new(
-                collection::CollectionRegistry::new(),
-                catalog,
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
+    init(cx);
+    let (workspace, cx) =
+        crate::tests::workspace(collection::CollectionRegistry::new(), catalog, cx);
 
-    (layout.unwrap(), cx, directory)
-}
-
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
-    let bounds = cx
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("missing {selector}"));
-    cx.simulate_click(bounds.center(), Modifiers::default());
+    (workspace, cx, directory)
 }
 
 fn active_editor(layout: &Entity<Workspace>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {

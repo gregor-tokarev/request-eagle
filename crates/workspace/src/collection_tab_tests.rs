@@ -1,7 +1,8 @@
 use std::{fs, time::Duration};
 
 use crate::main_view::Page;
-use crate::request_tab_tests::{SavedRequestFixture, click, edit_url};
+use crate::request_tab_tests::{SavedRequestFixture, edit_url};
+use crate::tests::click;
 use gpui_kit::TestAppContext;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -62,8 +63,8 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
     cx.run_until_parked();
     assert!(cx.debug_bounds("request-save-error").is_none());
 
-    let collection = fixture.directory.join("Renamed API");
-    assert!(!fixture.directory.join("API").exists());
+    let collection = fixture.directory.path().join("Renamed API");
+    assert!(!fixture.directory.path().join("API").exists());
     assert!(
         fs::read_to_string(collection.join("environment.toml"))
             .unwrap()
@@ -110,7 +111,7 @@ fn deleting_a_collection_closes_its_tab(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("backspace");
     click(cx, "confirm-sidebar-delete");
 
-    assert!(!fixture.directory.join("API").exists());
+    assert!(!fixture.directory.path().join("API").exists());
     cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 2);

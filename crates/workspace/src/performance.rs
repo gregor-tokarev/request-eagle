@@ -1,17 +1,57 @@
+use crate::tests::{collections, init, no_environments, workspace};
 use crate::workspace::Workspace;
 use collection::CollectionRegistry;
 use gpui_kit::{
-    AppContext, InputEvent as _, Modifiers, MouseButton, MouseMoveEvent, ScrollDelta,
-    ScrollWheelEvent, TestAppContext, TouchPhase, component::Root, point, px, size,
+    InputEvent as _, Modifiers, MouseButton, MouseMoveEvent, ScrollDelta, ScrollWheelEvent,
+    TestAppContext, TouchPhase, point, px, size,
 };
 use request::{Execution, HeaderMap, HttpMetrics, HttpResponse, Response, StatusCode, Version};
 use settings_ui::SettingsPage;
-use std::{
-    fs,
-    sync::atomic::{AtomicUsize, Ordering},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tab_ui::test_support::ResponseContent;
+
+/// The frame time of a 120 Hz display.
+const FRAME_BUDGET_MS: f64 = 1000. / 120.;
+
+/// Samples per measurement, set by REQUEST_EAGLE_BENCH_SAMPLES.
+fn sample_count() -> usize {
+    let count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
+        .map(|value| value.parse::<usize>().expect("positive sample count"))
+        .unwrap_or(120);
+    assert!(count > 0);
+
+    count
+}
+
+/// Reject debug builds when a budgeted benchmark runs, not when compiling
+/// ordinary tests.
+fn require_release_build() {
+    #[expect(
+        clippy::assertions_on_constants,
+        reason = "The assertion only fails in debug builds."
+    )]
+    {
+        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+    }
+}
+
+/// Print frame times in milliseconds, and return their 99th percentile.
+fn report(label: &str, mut samples: Vec<f64>) -> f64 {
+    samples.sort_by(f64::total_cmp);
+    let count = samples.len();
+    let percentile = |percent: usize| samples[(count * percent).div_ceil(100) - 1];
+    let mean = samples.iter().sum::<f64>() / count as f64;
+    let over_budget = samples.iter().filter(|&&ms| ms > FRAME_BUDGET_MS).count();
+
+    eprintln!(
+        "{label}: mean {mean:.2} ms, p95 {:.2}, p99 {:.2}, max {:.2}; over 8.33 ms: {over_budget}/{count}",
+        percentile(95),
+        percentile(99),
+        samples[count - 1],
+    );
+
+    percentile(99)
+}
 
 // Run serially, without other benchmarks competing for CPU:
 // cargo test -p workspace pages_render_benchmark -- --ignored --nocapture --test-threads=1
@@ -23,17 +63,10 @@ use tab_ui::test_support::ResponseContent;
 fn pages_render_benchmark(cx: &mut TestAppContext) {
     let page_filter = std::env::var("REQUEST_EAGLE_BENCH_PAGE").ok();
     let switch_pages = std::env::var_os("REQUEST_EAGLE_BENCH_TRANSITIONS").is_some();
-    let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
-        .map(|value| value.parse::<usize>().expect("positive sample count"))
-        .unwrap_or(120);
-    assert!(sample_count > 0);
+    let sample_count = sample_count();
 
+    init(cx);
     cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-        cx.set_reduce_motion(true);
         eprintln!(
             "Keybindings: {} registered commands",
             keybindings_service::commands(cx).len()
@@ -58,7 +91,7 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
         let (layout, cx) = cx.add_window_view(|window, cx| {
             Workspace::new(
                 collections,
-                crate::tests::no_environments(),
+                no_environments(),
                 updater::init("1.2.3", cx),
                 window,
                 cx,
@@ -143,56 +176,17 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
                     }
                 }
 
-                samples.sort_by(f64::total_cmp);
-                let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-                let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
-                eprintln!(
-                    "{label} {width}x{height} {}: mean {mean:.2} ms, p95 {:.2}, p99 {:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
-                    if scrolling {
-                        "scroll"
-                    } else if switch_pages && page.is_some() {
-                        "page switch"
-                    } else {
-                        "draw"
-                    },
-                    samples[(sample_count * 95).div_ceil(100) - 1],
-                    samples[(sample_count * 99).div_ceil(100) - 1],
-                    samples[sample_count - 1],
-                );
+                let interaction = if scrolling {
+                    "scroll"
+                } else if switch_pages && page.is_some() {
+                    "page switch"
+                } else {
+                    "draw"
+                };
+                report(&format!("{label} {width}x{height} {interaction}"), samples);
             }
         }
     }
-}
-
-pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
-    if request_count == 0 {
-        return CollectionRegistry::new();
-    }
-
-    // Load synthetic requests through the real parser, outside the timed region.
-    // Never load or modify the user's collections or preferences. Tests run in
-    // parallel, so each call gets its own directory.
-    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
-    let directory = std::env::temp_dir().join(format!(
-        "request-eagle-page-benchmark-{}-{request_count}-{}",
-        std::process::id(),
-        NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
-    ));
-    for index in 0..request_count {
-        let folder = directory.join(format!(
-            "collection-{:02}/folder-{:02}",
-            index / 100,
-            index % 100 / 20
-        ));
-        fs::create_dir_all(&folder).unwrap();
-        fs::write(folder.join(format!("request-{index:04}.toml")), format!(
-            "id = \"request-{index}\"\nname = \"Get resource {index}\"\nschema_version = 1\n[request]\ntype = \"http\"\nmethod = \"GET\"\npath = \"/resources/{index}\"\nheaders = []\n"
-        )).unwrap();
-    }
-
-    let collections = CollectionRegistry::from_path(&directory).unwrap();
-    fs::remove_dir_all(directory).unwrap();
-    collections
 }
 
 // Includes event dispatch, effects, Root, drawing and element cleanup. GPU
@@ -201,45 +195,14 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
 #[gpui_kit::test]
 #[ignore = "manual 120 fps tab interaction budget"]
 fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
-    let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
-        .map(|value| value.parse::<usize>().expect("positive sample count"))
-        .unwrap_or(120);
-    assert!(sample_count > 0);
-    #[expect(
-        clippy::assertions_on_constants,
-        reason = "Reject debug builds when the ignored benchmark runs, not when compiling ordinary tests."
-    )]
-    {
-        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
-    }
-
+    require_release_build();
+    let sample_count = sample_count();
     let mut failures = Vec::new();
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-        cx.set_reduce_motion(true);
-    });
+    init(cx);
 
     for tab_count in [100, 1_000, 10_000] {
-        let mut layout = None;
-        let (_root, cx) = cx.add_window_view(|window, cx| {
-            let view = cx.new(|cx| {
-                Workspace::new(
-                    CollectionRegistry::new(),
-                    crate::tests::no_environments(),
-                    updater::init("1.2.3", cx),
-                    window,
-                    cx,
-                )
-            });
-            layout = Some(view.clone());
-
-            Root::new(view, window, cx)
-        });
-        let layout = layout.unwrap();
+        let (layout, cx) = workspace(CollectionRegistry::new(), no_environments(), cx);
 
         cx.update(|_, cx| {
             layout.read(cx).main_view.clone().update(cx, |view, cx| {
@@ -295,17 +258,9 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
                     }
                 }
 
-                samples.sort_by(f64::total_cmp);
-                let mean = samples.iter().sum::<f64>() / sample_count as f64;
-                let p99 = samples[(sample_count * 99).div_ceil(100) - 1];
-                let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
                 let label = format!("{tab_count} tabs {width}x{height} {interaction}");
-                eprintln!(
-                    "{label}: mean {mean:.2} ms, p95 {:.2}, p99 {p99:.2}, max {:.2}; over 8.33 ms: {over_budget}/{sample_count}",
-                    samples[(sample_count * 95).div_ceil(100) - 1],
-                    samples[sample_count - 1],
-                );
-                if p99 > 1000. / 120. {
+                let p99 = report(&label, samples);
+                if p99 > FRAME_BUDGET_MS {
                     failures.push(format!("{label}: p99 {p99:.2} ms"));
                 }
 
@@ -340,27 +295,11 @@ fn tabs_interaction_benchmark(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 #[ignore = "manual 120 fps command palette budget"]
 fn palette_interaction_benchmark(cx: &mut TestAppContext) {
-    let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
-        .map(|value| value.parse::<usize>().expect("positive sample count"))
-        .unwrap_or(120);
-    assert!(sample_count > 0);
-    #[expect(
-        clippy::assertions_on_constants,
-        reason = "Reject debug builds when the ignored benchmark runs, not when compiling ordinary tests."
-    )]
-    {
-        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
-    }
-
+    require_release_build();
+    let sample_count = sample_count();
     let mut failures = Vec::new();
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-        cx.set_reduce_motion(true);
-    });
+    init(cx);
 
     // "g" matches every request; the rest narrows to a single one.
     let query = [
@@ -368,23 +307,7 @@ fn palette_interaction_benchmark(cx: &mut TestAppContext) {
     ];
 
     for request_count in [1_000, 10_000, 100_000] {
-        let mut layout = None;
-        let collections = collections(request_count);
-        let (_root, cx) = cx.add_window_view(|window, cx| {
-            let view = cx.new(|cx| {
-                Workspace::new(
-                    collections,
-                    crate::tests::no_environments(),
-                    updater::init("1.2.3", cx),
-                    window,
-                    cx,
-                )
-            });
-            layout = Some(view.clone());
-
-            Root::new(view, window, cx)
-        });
-        let layout = layout.unwrap();
+        let (layout, cx) = workspace(collections(request_count), no_environments(), cx);
         cx.update(|window, cx| {
             window.activate_window();
             crate::workspace::on_toggle_command_palette(&layout, window.window_handle(), cx);
@@ -473,19 +396,10 @@ fn palette_interaction_benchmark(cx: &mut TestAppContext) {
                 }));
             }
 
-            for (interaction, mut samples) in samples {
-                let count = samples.len();
-                samples.sort_by(f64::total_cmp);
-                let mean = samples.iter().sum::<f64>() / count as f64;
-                let p99 = samples[(count * 99).div_ceil(100) - 1];
-                let over_budget = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
+            for (interaction, samples) in samples {
                 let label = format!("{request_count} requests {width}x{height} {interaction}");
-                eprintln!(
-                    "{label}: mean {mean:.2} ms, p95 {:.2}, p99 {p99:.2}, max {:.2}; over 8.33 ms: {over_budget}/{count}",
-                    samples[(count * 95).div_ceil(100) - 1],
-                    samples[count - 1],
-                );
-                if p99 > 1000. / 120. {
+                let p99 = report(&label, samples);
+                if p99 > FRAME_BUDGET_MS {
                     failures.push(format!("{label}: p99 {p99:.2} ms"));
                 }
             }
@@ -505,20 +419,10 @@ fn palette_interaction_benchmark(cx: &mut TestAppContext) {
 // event dispatch, effects, drawing and cleanup; excludes GPU presentation.
 #[gpui_kit::test]
 #[ignore = "manual 120 fps response interaction budget"]
-#[allow(clippy::assertions_on_constants)] // Reject accidental debug-mode measurements.
 fn response_interaction_benchmark(cx: &mut TestAppContext) {
-    assert!(!cfg!(debug_assertions), "run this benchmark with --release");
-    let sample_count = std::env::var("REQUEST_EAGLE_BENCH_SAMPLES")
-        .map(|value| value.parse::<usize>().unwrap())
-        .unwrap_or(120);
-    assert!(sample_count > 0);
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-        cx.set_reduce_motion(true);
-    });
+    require_release_build();
+    let sample_count = sample_count();
+    init(cx);
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json".parse().unwrap());
     for index in 0..128 {
@@ -547,19 +451,9 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
     .unwrap();
     let body_bytes = body.len();
     let header_count = headers.len();
-    let collections = collections(1_000);
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let layout = cx.new(|cx| {
-            Workspace::new(
-                collections,
-                crate::tests::no_environments(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        let tabs = layout.read(cx).main_view.clone();
-        let draft = tabs.read(cx).tabs[0].draft();
+    let (layout, cx) = workspace(collections(1_000), no_environments(), cx);
+    cx.update(|window, cx| {
+        let draft = layout.read(cx).main_view.read(cx).tabs[0].draft();
         draft.update(cx, |draft, cx| draft.prepare(window, cx));
         let response = draft.read(cx).response_for_test();
         response.update(cx, |view, cx| {
@@ -583,7 +477,6 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
                 cx,
             );
         });
-        Root::new(layout, window, cx)
     });
     let mut failures = Vec::new();
     for (width, height) in [(1024., 768.), (1440., 900.), (3440., 1410.)] {
@@ -704,16 +597,13 @@ fn response_interaction_benchmark(cx: &mut TestAppContext) {
                     )
                 });
             }
-            samples.sort_by(f64::total_cmp);
-            let mean = samples.iter().sum::<f64>() / sample_count as f64;
-            let p95 = samples[(sample_count * 95).div_ceil(100) - 1];
-            let p99 = samples[(sample_count * 99).div_ceil(100) - 1];
-            let over = samples.iter().filter(|&&ms| ms > 1000. / 120.).count();
-            eprintln!(
-                "Workspace 1000 requests; response {body_bytes} B, {header_count} headers, {width}x{height} {scenario}: mean {mean:.2} ms, p95 {p95:.2}, p99 {p99:.2}, max {:.2}; over 8.33 ms: {over}/{sample_count}",
-                samples[sample_count - 1]
+            let p99 = report(
+                &format!(
+                    "Workspace 1000 requests; response {body_bytes} B, {header_count} headers, {width}x{height} {scenario}"
+                ),
+                samples,
             );
-            if p99 > 1000. / 120. {
+            if p99 > FRAME_BUDGET_MS {
                 failures.push(format!("{width}x{height} {scenario}: p99 {p99:.2} ms"));
             }
         }

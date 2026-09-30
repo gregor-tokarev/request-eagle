@@ -1,5 +1,6 @@
-use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, component::Root};
+use gpui_kit::{Entity, Focusable, TestAppContext, VisualTestContext};
 
+use crate::tests::{collections, init};
 use crate::workspace::{Workspace, on_toggle_command_palette, on_toggle_sidebar};
 
 /// A workspace with two requests in one collection, and the global
@@ -13,30 +14,8 @@ fn workspace(
         catalog.create(name).unwrap();
     }
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        cx.set_reduce_motion(true);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            Workspace::new(
-                crate::performance::collections(2),
-                catalog,
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-
-        Root::new(view, window, cx)
-    });
-    let layout = layout.unwrap();
+    init(cx);
+    let (layout, cx) = crate::tests::workspace(collections(2), catalog, cx);
 
     cx.update(|window, cx| {
         window.activate_window();

@@ -6,26 +6,13 @@ use gpui_kit::{
 };
 
 use crate::main_view::Page;
+use crate::tests::{collections, init, no_environments};
 use crate::workspace::Workspace;
 use tab_ui::RequestLocation;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-
-    cx.add_window_view(|window, cx| {
-        Workspace::new(
-            collection::CollectionRegistry::new(),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    })
+    init(cx);
+    crate::tests::workspace(collection::CollectionRegistry::new(), no_environments(), cx)
 }
 
 #[gpui_kit::test]
@@ -33,7 +20,6 @@ fn search_shortcut_focuses_sidebar_from_tree_and_request_inputs(cx: &mut TestApp
     let (layout, cx) = workspace(cx);
     let draft = cx.read(|cx| layout.read(cx).main_view.read(cx).tabs[0].draft());
     cx.update(|window, cx| {
-        cx.set_reduce_motion(true);
         draft.update(cx, |draft, cx| {
             draft.set_method(collection::Method::Post, cx);
             draft.prepare(window, cx);
@@ -560,22 +546,8 @@ fn settings_do_not_change_hidden_tabs(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        Workspace::new(
-            crate::performance::collections(2),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = crate::tests::workspace(collections(2), no_environments(), cx);
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
 
     // Folders still collapse and expand without opening tabs.

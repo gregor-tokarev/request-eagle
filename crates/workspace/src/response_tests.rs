@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Modifiers, TestAppContext, point, px};
+use gpui_kit::{Modifiers, TestAppContext, point, px};
 use request::{Execution, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
+use crate::tests::{init, no_environments, workspace};
 use tab_ui::test_support::ResponseContent;
 
 fn response(body: &[u8], content_type: &str) -> ResponseContent {
@@ -24,21 +25,8 @@ fn response(body: &[u8], content_type: &str) -> ResponseContent {
 
 #[gpui_kit::test]
 fn search_shortcut_preserves_response_search(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Workspace::new(
-            collection::CollectionRegistry::new(),
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = workspace(collection::CollectionRegistry::new(), no_environments(), cx);
     let view = cx.read(|cx| {
         layout.read(cx).main_view.read(cx).tabs[0]
             .draft()
@@ -82,29 +70,10 @@ fn minimum_workspace_keeps_request_fields_and_response_visible_at_each_zoom(
 ) {
     use gpui_kit::{InputEvent as _, ScrollDelta, ScrollWheelEvent, TouchPhase};
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            crate::workspace::Workspace::new(
-                collection::CollectionRegistry::new(),
-                crate::tests::no_environments(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
+    init(cx);
+    let (layout, cx) = workspace(collection::CollectionRegistry::new(), no_environments(), cx);
     let response_view = cx.read(|cx| {
-        layout.as_ref().unwrap().read(cx).main_view.read(cx).tabs[0]
+        layout.read(cx).main_view.read(cx).tabs[0]
             .draft()
             .read(cx)
             .response_for_test()

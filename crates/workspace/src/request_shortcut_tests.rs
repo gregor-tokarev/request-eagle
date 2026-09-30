@@ -1,7 +1,9 @@
 use collection::Method;
-use gpui_kit::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, component::Root};
+use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::time::Duration;
+
+use crate::tests::{init, no_environments, workspace};
 
 fn element_bounds(
     cx: &mut VisualTestContext,
@@ -39,28 +41,8 @@ async fn send_shortcut_uses_the_active_request_from_inputs_and_response(cx: &mut
         }
     });
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-        cx.set_reduce_motion(true);
-    });
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            crate::workspace::Workspace::new(
-                collection::CollectionRegistry::new(),
-                crate::tests::no_environments(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-        Root::new(view, window, cx)
-    });
-    let layout = layout.unwrap();
+    init(cx);
+    let (layout, cx) = workspace(collection::CollectionRegistry::new(), no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let first = cx.read(|cx| tabs.read(cx).tabs[0].draft());
     cx.simulate_keystrokes("secondary-t");

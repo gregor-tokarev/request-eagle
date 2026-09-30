@@ -1,7 +1,6 @@
 use std::{
     fs,
-    sync::atomic::{AtomicUsize, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use collection::{CollectionRegistry, Method};
@@ -9,6 +8,7 @@ use gpui_kit::{Modifiers, TestAppContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::main_view::Page;
+use crate::tests::{click, init, no_environments, workspace};
 use tab_ui::RequestDraft;
 
 #[gpui_kit::test]
@@ -39,38 +39,18 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}").await.unwrap();
     });
 
-    let directory = std::env::temp_dir().join(format!(
-        "request-eagle-open-saved-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-    ));
-    let file = directory.join("Saved API/Items/create.toml");
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("Saved API/Items/create.toml");
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     let original = format!(
         "id = \"create-item\"\nname = \"Create item\"\nschema_version = 1\n[request]\ntype = \"http\"\nmethod = \"POST\"\npath = \"{url}\"\nheaders = [[\"X-Saved\", \"first\"], [\"X-Saved\", \"second\"]]\nquery = [[\"tag\", \"one\"], [\"tag\", \"two\"]]\nbody = {:?}\n",
         b"{\"hello\":true}".as_slice(),
     );
     fs::write(&file, &original).unwrap();
-    let collections = CollectionRegistry::from_path(&directory).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path()).unwrap();
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Workspace::new(
-            collections,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = workspace(collections, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let row = cx.debug_bounds("collection-row-2").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());
@@ -200,29 +180,18 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     let collection::Request::Http(persisted) = persisted.request;
     cx.read(|cx| assert_eq!(persisted, draft.read(cx).request));
     assert_ne!(fs::read_to_string(&file).unwrap(), original);
-    fs::remove_dir_all(directory).unwrap();
 }
 
-static NEXT_SAVED_FIXTURE: AtomicUsize = AtomicUsize::new(0);
-
 pub(crate) struct SavedRequestFixture {
-    pub(crate) directory: std::path::PathBuf,
+    pub(crate) directory: tempfile::TempDir,
     pub(crate) file: std::path::PathBuf,
     original: String,
 }
 
 impl SavedRequestFixture {
     pub(crate) fn new() -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "request-eagle-save-{}-{}-{}",
-            std::process::id(),
-            NEXT_SAVED_FIXTURE.fetch_add(1, Ordering::Relaxed),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-        ));
-        let file = directory.join("API/example.toml");
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("API/example.toml");
         let original = r#"id = "example"
 name = "Example"
 schema_version = 1
@@ -250,43 +219,15 @@ path = "https://example.com/original"
         gpui_kit::Entity<RequestDraft>,
         &'a mut gpui_kit::VisualTestContext,
     ) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            preferences::init(cx);
-            request_eagle_theme::init(cx);
-            crate::actions::init(cx);
-        });
-        let registry = CollectionRegistry::from_path(&self.directory).unwrap();
-        let (layout, cx) = cx.add_window_view(|window, cx| {
-            crate::workspace::Workspace::new(
-                registry,
-                crate::tests::no_environments(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
+        init(cx);
+        let registry = CollectionRegistry::from_path(self.directory.path()).unwrap();
+        let (layout, cx) = workspace(registry, no_environments(), cx);
         let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
         click(cx, "collection-row-1");
         let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
 
         (tabs, draft, cx)
     }
-}
-
-impl Drop for SavedRequestFixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
-    }
-}
-
-pub(crate) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
-    let bounds = cx
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("missing {selector}"));
-    cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
-    cx.simulate_click(bounds.center(), Modifiers::default());
 }
 
 pub(crate) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
@@ -388,22 +329,9 @@ fn reverting_an_edit_clears_dirty_state_and_closes_without_prompt(cx: &mut TestA
 #[gpui_kit::test]
 fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Workspace::new(
-            registry,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let (layout, cx) = workspace(registry, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
@@ -451,7 +379,7 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    fs::create_dir_all(fixture.directory.join("Other")).unwrap();
+    fs::create_dir_all(fixture.directory.path().join("Other")).unwrap();
     let (tabs, draft, cx) = fixture.open(cx);
     edit_url(cx, "https://example.com/edited-before-rename");
 
@@ -460,7 +388,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     cx.simulate_keystrokes("up f2");
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
-    let renamed = fixture.directory.join("Renamed API/example.toml");
+    let renamed = fixture.directory.path().join("Renamed API/example.toml");
     cx.read(|cx| {
         assert_eq!(
             tabs.read(cx).tabs[1]
@@ -503,7 +431,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
         ..Default::default()
     });
     cx.run_until_parked();
-    let moved = fixture.directory.join("Other/example.toml");
+    let moved = fixture.directory.path().join("Other/example.toml");
     cx.read(|cx| {
         assert_eq!(
             tabs.read(cx).tabs[1]
@@ -552,7 +480,7 @@ fn context_click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
 #[gpui_kit::test]
 fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut TestAppContext) {
     let mut fixture = SavedRequestFixture::new();
-    let reused = fixture.directory.join("API/New Request.toml");
+    let reused = fixture.directory.path().join("API/New Request.toml");
     fs::rename(&fixture.file, &reused).unwrap();
     fixture.file = reused;
     let (tabs, draft, cx) = fixture.open(cx);
@@ -633,25 +561,12 @@ fn second_close_shortcut_discards_only_the_pending_tab(cx: &mut TestAppContext) 
 #[gpui_kit::test]
 fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    let nested = fixture.directory.join("API/API/V2/example.toml");
+    let nested = fixture.directory.path().join("API/API/V2/example.toml");
     fs::create_dir_all(nested.parent().unwrap()).unwrap();
     fs::rename(&fixture.file, &nested).unwrap();
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Workspace::new(
-            registry,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let (layout, cx) = workspace(registry, no_environments(), cx);
     click(cx, "collection-row-3");
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
