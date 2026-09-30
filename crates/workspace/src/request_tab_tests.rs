@@ -52,6 +52,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     init(cx);
     let (layout, cx) = workspace(collections, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|window, _| window.refresh());
     let row = cx.debug_bounds("collection-row-2").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());
     let draft = cx.read(|cx| {

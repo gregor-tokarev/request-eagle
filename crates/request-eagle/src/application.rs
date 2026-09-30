@@ -81,6 +81,12 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
+        window
+            .observe_window_appearance(|window, cx| {
+                request_eagle_theme::apply_preferences(window.appearance(), cx);
+            })
+            .detach();
+
         let workspace = workspace::init(collections, environments, updater, window, cx);
         let view = cx.new(|_| ApplicationView { workspace });
 

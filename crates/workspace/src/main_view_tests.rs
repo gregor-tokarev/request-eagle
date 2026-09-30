@@ -6,7 +6,7 @@ use gpui_kit::{
 };
 
 use crate::main_view::Page;
-use crate::tests::{collections, init, no_environments};
+use crate::tests::{click, collections, init, no_environments};
 use crate::workspace::Workspace;
 use tab_ui::RequestLocation;
 
@@ -115,8 +115,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         assert!(draft.url_input().unwrap().read(cx).value().is_empty());
     });
 
-    let url = cx.debug_bounds("request-url").unwrap();
-    cx.simulate_click(url.center(), Modifiers::default());
+    click(cx, "request-url");
     cx.simulate_input("https://example.com/first");
     cx.read(|cx| assert_eq!(first.read(cx).request.path, "https://example.com/first"));
 
@@ -222,8 +221,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         ("headers-key-0", "Accept"),
         ("headers-value-0", "application/json"),
     ] {
-        let field = cx.debug_bounds(selector).unwrap();
-        cx.simulate_click(field.center(), Modifiers::default());
+        click(cx, selector);
         cx.simulate_input(value);
     }
     assert!(cx.debug_bounds("headers-key-1").is_some());
@@ -551,6 +549,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
     let view = cx.read(|cx| layout.read(cx).main_view.clone());
 
     // Folders still collapse and expand without opening tabs.
+    cx.update(|window, _| window.refresh());
     let folder = cx.debug_bounds("collection-row-1").unwrap();
     cx.simulate_click(folder.center(), Modifiers::default());
     assert!(cx.debug_bounds("collection-row-2").is_none());

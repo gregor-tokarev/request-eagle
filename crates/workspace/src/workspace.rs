@@ -49,7 +49,6 @@ pub(crate) struct Workspace {
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
     _settings_subscription: Subscription,
-    _appearance_subscription: Subscription,
 }
 
 impl Workspace {
@@ -60,10 +59,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let appearance_subscription = cx.observe_window_appearance(window, |_, window, cx| {
-            request_eagle_theme::apply_preferences(window.appearance(), cx);
-        });
-
         let sidebar_visible = cx.new(|_| true);
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
@@ -193,7 +188,6 @@ impl Workspace {
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
             _settings_subscription: settings_subscription,
-            _appearance_subscription: appearance_subscription,
         }
     }
 
