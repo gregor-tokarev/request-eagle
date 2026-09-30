@@ -106,7 +106,7 @@ pub(crate) struct MessageLog {
     /// Measured at the interface size the list last used.
     row_height: Pixels,
     /// The list takes keyboard focus to move between messages.
-    focus: FocusHandle,
+    pub(super) focus: FocusHandle,
     split: Entity<ResizableState>,
     _search_subscription: Option<Subscription>,
 }
@@ -325,16 +325,19 @@ impl MessageLog {
     fn keyboard_row(&self) -> Option<usize> {
         let last = self.visible.len().checked_sub(1)?;
         let state = self.scroll.0.borrow();
+        let top = -state.base_handle.offset().y;
         // The list's last layout measured its viewport, not its rows.
-        let viewport = state.last_item_size.map(|size| size.item.height);
-        let first = ((-state.base_handle.offset().y / self.row_height).ceil() as usize).min(last);
-        let count = viewport.map_or(self.visible.len(), |height| {
-            ((height / self.row_height).floor() as usize).max(1)
-        });
+        let bottom = state
+            .last_item_size
+            .map_or(Pixels::MAX, |size| top + size.item.height);
+        // Rows that intersect the viewport, as the list renders them.
+        let first = ((top / self.row_height).floor() as usize).min(last);
+        let end = (bottom / self.row_height).ceil() as usize;
 
         match self.selected_row() {
-            Some(row) if (first..first + count).contains(&row) => Some(row),
-            _ => Some(first),
+            Some(row) if (first..end).contains(&row) => Some(row),
+            // Prefer the first row that is fully in view.
+            _ => Some(((top / self.row_height).ceil() as usize).min(last)),
         }
     }
 

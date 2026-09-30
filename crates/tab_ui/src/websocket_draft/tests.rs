@@ -443,8 +443,7 @@ fn new_messages_keep_scrolled_rows_in_place(cx: &mut TestAppContext) {
 
     cx.update(|_, cx| {
         log.update(cx, |log, _| {
-            log.scroll
-                .scroll_to_item(50, gpui_kit::ScrollStrategy::Top)
+            log.scroll.scroll_to_item(50, gpui_kit::ScrollStrategy::Top)
         })
     });
     assert!(element_bounds(cx, "websocket-messages").is_some());
@@ -456,4 +455,45 @@ fn new_messages_keep_scrolled_rows_in_place(cx: &mut TestAppContext) {
 
     push(&log, vec![received("a"), received("b"), received("c")], cx);
     assert_eq!(offset(cx), before - row_height * 3.);
+}
+
+#[gpui_kit::test]
+fn arrow_keys_move_from_a_partly_visible_selection(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(WebSocketRequest::default(), cx);
+    let log = log(&draft, cx);
+    push(
+        &log,
+        (0..100).map(|index| received(&index.to_string())).collect(),
+        cx,
+    );
+    let row_height = element_bounds(cx, "websocket-message-0")
+        .unwrap()
+        .size
+        .height;
+
+    // Select row 40, then scroll so half of it is clipped at the top.
+    cx.update(|window, cx| {
+        log.update(cx, |log, cx| {
+            let (id, _) = log.row_entry(40);
+            log.select(id, window, cx);
+            window.focus(&log.focus, cx);
+            log.scroll
+                .0
+                .borrow()
+                .base_handle
+                .set_offset(gpui_kit::point(gpui_kit::px(0.), -(row_height * 40.5)));
+        })
+    });
+    assert!(element_bounds(cx, "websocket-messages").is_some());
+
+    cx.simulate_keystrokes("up");
+    let preview = cx.read(|cx| {
+        let log = log.read(cx);
+        log.entry_by_id(log.selected.unwrap())
+            .unwrap()
+            .preview
+            .to_string()
+    });
+    // Row 39 is the newer neighbor of row 40 ("59"), which shows "60".
+    assert_eq!(preview, "60");
 }
