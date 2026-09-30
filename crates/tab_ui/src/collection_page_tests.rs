@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use collection::RequestScripts;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 
-use super::CollectionPage;
-use crate::{TabPage as _, request_draft::tests::element_bounds};
+use crate::{CollectionPage, TabPage as _, request_draft::tests::element_bounds};
 
 fn page(cx: &mut TestAppContext) -> (Entity<CollectionPage>, &mut VisualTestContext) {
     cx.update(|cx| {

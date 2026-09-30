@@ -19,6 +19,8 @@ mod variables;
 mod vim;
 
 #[cfg(test)]
+mod collection_page_tests;
+#[cfg(test)]
 mod environment_editor_tests;
 #[cfg(test)]
 mod test_allocator;
