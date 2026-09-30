@@ -344,6 +344,15 @@ impl Workspace {
             .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
     }
 
+    fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The imported collection is revealed in the tree, so it must be visible.
+        self.collections_open = true;
+        cx.notify();
+
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open_import_dialog(window, cx));
+    }
+
     fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.environments_open = true;
         cx.notify();
@@ -356,7 +365,7 @@ impl Workspace {
         &self,
         section: SidebarSection,
         count: usize,
-        new_button: Button,
+        buttons: Vec<Button>,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -425,13 +434,29 @@ impl Workspace {
                                 .child(count.to_string()),
                         ),
                 )
-                .child(new_button.ghost().xsmall()),
+                .children(buttons.into_iter().map(|button| button.ghost().xsmall())),
         )
     }
 
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+
+        let new_collection = Button::new("new-collection")
+            .debug_selector(|| "new-collection".into())
+            .icon(IconName::Plus)
+            .tooltip("New Collection")
+            .on_click(cx.listener(|this, _, window, cx| this.create_collection(window, cx)));
+        let import_collection = Button::new("import-collection")
+            .debug_selector(|| "import-collection".into())
+            .icon(Icon::default().path("icons/import.svg"))
+            .tooltip("Import Collection")
+            .on_click(cx.listener(|this, _, window, cx| this.import_collection(window, cx)));
+        let new_environment = Button::new("new-environment")
+            .debug_selector(|| "new-environment".into())
+            .icon(IconName::Plus)
+            .tooltip("New Environment")
+            .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
 
         // Open sections share the height, like the sections of an editor sidebar.
         let section_body = StyleRefinement::default().w_full().flex_1().min_h_0();
@@ -443,21 +468,13 @@ impl Workspace {
             .text_color(cx.theme().sidebar_foreground)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
-            .child(
-                self.section_header(
-                    SidebarSection::Collections,
-                    collection_count,
-                    Button::new("new-collection")
-                        .debug_selector(|| "new-collection".into())
-                        .icon(IconName::Plus)
-                        .tooltip("New Collection")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.create_collection(window, cx)),
-                        ),
-                    window,
-                    cx,
-                ),
-            )
+            .child(self.section_header(
+                SidebarSection::Collections,
+                collection_count,
+                vec![new_collection, import_collection],
+                window,
+                cx,
+            ))
             .when(self.collections_open, |this| {
                 this.child(self.sidebar.clone().cached(section_body.clone()))
             })
@@ -468,21 +485,13 @@ impl Workspace {
                     .h(px(1.))
                     .bg(cx.theme().sidebar_border),
             )
-            .child(
-                self.section_header(
-                    SidebarSection::Environments,
-                    environment_count,
-                    Button::new("new-environment")
-                        .debug_selector(|| "new-environment".into())
-                        .icon(IconName::Plus)
-                        .tooltip("New Environment")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.create_environment(window, cx)),
-                        ),
-                    window,
-                    cx,
-                ),
-            )
+            .child(self.section_header(
+                SidebarSection::Environments,
+                environment_count,
+                vec![new_environment],
+                window,
+                cx,
+            ))
             .when(self.environments_open, |this| {
                 this.child(self.environment_panel.clone().cached(section_body))
             })

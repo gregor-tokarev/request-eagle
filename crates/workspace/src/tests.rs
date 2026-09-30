@@ -298,4 +298,12 @@ fn sidebar_sections_fold_and_reopen(cx: &mut TestAppContext) {
     click(cx, "new-environment");
     assert!(height(cx, "environments-sidebar").is_some());
     cx.read(|cx| assert_eq!(layout.read(cx).main_view.read(cx).tabs.len(), 2));
+
+    // So does importing, which shows the imported collection in the tree.
+    click(cx, "collections-section");
+    assert_eq!(height(cx, "collections-sidebar"), None);
+    click(cx, "import-collection");
+    cx.run_until_parked();
+    assert!(height(cx, "collections-sidebar").is_some());
+    assert!(cx.debug_bounds("import-dialog").is_some());
 }
