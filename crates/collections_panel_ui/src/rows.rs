@@ -248,14 +248,36 @@ impl CollectionPanel {
                     this.move_item(&drag.path, index, placement, window, cx);
                 }
             }))
-            .on_click(cx.listener(move |this, _, window, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                let double = event.click_count() == 2;
+                let first = this
+                    .clicked
+                    .as_ref()
+                    .and_then(|path| this.tree.items.iter().position(|item| &item.path == path));
+                let index = if double {
+                    first.unwrap_or(index)
+                } else {
+                    index
+                };
+                let Ok(row) = this.visible.binary_search(&index) else {
+                    return;
+                };
+                let item = &this.tree.items[index];
+                let branch = item.is_branch();
+                let collection = item.kind == ItemKind::Collection;
+                let path = item.path.clone();
+
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
 
                 if branch {
                     this.toggle(index, cx);
+                    this.clicked = Some(path);
                 }
-                this.open(index, cx);
+                // A click expands a collection; its tab opens on double click.
+                if !collection || (double && first == Some(index)) {
+                    this.open(index, cx);
+                }
             }))
             .capture_any_mouse_down(
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {

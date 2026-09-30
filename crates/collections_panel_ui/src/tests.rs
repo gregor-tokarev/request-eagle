@@ -1,11 +1,14 @@
-use std::{collections::HashSet, fs, sync::Arc};
+use std::{cell::RefCell, collections::HashSet, fs, path::PathBuf, rc::Rc, sync::Arc};
 
 use collection::CollectionRegistry;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Focusable, Modifiers, TestAppContext, px, size};
+use gpui_kit::{
+    AppContext, Entity, Focusable, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
+    Point, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px, size,
+};
 
 use super::{
-    CollectionPanel,
+    CollectionPanel, CollectionPanelEvent,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -209,6 +212,152 @@ fn sidebar_virtualizes_rows_and_handles_collapse_search_and_selection(cx: &mut T
     cx.run_until_parked();
     cx.read(|cx| assert_eq!(sidebar.read(cx).selected, Some(last)));
     assert!(cx.debug_bounds(last_selector).is_some());
+}
+
+type Opened = Rc<RefCell<Vec<PathBuf>>>;
+
+fn clicking_sidebar(
+    cx: &mut TestAppContext,
+) -> (Entity<CollectionPanel>, Opened, &mut VisualTestContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::init(cx);
+    });
+
+    let (sidebar, cx) =
+        cx.add_window_view(|window, cx| CollectionPanel::new(collections(), window, cx));
+    cx.simulate_resize(size(px(300.), px(500.)));
+    cx.update(|window, _| window.activate_window());
+
+    let opened = Opened::default();
+    cx.update(|_, cx| {
+        let opened = opened.clone();
+        cx.subscribe(
+            &sidebar,
+            move |_, event: &CollectionPanelEvent, _| match event {
+                CollectionPanelEvent::OpenRequest { path, .. }
+                | CollectionPanelEvent::OpenCollection { path, .. } => {
+                    opened.borrow_mut().push(path.clone())
+                }
+                _ => {}
+            },
+        )
+        .detach();
+    });
+
+    (sidebar, opened, cx)
+}
+
+fn row_selector(index: usize) -> &'static str {
+    Box::leak(format!("collection-row-{index}").into_boxed_str())
+}
+
+fn click_at(cx: &mut VisualTestContext, position: Point<Pixels>, click_count: usize) {
+    cx.simulate_event(MouseDownEvent {
+        button: MouseButton::Left,
+        position,
+        click_count,
+        ..Default::default()
+    });
+    cx.simulate_event(MouseUpEvent {
+        button: MouseButton::Left,
+        position,
+        click_count,
+        ..Default::default()
+    });
+    cx.run_until_parked();
+}
+
+/// Scroll to the bottom, where collapsing the last collection scrolls the
+/// rows above it under the pointer, and return that collection's row centre.
+fn last_collection(
+    sidebar: &Entity<CollectionPanel>,
+    cx: &mut VisualTestContext,
+) -> (PathBuf, &'static str, Point<Pixels>) {
+    cx.update(|window, cx| {
+        let focus = sidebar.read(cx).focus.clone();
+        focus.focus(window, cx);
+    });
+    cx.simulate_keystrokes("end");
+    cx.run_until_parked();
+
+    let (index, path) = cx.read(|cx| {
+        let tree = &sidebar.read(cx).tree;
+        let index = tree
+            .items
+            .iter()
+            .position(|item| item.label == "Status API")
+            .unwrap();
+        (index, tree.items[index].path.clone())
+    });
+    let selector = row_selector(index);
+
+    (path, selector, cx.debug_bounds(selector).unwrap().center())
+}
+
+#[gpui_kit::test]
+fn double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
+    let (sidebar, opened, cx) = clicking_sidebar(cx);
+    let (path, selector, position) = last_collection(&sidebar, cx);
+
+    click_at(cx, position, 1);
+    assert!(opened.borrow().is_empty());
+    assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
+
+    click_at(cx, position, 2);
+    assert_eq!(*opened.borrow(), [path]);
+}
+
+#[gpui_kit::test]
+fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) {
+    let (sidebar, opened, cx) = clicking_sidebar(cx);
+
+    // Across the edge between two requests.
+    let (index, paths) = cx.read(|cx| {
+        let items = &sidebar.read(cx).tree.items;
+        let index = (0..items.len() - 1)
+            .find(|&index| {
+                matches!(items[index].kind, ItemKind::Request(_))
+                    && matches!(items[index + 1].kind, ItemKind::Request(_))
+            })
+            .unwrap();
+        (
+            index,
+            vec![items[index].path.clone(), items[index + 1].path.clone()],
+        )
+    });
+    let first = cx.debug_bounds(row_selector(index)).unwrap();
+    let second = cx.debug_bounds(row_selector(index + 1)).unwrap();
+    click_at(cx, point(first.center().x, first.bottom() - px(1.)), 1);
+    click_at(cx, point(second.center().x, second.top() + px(1.)), 2);
+    assert_eq!(*opened.borrow(), paths);
+
+    // Scrolling after collapsing a collection leaves the next click on
+    // the row now under the pointer.
+    let (collection, _, position) = last_collection(&sidebar, cx);
+    click_at(cx, position, 1);
+    cx.simulate_event(ScrollWheelEvent {
+        position,
+        delta: ScrollDelta::Pixels(point(px(0.), px(32.))),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    let visible = cx.read(|cx| sidebar.read(cx).visible.clone());
+    let index = visible
+        .iter()
+        .copied()
+        .find(|&index| {
+            cx.debug_bounds(row_selector(index))
+                .is_some_and(|bounds| bounds.contains(&position))
+        })
+        .unwrap();
+    let under = cx.read(|cx| sidebar.read(cx).tree.items[index].path.clone());
+    assert_ne!(under, collection);
+
+    click_at(cx, position, 2);
+    assert_eq!(opened.borrow().last(), Some(&under));
+    assert!(!opened.borrow().contains(&collection));
 }
 
 #[gpui_kit::test]

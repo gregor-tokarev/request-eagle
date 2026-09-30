@@ -5,7 +5,7 @@ use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewTab, SaveRequest};
-use crate::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
+use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
 use request::Method;
@@ -139,11 +139,8 @@ impl MainView {
         let picker_subscription = cx.subscribe_in(
             &environment_picker,
             window,
-            |this, _, event: &EnvironmentPickerEvent, window, cx| match event {
-                EnvironmentPickerEvent::Open(name) => {
-                    this.open_environment(name.clone(), window, cx);
-                }
-                EnvironmentPickerEvent::Create => this.create_environment(window, cx),
+            |this, _, _: &CreateEnvironmentRequested, window, cx| {
+                this.create_environment(window, cx)
             },
         );
         let environments_subscription = cx.subscribe(&environments, Self::on_environments_event);
