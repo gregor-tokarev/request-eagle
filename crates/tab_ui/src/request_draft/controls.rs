@@ -8,20 +8,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::Method;
+use request_eagle_theme::method_color;
 
 use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
-
-fn method_color(method: Method, cx: &App) -> Hsla {
-    match method {
-        Method::Get => cx.theme().success,
-        Method::Post => cx.theme().warning,
-        Method::Put | Method::Patch => cx.theme().info,
-        Method::Head | Method::Options => cx.theme().muted_foreground,
-        Method::Delete => cx.theme().danger,
-    }
-}
 
 impl RequestDraft {
     pub(super) fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -126,7 +117,7 @@ impl RequestDraft {
                         div()
                             .debug_selector(|| "request-method-label".into())
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(method_color(method, cx))
+                            .text_color(method_color(method.as_str(), cx))
                             .child(method.as_str()),
                     )
                     .child(
@@ -154,7 +145,7 @@ impl RequestDraft {
                         PopupMenuItem::element(move |_, cx| {
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(method_color(option, cx))
+                                .text_color(method_color(option.as_str(), cx))
                                 .child(option.as_str())
                         })
                         .checked(option == method)

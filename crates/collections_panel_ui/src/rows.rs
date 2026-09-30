@@ -15,6 +15,7 @@ use super::{
     tree::ItemKind,
 };
 use collection::MovePlacement;
+use request_eagle_theme::method_color;
 
 impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -347,18 +348,5 @@ impl CollectionPanel {
                 )
             })
             .into_any_element()
-    }
-}
-
-/// The color that identifies an HTTP method in request rows.
-pub fn method_color(method: &str, cx: &App) -> Hsla {
-    let theme = cx.theme();
-
-    match method {
-        "GET" => theme.success,
-        "POST" => theme.warning,
-        "PUT" | "PATCH" => theme.info,
-        "HEAD" | "OPTIONS" => theme.muted_foreground,
-        _ => theme.danger,
     }
 }

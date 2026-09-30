@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use collections_panel_ui::{CollectionPanel, RequestMatch, method_color};
+use collections_panel_ui::{CollectionPanel, RequestMatch};
 use gpui_kit::component::{
     kbd::Kbd,
     list::{List, ListDelegate, ListItem, ListState},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request_eagle_theme::method_color;
 
 use super::main_view::MainView;
 use crate::actions::ToggleCommandPalette;

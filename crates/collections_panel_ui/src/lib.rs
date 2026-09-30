@@ -24,5 +24,4 @@ mod tests;
 pub use actions::init;
 pub use lookup::{CollectionMatch, RequestMatch};
 pub use panel::{CollectionPanel, CollectionPanelEvent};
-pub use rows::method_color;
 pub use saving::SaveDestination;

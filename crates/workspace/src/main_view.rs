@@ -9,6 +9,7 @@ use crate::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
 use request::Method;
+use request_eagle_theme::method_color;
 use tab_ui::{
     CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft,
     RequestLocation, SaveCollection,
@@ -803,20 +804,13 @@ impl MainView {
                 )
             })
             .when_some(tab.method, |this, method| {
-                let color = match method {
-                    Method::Get => cx.theme().success,
-                    Method::Post => cx.theme().warning,
-                    Method::Put => cx.theme().info,
-                    _ => cx.theme().danger,
-                };
-
                 this.child(
                     div()
                         .debug_selector(move || format!("tab-method-{id}"))
                         .flex_none()
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(color)
+                        .text_color(method_color(method.as_str(), cx))
                         .child(method.as_str()),
                 )
             })
