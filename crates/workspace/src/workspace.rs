@@ -40,15 +40,17 @@ pub(crate) struct Workspace {
     pub(crate) main_split: Entity<ResizableState>,
     pub(crate) sidebar_visible: Entity<bool>,
 
-    pub(crate) settings: Entity<Settings>,
+    /// Built when first opened.
+    pub(crate) settings: Option<Entity<Settings>>,
     pub(crate) settings_visible: bool,
     previous_focus: Option<FocusHandle>,
+    updater: Entity<Updater>,
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
-    _settings_subscription: Subscription,
+    _settings_subscription: Option<Subscription>,
 }
 
 impl Workspace {
@@ -62,13 +64,6 @@ impl Workspace {
         let sidebar_visible = cx.new(|_| true);
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
-
-        let settings = cx.new(|cx| Settings::new(updater, window, cx));
-        let settings_subscription = cx.subscribe_in(
-            &settings,
-            window,
-            |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
-        );
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
@@ -181,26 +176,49 @@ impl Workspace {
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
-            settings,
+            settings: None,
             settings_visible: false,
             previous_focus: None,
+            updater,
             command_palette: None,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
-            _settings_subscription: settings_subscription,
+            _settings_subscription: None,
         }
     }
 
-    pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Settings> {
         if !self.settings_visible {
             self.previous_focus = window.focused(cx);
             self.settings_visible = true;
         }
 
-        self.settings
-            .update(cx, |settings, cx| settings.focus(window, cx));
+        // The pages list every installed font and shortcut, so launching
+        // does not build them.
+        let settings = match &self.settings {
+            Some(settings) => settings.clone(),
+            None => {
+                let settings = cx.new(|cx| Settings::new(self.updater.clone(), window, cx));
+                self._settings_subscription = Some(cx.subscribe_in(
+                    &settings,
+                    window,
+                    |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
+                ));
+                self.settings = Some(settings.clone());
+
+                settings
+            }
+        };
+
+        settings.update(cx, |settings, cx| settings.focus(window, cx));
 
         cx.notify();
+
+        settings
     }
 
     pub(crate) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -365,9 +383,7 @@ fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: 
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
-                    this.open_settings(window, cx);
-
-                    this.settings.update(cx, |settings, cx| {
+                    this.open_settings(window, cx).update(cx, |settings, cx| {
                         settings.select_page(SettingsPage::General, window, cx)
                     });
                 });
@@ -420,11 +436,13 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Keep the screen entities alive, but only lay out the visible screen.
         // GPUI still requests child layouts beneath display: none containers.
-        if self.settings_visible {
+        if self.settings_visible
+            && let Some(settings) = self.settings.clone()
+        {
             return div()
                 .size_full()
                 .text_base()
-                .child(self.settings.clone())
+                .child(settings)
                 .into_any_element();
         }
 

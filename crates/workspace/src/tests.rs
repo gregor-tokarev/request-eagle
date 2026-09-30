@@ -114,7 +114,9 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 
     let (layout, cx) = workspace(CollectionRegistry::new(), no_environments(), cx);
 
-    let settings = cx.read(|cx| layout.read(cx).settings.clone());
+    // Launching does not build the settings screen.
+    assert!(cx.read(|cx| layout.read(cx).settings.is_none()));
+    let mut settings = None;
     assert!(cx.debug_bounds("settings").is_none());
     assert!(cx.debug_bounds("main-view").is_some());
     let sidebar_focus = cx.read(|cx| layout.read(cx).sidebar.focus_handle(cx));
@@ -128,10 +130,12 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 
         assert!(cx.debug_bounds("settings").is_some());
         assert!(cx.debug_bounds("main-view").is_none());
-        cx.read(|cx| {
+        let opened = cx.read(|cx| {
             assert!(layout.read(cx).settings_visible);
-            assert_eq!(layout.read(cx).settings, settings);
+            layout.read(cx).settings.clone()
         });
+        assert!(opened.is_some());
+        assert_eq!(settings.get_or_insert(opened.clone()), &opened);
 
         // Reopening an already visible screen must not replace the saved focus.
         cx.update(|window, cx| {
@@ -147,7 +151,7 @@ fn settings_survives_closing_and_reopening(cx: &mut TestAppContext) {
 
         cx.read(|cx| {
             assert!(!layout.read(cx).settings_visible);
-            assert_eq!(layout.read(cx).settings, settings);
+            assert_eq!(layout.read(cx).settings, opened);
         });
         assert!(cx.debug_bounds("settings").is_none());
         assert!(cx.debug_bounds("main-view").is_some());
