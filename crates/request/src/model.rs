@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     Http(HttpRequest),
+    Grpc(crate::GrpcRequest),
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -50,6 +51,12 @@ impl HttpRequest {
 impl From<HttpRequest> for Request {
     fn from(request: HttpRequest) -> Self {
         Self::Http(request)
+    }
+}
+
+impl From<crate::GrpcRequest> for Request {
+    fn from(request: crate::GrpcRequest) -> Self {
+        Self::Grpc(request)
     }
 }
 

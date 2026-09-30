@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use request::Request;
 use serde::{Deserialize, Serialize};
 
+// Most entries are requests, so boxing them would not make trees smaller.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Entry {
     File(FileEntry),

@@ -37,6 +37,16 @@ impl CollectionPanel {
         self.finish_creation(result, window, cx);
     }
 
+    pub(super) fn create_grpc_request(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self.collections.create_grpc_request(parent);
+        self.finish_creation(result, window, cx);
+    }
+
     pub(super) fn create_folder(
         &mut self,
         parent: &Path,

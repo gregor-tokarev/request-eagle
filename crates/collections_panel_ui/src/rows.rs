@@ -301,6 +301,8 @@ impl CollectionPanel {
                 let menu = if branch {
                     let request_view = view.clone();
                     let request_parent = path.clone();
+                    let grpc_view = view.clone();
+                    let grpc_parent = path.clone();
                     let folder_view = view.clone();
                     let folder_parent = path.clone();
 
@@ -311,6 +313,17 @@ impl CollectionPanel {
                             window.defer(cx, move |window, cx| {
                                 let _ = view.update(cx, |this, cx| {
                                     this.create_request(&parent, window, cx)
+                                });
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("New gRPC Request").on_click(move |_, window, cx| {
+                            let view = grpc_view.clone();
+                            let parent = grpc_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_grpc_request(&parent, window, cx)
                                 });
                             });
                         }),

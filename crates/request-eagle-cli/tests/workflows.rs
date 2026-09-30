@@ -505,3 +505,51 @@ fn collection_edits_still_require_the_exclusive_lock() {
     assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(listed[0]["path"], collection);
 }
+
+#[test]
+fn grpc_requests_are_saved_and_listed_with_their_protocol() {
+    let cli = Cli::new();
+    let collection = cli.collection();
+    let grpc = json!({
+        "protocol": "grpc",
+        "url": "grpcs://example.invalid",
+        "tls": true,
+        "method": "echo.v1.EchoService/Say",
+        "message": "{\"text\": \"hi\"}",
+        "metadata": [["authorization", "Bearer {{token}}"]],
+        "proto_file": "protos/echo.proto",
+        "import_paths": ["shared"],
+    });
+    let created = cli.create(&collection, grpc.clone());
+    let path = created["path"].as_str().unwrap();
+    assert_eq!(created["request"], grpc);
+
+    let source = fs::read_to_string(path).unwrap();
+    assert!(source.contains("type = \"grpc\""), "{source}");
+    assert!(source.contains("source = \"proto_file\""), "{source}");
+
+    let listed = cli.call(json!({"command":"requests.list","query":"EchoService"}));
+    assert_eq!(listed[0]["protocol"], "grpc");
+    assert_eq!(listed[0]["url"], "grpcs://example.invalid");
+
+    // Changing protocol leaves no gRPC fields behind, and back again.
+    let http = json!({"method":"GET","url":"https://example.invalid","headers":[],"query":[],"body":null,"pre_request":"","post_response":""});
+    let updated = cli.call(
+        json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":http}),
+    );
+    assert_eq!(updated["request"], http);
+    let source = fs::read_to_string(path).unwrap();
+    assert!(
+        !source.contains("proto_file") && !source.contains("metadata"),
+        "{source}"
+    );
+
+    let reflection = json!({"protocol":"grpc","url":"localhost:50051","tls":false,"method":"","message":"","metadata":[]});
+    let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":reflection}));
+    assert_eq!(updated["request"], reflection);
+    let source = fs::read_to_string(path).unwrap();
+    assert!(
+        !source.contains("GET") && !source.contains("definition"),
+        "{source}"
+    );
+}

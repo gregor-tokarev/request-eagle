@@ -220,10 +220,17 @@ fn add_entries(
     items[parent].end = items.len();
 }
 
-/// A request row's method and the text the sidebar filter matches.
+/// A request row's method, or gRPC, and the text the sidebar filter matches.
 fn request_row(file: &FileEntry) -> (&'static str, String) {
-    let Request::Http(request) = &file.request;
-    let method = request.method.as_str();
+    match &file.request {
+        Request::Http(request) => {
+            let method = request.method.as_str();
 
-    (method, format!("{method} {} {}", file.name, request.path))
+            (method, format!("{method} {} {}", file.name, request.path))
+        }
+        Request::Grpc(request) => (
+            "gRPC",
+            format!("gRPC {} {} {}", file.name, request.url, request.method),
+        ),
+    }
 }

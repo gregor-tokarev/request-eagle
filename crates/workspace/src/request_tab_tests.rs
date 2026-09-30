@@ -62,7 +62,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].title, "Create item");
-        assert_eq!(tabs.tabs[1].method, Some(request::Method::Post));
+        assert_eq!(tabs.tabs[1].method, Some("POST"));
         assert_eq!(
             tabs.tabs[1]
                 .location(cx)
@@ -145,7 +145,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].draft(), draft);
-        assert_eq!(tabs.tabs[1].method, Some(request::Method::Put));
+        assert_eq!(tabs.tabs[1].method, Some("PUT"));
         assert_eq!(draft.read(cx).request.headers[0].1, "updated");
     });
     assert!(
@@ -177,7 +177,9 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert!(!reopened.read(cx).is_dirty());
     });
     let persisted = collection::FileEntry::from_path(&file).unwrap();
-    let request::Request::Http(persisted) = persisted.request;
+    let request::Request::Http(persisted) = persisted.request else {
+        panic!("expected an HTTP request");
+    };
     cx.read(|cx| assert_eq!(persisted, draft.read(cx).request));
     assert_ne!(fs::read_to_string(&file).unwrap(), original);
 }
@@ -306,7 +308,10 @@ fn save_and_close_persists_body_and_does_not_close_after_a_failed_save(cx: &mut 
     });
     let request::Request::Http(saved) = collection::FileEntry::from_path(&fixture.file)
         .unwrap()
-        .request;
+        .request
+    else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(
         saved.body.as_deref(),
         Some(b"{\"persisted\":true}".as_slice())
@@ -405,7 +410,10 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     });
     cx.simulate_keystrokes("secondary-s");
     assert!(cx.debug_bounds("request-save-error").is_none());
-    let request::Request::Http(saved) = collection::FileEntry::from_path(&renamed).unwrap().request;
+    let request::Request::Http(saved) = collection::FileEntry::from_path(&renamed).unwrap().request
+    else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(saved.path, "https://example.com/edited-before-rename");
 
     // Drag the open request to another collection.
@@ -503,7 +511,9 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
     assert!(cx.debug_bounds("request-save-error").is_some());
     let after = collection::FileEntry::from_path(&fixture.file).unwrap();
     assert_eq!(after.id, before.id);
-    let request::Request::Http(after_request) = after.request;
+    let request::Request::Http(after_request) = after.request else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(after_request.path, "/", "old tab overwrote a new request");
     cx.read(|cx| assert!(draft.read(cx).is_dirty()));
 
@@ -524,7 +534,10 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
     cx.simulate_keystrokes("secondary-s");
     let request::Request::Http(saved) = collection::FileEntry::from_path(&fixture.file)
         .unwrap()
-        .request;
+        .request
+    else {
+        panic!("expected an HTTP request");
+    };
     assert_eq!(saved.path, "https://example.com/new-draft");
     cx.read(|cx| assert_eq!(draft.read(cx).request.path, "https://example.com/old-draft"));
 }

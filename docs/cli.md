@@ -57,5 +57,10 @@ script results.
 - Saved scripts run only with `trust_scripts: true`. Read them first, including
   the collection's scripts from `collections.get`, which run before the request's.
 - Response bodies and raw header values are Base64.
+- Saved gRPC requests have `"protocol": "grpc"`, a `url`, a `method` such as
+  `package.Service/Method` and a JSON `message`. Without `proto_file` their
+  services come from server reflection. `requests.run` sends the message once,
+  also on client streams, and returns every message with the final status;
+  non-OK gRPC statuses exit 0 like HTTP errors.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

@@ -20,7 +20,9 @@ fn saving_body_keeps_tree_and_browsing_state(cx: &mut TestAppContext) {
         let tree = panel.tree.clone();
         let visible = panel.visible.clone();
         let mut request = panel.collections.file(&path).unwrap().request.clone();
-        let Request::Http(http) = &mut request;
+        let Request::Http(http) = &mut request else {
+            panic!("expected an HTTP request");
+        };
         http.body = Some(b"updated body".to_vec());
 
         panel
@@ -31,9 +33,13 @@ fn saving_body_keeps_tree_and_browsing_state(cx: &mut TestAppContext) {
         assert!(Arc::ptr_eq(&visible, &panel.visible));
         assert!(panel.collapsed.contains(&1));
         assert_eq!(panel.selected, Some(1));
-        let Request::Http(cached) = &panel.collections.file(&path).unwrap().request;
+        let Request::Http(cached) = &panel.collections.file(&path).unwrap().request else {
+            panic!("expected an HTTP request");
+        };
         assert_eq!(cached.body.as_deref(), Some(b"updated body".as_slice()));
-        let Request::Http(saved) = collection::FileEntry::from_path(&path).unwrap().request;
+        let Request::Http(saved) = collection::FileEntry::from_path(&path).unwrap().request else {
+            panic!("expected an HTTP request");
+        };
         assert_eq!(saved.body.as_deref(), Some(b"updated body".as_slice()));
     });
 }
@@ -53,7 +59,9 @@ fn saving_updates_method_name_and_search_without_rebuilding_browsing_rows(cx: &m
         panel.selected = Some(2);
         panel.collapsed.insert(1);
         let mut request = panel.collections.file(&path).unwrap().request.clone();
-        let Request::Http(http) = &mut request;
+        let Request::Http(http) = &mut request else {
+            panic!("expected an HTTP request");
+        };
         http.method = Method::Post;
         http.path = "/accounts".into();
         let contents = fs::read_to_string(&path)

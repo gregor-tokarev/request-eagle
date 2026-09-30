@@ -12,6 +12,7 @@ actions!(
         OpenGeneralSettings,
         SaveRequest,
         NewTab,
+        NewGrpcTab,
         CloseTab,
         PreviousTab,
         NextTab,
@@ -78,6 +79,16 @@ pub(crate) fn init(cx: &mut App) {
         "secondary-t",
         cx,
     );
+    keybindings_service::register(
+        NewGrpcTab,
+        "New gRPC request",
+        "Open an empty gRPC request.",
+        "Tabs",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("new gRPC request command should be valid");
     register_tab_action(
         CloseTab,
         "Close tab",

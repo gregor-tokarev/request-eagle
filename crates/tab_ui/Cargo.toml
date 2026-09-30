@@ -10,7 +10,9 @@ test-support = []
 environment = { path = "../environment" }
 aho-corasick = "1"
 anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
+futures = "0.3"
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html", "tree-sitter-javascript"] }
 lsp-types = "0.97"
 preferences = { path = "../preferences" }

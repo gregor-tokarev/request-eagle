@@ -1,17 +1,20 @@
 use std::{collections::HashMap, path::Path};
 
 use gpui_kit::base::{Tab, Tabs};
-use gpui_kit::component::{button::*, *};
+use gpui_kit::component::{
+    button::*,
+    menu::{DropdownMenu, PopupMenuItem},
+    *,
+};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{CloseTab, NewTab, SaveRequest};
+use crate::actions::{CloseTab, NewGrpcTab, NewTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
-use request::Method;
 use request_eagle_theme::method_color;
 use tab_ui::{
-    CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft,
+    CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft, RequestDraft,
     RequestLocation, SaveCollection,
 };
 
@@ -24,6 +27,7 @@ const TAB_HEIGHT: Rems = rems(2.);
 #[derive(Clone)]
 pub(crate) enum Page {
     Request(Entity<RequestDraft>),
+    Grpc(Entity<GrpcDraft>),
     Collection(Entity<CollectionPage>),
     Environment(Entity<EnvironmentEditor>),
 }
@@ -32,22 +36,33 @@ impl Page {
     fn is_dirty(&self, cx: &App) -> bool {
         match self {
             Page::Request(draft) => draft.read(cx).is_dirty(),
+            Page::Grpc(draft) => draft.read(cx).is_dirty(),
             Page::Collection(page) => page.read(cx).is_dirty(),
             Page::Environment(editor) => editor.read(cx).is_dirty(),
         }
     }
 
-    /// The method shown before a request tab's title.
-    fn method(&self, cx: &App) -> Option<Method> {
+    /// The HTTP method, or gRPC, shown before a request tab's title.
+    fn method(&self, cx: &App) -> Option<&'static str> {
         match self {
-            Page::Request(draft) => Some(draft.read(cx).request.method),
+            Page::Request(draft) => Some(draft.read(cx).request.method.as_str()),
+            Page::Grpc(_) => Some("gRPC"),
+            Page::Collection(_) | Page::Environment(_) => None,
+        }
+    }
+
+    /// The saved request a request tab shows.
+    fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
+        match self {
+            Page::Request(draft) => draft.read(cx).location.as_ref(),
+            Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::Collection(_) | Page::Environment(_) => None,
         }
     }
 
     fn icon(&self) -> Option<&'static str> {
         match self {
-            Page::Request(_) => None,
+            Page::Request(_) | Page::Grpc(_) => None,
             Page::Collection(_) => Some("icons/package.svg"),
             Page::Environment(_) => Some("icons/globe.svg"),
         }
@@ -71,6 +86,7 @@ impl Page {
 
         match self {
             Page::Request(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
+            Page::Grpc(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
             Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
         }
@@ -79,6 +95,7 @@ impl Page {
     fn prepare(&self, window: &mut Window, cx: &mut App) {
         match self {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
+            Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
             Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
         }
@@ -89,6 +106,7 @@ impl Page {
             // Only the request editor's expensive children are cached; selecting
             // a response must not invalidate a cache around the entire page.
             Page::Request(draft) => draft.clone().into_any_element(),
+            Page::Grpc(draft) => draft.clone().into_any_element(),
             Page::Collection(page) => page
                 .clone()
                 .cached(StyleRefinement::default().size_full())
@@ -104,7 +122,7 @@ impl Page {
 pub(crate) struct PageTab {
     pub(crate) id: u64,
     pub(crate) title: SharedString,
-    pub(crate) method: Option<Method>,
+    pub(crate) method: Option<&'static str>,
     dirty: bool,
     pub(crate) page: Page,
     _subscriptions: Vec<Subscription>,
@@ -204,8 +222,14 @@ impl MainView {
             return;
         }
 
-        let request::Request::Http(request) = request;
-        self.open_draft(location.name.clone(), request.clone(), Some(location), cx);
+        match request {
+            request::Request::Http(request) => {
+                self.open_draft(location.name.clone(), request.clone(), Some(location), cx)
+            }
+            request::Request::Grpc(request) => {
+                self.open_grpc_draft(location.name.clone(), request.clone(), Some(location), cx)
+            }
+        }
     }
 
     /// Follow a request renamed or moved in the sidebar.
@@ -222,13 +246,10 @@ impl MainView {
     }
 
     fn request_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
-        self.tabs.iter().position(|tab| match &tab.page {
-            Page::Request(draft) => draft
-                .read(cx)
-                .location
-                .as_ref()
-                .is_some_and(|location| location.path == path && location.id == id),
-            _ => false,
+        self.tabs.iter().position(|tab| {
+            tab.page
+                .location(cx)
+                .is_some_and(|location| location.path == path && location.id == id)
         })
     }
 
@@ -241,8 +262,10 @@ impl MainView {
         let tab = &mut self.tabs[index];
         tab.title = location.name.clone();
 
-        if let Page::Request(draft) = &tab.page {
-            draft.update(cx, |draft, cx| draft.set_location(location, cx));
+        match &tab.page {
+            Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
+            Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
+            Page::Collection(_) | Page::Environment(_) => {}
         }
     }
 
@@ -332,6 +355,26 @@ impl MainView {
             cx.new(|cx| RequestDraft::new(request, location, sessions, Some(environments), cx));
 
         self.open_tab(title, Page::Request(draft), cx);
+    }
+
+    pub(crate) fn new_grpc_tab(&mut self, cx: &mut Context<Self>) {
+        let title = format!("Untitled {}", self.next_id);
+        self.open_grpc_draft(title.into(), Default::default(), None, cx);
+    }
+
+    fn open_grpc_draft(
+        &mut self,
+        title: SharedString,
+        request: request::GrpcRequest,
+        location: Option<RequestLocation>,
+        cx: &mut Context<Self>,
+    ) {
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let draft =
+            cx.new(|cx| GrpcDraft::new(request, location, sessions, Some(environments), cx));
+
+        self.open_tab(title, Page::Grpc(draft), cx);
     }
 
     fn environment_tab(&self, name: &str, cx: &App) -> Option<(usize, Entity<EnvironmentEditor>)> {
@@ -543,29 +586,58 @@ impl MainView {
             }
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
-                let Some(location) = draft.read(cx).location.clone() else {
-                    save_request::open(cx.entity(), self.sidebar.clone(), id, request, window, cx);
-                    cx.notify();
-                    return;
-                };
+                let location = draft.read(cx).location.clone();
 
-                let result = self.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.save_request(&location.path, &location.id, request.clone().into(), cx)
-                });
+                if self.save_request(id, location, request.clone().into(), window, cx) {
+                    draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
+                    self.close_saved_tab(index, window, cx);
+                }
+            }
+            Page::Grpc(draft) => {
+                let request = draft.read(cx).request.clone();
+                let location = draft.read(cx).location.clone();
 
-                match result {
-                    Ok(()) => {
-                        draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
-                        self.close_saved_tab(index, window, cx);
-                    }
-                    Err(error) => {
-                        self.save_error = Some(format!("Could not save request: {error}"))
-                    }
+                if self.save_request(id, location, request.clone().into(), window, cx) {
+                    draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
+                    self.close_saved_tab(index, window, cx);
                 }
             }
         }
 
         cx.notify();
+    }
+
+    /// Save a request tab to its file. An unsaved draft opens the save dialog
+    /// instead, and false is returned until the dialog saves it.
+    fn save_request(
+        &mut self,
+        tab_id: u64,
+        location: Option<RequestLocation>,
+        request: request::Request,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(location) = location else {
+            save_request::open(
+                cx.entity(),
+                self.sidebar.clone(),
+                tab_id,
+                request,
+                window,
+                cx,
+            );
+            return false;
+        };
+
+        let result = self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.save_request(&location.path, &location.id, request, cx)
+        });
+
+        if let Err(error) = &result {
+            self.save_error = Some(format!("Could not save request: {error}"));
+        }
+
+        result.is_ok()
     }
 
     /// Attach a new request draft to the file it was saved as.
@@ -589,9 +661,14 @@ impl MainView {
         };
         self.set_request_location(index, location, cx);
 
-        if let Page::Request(draft) = &self.tabs[index].page {
-            let request::Request::Http(request) = &file.request;
-            draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
+        match (&self.tabs[index].page, &file.request) {
+            (Page::Request(draft), request::Request::Http(request)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx))
+            }
+            (Page::Grpc(draft), request::Request::Grpc(request)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx))
+            }
+            _ => {}
         }
 
         self.save_error = None;
@@ -674,11 +751,49 @@ impl MainView {
     }
 
     pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(index) = self.selected
-            && let Page::Request(draft) = &self.tabs[index].page
-        {
-            draft.update(cx, |draft, cx| draft.send(window, cx));
+        match self.selected.map(|index| &self.tabs[index].page) {
+            Some(Page::Request(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
+            Some(Page::Grpc(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
+            _ => {}
         }
+    }
+
+    /// Choose the protocol of a new request tab.
+    fn new_tab_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let view = cx.entity().downgrade();
+
+        Button::new("new-tab-menu")
+            .debug_selector(|| "new-tab-menu".into())
+            .ghost()
+            .small()
+            .flex_none()
+            .icon(Icon::new(IconName::ChevronDown).size_3())
+            .accessibility_label("New request")
+            .dropdown_menu(move |menu, _, _| {
+                let http = view.clone();
+                let grpc = view.clone();
+
+                menu.item(
+                    PopupMenuItem::new("HTTP Request")
+                        .action(Box::new(NewTab))
+                        .on_click(move |_, window, cx| {
+                            let _ = http.update(cx, |view, cx| {
+                                view.new_tab(cx);
+                                view.focus(window, cx);
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("gRPC Request")
+                        .action(Box::new(NewGrpcTab))
+                        .on_click(move |_, window, cx| {
+                            let _ = grpc.update(cx, |view, cx| {
+                                view.new_grpc_tab(cx);
+                                view.focus(window, cx);
+                            });
+                        }),
+                )
+            })
     }
 
     fn tab_strip(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -807,8 +922,8 @@ impl MainView {
                         .flex_none()
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(method_color(method.as_str(), cx))
-                        .child(method.as_str()),
+                        .text_color(method_color(method, cx))
+                        .child(method),
                 )
             })
             .child(
@@ -904,6 +1019,7 @@ impl Render for MainView {
                                 this.focus(window, cx);
                             })),
                     )
+                    .child(self.new_tab_menu(cx))
                     .child(div().flex_1())
                     .child(self.environment_picker.clone()),
             )

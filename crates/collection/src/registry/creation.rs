@@ -15,7 +15,7 @@ use crate::{
     Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
     FileEntry,
 };
-use request::{HttpRequest, Method, Request};
+use request::{GrpcRequest, HttpRequest, Method, Request};
 
 impl CollectionRegistry {
     pub fn create_collection(&mut self) -> Result<PathBuf, CollectionEditError> {
@@ -66,6 +66,14 @@ impl CollectionRegistry {
                 query: Vec::new(),
                 scripts: Default::default(),
             }),
+        )
+    }
+
+    pub fn create_grpc_request(&mut self, parent: &Path) -> Result<PathBuf, CollectionEditError> {
+        self.create_request_with(
+            parent,
+            "New gRPC Request",
+            Request::Grpc(GrpcRequest::default()),
         )
     }
 

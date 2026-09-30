@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use environment::{EnvironmentSession, VariableError, VariableResolver};
 
-use crate::{HttpRequest, RequestScripts};
+use crate::{GrpcRequest, HttpRequest, RequestScripts};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -48,6 +48,30 @@ impl RequestVariables {
         variables.session = Some(session);
 
         variables
+    }
+
+    /// Resolve a gRPC request's URL and metadata. Messages resolve with
+    /// `resolve_text` when they are sent.
+    pub(crate) fn resolve_grpc(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
+        let mut request = request.clone();
+        request.url = self.resolve_text(&request.url)?;
+
+        for (key, value) in &mut request.metadata {
+            *key = self.resolve_text(key)?;
+            *value = self.resolve_text(value)?;
+        }
+
+        Ok(request)
+    }
+
+    pub(crate) fn resolve_text(&self, text: &str) -> Result<String, String> {
+        VariableResolver::new(&self.values)
+            .resolve(text)
+            .map_err(|error| self.variable_error(error))
+    }
+
+    fn variable_error(&self, error: VariableError) -> String {
+        variable_error(error, self.environment_error.as_deref())
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
@@ -96,15 +120,20 @@ pub(crate) fn resolve_request(
             generated.insert(name.clone(), value.clone());
         }
     }
-    resolved.map_err(|error| {
-        if let VariableError::Unknown(name) = &error
-            && !name.starts_with('$')
-            && let Some(message) = environment_error
-        {
-            return message.to_owned();
-        }
-        error.to_string()
-    })
+    resolved.map_err(|error| variable_error(error, environment_error))
+}
+
+/// A missing variable is reported as the environment read failure that
+/// caused it, when there is one.
+fn variable_error(error: VariableError, environment_error: Option<&str>) -> String {
+    if let VariableError::Unknown(name) = &error
+        && !name.starts_with('$')
+        && let Some(message) = environment_error
+    {
+        return message.to_owned();
+    }
+
+    error.to_string()
 }
 
 impl HttpRequest {
