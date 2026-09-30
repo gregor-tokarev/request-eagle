@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use environment::EnvironmentSessions;
-use futures::StreamExt as _;
+use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -22,6 +24,10 @@ use crate::variables::VariableScope;
 /// The most events shown per update. A fast stream is drawn in batches
 /// instead of once for every message.
 const EVENT_BATCH: usize = 512;
+
+/// The pause after each batch, which lets the window draw and handle input
+/// while a stream keeps the queue full.
+const BATCH_PAUSE: Duration = Duration::from_millis(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConnectionState {
@@ -96,7 +102,7 @@ impl WebSocketDraft {
 
         Self {
             location,
-            handshake_headers: request::websocket_handshake_headers(&request.headers),
+            handshake_headers: request::websocket_handshake_headers(&request.url, &request.headers),
             saved_request: request.clone(),
             request,
             section: WebSocketSection::Message,
@@ -195,7 +201,7 @@ impl WebSocketDraft {
             while let Some(event) = events.next().await {
                 let mut batch = vec![event];
                 while batch.len() < EVENT_BATCH
-                    && let Ok(event) = events.try_recv()
+                    && let Some(Some(event)) = events.next().now_or_never()
                 {
                     batch.push(event);
                 }
@@ -203,6 +209,8 @@ impl WebSocketDraft {
                 if this.update(cx, |this, cx| this.receive(batch, cx)).is_err() {
                     return;
                 }
+
+                cx.background_executor().timer(BATCH_PAUSE).await;
             }
         }));
     }
@@ -216,7 +224,7 @@ impl WebSocketDraft {
                 self.set_state(ConnectionState::Disconnected, cx);
             }
             ConnectionState::Connected => {
-                if let Some(connection) = &self.connection {
+                if let Some(connection) = &mut self.connection {
                     connection.close();
                 }
                 self.set_state(ConnectionState::Closing, cx);
@@ -266,7 +274,27 @@ impl WebSocketDraft {
     fn set_state(&mut self, state: ConnectionState, cx: &mut Context<Self>) {
         self.state = state;
         self.log.update(cx, |log, cx| log.set_state(state, cx));
+        self.notify_controls(cx);
+    }
+
+    /// Redraw the cached URL bar and sections. Notifying the draft alone
+    /// redraws only its uncached content, which is enough while handling
+    /// their own input, but not for changes that arrive later.
+    fn notify_controls(&self, cx: &mut Context<Self>) {
+        self.address.update(cx, |_, cx| cx.notify());
+        self.configuration.update(cx, |_, cx| cx.notify());
         cx.notify();
+    }
+
+    fn refresh_handshake_headers(&mut self, cx: &mut Context<Self>) {
+        self.handshake_headers =
+            request::websocket_handshake_headers(&self.request.url, &self.request.headers);
+
+        if let Some(headers) = &self.headers {
+            headers.update(cx, |headers, cx| {
+                headers.set_generated_headers(&self.handshake_headers, cx)
+            });
+        }
     }
 
     pub(crate) fn url_state(
@@ -291,6 +319,7 @@ impl WebSocketDraft {
                     |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.url = input.read(cx).value().to_string();
+                            this.refresh_handshake_headers(cx);
                             cx.notify();
                         }
                     },
@@ -325,21 +354,16 @@ impl WebSocketDraft {
                 ("params", self.request.query.as_slice(), &[][..])
             };
             let fields = cx.new(|cx| RequestFields::new(id, values, generated, scope, window, cx));
-            let subscription =
-                cx.subscribe(&fields, move |this, fields, event: &FieldsChanged, cx| {
-                    if is_headers {
-                        this.request.headers = event.0.clone();
-                        this.handshake_headers =
-                            request::websocket_handshake_headers(&this.request.headers);
-                        fields.update(cx, |fields, cx| {
-                            fields.set_generated_headers(&this.handshake_headers, cx)
-                        });
-                    } else {
-                        this.request.query = event.0.clone();
-                    }
+            let subscription = cx.subscribe(&fields, move |this, _, event: &FieldsChanged, cx| {
+                if is_headers {
+                    this.request.headers = event.0.clone();
+                    this.refresh_handshake_headers(cx);
+                } else {
+                    this.request.query = event.0.clone();
+                }
 
-                    cx.notify();
-                });
+                cx.notify();
+            });
             self._subscriptions.push(subscription);
             *slot = Some(fields);
         }
@@ -398,7 +422,7 @@ impl WebSocketDraft {
             let _ = this.update(cx, |this, cx| {
                 this.message_json_valid = valid;
                 this.message_task = None;
-                cx.notify();
+                this.notify_controls(cx);
             });
         }));
     }
@@ -427,7 +451,7 @@ impl WebSocketDraft {
                     message.update(cx, |message, cx| message.replace_all(text, window, cx));
                 }
 
-                cx.notify();
+                this.notify_controls(cx);
             });
         }));
         cx.notify();

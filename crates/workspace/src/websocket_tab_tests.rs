@@ -60,9 +60,8 @@ fn saved_websocket_opens_from_the_sidebar_and_saves_its_edits(cx: &mut TestAppCo
 
     cx.simulate_keystrokes("secondary-s");
     cx.read(|cx| assert!(!draft.read(cx).is_dirty()));
-    let request::Request::WebSocket(saved) = collection::FileEntry::from_path(&file)
-        .unwrap()
-        .request
+    let request::Request::WebSocket(saved) =
+        collection::FileEntry::from_path(&file).unwrap().request
     else {
         panic!("expected a WebSocket request");
     };
@@ -100,7 +99,8 @@ fn a_new_websocket_tab_is_saved_through_the_dialog(cx: &mut TestAppContext) {
     dialog_click(cx, "save-destination-0");
     dialog_click(cx, "confirm-save-request");
 
-    let file = collection::FileEntry::from_path(directory.path().join("Streams/Feed.toml")).unwrap();
+    let file =
+        collection::FileEntry::from_path(directory.path().join("Streams/Feed.toml")).unwrap();
     let request::Request::WebSocket(saved) = file.request else {
         panic!("expected a WebSocket request");
     };
@@ -116,6 +116,8 @@ fn a_new_websocket_tab_is_saved_through_the_dialog(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_send_shortcut_connects_a_websocket(cx: &mut TestAppContext) {
+    // The connection's thread wakes the tab when the test ends.
+    cx.executor().allow_parking();
     // The handshake is never answered, so the tab stays connecting.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 

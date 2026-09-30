@@ -5,10 +5,10 @@ use std::{
     time::Duration,
 };
 
-use futures::{SinkExt as _, StreamExt as _, channel::mpsc};
+use futures::{SinkExt as _, StreamExt as _};
 use request::{
     ExecutionError, ProxyMode, RequestPreferences, RequestVariables, StatusCode, WebSocketClose,
-    WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketMessage, WebSocketRequest,
+    WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage, WebSocketRequest,
 };
 use tokio_tungstenite::{
     WebSocketStream,
@@ -97,7 +97,7 @@ fn variables(values: &[(&str, &str)]) -> RequestVariables {
     )
 }
 
-fn open(url: String) -> (WebSocketConnection, mpsc::Receiver<WebSocketEvent>) {
+fn open(url: String) -> (WebSocketConnection, WebSocketEvents) {
     open_with(
         WebSocketRequest {
             url,
@@ -110,11 +110,11 @@ fn open(url: String) -> (WebSocketConnection, mpsc::Receiver<WebSocketEvent>) {
 fn open_with(
     request: WebSocketRequest,
     preferences: &RequestPreferences,
-) -> (WebSocketConnection, mpsc::Receiver<WebSocketEvent>) {
+) -> (WebSocketConnection, WebSocketEvents) {
     WebSocketConnection::open(request, variables(&[]), preferences)
 }
 
-async fn next(events: &mut mpsc::Receiver<WebSocketEvent>) -> WebSocketEventKind {
+async fn next(events: &mut WebSocketEvents) -> WebSocketEventKind {
     smol::future::or(
         async { events.next().await.expect("another event").kind },
         async {
@@ -125,7 +125,7 @@ async fn next(events: &mut mpsc::Receiver<WebSocketEvent>) -> WebSocketEventKind
     .await
 }
 
-async fn connected(events: &mut mpsc::Receiver<WebSocketEvent>) {
+async fn connected(events: &mut WebSocketEvents) {
     match next(events).await {
         WebSocketEventKind::Connected(handshake) => assert_eq!(handshake.status, 101),
         event => panic!("expected a connection, got {event:?}"),
@@ -276,7 +276,7 @@ fn a_fast_stream_arrives_complete_and_in_order() {
 #[test]
 fn closing_from_the_client_waits_for_the_server() {
     let url = serve(|mut socket, _| async move { while let Some(Ok(_)) = socket.next().await {} });
-    let (connection, mut events) = open(url);
+    let (mut connection, mut events) = open(url);
 
     smol::block_on(async {
         connected(&mut events).await;
@@ -465,4 +465,91 @@ fn dropping_a_connection_stops_its_handshake() {
         assert!(events.next().await.is_none());
     });
     drop(listener);
+}
+
+#[test]
+fn closing_abandons_a_send_the_peer_never_reads() {
+    // The server completes the handshake and then stops reading.
+    let url = serve(|socket, _| async move {
+        std::future::pending::<()>().await;
+        drop(socket);
+    });
+    let (mut connection, mut events) = open(url);
+
+    smol::block_on(async {
+        connected(&mut events).await;
+        // Larger than the socket buffers, so the send cannot finish.
+        connection.send("x".repeat(64 * 1024 * 1024), variables(&[]));
+        smol::Timer::after(Duration::from_millis(200)).await;
+
+        let started = std::time::Instant::now();
+        connection.close();
+        assert!(matches!(
+            next(&mut events).await,
+            WebSocketEventKind::Closed(WebSocketClose {
+                code: None,
+                by_client: true,
+                ..
+            })
+        ));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    });
+}
+
+#[test]
+fn the_handshake_reports_every_header_it_sent() {
+    let url = serve(|mut socket, _| async move { while let Some(Ok(_)) = socket.next().await {} });
+    let url = url.replacen("ws://", "ws://user:secret@", 1);
+    let (_connection, mut events) = open(url.clone());
+
+    smol::block_on(async {
+        let WebSocketEventKind::Connected(handshake) = next(&mut events).await else {
+            panic!("expected a connection");
+        };
+        let names: Vec<_> = handshake
+            .request_headers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Host",
+                "Authorization",
+                "Accept",
+                "Connection",
+                "Upgrade",
+                "Sec-WebSocket-Version",
+                "Sec-WebSocket-Key"
+            ]
+        );
+        assert!(
+            handshake
+                .request_headers
+                .contains(&("Authorization".into(), "Basic dXNlcjpzZWNyZXQ=".into()))
+        );
+        // Credentials travel in the header, not in the URL shown in the log.
+        assert!(!handshake.url.contains("secret"), "{}", handshake.url);
+    });
+}
+
+#[test]
+fn the_editor_previews_handshake_headers() {
+    let preview = request::websocket_handshake_headers(
+        "example.com/socket",
+        &[("Upgrade".into(), "websocket".into())],
+    );
+    assert_eq!(
+        preview,
+        [
+            ("Host".into(), "example.com".into()),
+            ("Accept".into(), "*/*".into()),
+            ("Connection".into(), "Upgrade".into()),
+            ("Sec-WebSocket-Version".into(), "13".into()),
+            ("Sec-WebSocket-Key".into(), "Generated on connect".into()),
+        ]
+    );
+
+    let templated = request::websocket_handshake_headers("wss://{{host}}/socket", &[]);
+    assert_eq!(templated[0], ("Host".into(), "Resolved on connect".into()));
 }

@@ -1,12 +1,18 @@
 use std::{
-    pin::pin,
+    pin::{Pin, pin},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    task::{Context, Poll, ready},
     time::{Duration, Instant, SystemTime},
 };
 
 use futures::{
-    SinkExt as _, StreamExt as _,
-    channel::mpsc,
+    SinkExt as _, Stream, StreamExt as _,
+    channel::{mpsc, oneshot},
     future::{self, Either},
+    task::AtomicWaker,
 };
 use http_client::http::{HeaderMap, StatusCode};
 use tokio_tungstenite::{
@@ -18,38 +24,72 @@ use tokio_tungstenite::{
     },
 };
 
-use crate::{ExecutionError, RequestPreferences, RequestVariables, WebSocketRequest};
+use crate::{ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest};
 
-/// Received messages wait here until the tab reads them. When it is full the
-/// connection stops reading, so a fast server is slowed down by TCP flow
-/// control instead of filling memory.
+/// Events wait in a queue until the tab reads them. When it holds this many
+/// events, or this many bytes of received messages, the connection stops
+/// reading, so a fast server is slowed down by TCP flow control instead of
+/// filling memory. A single message may exceed the byte budget.
 const EVENT_QUEUE: usize = 256;
+const QUEUED_BYTES: usize = 16 * 1024 * 1024;
 
-/// How long a closing connection waits for the server to acknowledge.
+/// How long closing waits to send the close frame, and then for the server
+/// to acknowledge it.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 const KEY_HEADER: &str = "Sec-WebSocket-Key";
 
 /// Upgrade headers the handshake adds unless the request sets them.
-const HANDSHAKE_HEADERS: [(&str, &str); 4] = [
+const UPGRADE_HEADERS: [(&str, &str); 4] = [
     ("Connection", "Upgrade"),
     ("Upgrade", "websocket"),
     ("Sec-WebSocket-Version", "13"),
     (KEY_HEADER, "Generated on connect"),
 ];
 
-/// The handshake headers a request adds to its own, for the header editor's
-/// preview. The key is a placeholder until the connection generates one.
-pub fn websocket_handshake_headers(headers: &[(String, String)]) -> Vec<(String, String)> {
-    HANDSHAKE_HEADERS
-        .iter()
-        .filter(|(name, _)| {
-            !headers
-                .iter()
-                .any(|(key, _)| key.eq_ignore_ascii_case(name))
-        })
-        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-        .collect()
+/// The headers a handshake adds to the request's own, which take precedence.
+/// Before connecting, the key and any values from `{{variables}}` are placeholders.
+pub fn websocket_handshake_headers(
+    url: &str,
+    headers: &[(String, String)],
+) -> Vec<(String, String)> {
+    let url = websocket_url(url);
+    let templated = url.contains("{{");
+    let has = |name: &str| {
+        headers
+            .iter()
+            .any(|(key, _)| key.eq_ignore_ascii_case(name))
+    };
+
+    // The HTTP client sends Host and Accept. Credentials in the URL become
+    // Basic authorization, as for HTTP requests.
+    let mut generated: Vec<(String, String)> =
+        crate::generated_headers(Method::Get, &http_url(&url), headers, 0)
+            .into_iter()
+            .filter(|(name, _)| matches!(name.as_str(), "Host" | "Authorization" | "Accept"))
+            .map(|(name, value)| {
+                let value = if templated && name != "Accept" {
+                    "Resolved on connect".to_owned()
+                } else {
+                    value
+                };
+
+                (name, value)
+            })
+            .collect();
+
+    if templated && !has("host") && !generated.iter().any(|(name, _)| name == "Host") {
+        generated.insert(0, ("Host".into(), "Resolved on connect".into()));
+    }
+
+    generated.extend(
+        UPGRADE_HEADERS
+            .iter()
+            .filter(|(name, _)| !has(name))
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+    );
+
+    generated
 }
 
 #[derive(Debug)]
@@ -74,8 +114,9 @@ pub enum WebSocketEventKind {
 
 #[derive(Clone, Debug)]
 pub struct WebSocketHandshake {
-    /// The resolved URL, including query parameters.
+    /// The resolved URL, including query parameters but not credentials.
     pub url: String,
+    /// Every header the handshake sent.
     pub request_headers: Vec<(String, String)>,
     pub status: StatusCode,
     pub response_headers: HeaderMap,
@@ -97,187 +138,280 @@ pub struct WebSocketClose {
     pub by_client: bool,
 }
 
-enum Command {
-    Send(String, RequestVariables),
-    Close,
-}
-
 /// An open or opening connection. Dropping it closes the connection.
 pub struct WebSocketConnection {
-    commands: mpsc::UnboundedSender<Command>,
+    messages: mpsc::UnboundedSender<(String, RequestVariables)>,
+    /// Dropping the sender starts closing.
+    close: Option<oneshot::Sender<()>>,
+}
+
+/// A connection's events, in the order they happened. The stream ends after
+/// `Closed` or `Failed`.
+pub struct WebSocketEvents {
+    receiver: mpsc::Receiver<WebSocketEvent>,
+    backlog: Arc<Backlog>,
+}
+
+/// Bytes of received messages waiting in the event queue.
+#[derive(Default)]
+struct Backlog {
+    bytes: AtomicUsize,
+    /// The connection's reader, while it waits for the queue to drain.
+    reader: AtomicWaker,
 }
 
 impl WebSocketConnection {
-    /// Start connecting in the background. Events arrive in order as they
-    /// happen, and the stream ends after `Closed` or `Failed`. Variables are
-    /// resolved when connecting; each message resolves them when it is sent.
+    /// Start connecting in the background. Variables are resolved when
+    /// connecting; each message resolves them when it is sent.
     pub fn open(
         request: WebSocketRequest,
         variables: RequestVariables,
         preferences: &RequestPreferences,
-    ) -> (Self, mpsc::Receiver<WebSocketEvent>) {
-        let (commands, command_receiver) = mpsc::unbounded();
-        let (events, event_receiver) = mpsc::channel(EVENT_QUEUE);
-        let preferences = preferences.clone();
+    ) -> (Self, WebSocketEvents) {
+        let (messages, message_receiver) = mpsc::unbounded();
+        let (close, closing) = oneshot::channel();
+        let (events, receiver) = mpsc::channel(EVENT_QUEUE);
+        let backlog = Arc::new(Backlog::default());
+        let connection = Connection {
+            messages: message_receiver,
+            closing,
+            events,
+            backlog: backlog.clone(),
+        };
 
         // The HTTP client performs the handshake and needs its Tokio runtime.
-        reqwest_client::runtime().spawn(run(
-            request,
-            variables,
-            preferences,
-            command_receiver,
-            events,
-        ));
+        reqwest_client::runtime().spawn(connection.run(request, variables, preferences.clone()));
 
-        (Self { commands }, event_receiver)
+        (
+            Self {
+                messages,
+                close: Some(close),
+            },
+            WebSocketEvents { receiver, backlog },
+        )
     }
 
     /// Queue a text message. Its `Sent` event reports the text as sent,
     /// after variables were resolved.
     pub fn send(&self, message: String, variables: RequestVariables) {
-        let _ = self
-            .commands
-            .unbounded_send(Command::Send(message, variables));
+        let _ = self.messages.unbounded_send((message, variables));
     }
 
-    /// Start a normal closure. Messages queued before it are sent first.
-    pub fn close(&self) {
-        let _ = self.commands.unbounded_send(Command::Close);
+    /// Start a normal closure. Messages that were not sent yet are dropped.
+    pub fn close(&mut self) {
+        self.close = None;
     }
 }
 
-async fn run(
-    request: WebSocketRequest,
-    variables: RequestVariables,
-    preferences: RequestPreferences,
-    mut commands: mpsc::UnboundedReceiver<Command>,
-    mut events: mpsc::Sender<WebSocketEvent>,
-) {
-    let connecting = async {
-        let request = variables
-            .resolve_websocket(&request)
-            .map_err(ExecutionError::Variables)?;
+impl Stream for WebSocketEvents {
+    type Item = WebSocketEvent;
 
-        handshake(request, &preferences).await
-    };
-    let connecting = async {
-        match (preferences.timeout_ms != 0).then(|| Duration::from_millis(preferences.timeout_ms))
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let event = ready!(self.receiver.poll_next_unpin(cx));
+
+        if let Some(WebSocketEvent {
+            kind: WebSocketEventKind::Received(message),
+            ..
+        }) = &event
         {
-            Some(timeout) => {
-                smol::future::or(connecting, async {
-                    smol::Timer::after(timeout).await;
-
-                    Err(ExecutionError::Timeout { timeout })
-                })
-                .await
-            }
-            None => connecting.await,
+            self.backlog
+                .bytes
+                .fetch_sub(message_bytes(message), Ordering::SeqCst);
+            self.backlog.reader.wake();
         }
-    };
-    // Closing or dropping the connection stops a handshake that never ends.
-    let cancelled = async {
-        while let Some(Command::Send(..)) = commands.next().await {}
-    };
-    let connected = smol::future::or(async { Some(connecting.await) }, async {
-        cancelled.await;
-        None
-    })
-    .await;
 
-    let (socket, handshake) = match connected {
-        Some(Ok(connected)) => connected,
-        Some(Err(error)) => {
-            let _ = events.send(event(WebSocketEventKind::Failed(error))).await;
+        Poll::Ready(event)
+    }
+}
+
+impl Drop for WebSocketEvents {
+    fn drop(&mut self) {
+        // Let a waiting reader find out that nothing reads the queue any more.
+        self.backlog.bytes.store(0, Ordering::SeqCst);
+        self.backlog.reader.wake();
+    }
+}
+
+/// The background half of a connection.
+struct Connection {
+    messages: mpsc::UnboundedReceiver<(String, RequestVariables)>,
+    /// Resolves when the owner closes or drops the connection.
+    closing: oneshot::Receiver<()>,
+    events: mpsc::Sender<WebSocketEvent>,
+    backlog: Arc<Backlog>,
+}
+
+impl Connection {
+    async fn run(
+        self,
+        request: WebSocketRequest,
+        variables: RequestVariables,
+        preferences: RequestPreferences,
+    ) {
+        let Self {
+            mut messages,
+            mut closing,
+            mut events,
+            backlog,
+        } = self;
+
+        let connecting = async {
+            let request = variables
+                .resolve_websocket(&request)
+                .map_err(ExecutionError::Variables)?;
+
+            handshake(request, &preferences).await
+        };
+        let connecting = pin!(async {
+            match (preferences.timeout_ms != 0)
+                .then(|| Duration::from_millis(preferences.timeout_ms))
+            {
+                Some(timeout) => {
+                    smol::future::or(connecting, async {
+                        smol::Timer::after(timeout).await;
+
+                        Err(ExecutionError::Timeout { timeout })
+                    })
+                    .await
+                }
+                None => connecting.await,
+            }
+        });
+
+        // Closing stops a handshake that would otherwise never end.
+        let (socket, handshake) = match future::select(connecting, &mut closing).await {
+            Either::Left((Ok(connected), _)) => connected,
+            Either::Left((Err(error), _)) => {
+                let _ = events.send(event(WebSocketEventKind::Failed(error))).await;
+                return;
+            }
+            Either::Right(_) => return,
+        };
+
+        if events
+            .send(event(WebSocketEventKind::Connected(handshake)))
+            .await
+            .is_err()
+        {
             return;
         }
-        None => return,
-    };
 
-    if events
-        .send(event(WebSocketEventKind::Connected(handshake)))
-        .await
-        .is_err()
-    {
-        return;
-    }
+        let (mut sink, mut stream) = socket.split();
+        let mut received = events.clone();
+        let mut sent = events.clone();
 
-    let (mut sink, mut stream) = socket.split();
-    let mut received = events.clone();
-    let mut sent = events.clone();
+        let reader = pin!(async move {
+            let mut close = None;
 
-    let reader = pin!(async move {
-        let mut close = None;
+            while let Some(message) = stream.next().await {
+                let message = match message? {
+                    Message::Text(text) => WebSocketMessage::Text(text.as_str().to_owned()),
+                    Message::Binary(bytes) => WebSocketMessage::Binary(bytes.to_vec()),
+                    // Tungstenite answers the close frame; the stream then ends.
+                    Message::Close(frame) => {
+                        close = Some(frame);
+                        continue;
+                    }
+                    Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
+                };
 
-        while let Some(message) = stream.next().await {
-            let message = match message? {
-                Message::Text(text) => WebSocketMessage::Text(text.as_str().to_owned()),
-                Message::Binary(bytes) => WebSocketMessage::Binary(bytes.to_vec()),
-                // Tungstenite answers the close frame; the stream then ends.
-                Message::Close(frame) => {
-                    close = Some(frame);
-                    continue;
+                future::poll_fn(|cx| {
+                    backlog.reader.register(cx.waker());
+
+                    if backlog.bytes.load(Ordering::SeqCst) < QUEUED_BYTES {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+                backlog
+                    .bytes
+                    .fetch_add(message_bytes(&message), Ordering::SeqCst);
+
+                if received
+                    .send(event(WebSocketEventKind::Received(message)))
+                    .await
+                    .is_err()
+                {
+                    break;
                 }
-                Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
-            };
-
-            if received
-                .send(event(WebSocketEventKind::Received(message)))
-                .await
-                .is_err()
-            {
-                break;
             }
-        }
 
-        Ok::<_, tungstenite::Error>(close)
-    });
+            Ok::<_, tungstenite::Error>(close)
+        });
 
-    let writer = pin!(async move {
-        // The loop also ends when the connection's owner drops it.
-        while let Some(Command::Send(text, variables)) = commands.next().await {
-            let kind = match variables.resolve_text(&text) {
-                Ok(text) => {
-                    sink.send(Message::text(text.clone())).await?;
+        // Returns whether the close frame was sent.
+        let writer = pin!(async move {
+            loop {
+                let (text, variables) = match future::select(messages.next(), &mut closing).await {
+                    Either::Left((Some(message), _)) => message,
+                    _ => break,
+                };
 
-                    WebSocketEventKind::Sent(WebSocketMessage::Text(text))
-                }
-                Err(error) => WebSocketEventKind::NotSent(ExecutionError::Variables(error)),
-            };
+                let kind = match variables.resolve_text(&text) {
+                    Ok(text) => {
+                        // A peer that stops reading can hold a send forever.
+                        // Closing abandons it, without a close frame.
+                        let send = sink.send(Message::text(text.clone()));
+                        match future::select(send, &mut closing).await {
+                            Either::Left((result, _)) => result?,
+                            Either::Right(_) => return Ok(false),
+                        }
 
-            let _ = sent.send(event(kind)).await;
-        }
+                        WebSocketEventKind::Sent(WebSocketMessage::Text(text))
+                    }
+                    Err(error) => WebSocketEventKind::NotSent(ExecutionError::Variables(error)),
+                };
 
-        sink.send(Message::Close(Some(CloseFrame {
-            code: CloseCode::Normal,
-            reason: "".into(),
-        })))
-        .await
-    });
+                let _ = sent.send(event(kind)).await;
+            }
 
-    let result = match future::select(reader, writer).await {
-        Either::Left((read, _)) => read.map(|frame| closed(frame, false)),
-        Either::Right((Ok(()), reader)) => {
-            let acknowledged = smol::future::or(async { Some(reader.await) }, async {
+            let close = sink.send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "".into(),
+            })));
+
+            smol::future::or(async { close.await.map(|()| true) }, async {
                 smol::Timer::after(CLOSE_TIMEOUT).await;
-                None
+                Ok(false)
             })
-            .await;
+            .await
+        });
 
-            // The connection is closing anyway, so a server that drops it
-            // without acknowledging is not an error.
-            match acknowledged {
-                Some(Ok(frame)) => Ok(closed(frame, true)),
-                _ => Ok(closed(None, true)),
+        let result = match future::select(reader, writer).await {
+            Either::Left((read, _)) => read.map(|frame| closed(frame, false)),
+            Either::Right((Ok(true), reader)) => {
+                let acknowledged = smol::future::or(async { Some(reader.await) }, async {
+                    smol::Timer::after(CLOSE_TIMEOUT).await;
+                    None
+                })
+                .await;
+
+                // The connection is closing anyway, so a server that drops it
+                // without acknowledging is not an error.
+                match acknowledged {
+                    Some(Ok(frame)) => Ok(closed(frame, true)),
+                    _ => Ok(closed(None, true)),
+                }
             }
-        }
-        Either::Right((Err(error), _)) => Err(error),
-    };
+            Either::Right((Ok(false), _)) => Ok(closed(None, true)),
+            Either::Right((Err(error), _)) => Err(error),
+        };
 
-    let kind = match result {
-        Ok(close) => WebSocketEventKind::Closed(close),
-        Err(error) => WebSocketEventKind::Failed(ExecutionError::WebSocket(error)),
-    };
-    let _ = events.send(event(kind)).await;
+        let kind = match result {
+            Ok(close) => WebSocketEventKind::Closed(close),
+            Err(error) => WebSocketEventKind::Failed(ExecutionError::WebSocket(error)),
+        };
+        let _ = events.send(event(kind)).await;
+    }
+}
+
+fn message_bytes(message: &WebSocketMessage) -> usize {
+    match message {
+        WebSocketMessage::Text(text) => text.len(),
+        WebSocketMessage::Binary(bytes) => bytes.len(),
+    }
 }
 
 fn event(kind: WebSocketEventKind) -> WebSocketEvent {
@@ -319,17 +453,21 @@ async fn handshake(
         url.query_pairs_mut().extend_pairs(&request.query);
     }
 
-    let shown_url = url.to_string();
-    // The HTTP client sends the upgrade request; ws and wss share their ports.
-    let _ = url.set_scheme(scheme);
-
-    let mut headers = websocket_handshake_headers(&request.headers);
+    let mut headers = websocket_handshake_headers(url.as_str(), &request.headers);
     for (name, value) in &mut headers {
         if name == KEY_HEADER {
             *value = generate_key();
         }
     }
     headers.extend(request.headers);
+
+    // Credentials are sent as the Authorization header above instead, and
+    // are not shown with the URL.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    let shown_url = url.to_string();
+    // The HTTP client sends the upgrade request; ws and wss share their ports.
+    let _ = url.set_scheme(scheme);
 
     let key = headers
         .iter()
@@ -405,5 +543,16 @@ fn websocket_url(url: &str) -> String {
         url.to_owned()
     } else {
         format!("wss://{url}")
+    }
+}
+
+/// The address of the HTTP request that upgrades to a WebSocket.
+fn http_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else if let Some(rest) = url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else {
+        url.to_owned()
     }
 }

@@ -103,6 +103,8 @@ pub(crate) struct MessageLog {
     /// The resolved URL of the current or last connection.
     url: SharedString,
     scroll: UniformListScrollHandle,
+    /// The list takes keyboard focus to move between messages.
+    focus: FocusHandle,
     split: Entity<ResizableState>,
     _search_subscription: Option<Subscription>,
 }
@@ -123,6 +125,7 @@ impl MessageLog {
             state: ConnectionState::Disconnected,
             url: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
+            focus: cx.focus_handle().tab_stop(true),
             split: cx.new(|_| ResizableState::default()),
             _search_subscription: None,
         }
@@ -310,6 +313,34 @@ impl MessageLog {
         cx.notify();
     }
 
+    /// Up and Down show the neighboring message; Escape closes it.
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let row = self
+            .selected
+            .and_then(|id| self.visible.iter().rposition(|&visible| visible == id))
+            .map(|index| self.visible.len() - 1 - index);
+        let next = match (event.keystroke.key.as_str(), row) {
+            ("down", Some(row)) => (row + 1 < self.visible.len()).then_some(row + 1),
+            ("up", Some(row)) => row.checked_sub(1),
+            ("down" | "up", None) => (!self.visible.is_empty()).then_some(0),
+            ("escape", Some(_)) => {
+                self.selected = None;
+                self.detail = None;
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
+            _ => return,
+        };
+
+        cx.stop_propagation();
+        if let Some(row) = next {
+            let (id, _) = self.row_entry(row);
+            self.select(id, window, cx);
+            self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        }
+    }
+
     fn entry(&mut self, event: WebSocketEvent) -> Entry {
         let time = chrono::DateTime::<chrono::Local>::from(event.time)
             .format("%H:%M:%S%.3f")
@@ -470,9 +501,16 @@ impl MessageLog {
             .px_2()
             .gap_2()
             .rounded(cx.theme().radius_tokens().md)
+            .border_1()
+            .border_color(transparent_black())
             .cursor_pointer()
-            .when(selected, |this| this.bg(cx.theme().muted))
-            .hover(|this| this.bg(cx.theme().muted))
+            .when(selected, |this| {
+                this.bg(cx.theme().list_active)
+                    .border_color(cx.theme().list_active_border)
+            })
+            .when(!selected, |this| {
+                this.hover(|this| this.bg(cx.theme().list_hover))
+            })
             .child(
                 Icon::new(icon)
                     .size(rems(0.875))
@@ -507,13 +545,19 @@ impl MessageLog {
                     .text_color(cx.theme().muted_foreground)
                     .child(entry.time.clone()),
             )
-            .on_click(cx.listener(move |this, _, window, cx| this.select(id, window, cx)))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                window.focus(&this.focus, cx);
+                this.select(id, window, cx);
+            }))
             .into_any_element()
     }
 
     fn list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         div()
+            .id("websocket-message-list")
             .debug_selector(|| "websocket-messages".into())
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::on_key_down))
             .relative()
             .size_full()
             .child(
@@ -531,12 +575,9 @@ impl MessageLog {
     }
 
     fn detail(&self, detail: &Detail, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let entry = self.entry_by_id(detail.id);
+        let id = detail.id;
+        let entry = self.entry_by_id(id);
         let kind = entry.map_or(EntryKind::Received, |entry| entry.kind);
-        let copied = entry.map(|entry| match &entry.content {
-            Content::Text(text) => text.to_string(),
-            Content::Binary(bytes) => hex_dump(bytes),
-        });
 
         v_flex()
             .debug_selector(|| "websocket-message-detail".into())
@@ -575,11 +616,16 @@ impl MessageLog {
                             .small()
                             .icon(IconName::Copy)
                             .accessibility_label("Copy message")
-                            .on_click(move |_, _, cx| {
-                                if let Some(text) = &copied {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                // Build the text only when it is copied, not on every redraw.
+                                if let Some(entry) = this.entry_by_id(id) {
+                                    let text = match &entry.content {
+                                        Content::Text(text) => text.to_string(),
+                                        Content::Binary(bytes) => hex_dump(bytes),
+                                    };
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
                                 }
-                            }),
+                            })),
                     )
                     .child(
                         Button::new("close-websocket-message")

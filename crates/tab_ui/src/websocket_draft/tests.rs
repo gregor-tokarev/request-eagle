@@ -45,7 +45,9 @@ fn received(text: &str) -> WebSocketEvent {
 }
 
 fn sent(text: &str) -> WebSocketEvent {
-    event(WebSocketEventKind::Sent(WebSocketMessage::Text(text.to_owned())))
+    event(WebSocketEventKind::Sent(WebSocketMessage::Text(
+        text.to_owned(),
+    )))
 }
 
 fn log(draft: &Entity<WebSocketDraft>, cx: &mut VisualTestContext) -> Entity<MessageLog> {
@@ -222,10 +224,7 @@ fn the_log_keeps_the_newest_messages(cx: &mut TestAppContext) {
             log.row_entry(0).1.preview.as_ref(),
             (MAX_ENTRIES + 9).to_string()
         );
-        assert_eq!(
-            log.row_entry(MAX_ENTRIES - 1).1.preview.as_ref(),
-            "10"
-        );
+        assert_eq!(log.row_entry(MAX_ENTRIES - 1).1.preview.as_ref(), "10");
     });
     assert!(element_bounds(cx, "websocket-dropped").is_some());
 
@@ -348,10 +347,43 @@ fn params_and_headers_edit_the_request(cx: &mut TestAppContext) {
 
     let url = cx.read(|cx| draft.read(cx).url.clone().unwrap());
     cx.update(|window, cx| {
-        url.update(cx, |url, cx| url.replace_all("wss://example.com/other", window, cx))
+        url.update(cx, |url, cx| {
+            url.replace_all("wss://example.com/other", window, cx)
+        })
     });
     cx.read(|cx| {
         assert_eq!(draft.read(cx).request.url, "wss://example.com/other");
         assert!(draft.read(cx).is_dirty());
     });
+}
+
+#[gpui_kit::test]
+fn arrow_keys_move_between_messages(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(WebSocketRequest::default(), cx);
+    let log = log(&draft, cx);
+    push(&log, vec![received("first"), received("second")], cx);
+
+    let newest = element_bounds(cx, "websocket-message-0").unwrap();
+    cx.simulate_click(newest.center(), Modifiers::default());
+    let selected = |cx: &mut VisualTestContext| {
+        cx.read(|cx| {
+            let log = log.read(cx);
+            log.selected
+                .and_then(|id| log.entry_by_id(id))
+                .map(|entry| entry.preview.to_string())
+        })
+    };
+    assert_eq!(selected(cx).as_deref(), Some("second"));
+
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected(cx).as_deref(), Some("first"));
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected(cx).as_deref(), Some("first"));
+    cx.simulate_keystrokes("up");
+    assert_eq!(selected(cx).as_deref(), Some("second"));
+    assert!(element_bounds(cx, "websocket-message-detail").is_some());
+
+    cx.simulate_keystrokes("escape");
+    assert_eq!(selected(cx), None);
+    assert!(element_bounds(cx, "websocket-message-detail").is_none());
 }

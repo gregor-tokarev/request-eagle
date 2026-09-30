@@ -33,6 +33,6 @@ pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};
 pub use variables::RequestVariables;
 pub use websocket::{
-    WebSocketClose, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketHandshake,
-    WebSocketMessage, websocket_handshake_headers,
+    WebSocketClose, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketEvents,
+    WebSocketHandshake, WebSocketMessage, websocket_handshake_headers,
 };

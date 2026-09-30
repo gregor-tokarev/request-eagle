@@ -74,7 +74,6 @@ fn text_and_request_methods_remain_readable_on_their_surfaces(cx: &mut TestAppCo
                 ("POST / warning", theme.warning),
                 ("PUT / info", theme.info),
                 ("DELETE / error", theme.danger),
-                ("WS / magenta", theme.magenta),
             ] {
                 for surface in [
                     background,
