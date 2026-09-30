@@ -44,9 +44,10 @@ and independent document trees; the existing highlighting/injection tests also
 pass with shared queries.
 
 Request Eagle compiles JSON and JavaScript queries on the background executor
-alongside preference loading and awaits both before opening its first workspace.
-This avoids compiling the same JavaScript queries during each editor's first
-redraw, including when opening an empty Scripts editor immediately after launch.
+at launch. This avoids compiling the same JavaScript queries during each
+editor's first redraw. The window does not wait for them: creating it takes
+longer than compiling them, and no editor exists until a Body or Scripts
+section is shown.
 
 The third patch supports Vim's block cursor. `set_caret_hidden` hides only the
 painted caret, and `scroll_to_offset` reveals the Vim cursor rather than an edge
