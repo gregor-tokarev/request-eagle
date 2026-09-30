@@ -28,37 +28,28 @@ impl VariableTarget {
         }
     }
 
-    /// Where `ranges` are on screen this frame, and the visible text area.
-    /// Ranges that are scrolled away or wrap onto another row are left out.
-    fn bounds(&self, ranges: &[Range<usize>], cx: &App) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
-        let (visible, line_height, bounds) = match self {
+    /// The visible text area and where each chip is on screen this frame.
+    fn chip_bounds(
+        &self,
+        chips: &[Range<usize>],
+        cx: &App,
+    ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
+        match self {
             Self::Input(input) => {
                 let input = input.read(cx);
-                let bounds = ranges
-                    .iter()
-                    .filter_map(|range| input.range_to_bounds(range));
-                (
-                    input.input_bounds(),
-                    input.line_height(),
-                    bounds.collect::<Vec<_>>(),
-                )
+                let bounds = chip_bounds(chips, input.line_height(), |range| {
+                    input.range_to_bounds(range)
+                });
+                (input.input_bounds(), bounds)
             }
             Self::Editor(input) => {
                 let input = input.read(cx);
-                let bounds = ranges
-                    .iter()
-                    .filter_map(|range| input.range_to_bounds(range));
-                (
-                    input.input_bounds(),
-                    input.line_height(),
-                    bounds.collect::<Vec<_>>(),
-                )
+                let bounds = chip_bounds(chips, input.line_height(), |range| {
+                    input.range_to_bounds(range)
+                });
+                (input.input_bounds(), bounds)
             }
-        };
-        let one_row =
-            |bounds: &Bounds<Pixels>| line_height.is_some_and(|h| bounds.size.height <= h);
-
-        (visible, bounds.into_iter().filter(one_row).collect())
+        }
     }
 
     fn snapshot(&self, window: &Window, cx: &App) -> Option<(SharedString, usize)> {
@@ -198,7 +189,7 @@ impl VariableInput {
     /// Paint each `{{variable}}` as a rounded chip over its text. The text
     /// stays ordinary input text; the input only reports where it is.
     fn paint_chips(&self, window: &mut Window, cx: &App) {
-        let (visible, chips) = self.target.bounds(&self.chips, cx);
+        let (visible, chips) = self.target.chip_bounds(&self.chips, cx);
         let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
         let color = cx.theme().info.opacity(0.25);
         let radius = cx.theme().radius_tokens().sm;
@@ -539,25 +530,64 @@ pub(crate) fn active_token(text: &str, cursor: usize) -> Option<(Range<usize>, &
     Some((start..end, query))
 }
 
+/// Where each chip is on screen. Chips that are folded away, scrolled out of
+/// view or wrapped onto another row are left out.
+pub(crate) fn chip_bounds(
+    chips: &[Range<usize>],
+    line_height: Option<Pixels>,
+    range_to_bounds: impl Fn(&Range<usize>) -> Option<Bounds<Pixels>>,
+) -> Vec<Bounds<Pixels>> {
+    let Some(line_height) = line_height else {
+        return Vec::new();
+    };
+
+    chips
+        .iter()
+        .filter_map(|chip| {
+            // A soft wrap right after a chip resolves its end to the next row,
+            // so measure up to the last brace and add the brace before it.
+            let inner = range_to_bounds(&(chip.start..chip.end - 1))?;
+            let brace = range_to_bounds(&(chip.end - 2..chip.end - 1))?;
+            let width = inner.size.width + brace.size.width;
+
+            // Folded text collapses to zero width at the next visible row.
+            (inner.size.height <= line_height && inner.size.width > px(0.))
+                .then(|| Bounds::new(inner.origin, size(width, inner.size.height)))
+        })
+        .collect()
+}
+
 /// Byte ranges of `{{variable}}` references. `{{!literal}}` escapes are sent
-/// as written. An unclosed `{{` on one line does not claim later lines.
+/// as written. A reference ends at the first `}}` on its line; an unclosed
+/// `{{` does not claim later lines. Each byte is scanned once.
 pub(crate) fn variable_references(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
     let mut offset = 0;
 
     std::iter::from_fn(move || {
         loop {
             let start = offset + text[offset..].find("{{")?;
-            let end = start + 2 + text[start + 2..].find("}}")? + 2;
-            let name = &text[start + 2..end - 2];
+            let mut cursor = start + 2;
 
-            if name.contains('\n') {
-                offset = start + 2;
+            let close = loop {
+                cursor += text[cursor..].find(['}', '\n'])?;
+                if text[cursor..].starts_with("}}") {
+                    break Some(cursor);
+                }
+                if text[cursor..].starts_with('\n') {
+                    break None;
+                }
+                cursor += 1;
+            };
+
+            // No reference on this line can close once it ends.
+            let Some(close) = close else {
+                offset = cursor + 1;
                 continue;
-            }
+            };
 
-            offset = end;
-            if !name.starts_with('!') {
-                return Some(start..end);
+            offset = close + 2;
+            if !text[start + 2..close].starts_with('!') {
+                return Some(start..offset);
             }
         }
     })
