@@ -2,7 +2,7 @@
 
 This crate owns the request data shared by saved collections and drafts, request
 preferences, and the executor. It does not depend on GPUI application or UI types.
-`collection` and `preferences` re-export their original types, so their imports and
+`preferences` re-exports the request preference types, so its imports and
 serialized files remain compatible.
 
 TLS certificate verification is enabled by default. New profiles and preference
@@ -10,7 +10,8 @@ files that omit `ssl_certificate_verification` verify server certificates. An
 explicit stored value is preserved, including `false` saved by older versions.
 
 ```rust,no_run
-use environment::VariableValues;
+use std::collections::HashMap;
+
 use request::{HttpRequest, RequestExecutor, RequestPreferences, RequestVariables, Response};
 
 let executor = RequestExecutor::new(&RequestPreferences::default())?;
@@ -18,9 +19,7 @@ let request = HttpRequest {
     path: "https://example.com/{{route}}".into(),
     ..HttpRequest::default()
 };
-let values = VariableValues {
-    environment: [("route".into(), "api".into())].into(),
-};
+let values = HashMap::from([("route".into(), "api".into())]);
 
 // The returned future owns its inputs and can be spawned on a background
 // executor without borrowing a tab.
