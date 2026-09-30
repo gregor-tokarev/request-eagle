@@ -43,15 +43,17 @@ pub(crate) struct Workspace {
     pub(crate) main_split: Entity<ResizableState>,
     pub(crate) sidebar_visible: Entity<bool>,
 
-    pub(crate) settings: Entity<Settings>,
+    /// Built when first opened.
+    pub(crate) settings: Option<Entity<Settings>>,
     pub(crate) settings_visible: bool,
     previous_focus: Option<FocusHandle>,
+    updater: Entity<Updater>,
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
-    _settings_subscription: Subscription,
+    _settings_subscription: Option<Subscription>,
 }
 
 impl Workspace {
@@ -65,13 +67,6 @@ impl Workspace {
         let sidebar_visible = cx.new(|_| true);
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
-
-        let settings = cx.new(|cx| Settings::new(updater, window, cx));
-        let settings_subscription = cx.subscribe_in(
-            &settings,
-            window,
-            |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
-        );
 
         let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
         let sidebar_subscription =
@@ -186,26 +181,49 @@ impl Workspace {
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
-            settings,
+            settings: None,
             settings_visible: false,
             previous_focus: None,
+            updater,
             command_palette: None,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
-            _settings_subscription: settings_subscription,
+            _settings_subscription: None,
         }
     }
 
-    pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Settings> {
         if !self.settings_visible {
             self.previous_focus = window.focused(cx);
             self.settings_visible = true;
         }
 
-        self.settings
-            .update(cx, |settings, cx| settings.focus(window, cx));
+        // The pages list every installed font and shortcut, so launching
+        // does not build them.
+        let settings = match &self.settings {
+            Some(settings) => settings.clone(),
+            None => {
+                let settings = cx.new(|cx| Settings::new(self.updater.clone(), window, cx));
+                self._settings_subscription = Some(cx.subscribe_in(
+                    &settings,
+                    window,
+                    |this, _, _: &SettingsEvent, window, cx| this.close_settings(window, cx),
+                ));
+                self.settings = Some(settings.clone());
+
+                settings
+            }
+        };
+
+        settings.update(cx, |settings, cx| settings.focus(window, cx));
 
         cx.notify();
+
+        settings
     }
 
     pub(crate) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -326,6 +344,15 @@ impl Workspace {
             .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
     }
 
+    fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The imported collection is revealed in the tree, so it must be visible.
+        self.collections_open = true;
+        cx.notify();
+
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open_import_dialog(window, cx));
+    }
+
     fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.environments_open = true;
         cx.notify();
@@ -338,7 +365,7 @@ impl Workspace {
         &self,
         section: SidebarSection,
         count: usize,
-        new_button: Button,
+        buttons: Vec<Button>,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -407,13 +434,29 @@ impl Workspace {
                                 .child(count.to_string()),
                         ),
                 )
-                .child(new_button.ghost().xsmall()),
+                .children(buttons.into_iter().map(|button| button.ghost().xsmall())),
         )
     }
 
     fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+
+        let new_collection = Button::new("new-collection")
+            .debug_selector(|| "new-collection".into())
+            .icon(IconName::Plus)
+            .tooltip("New Collection")
+            .on_click(cx.listener(|this, _, window, cx| this.create_collection(window, cx)));
+        let import_collection = Button::new("import-collection")
+            .debug_selector(|| "import-collection".into())
+            .icon(Icon::default().path("icons/import.svg"))
+            .tooltip("Import Collection")
+            .on_click(cx.listener(|this, _, window, cx| this.import_collection(window, cx)));
+        let new_environment = Button::new("new-environment")
+            .debug_selector(|| "new-environment".into())
+            .icon(IconName::Plus)
+            .tooltip("New Environment")
+            .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
 
         // Open sections share the height, like the sections of an editor sidebar.
         let section_body = StyleRefinement::default().w_full().flex_1().min_h_0();
@@ -425,21 +468,13 @@ impl Workspace {
             .text_color(cx.theme().sidebar_foreground)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
-            .child(
-                self.section_header(
-                    SidebarSection::Collections,
-                    collection_count,
-                    Button::new("new-collection")
-                        .debug_selector(|| "new-collection".into())
-                        .icon(IconName::Plus)
-                        .tooltip("New Collection")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.create_collection(window, cx)),
-                        ),
-                    window,
-                    cx,
-                ),
-            )
+            .child(self.section_header(
+                SidebarSection::Collections,
+                collection_count,
+                vec![new_collection, import_collection],
+                window,
+                cx,
+            ))
             .when(self.collections_open, |this| {
                 this.child(self.sidebar.clone().cached(section_body.clone()))
             })
@@ -450,21 +485,13 @@ impl Workspace {
                     .h(px(1.))
                     .bg(cx.theme().sidebar_border),
             )
-            .child(
-                self.section_header(
-                    SidebarSection::Environments,
-                    environment_count,
-                    Button::new("new-environment")
-                        .debug_selector(|| "new-environment".into())
-                        .icon(IconName::Plus)
-                        .tooltip("New Environment")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.create_environment(window, cx)),
-                        ),
-                    window,
-                    cx,
-                ),
-            )
+            .child(self.section_header(
+                SidebarSection::Environments,
+                environment_count,
+                vec![new_environment],
+                window,
+                cx,
+            ))
             .when(self.environments_open, |this| {
                 this.child(self.environment_panel.clone().cached(section_body))
             })
@@ -493,9 +520,7 @@ fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: 
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
-                    this.open_settings(window, cx);
-
-                    this.settings.update(cx, |settings, cx| {
+                    this.open_settings(window, cx).update(cx, |settings, cx| {
                         settings.select_page(SettingsPage::General, window, cx)
                     });
                 });
@@ -548,11 +573,13 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Keep the screen entities alive, but only lay out the visible screen.
         // GPUI still requests child layouts beneath display: none containers.
-        if self.settings_visible {
+        if self.settings_visible
+            && let Some(settings) = self.settings.clone()
+        {
             return div()
                 .size_full()
                 .text_base()
-                .child(self.settings.clone())
+                .child(settings)
                 .into_any_element();
         }
 

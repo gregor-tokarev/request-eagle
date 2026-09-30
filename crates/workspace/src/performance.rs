@@ -98,16 +98,18 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
             )
         });
 
-        if let Some(page) = page {
+        let settings = page.map(|page| {
             cx.update(|window, cx| {
                 layout.update(cx, |layout, cx| {
-                    layout.open_settings(window, cx);
-                    layout.settings.update(cx, |settings, cx| {
+                    let settings = layout.open_settings(window, cx);
+                    settings.update(cx, |settings, cx| {
                         settings.select_page(page, window, cx);
                     });
-                });
-            });
-        }
+
+                    settings
+                })
+            })
+        });
 
         for (width, height) in [(1024., 768.), (1440., 900.), (3440., 1410.)] {
             cx.simulate_resize(size(px(width), px(height)));
@@ -131,18 +133,17 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
 
                 for index in 0..sample_count + 20 {
                     let duration = cx.update(|window, cx| {
-                        if switch_pages && let Some(page) = page {
-                            layout.update(cx, |layout, cx| {
-                                layout.settings.update(cx, |settings, cx| {
-                                    settings.select_page(SettingsPage::General, window, cx);
-                                });
+                        if switch_pages
+                            && let Some(page) = page
+                            && let Some(settings) = &settings
+                        {
+                            settings.update(cx, |settings, cx| {
+                                settings.select_page(SettingsPage::General, window, cx);
                             });
                             window.refresh();
                             window.draw(cx).clear(cx);
-                            layout.update(cx, |layout, cx| {
-                                layout.settings.update(cx, |settings, cx| {
-                                    settings.select_page(page, window, cx);
-                                });
+                            settings.update(cx, |settings, cx| {
+                                settings.select_page(page, window, cx);
                             });
                         }
 

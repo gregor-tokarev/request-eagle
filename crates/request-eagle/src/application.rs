@@ -21,14 +21,17 @@ pub fn run() {
     app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
 
-        // Compile shared syntax queries alongside preference loading, off the
-        // UI thread. Finish before opening the workspace so even an immediate
-        // first editor opening can reuse them.
-        let editor_highlighting = cx.background_executor().spawn(async {
-            for language in ["json", "javascript"] {
-                gpui_kit::component::highlighter::SyntaxHighlighter::new(language);
-            }
-        });
+        // Compile shared syntax queries off the UI thread so the first editor
+        // can reuse them. The window does not wait: creating it takes longer
+        // than compiling, and editors only open when a Body or Scripts
+        // section is shown.
+        cx.background_executor()
+            .spawn(async {
+                for language in ["json", "javascript"] {
+                    gpui_kit::component::highlighter::SyntaxHighlighter::new(language);
+                }
+            })
+            .detach();
 
         #[cfg(target_os = "macos")]
         cx.set_reduce_motion(
@@ -56,7 +59,6 @@ pub fn run() {
                 return;
             }
 
-            editor_highlighting.await;
             cx.update(|cx| open_workspace(&home, cx));
         })
         .detach();

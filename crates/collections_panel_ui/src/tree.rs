@@ -166,7 +166,7 @@ impl CollectionTree {
     }
 }
 
-fn path_name(path: &Path) -> String {
+pub(super) fn path_name(path: &Path) -> String {
     path.file_name()
         .unwrap_or(path.as_os_str())
         .to_string_lossy()

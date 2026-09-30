@@ -14,8 +14,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 rustup target add "$TARGET"
-cargo build --locked --release -p request-eagle --target "$TARGET"
-cp "$ROOT/target/$TARGET/release/request-eagle" "$APP/Contents/MacOS/request-eagle"
+cargo build --locked --profile dist -p request-eagle --target "$TARGET"
+cp "$ROOT/target/$TARGET/dist/request-eagle" "$APP/Contents/MacOS/request-eagle"
 
 chmod 755 "$APP/Contents/MacOS/request-eagle"
 cp "$ROOT/packaging/macos/AppIconEagleV2.icns" "$APP/Contents/Resources/AppIconEagleV2.icns"

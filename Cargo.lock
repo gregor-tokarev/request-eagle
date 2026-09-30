@@ -1187,6 +1187,7 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "gpui-kit",
+ "import",
  "keybindings_service",
  "request",
  "suffix",
@@ -2538,7 +2539,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547#c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c38733a06868b10813788ca3ebbace790eeb65b1#c38733a06868b10813788ca3ebbace790eeb65b1"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2575,7 +2576,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547#c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c38733a06868b10813788ca3ebbace790eeb65b1#c38733a06868b10813788ca3ebbace790eeb65b1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2622,7 +2623,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547#c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c38733a06868b10813788ca3ebbace790eeb65b1#c38733a06868b10813788ca3ebbace790eeb65b1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2665,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.6.2"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547#c5e2b7a2ac6a05856e281f8e9d1f76ae7b412547"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=c38733a06868b10813788ca3ebbace790eeb65b1#c38733a06868b10813788ca3ebbace790eeb65b1"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -3243,6 +3244,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
+dependencies = [
+ "arraydeque",
+ "smallvec",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3712,6 +3723,19 @@ name = "imgref"
 version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89194689a993ab15268672e99e7b0e19da2da3268ac682e8f02d29d4d1434cd7"
+
+[[package]]
+name = "import"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "collection",
+ "percent-encoding",
+ "request",
+ "serde-saphyr 1.3.0",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "indexmap"
@@ -6388,7 +6412,7 @@ dependencies = [
  "itertools 0.11.0",
  "normpath",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 0.0.29",
  "serde_json",
  "siphasher",
  "toml 0.8.23",
@@ -6733,12 +6757,26 @@ dependencies = [
  "base64",
  "encoding_rs_io",
  "getrandom 0.3.4",
- "granit-parser",
+ "granit-parser 0.0.7",
  "nohash-hasher",
  "num-traits",
  "serde_core",
  "smallvec",
  "zmij",
+]
+
+[[package]]
+name = "serde-saphyr"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
+dependencies = [
+ "annotate-snippets",
+ "encoding_rs_io",
+ "granit-parser 1.3.0",
+ "num-traits",
+ "serde_core",
+ "smallvec",
 ]
 
 [[package]]

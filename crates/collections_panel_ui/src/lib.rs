@@ -1,6 +1,7 @@
 mod actions;
 mod dragging;
 mod editing;
+mod importing;
 mod lookup;
 mod panel;
 mod rows;
@@ -12,6 +13,8 @@ mod tree;
 mod dragging_tests;
 #[cfg(test)]
 mod editing_tests;
+#[cfg(test)]
+mod importing_tests;
 #[cfg(test)]
 mod lookup_tests;
 #[cfg(test)]
