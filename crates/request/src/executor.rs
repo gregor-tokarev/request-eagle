@@ -53,14 +53,21 @@ impl RequestExecutor {
 
                 let sent_at = Instant::now();
                 let body = request.body.take().map(Bytes::from);
-                let response = executor.http.execute(&request, body.clone()).await?;
+
+                // Only a post-response script reads the sent body. Otherwise
+                // HTTP owns the upload and releases it before the download.
+                let has_post_script = !request.scripts.post_response.trim().is_empty()
+                    || !state.collection_post_response.trim().is_empty();
+                let post_body = if has_post_script { body.clone() } else { None };
+
+                let response = executor.http.execute(&request, body).await?;
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
                     scripts: std::mem::take(&mut reports),
                 };
 
-                Ok((request, body, state, execution))
+                Ok((request, post_body, state, execution))
             };
 
             let (request, body, state, execution) = match executor.timeout {
