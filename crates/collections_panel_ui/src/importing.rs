@@ -269,26 +269,22 @@ impl Render for ImportDialog {
                             .child(
                                 v_flex()
                                     .gap_1()
-                                    .child(
-                                        div().text_base().font_weight(FontWeight::SEMIBOLD).child(
-                                            if self.importing {
-                                                "Importing…"
-                                            } else {
-                                                "Drop a file to import"
-                                            },
-                                        ),
-                                    )
+                                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(
+                                        if self.importing {
+                                            "Importing…"
+                                        } else {
+                                            "Drop a file to import"
+                                        },
+                                    ))
                                     .child(
                                         h_flex()
                                             .gap_1()
-                                            .text_sm()
                                             .text_color(theme.muted_foreground)
                                             .child("Or select")
                                             .child(
                                                 Button::new("choose-import-file")
                                                     .debug_selector(|| "choose-import-file".into())
                                                     .link()
-                                                    .small()
                                                     // Colored like a link, it needs no underline.
                                                     .text_decoration_0()
                                                     .label("a file")
@@ -314,13 +310,15 @@ impl Render for ImportDialog {
                         )
                     }),
             )
+            // The formats wrap onto separate lines in narrow windows.
             .child(
                 h_flex()
-                    .gap_3()
+                    .flex_wrap()
+                    .gap_x_6()
+                    .gap_y_1()
                     .text_sm()
                     .text_color(theme.muted_foreground)
                     .child("Postman Collection v2.0 and v2.1")
-                    .child(div().h_4().w(px(1.)).bg(theme.border))
                     .child("OpenAPI 3 and Swagger 2.0, in JSON or YAML"),
             )
     }
