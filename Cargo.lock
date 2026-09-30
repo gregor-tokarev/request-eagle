@@ -6658,6 +6658,7 @@ dependencies = [
  "event-listener",
  "flate2",
  "futures-channel",
+ "libc",
  "lsp-types",
  "request",
  "rquickjs",

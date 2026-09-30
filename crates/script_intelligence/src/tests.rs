@@ -376,6 +376,25 @@ fn typescript_infers_local_values_awaited_responses_and_callback_parameters() {
 }
 
 #[test]
+fn bundled_libraries_complete_modern_builtins_scripts_use() {
+    let phase = ScriptPhase::PreRequest;
+    for (source, expected) in [
+        ("'Eagle'.startsW|", "startsWith"),
+        ("'Eagle'.replaceA|", "replaceAll"),
+        ("Object.entr|", "entries"),
+        ("[1].findL|", "findLast"),
+        ("new Map().ge|", "get"),
+        ("Promise.allS|", "allSettled"),
+        ("BigInt(1).toStr|", "toString"),
+    ] {
+        assert!(
+            labels(&complete(source, phase)).contains(&expected),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn phase_declarations_switch_without_leaking_response_or_execution_members() {
     assert_eq!(
         labels(&complete("pm.res|", ScriptPhase::PostResponse)),

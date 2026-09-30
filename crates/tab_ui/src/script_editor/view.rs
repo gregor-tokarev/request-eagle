@@ -209,6 +209,11 @@ impl ScriptEditor {
         self._subscriptions.push(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {
+                // Reload the compiler if it was released while scripts were idle.
+                if matches!(event, InputEvent::Focus) {
+                    script_intelligence::warm_up();
+                }
+
                 if matches!(event, InputEvent::Change) {
                     let value = editor.read(cx).value().to_string();
                     if phase == ScriptPhase::PreRequest {

@@ -1,7 +1,7 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui_kit::{
-    AppContext as _, Keystroke, TestAppContext,
+    AppContext as _, Focusable as _, Keystroke, TestAppContext,
     component::{Root, input::EditorState},
     px, size,
 };
@@ -150,6 +150,94 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
             durations[samples - 1],
             allocations[(samples * 99).div_ceil(100) - 1],
             durations.iter().filter(|&&x| x > 1000. / 120.).count()
+        );
+    }
+}
+
+// Frames while the Scripts section opens and the TypeScript compiler loads in
+// the background, until the first completions arrive. The compiler loads once
+// per process, so repeat the command for more cold samples:
+// cargo test -p tab_ui --release scripts_open_benchmark -- --ignored --nocapture --test-threads=1
+#[gpui_kit::test]
+#[ignore = "manual Scripts opening frame benchmark"]
+async fn scripts_open_benchmark(cx: &mut TestAppContext) {
+    #[expect(
+        clippy::assertions_on_constants,
+        reason = "Reject debug runs of this manual benchmark, not ordinary test builds."
+    )]
+    {
+        assert!(!cfg!(debug_assertions), "run with --release");
+    }
+
+    cx.executor().allow_parking();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+        cx.set_reduce_motion(true);
+    });
+
+    for load in ["cold", "warm"] {
+        let mut draft = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| {
+                let mut draft = new_draft(cx);
+                draft.prepare(window, cx);
+                draft
+            });
+            draft = Some(view.clone());
+
+            Root::new(view, window, cx)
+        });
+        let draft = draft.unwrap();
+        cx.simulate_resize(size(px(1440.), px(900.)));
+        cx.run_until_parked();
+
+        let open = cx.update(|window, cx| {
+            let started = Instant::now();
+            draft.update(cx, |draft, cx| {
+                draft.section = RequestSection::Scripts;
+                draft.prepare(window, cx);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            started.elapsed().as_secs_f64() * 1000.
+        });
+        let editor = cx.update(|window, cx| {
+            draft.update(cx, |draft, cx| {
+                let editor = draft.script_state(window, cx);
+                window.focus(&editor.read(cx).focus_handle(cx), cx);
+                editor
+            })
+        });
+        cx.simulate_input("pm.");
+
+        // Draw at 120 Hz, as a busy UI would, until completions arrive.
+        let started = Instant::now();
+        let mut frames = Vec::new();
+
+        while !cx.read(|cx| editor.read(cx).completion_menu_state().open) {
+            assert!(started.elapsed() < Duration::from_secs(20));
+            let frame = Instant::now();
+            cx.executor().advance_clock(Duration::from_millis(8));
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+            frames.push(frame.elapsed().as_secs_f64() * 1000.);
+            smol::Timer::after(Duration::from_millis(8)).await;
+        }
+
+        let ready = started.elapsed().as_secs_f64() * 1000.;
+        frames.sort_by(f64::total_cmp);
+        let count = frames.len();
+
+        eprintln!(
+            "{load}: open {open:.2} ms, completions after {ready:.0} ms; {count} frames meanwhile: p99 {:.2}, max {:.2}; over 8.33 ms: {}",
+            frames[(count * 99).div_ceil(100) - 1],
+            frames[count - 1],
+            frames.iter().filter(|&&x| x > 1000. / 120.).count()
         );
     }
 }

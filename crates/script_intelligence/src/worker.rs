@@ -1,10 +1,12 @@
 use std::{
     collections::VecDeque,
+    mem,
     sync::{
         Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -17,6 +19,8 @@ use super::compiler::Compiler;
 
 const SOURCE_LIMIT: usize = 256 * 1024;
 const QUEUE_LIMIT: usize = 16;
+// Release the compiler after scripts have not been edited for this long.
+const IDLE_LIMIT: Duration = Duration::from_secs(5 * 60);
 
 struct Query {
     source: String,
@@ -36,10 +40,22 @@ impl Drop for CancelOnDrop {
 }
 
 #[derive(Default)]
+struct Pending {
+    queries: VecDeque<Query>,
+    warm_up: bool,
+}
+
+#[derive(Default)]
 struct Queue {
-    pending: Mutex<VecDeque<Query>>,
+    pending: Mutex<Pending>,
     available: Condvar,
     capacity: Event,
+}
+
+enum Work {
+    Query(Query),
+    WarmUp,
+    Idle,
 }
 
 impl Queue {
@@ -51,14 +67,14 @@ impl Queue {
 
             {
                 let mut pending = self.pending.lock().unwrap();
-                pending.retain(|query| {
+                pending.queries.retain(|query| {
                     !query.cancelled.load(Ordering::Relaxed) && !query.reply.is_canceled()
                 });
 
-                if pending.len() < QUEUE_LIMIT {
-                    pending.push_back(query);
+                if pending.queries.len() < QUEUE_LIMIT {
+                    pending.queries.push_back(query);
                     self.available.notify_one();
-                    self.capacity.notify(QUEUE_LIMIT - pending.len());
+                    self.capacity.notify(QUEUE_LIMIT - pending.queries.len());
 
                     return;
                 }
@@ -70,16 +86,51 @@ impl Queue {
         }
     }
 
-    fn next(&self) -> Query {
-        let mut pending = self.pending.lock().unwrap();
+    fn warm_up(&self) {
+        self.pending.lock().unwrap().warm_up = true;
+        self.available.notify_one();
+    }
 
-        loop {
-            if let Some(query) = pending.pop_front() {
-                self.capacity.notify(1);
-                return query;
-            }
+    /// Wait for a query or warm-up request, or report that none arrived
+    /// within `idle`.
+    fn next(&self, idle: Duration) -> Work {
+        let pending = self.pending.lock().unwrap();
+        let (mut pending, _) = self
+            .available
+            .wait_timeout_while(pending, idle, |pending| {
+                pending.queries.is_empty() && !pending.warm_up
+            })
+            .unwrap();
 
-            pending = self.available.wait(pending).unwrap();
+        if let Some(query) = pending.queries.pop_front() {
+            self.capacity.notify(1);
+            Work::Query(query)
+        } else if mem::take(&mut pending.warm_up) {
+            Work::WarmUp
+        } else {
+            Work::Idle
+        }
+    }
+}
+
+/// Return a released compiler's memory to the system. The allocator would
+/// otherwise keep the freed pages for the process.
+fn release_freed_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim only releases memory that is already free.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+        }
+
+        // SAFETY: A null zone asks every malloc zone to release free pages.
+        unsafe {
+            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
         }
     }
 }
@@ -96,41 +147,63 @@ fn worker() -> Result<&'static Arc<Queue>> {
                 .name("script-typescript".into())
                 .stack_size(16 * 1024 * 1024)
                 .spawn(move || {
-                    // Compiler and static libraries initialize once, off the UI
-                    // thread, before processing editor requests.
-                    let mut compiler = Compiler::new();
+                    // The compiler and static libraries load off the UI thread
+                    // on warm-up or the first query, and unload when idle.
+                    let mut compiler = None;
+                    // Failed queries drop their compiler before the worker
+                    // goes idle, so track memory to release separately.
+                    let mut used_since_release = false;
 
                     loop {
-                        let query = worker_queue.next();
+                        let query = match worker_queue.next(IDLE_LIMIT) {
+                            Work::Query(query) => query,
+                            Work::WarmUp => {
+                                if compiler.is_none() {
+                                    // The next query retries and reports a failure.
+                                    used_since_release = true;
+                                    compiler = Compiler::new().ok();
+                                }
+                                continue;
+                            }
+                            Work::Idle => {
+                                compiler = None;
+                                if mem::take(&mut used_since_release) {
+                                    release_freed_memory();
+                                }
+                                continue;
+                            }
+                        };
+
                         if query.cancelled.load(Ordering::Relaxed) || query.reply.is_canceled() {
                             continue;
                         }
 
-                        let result =
-                            compiler
-                                .as_mut()
-                                .map_err(|error| error.clone())
-                                .and_then(|compiler| {
-                                    let cancelled = query.cancelled.clone();
-                                    compiler.query(
-                                        &query.source,
-                                        query.offset,
-                                        query.phase,
-                                        query.kind,
-                                        move || cancelled.load(Ordering::Relaxed),
-                                    )
-                                });
-                        let failed = result.is_err();
+                        used_since_release = true;
+                        let loaded = compiler.take().map_or_else(Compiler::new, Ok);
+                        let result = loaded.and_then(|mut loaded| {
+                            let cancelled = query.cancelled.clone();
+                            let result = loaded.query(
+                                &query.source,
+                                query.offset,
+                                query.phase,
+                                query.kind,
+                                move || cancelled.load(Ordering::Relaxed),
+                            );
+
+                            // Hard interrupts/errors can leave a partially
+                            // updated TS program, so the next query loads a
+                            // fresh one. Dropping this one first means two
+                            // never coexist. Cooperative TS cancellation
+                            // returns Ok(None) and safely keeps the warm compiler.
+                            if result.is_ok() {
+                                compiler = Some(loaded);
+                            }
+
+                            result
+                        });
                         let _ = query.reply.send(result.and_then(|result| {
                             result.ok_or_else(|| "Script language query was cancelled".into())
                         }));
-
-                        if failed {
-                            // Hard interrupts/errors can leave a partially
-                            // updated TS program. Cooperative TS cancellation
-                            // returns Ok(None) and safely keeps the warm compiler.
-                            compiler = Compiler::new();
-                        }
                     }
                 })
                 .map_err(|error| format!("Unable to start script language service: {error}"))?;
@@ -141,9 +214,12 @@ fn worker() -> Result<&'static Arc<Queue>> {
         .map_err(|error| anyhow!(error.clone()))
 }
 
-/// Start parsing the bundled compiler/libraries while the editor becomes visible.
+/// Load the bundled compiler/libraries while a script editor becomes visible
+/// or focused, unless they are already loaded.
 pub fn warm_up() {
-    let _ = worker();
+    if let Ok(queue) = worker() {
+        queue.warm_up();
+    }
 }
 
 async fn query(
@@ -212,6 +288,14 @@ pub async fn hover(source: String, offset: usize, phase: ScriptPhase) -> Result<
 mod tests {
     use super::*;
 
+    fn next_query(queue: &Queue) -> Query {
+        let Work::Query(query) = queue.next(Duration::ZERO) else {
+            panic!("expected a query");
+        };
+
+        query
+    }
+
     fn query(source: &str) -> (Query, oneshot::Receiver<Result<String, String>>) {
         let (reply, receiver) = oneshot::channel();
         let query = Query {
@@ -241,8 +325,8 @@ mod tests {
         let (latest, _receiver) = query("latest input");
         smol::block_on(queue.push(latest));
 
-        assert_eq!(queue.next().source, "latest input");
-        assert!(queue.pending.lock().unwrap().is_empty());
+        assert_eq!(next_query(&queue).source, "latest input");
+        assert!(queue.pending.lock().unwrap().queries.is_empty());
     }
 
     #[test]
@@ -259,17 +343,32 @@ mod tests {
         let (latest, _receiver) = query("final input");
         let mut enqueue = Box::pin(queue.push(latest));
         assert!(smol::block_on(smol::future::poll_once(&mut enqueue)).is_none());
-        assert_eq!(queue.pending.lock().unwrap().len(), QUEUE_LIMIT);
+        assert_eq!(queue.pending.lock().unwrap().queries.len(), QUEUE_LIMIT);
 
         // The waiting future resumes after a pop and retains its actual query.
-        assert_eq!(queue.next().source, "other editor");
+        assert_eq!(next_query(&queue).source, "other editor");
         smol::block_on(enqueue);
 
         for _ in 1..QUEUE_LIMIT {
-            assert_eq!(queue.next().source, "other editor");
+            assert_eq!(next_query(&queue).source, "other editor");
         }
 
-        assert_eq!(queue.next().source, "final input");
-        assert!(queue.pending.lock().unwrap().is_empty());
+        assert_eq!(next_query(&queue).source, "final input");
+        assert!(queue.pending.lock().unwrap().queries.is_empty());
+    }
+
+    #[test]
+    fn idle_worker_is_told_to_unload_until_a_warm_up_or_query_arrives() {
+        let queue = Queue::default();
+        assert!(matches!(queue.next(Duration::ZERO), Work::Idle));
+
+        queue.warm_up();
+        assert!(matches!(queue.next(Duration::ZERO), Work::WarmUp));
+        assert!(matches!(queue.next(Duration::ZERO), Work::Idle));
+
+        let (latest, _receiver) = query("latest input");
+        smol::block_on(queue.push(latest));
+        assert_eq!(next_query(&queue).source, "latest input");
+        assert!(matches!(queue.next(Duration::ZERO), Work::Idle));
     }
 }

@@ -5,12 +5,15 @@ use std::{
 
 use flate2::read::GzDecoder;
 use request::ScriptPhase;
-use rquickjs::{Context, Function, Runtime};
+use rquickjs::{Context, Function, Module, Runtime};
 
 const MEMORY_LIMIT: usize = 128 * 1024 * 1024;
 const INITIALIZATION_LIMIT: Duration = Duration::from_secs(15);
 const QUERY_LIMIT: Duration = Duration::from_secs(2);
 const RESPONSE_LIMIT: usize = 1024 * 1024;
+
+// Compiled from the vendored compiler by build.rs.
+static COMPILER_BYTECODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/typescript.bin"));
 
 pub(crate) struct Compiler {
     context: Context,
@@ -21,9 +24,9 @@ fn decompress(bytes: &[u8]) -> Result<String, String> {
     let mut source = String::new();
 
     GzDecoder::new(bytes)
-        .take(12 * 1024 * 1024)
+        .take(1024 * 1024)
         .read_to_string(&mut source)
-        .map_err(|error| format!("Unable to load embedded TypeScript: {error}"))?;
+        .map_err(|error| format!("Unable to load embedded TypeScript libraries: {error}"))?;
 
     Ok(source)
 }
@@ -41,14 +44,15 @@ impl Compiler {
 
         context.with(|cx| {
             let load = || -> rquickjs::Result<()> {
-                let compiler = decompress(include_bytes!("assets/typescript-5.9.3.js.gz"))
-                    .map_err(|error| rquickjs::Exception::throw_message(&cx, &error))?;
+                // SAFETY: build.rs wrote this bytecode with the same QuickJS
+                // version; Cargo resolves one rquickjs 0.14 for both.
+                let compiler = unsafe { Module::load(cx.clone(), COMPILER_BYTECODE)? };
 
                 // Only bundled compiler/host code is evaluated. Editor source is
                 // passed to ScriptSnapshot as data and is never executed.
-                cx.eval::<(), _>(compiler)?;
+                compiler.eval()?.1.finish::<()>()?;
                 let setup: Function = cx.eval(include_str!("host.js"))?;
-                let libraries = decompress(include_bytes!("assets/lib.es2023.json.gz"))
+                let libraries = decompress(include_bytes!("assets/libraries.json.gz"))
                     .map_err(|error| rquickjs::Exception::throw_message(&cx, &error))?;
                 let query: Function = setup.call((libraries, include_str!("pm.d.ts")))?;
 
