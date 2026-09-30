@@ -1,11 +1,12 @@
 # GPUI Kit editor fixes
 
-The workspace pins seven changed files on top of GPUI Kit **0.6.2**:
+The workspace pins eight changed files on top of GPUI Kit **0.6.2**:
 
 - Upstream tag: `v0.6.2`, commit `122c36f7be19ea0e179107c067b679efccb7d66a`.
-- Patched commit: [`45c222ca2a43bcaa67a4c43f0cba62b1e2e74461`](https://github.com/gregor-tokarev/gpui-kit/commit/45c222ca2a43bcaa67a4c43f0cba62b1e2e74461).
+- Patched commit: [`1e9cb549333eae28a963acfce4b114e04085be09`](https://github.com/gregor-tokarev/gpui-kit/commit/1e9cb549333eae28a963acfce4b114e04085be09).
 - Completion changes: [0001-current-frame-completion-position.patch](0001-current-frame-completion-position.patch).
 - Query reuse: [0002-cache-syntax-queries.patch](0002-cache-syntax-queries.patch), applied after the first patch.
+- Vim cursor support: [0003-vim-caret-and-selection-direction.patch](0003-vim-caret-and-selection-direction.patch), applied after the second patch.
 
 Inputs previously published their caret geometry during paint, after popups
 had already chosen a position using the previous frame. Typing therefore
@@ -45,6 +46,17 @@ Request Eagle compiles JSON and JavaScript queries on the background executor
 alongside preference loading and awaits both before opening its first workspace.
 This avoids compiling the same JavaScript queries during each editor's first
 redraw, including when opening an empty Scripts editor immediately after launch.
+
+The third patch supports Vim's block cursor, which Request Eagle paints on the
+character under the Vim cursor, including the active end of a Visual selection.
+`set_selected_range` always leaves the caret at the end of the range and scrolls
+to its start, so a selection extended upward kept the caret at the bottom, and a
+long selection left the Vim cursor off-screen. The patch adds `set_caret_hidden`,
+which hides only the painted caret, and `set_selected_range_with_direction`,
+which can place the caret at the start of the range and scrolls the caret into
+view. Base tests cover both; Request Eagle's Vim tests check the block position
+in Visual and Visual Line mode and that long selections scroll with the Vim
+cursor.
 
 When upstream includes equivalent behavior, remove these overrides and this
 directory together, retaining the app regression tests.

@@ -3,7 +3,7 @@ use gpui_kit::*;
 
 use super::{Vim, motions::next};
 
-/// Paint after the editor so the block uses this frame's caret geometry,
+/// Paint after the editor so the block uses this frame's text layout,
 /// including wrapping, the line-number gutter, and scrolling.
 pub(crate) fn cursor(vim: &Entity<Vim>) -> impl IntoElement {
     let vim = vim.clone();
@@ -44,14 +44,16 @@ pub(super) struct BlockCursor {
 }
 
 pub(super) fn layout(vim: &Entity<Vim>, window: &Window, cx: &App) -> Option<BlockCursor> {
-    let editor = vim.read(cx).normal_editor()?.read(cx);
+    let (editor, offset) = vim.read(cx).block_cursor(cx)?;
+    let editor = editor.read(cx);
 
-    if !editor.focus_handle(cx).is_focused(window) || !editor.selected_range().is_empty() {
+    if !editor.focus_handle(cx).is_focused(window) {
         return None;
     }
 
-    let (caret, line_height) = editor.cursor_layout()?;
-    let offset = editor.cursor();
+    // A Visual selection keeps the editor's caret at one of its edges, so the
+    // block is placed on the Vim cursor's character rather than on the caret.
+    let character_bounds = editor.range_to_bounds(&(offset..offset))?;
     let text = editor.text();
     let character = match text.char_at(offset) {
         None | Some('\n' | '\r' | '\t') => " ".to_owned(),
@@ -77,11 +79,8 @@ pub(super) fn layout(vim: &Entity<Vim>, window: &Window, cx: &App) -> Option<Blo
         None,
     );
     let bounds = Bounds::new(
-        point(
-            caret.left(),
-            caret.top() + editor.scroll_offset().y - (line_height - caret.size.height) / 2.,
-        ),
-        size(glyph.width, line_height),
+        character_bounds.origin,
+        size(glyph.width, character_bounds.size.height),
     );
 
     Some(BlockCursor {

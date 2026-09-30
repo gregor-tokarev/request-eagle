@@ -58,8 +58,21 @@ pub(crate) struct Vim {
 }
 
 impl Vim {
-    pub(super) fn normal_editor(&self) -> Option<&Entity<EditorState>> {
-        (self.enabled && self.mode == Mode::Normal).then_some(&self.editor)
+    /// The editor and offset that show a block cursor outside Insert mode.
+    pub(super) fn block_cursor(&self, cx: &App) -> Option<(&Entity<EditorState>, usize)> {
+        let cursor = match self.mode {
+            _ if !self.enabled => return None,
+            Mode::Normal => self.editor.read(cx).cursor(),
+            Mode::Visual { cursor, .. } => cursor,
+            Mode::Insert => return None,
+        };
+
+        Some((&self.editor, cursor))
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_normal(&self) -> bool {
+        self.enabled && self.mode == Mode::Normal
     }
 
     pub(crate) fn new(editor: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
@@ -242,6 +255,11 @@ impl Vim {
         let changed = self.mode.label() != mode.label();
         self.mode = mode;
 
+        // The block cursor replaces the editor's caret outside Insert mode.
+        let caret_hidden = self.enabled && mode != Mode::Insert;
+        self.editor
+            .update(cx, |editor, cx| editor.set_caret_hidden(caret_hidden, cx));
+
         // The editor invalidates itself when its selection moves. This view
         // only displays the mode, so cursor motions need no second invalidation.
         if changed {
@@ -264,8 +282,11 @@ impl Vim {
     }
 
     fn select(&mut self, range: Range<usize>, cx: &mut App) {
-        self.editor
-            .update(cx, |editor, cx| editor.set_selected_range(range, cx));
+        // A Visual selection scrolls with its active end, like the Vim cursor.
+        let reversed = matches!(self.mode, Mode::Visual { anchor, cursor, .. } if cursor < anchor);
+        self.editor.update(cx, |editor, cx| {
+            editor.set_selected_range_with_direction(range, reversed, cx)
+        });
         self.selection = self.editor.read(cx).selected_range();
     }
 
