@@ -14,6 +14,7 @@ mod script_editor;
 mod script_intelligence;
 mod section_count;
 mod variable_input;
+mod variable_table;
 mod variables;
 mod vim;
 

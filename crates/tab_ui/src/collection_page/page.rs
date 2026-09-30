@@ -14,8 +14,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::variables::{VariableTable, VariablesChanged};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
+use crate::variable_table::{VariableTable, VariablesChanged};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CollectionSection {
@@ -169,7 +169,15 @@ impl CollectionPage {
     ) -> Entity<VariableTable> {
         self.variables
             .get_or_insert_with(|| {
-                let table = cx.new(|cx| VariableTable::new(&self.draft.variables, window, cx));
+                let table = cx.new(|cx| {
+                    VariableTable::new(
+                        "collection-variable",
+                        "name",
+                        &self.draft.variables,
+                        window,
+                        cx,
+                    )
+                });
                 self._subscriptions.push(cx.subscribe(
                     &table,
                     |this, _, event: &VariablesChanged, cx| {

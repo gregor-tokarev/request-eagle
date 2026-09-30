@@ -7,13 +7,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
+use crate::variable_table::{VariableTable, VariablesChanged};
 use crate::{Environments, EnvironmentsEvent};
-
-struct VariableRow {
-    key: Entity<InputState>,
-    value: Entity<InputState>,
-    _subscriptions: [Subscription; 2],
-}
 
 /// Edits one global environment's name and variables in a tab. Variables are
 /// written to the environment file only when saved.
@@ -25,7 +20,7 @@ pub struct EnvironmentEditor {
     load_error: Option<String>,
     error: Option<String>,
     name_input: Option<Entity<InputState>>,
-    rows: Vec<VariableRow>,
+    table: Option<Entity<VariableTable>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,7 +44,7 @@ impl EnvironmentEditor {
             load_error,
             error: None,
             name_input: None,
-            rows: Vec::new(),
+            table: None,
             _subscriptions: Vec::new(),
         }
     }
@@ -177,58 +172,22 @@ impl EnvironmentEditor {
 
         let active_subscription = cx.observe(&self.environments, |_, _, cx| cx.notify());
 
+        let table =
+            cx.new(|cx| VariableTable::new("environment", "key", &self.variables, window, cx));
+        let table_subscription = cx.subscribe(&table, |this, _, event: &VariablesChanged, cx| {
+            this.variables = event.0.clone();
+            this.error = None;
+            cx.notify();
+        });
+
         self.name_input = Some(name);
-        self._subscriptions = vec![name_subscription, rename_subscription, active_subscription];
-
-        for (key, value) in self.variables.clone() {
-            self.append_row(&key, &value, window, cx);
-        }
-        self.append_row("", "", window, cx);
-    }
-
-    fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let key = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Add variable")
-                .default_value(key.to_owned())
-        });
-        let value = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Value")
-                .default_value(value.to_owned())
-        });
-        let subscriptions = [&key, &value].map(|input| {
-            cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    if this.rows.last().is_some_and(|row| populated(row, cx)) {
-                        this.append_row("", "", window, cx);
-                    }
-
-                    this.sync(cx);
-                }
-            })
-        });
-
-        self.rows.push(VariableRow {
-            key,
-            value,
-            _subscriptions: subscriptions,
-        });
-    }
-
-    fn sync(&mut self, cx: &mut Context<Self>) {
-        self.variables = self
-            .rows
-            .iter()
-            .filter_map(|row| {
-                let key = row.key.read(cx).value().trim().to_owned();
-
-                (!key.is_empty()).then(|| (key, row.value.read(cx).value().to_string()))
-            })
-            .collect();
-        self.error = None;
-
-        cx.notify();
+        self.table = Some(table);
+        self._subscriptions = vec![
+            name_subscription,
+            rename_subscription,
+            active_subscription,
+            table_subscription,
+        ];
     }
 
     fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -293,102 +252,6 @@ impl EnvironmentEditor {
                     })),
             )
     }
-
-    fn table(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        v_flex()
-            .debug_selector(|| "environment-variables-table".into())
-            .w_full()
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(cx.theme().radius_tokens().lg)
-            .overflow_hidden()
-            .child(
-                h_flex()
-                    .h_8()
-                    .bg(cx.theme().table_head)
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(cx.theme().muted_foreground)
-                    .children(["Variable", "Value"].map(|label| {
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .px_2()
-                            .when(label == "Variable", |cell| cell.border_r_1())
-                            .border_color(cx.theme().border)
-                            .flex()
-                            .items_center()
-                            .child(label)
-                    })),
-            )
-            .children(self.rows.iter().enumerate().map(|(index, row)| {
-                let populated = populated(row, cx);
-
-                h_flex()
-                    .id(("environment-variable", row.key.entity_id()))
-                    .h_8()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .hover(|row| row.bg(cx.theme().table_hover))
-                    .child(
-                        h_flex()
-                            .debug_selector(move || format!("environment-key-{index}"))
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .border_r_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Input::new(&row.key)
-                                        .small()
-                                        .appearance(false)
-                                        .aria_label(format!("Variable {}", index + 1)),
-                                ),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .debug_selector(move || format!("environment-value-{index}"))
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Input::new(&row.value)
-                                        .small()
-                                        .appearance(false)
-                                        .aria_label(format!("Value {}", index + 1)),
-                                ),
-                            )
-                            .when(populated, |cell| {
-                                cell.child(
-                                    Button::new("remove-variable")
-                                        .debug_selector(move || {
-                                            format!("environment-remove-{index}")
-                                        })
-                                        .mr_1()
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .accessibility_label(format!(
-                                            "Remove variable {}",
-                                            index + 1
-                                        ))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.rows.remove(index);
-                                            this.sync(cx);
-                                        })),
-                                )
-                            }),
-                    )
-            }))
-    }
-}
-
-fn populated(row: &VariableRow, cx: &App) -> bool {
-    !row.key.read(cx).value().is_empty() || !row.value.read(cx).value().is_empty()
 }
 
 fn sorted(entries: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
@@ -434,7 +297,7 @@ impl Render for EnvironmentEditor {
                     )
                 },
             )
-            .child(self.table(cx))
+            .children(self.table.clone())
     }
 }
 

@@ -1,5 +1,4 @@
 mod page;
-mod variables;
 
 #[cfg(test)]
 mod tests;

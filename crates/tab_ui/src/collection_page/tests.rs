@@ -109,7 +109,7 @@ fn scripts_section_edits_collection_scripts(cx: &mut TestAppContext) {
     let scripts = element_bounds(cx, "collection-section-Scripts").unwrap();
     cx.simulate_click(scripts.center(), Modifiers::default());
     assert!(element_bounds(cx, "collection-scripts").is_some());
-    assert!(element_bounds(cx, "collection-variables-table").is_none());
+    assert!(element_bounds(cx, "collection-variable-table").is_none());
 
     cx.update(|window, cx| {
         page.update(cx, |page, cx| {
