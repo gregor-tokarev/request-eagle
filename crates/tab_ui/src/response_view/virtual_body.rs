@@ -12,7 +12,7 @@ const SCROLLBAR: Rems = rems(0.75);
 /// A read-only viewport over the complete response. A compact list of byte
 /// offsets indexes wrapped rows; only visible rows become shaped glyph layouts.
 /// In particular, a one-line JSON response never becomes one giant ShapedLine.
-pub(super) struct VirtualBody {
+pub(crate) struct VirtualBody {
     text: Rope,
     pub(super) source: SharedString,
     pub(super) focus: FocusHandle,
@@ -40,7 +40,7 @@ pub(super) struct PaintedRow {
 }
 
 impl VirtualBody {
-    pub(super) fn new(source: SharedString, wrap: bool, cx: &mut App) -> Self {
+    pub(crate) fn new(source: SharedString, wrap: bool, cx: &mut App) -> Self {
         let font = font(cx.theme().mono_font_family.clone());
         let text = Rope::from(source.as_ref());
         let max_line_bytes = source.split('\n').map(str::len).max().unwrap_or(0);
@@ -66,7 +66,7 @@ impl VirtualBody {
         }
     }
 
-    pub(super) fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
         self.reveal = Some(self.row_range(self.first_row()).start);
         self.wrap = wrap;
         self.layout_width = None;

@@ -95,7 +95,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         let view = view.read(cx);
         let tab = &view.tabs[0];
 
-        assert_eq!(tab.method, Some("GET"));
+        assert_eq!(tab.label, Some("GET"));
         assert!(tab.location(cx).is_none());
 
         tab.draft()
@@ -127,7 +127,7 @@ fn new_tabs_start_as_independent_empty_get_requests(cx: &mut TestAppContext) {
         let draft = tab.draft();
 
         assert_eq!(view.selected, Some(1));
-        assert_eq!(tab.method, Some("GET"));
+        assert_eq!(tab.label, Some("GET"));
         assert!(tab.location(cx).is_none());
         assert_ne!(draft, first);
         assert!(draft.read(cx).request.path.is_empty());
@@ -187,7 +187,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
         let draft = tab.draft();
 
         assert_eq!(view.selected, Some(2));
-        assert_eq!(tab.method, Some("GET"));
+        assert_eq!(tab.label, Some("GET"));
         assert!(tab.location(cx).is_none());
         assert!(matches!(
             draft.read(cx).request.method,
@@ -201,7 +201,7 @@ fn plus_button_does_not_assign_a_new_request_to_the_active_collection(cx: &mut T
                 .as_deref(),
             Some(saved_path)
         );
-        assert_eq!(view.tabs[1].method, Some("POST"));
+        assert_eq!(view.tabs[1].label, Some("POST"));
     });
     // A resizer's settling frame can replay the cached page. Refresh before
     // inspecting debug selectors, which are collected during a fresh layout.
@@ -251,7 +251,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
 
     cx.update(|_, cx| draft.update(cx, |draft, cx| draft.set_method(request::Method::Post, cx)));
     cx.read(|cx| {
-        assert_eq!(view.read(cx).tabs[0].method, Some("POST"));
+        assert_eq!(view.read(cx).tabs[0].label, Some("POST"));
         assert!(view.read(cx).tabs[0].location(cx).is_none());
         assert_eq!(
             draft.read(cx).request.headers,
@@ -269,7 +269,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         let view = view.read(cx);
         let new_draft = view.tabs[1].draft();
 
-        assert_eq!(view.tabs[1].method, Some("GET"));
+        assert_eq!(view.tabs[1].label, Some("GET"));
         assert!(new_draft.read(cx).request.headers.is_empty());
         assert!(new_draft.read(cx).request.query.is_empty());
         assert!(new_draft.read(cx).request.body.is_none());
@@ -324,7 +324,7 @@ fn tab_shortcuts_work_from_sidebar_and_wrap(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).tabs.len(), 1);
         assert_eq!(view.read(cx).tabs[0].id, 4);
         assert_eq!(view.read(cx).selected, Some(0));
-        assert_eq!(view.read(cx).tabs[0].method, Some("GET"));
+        assert_eq!(view.read(cx).tabs[0].label, Some("GET"));
         assert!(view.read(cx).tabs[0].location(cx).is_none());
     });
 }
@@ -556,7 +556,7 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
         assert_eq!(view.tabs.len(), 2);
         assert_eq!(view.selected, Some(1));
         assert_eq!(view.tabs[1].title, "Get resource 0");
-        assert_eq!(view.tabs[1].method, Some("GET"));
+        assert_eq!(view.tabs[1].label, Some("GET"));
 
         view.tabs[1].draft()
     });
@@ -653,7 +653,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
         assert_eq!(view.read(cx).tabs.len(), 3);
         assert_eq!(view.read(cx).selected, Some(1));
         assert_eq!(view.read(cx).tabs[1].title, "Renamed request");
-        assert_eq!(view.read(cx).tabs[1].method, Some("GET"));
+        assert_eq!(view.read(cx).tabs[1].label, Some("GET"));
         assert_eq!(view.read(cx).tabs[1].draft(), first_page);
         let draft = view.read(cx).tabs[1].draft();
         assert_eq!(
@@ -665,7 +665,7 @@ fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestA
             "Renamed collection"
         );
         assert_eq!(view.read(cx).tabs[2].title, "Same name");
-        assert_eq!(view.read(cx).tabs[2].method, Some("POST"));
+        assert_eq!(view.read(cx).tabs[2].label, Some("POST"));
     });
 }
 

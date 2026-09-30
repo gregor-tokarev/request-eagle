@@ -6,7 +6,6 @@ use std::{
 use collection::{CollectionRegistry, Entry, FileEntry};
 
 use gpui_kit::SharedString;
-use request::Request;
 
 use super::search::SearchIndex;
 
@@ -167,7 +166,7 @@ impl CollectionTree {
     }
 }
 
-fn path_name(path: &Path) -> String {
+pub(super) fn path_name(path: &Path) -> String {
     path.file_name()
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
@@ -220,17 +219,12 @@ fn add_entries(
     items[parent].end = items.len();
 }
 
-/// A request row's method, or gRPC, and the text the sidebar filter matches.
+/// A request row's method or protocol and the text the sidebar filter matches.
 fn request_row(file: &FileEntry) -> (&'static str, String) {
-    match &file.request {
-        Request::Http(request) => {
-            let method = request.method.as_str();
+    let label = file.request.label();
 
-            (method, format!("{method} {} {}", file.name, request.path))
-        }
-        Request::Grpc(request) => (
-            "gRPC",
-            format!("gRPC {} {} {}", file.name, request.url, request.method),
-        ),
-    }
+    (
+        label,
+        format!("{label} {} {}", file.name, file.request.url()),
+    )
 }

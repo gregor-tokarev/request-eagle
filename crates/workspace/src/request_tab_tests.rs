@@ -62,7 +62,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].title, "Create item");
-        assert_eq!(tabs.tabs[1].method, Some("POST"));
+        assert_eq!(tabs.tabs[1].label, Some("POST"));
         assert_eq!(
             tabs.tabs[1]
                 .location(cx)
@@ -145,7 +145,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].draft(), draft);
-        assert_eq!(tabs.tabs[1].method, Some("PUT"));
+        assert_eq!(tabs.tabs[1].label, Some("PUT"));
         assert_eq!(draft.read(cx).request.headers[0].1, "updated");
     });
     assert!(

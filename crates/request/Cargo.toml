@@ -36,6 +36,8 @@ tonic = { version = "0.14", default-features = false, features = ["channel", "co
 tonic-prost = "0.14"
 tonic-reflection = { version = "0.14", default-features = false }
 tower = { version = "0.5", features = ["util"] }
+# WebSocket framing over the connection upgraded by the HTTP client.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
 
 [dev-dependencies]

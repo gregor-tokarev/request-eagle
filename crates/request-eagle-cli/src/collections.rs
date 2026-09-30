@@ -70,6 +70,9 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
             return Ok(request_json(registry.file(&path).context("Created request was not found")?));
         }
         Command::RequestsUpdate { path, expected_id, request } => {
+            if let Some(Request::WebSocket(_)) = registry.file(&path).map(|file| &file.request) {
+                bail!("requests.update edits HTTP and gRPC requests, and this is a WebSocket request");
+            }
             registry.update_request(&path, &expected_id, request.into())?;
             return Ok(request_json(registry.file(&path).context("Updated request was not found")?));
         }
@@ -91,12 +94,17 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
 }
 
 fn request_json(file: &FileEntry) -> Value {
-    let request = match &file.request {
-        Request::Http(request) => json!(RequestInput::from(request)),
-        Request::Grpc(request) => json!(GrpcRequestInput::from(request)),
-    };
-
-    json!({"path": file.path, "id": file.id, "name": file.name, "request": request})
+    match &file.request {
+        Request::Http(request) => {
+            json!({"path": file.path, "id": file.id, "name": file.name, "request": RequestInput::from(request)})
+        }
+        Request::Grpc(request) => {
+            json!({"path": file.path, "id": file.id, "name": file.name, "request": GrpcRequestInput::from(request)})
+        }
+        Request::WebSocket(request) => {
+            json!({"path": file.path, "id": file.id, "name": file.name, "websocket": request})
+        }
+    }
 }
 
 impl From<SavedRequest> for Request {
@@ -130,6 +138,9 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
                     }
                     Request::Grpc(request) => {
                         json!({"path": file.path, "id": file.id, "name": file.name, "protocol": "grpc", "method": request.method, "url": request.url, "collection": collection})
+                    }
+                    Request::WebSocket(request) => {
+                        json!({"path": file.path, "id": file.id, "name": file.name, "protocol": "websocket", "url": request.url, "collection": collection})
                     }
                 };
                 if query.is_empty() || value.to_string().to_lowercase().contains(query) {

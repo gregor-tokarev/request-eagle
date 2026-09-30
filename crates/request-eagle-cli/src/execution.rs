@@ -37,6 +37,11 @@ pub async fn run(
 
             return run_grpc(path, &collection.path, request, values, &settings).await;
         }
+        request::Request::WebSocket(_) => {
+            bail!(
+                "requests.run sends HTTP and gRPC requests. Open WebSocket requests in the app to connect"
+            )
+        }
     };
     if (!request.scripts.is_empty() || !collection.scripts().is_empty()) && !trust_scripts {
         bail!(

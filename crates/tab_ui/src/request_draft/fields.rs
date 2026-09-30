@@ -61,7 +61,7 @@ impl RequestFields {
         fields
     }
 
-    pub(super) fn set_generated_headers(
+    pub(crate) fn set_generated_headers(
         &mut self,
         headers: &[(String, String)],
         cx: &mut Context<Self>,

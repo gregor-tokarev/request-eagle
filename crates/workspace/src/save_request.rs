@@ -17,14 +17,15 @@ pub(crate) fn open(
     cx: &mut App,
 ) {
     let dialog = cx.new(|cx| {
+        // A gRPC request is named after its method, such as SayHello.
         let target = match &request {
-            request::Request::Http(request) => request.path.trim(),
-            // The method name, such as SayHello, or else the server.
-            request::Request::Grpc(request) => request
+            request::Request::Grpc(grpc) => grpc
                 .method
                 .rsplit_once('/')
-                .map_or(request.url.trim(), |(_, method)| method.trim()),
-        };
+                .map_or(request.url(), |(_, method)| method),
+            _ => request.url(),
+        }
+        .trim();
         let suggested = if target.is_empty() {
             "New Request"
         } else {

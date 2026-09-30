@@ -98,9 +98,18 @@ impl PageTab {
         draft.clone()
     }
 
+    /// The WebSocket draft shown in this tab.
+    pub(crate) fn websocket(&self) -> gpui_kit::Entity<tab_ui::WebSocketDraft> {
+        let Page::WebSocket(draft) = &self.page else {
+            panic!("{} is not a WebSocket tab", self.title);
+        };
+
+        draft.clone()
+    }
+
     /// Where the tab's request is saved.
     pub(crate) fn location(&self, cx: &gpui_kit::App) -> Option<tab_ui::RequestLocation> {
-        self.draft().read(cx).location.clone()
+        self.page.location(cx).cloned()
     }
 }
 
@@ -298,4 +307,12 @@ fn sidebar_sections_fold_and_reopen(cx: &mut TestAppContext) {
     click(cx, "new-environment");
     assert!(height(cx, "environments-sidebar").is_some());
     cx.read(|cx| assert_eq!(layout.read(cx).main_view.read(cx).tabs.len(), 2));
+
+    // So does importing, which shows the imported collection in the tree.
+    click(cx, "collections-section");
+    assert_eq!(height(cx, "collections-sidebar"), None);
+    click(cx, "import-collection");
+    cx.run_until_parked();
+    assert!(height(cx, "collections-sidebar").is_some());
+    assert!(cx.debug_bounds("import-dialog").is_some());
 }

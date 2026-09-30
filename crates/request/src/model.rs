@@ -6,6 +6,28 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     Http(HttpRequest),
     Grpc(crate::GrpcRequest),
+    #[serde(rename = "websocket")]
+    WebSocket(WebSocketRequest),
+}
+
+impl Request {
+    /// The label shown before the request's name: its HTTP method or protocol.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Http(request) => request.method.as_str(),
+            Self::Grpc(_) => "gRPC",
+            Self::WebSocket(_) => "WS",
+        }
+    }
+
+    /// The address the request is sent to, as written.
+    pub fn url(&self) -> &str {
+        match self {
+            Self::Http(request) => &request.path,
+            Self::Grpc(request) => &request.url,
+            Self::WebSocket(request) => &request.url,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -57,6 +79,27 @@ impl From<HttpRequest> for Request {
 impl From<crate::GrpcRequest> for Request {
     fn from(request: crate::GrpcRequest) -> Self {
         Self::Grpc(request)
+    }
+}
+
+/// A WebSocket connection's address and handshake, and the message being composed.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WebSocketRequest {
+    /// A ws or wss URL, which may contain `{{variables}}`.
+    pub url: String,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query: Vec<(String, String)>,
+    /// Saved with the request, so it can be sent again after reopening it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub message: String,
+}
+
+impl From<WebSocketRequest> for Request {
+    fn from(request: WebSocketRequest) -> Self {
+        Self::WebSocket(request)
     }
 }
 

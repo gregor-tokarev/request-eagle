@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use environment::{EnvironmentSession, VariableError, VariableResolver};
 
-use crate::{GrpcRequest, HttpRequest, RequestScripts};
+use crate::{GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -95,7 +95,7 @@ impl RequestVariables {
         let mut resolve = |text: &str| {
             resolver
                 .resolve(text)
-                .map_err(|error| self.variable_error(error))
+                .map_err(|error| describe_error(error, self.environment_error.as_deref()))
         };
         let mut request = request.clone();
         request.url = resolve(&request.url)?;
@@ -112,16 +112,6 @@ impl RequestVariables {
         Ok(request)
     }
 
-    pub(crate) fn resolve_text(&self, text: &str) -> Result<String, String> {
-        VariableResolver::new(&self.values)
-            .resolve(text)
-            .map_err(|error| self.variable_error(error))
-    }
-
-    fn variable_error(&self, error: VariableError) -> String {
-        variable_error(error, self.environment_error.as_deref())
-    }
-
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
         let scripted = !request.scripts.pre_request.trim().is_empty();
         resolve_request(
@@ -133,6 +123,49 @@ impl RequestVariables {
             &mut BTreeMap::new(),
         )
     }
+
+    /// Resolve the URL, parameters and headers a WebSocket connects with.
+    pub(crate) fn resolve_websocket(
+        &self,
+        request: &WebSocketRequest,
+    ) -> Result<WebSocketRequest, String> {
+        let mut resolver = VariableResolver::new(&self.values);
+        let mut request = request.clone();
+        let mut resolve = || {
+            request.url = resolve_url(&request.url, &mut resolver)?;
+
+            for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
+                *key = resolver.resolve(key)?;
+                *value = resolver.resolve(value)?;
+            }
+
+            Ok(())
+        };
+
+        resolve()
+            .map(|()| request)
+            .map_err(|error| describe_error(error, self.environment_error.as_deref()))
+    }
+
+    /// Resolve one outgoing WebSocket or gRPC stream message.
+    pub(crate) fn resolve_text(&self, text: &str) -> Result<String, String> {
+        VariableResolver::new(&self.values)
+            .resolve(text)
+            .map_err(|error| describe_error(error, self.environment_error.as_deref()))
+    }
+}
+
+/// An unknown variable is most likely missing because its environment could
+/// not be read, so report that instead.
+fn describe_error(error: VariableError, environment_error: Option<&str>) -> String {
+    if let VariableError::Unknown(name) = &error
+        && !name.starts_with('$')
+        && let Some(message) = environment_error
+    {
+        return message.to_owned();
+    }
+
+    error.to_string()
 }
 
 /// `scripted` reports whether a collection or request pre-request script ran.
@@ -168,20 +201,7 @@ pub(crate) fn resolve_request(
             generated.insert(name.clone(), value.clone());
         }
     }
-    resolved.map_err(|error| variable_error(error, environment_error))
-}
-
-/// A missing variable is reported as the environment read failure that
-/// caused it, when there is one.
-fn variable_error(error: VariableError, environment_error: Option<&str>) -> String {
-    if let VariableError::Unknown(name) = &error
-        && !name.starts_with('$')
-        && let Some(message) = environment_error
-    {
-        return message.to_owned();
-    }
-
-    error.to_string()
+    resolved.map_err(|error| describe_error(error, environment_error))
 }
 
 impl HttpRequest {

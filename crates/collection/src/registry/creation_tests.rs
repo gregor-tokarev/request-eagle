@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Method, Request};
+use request::{Method, Request, WebSocketRequest};
 
 struct Fixture(PathBuf);
 
@@ -172,4 +172,46 @@ fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
             .unwrap()
             .contains("[request.scripts]")
     );
+}
+
+#[test]
+fn websocket_requests_save_and_reload_without_stale_fields() {
+    let fixture = Fixture::new();
+    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let collection = registry.create_collection().unwrap();
+    let mut request = WebSocketRequest {
+        url: "wss://{{host}}/feed".into(),
+        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        query: vec![("room".into(), "42".into())],
+        message: "{\"subscribe\":\"prices\"}".into(),
+    };
+    let path = registry
+        .create_request_with(&collection, "Prices", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.contains("type = \"websocket\""), "{content}");
+    let file = crate::FileEntry::from_path(&path).unwrap();
+    let Request::WebSocket(saved) = &file.request else {
+        panic!("expected a WebSocket request");
+    };
+    assert_eq!(saved, &request);
+    assert_eq!(file.request.label(), "WS");
+    assert_eq!(file.request.url(), "wss://{{host}}/feed");
+
+    // Emptied fields are removed from the file rather than kept from before.
+    request.headers.clear();
+    request.query.clear();
+    request.message.clear();
+    registry
+        .update_request(&path, &file.id, request.clone().into())
+        .unwrap();
+    let content = fs::read_to_string(&path).unwrap();
+    for field in ["headers", "query", "message"] {
+        assert!(!content.contains(field), "{field} remained in {content}");
+    }
+    let Request::WebSocket(saved) = crate::FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected a WebSocket request");
+    };
+    assert_eq!(saved, request);
 }

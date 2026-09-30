@@ -303,6 +303,8 @@ impl CollectionPanel {
                     let request_parent = path.clone();
                     let grpc_view = view.clone();
                     let grpc_parent = path.clone();
+                    let websocket_view = view.clone();
+                    let websocket_parent = path.clone();
                     let folder_view = view.clone();
                     let folder_parent = path.clone();
 
@@ -324,6 +326,17 @@ impl CollectionPanel {
                             window.defer(cx, move |window, cx| {
                                 let _ = view.update(cx, |this, cx| {
                                     this.create_grpc_request(&parent, window, cx)
+                                });
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("New WebSocket").on_click(move |_, window, cx| {
+                            let view = websocket_view.clone();
+                            let parent = websocket_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_websocket(&parent, window, cx)
                                 });
                             });
                         }),

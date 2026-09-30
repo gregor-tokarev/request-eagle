@@ -8,14 +8,14 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{CloseTab, NewGrpcTab, NewTab, SaveRequest};
+use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
 use request_eagle_theme::method_color;
 use tab_ui::{
     CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft, RequestDraft,
-    RequestLocation, SaveCollection,
+    RequestLocation, SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -28,6 +28,7 @@ const TAB_HEIGHT: Rems = rems(2.);
 pub(crate) enum Page {
     Request(Entity<RequestDraft>),
     Grpc(Entity<GrpcDraft>),
+    WebSocket(Entity<WebSocketDraft>),
     Collection(Entity<CollectionPage>),
     Environment(Entity<EnvironmentEditor>),
 }
@@ -37,48 +38,51 @@ impl Page {
         match self {
             Page::Request(draft) => draft.read(cx).is_dirty(),
             Page::Grpc(draft) => draft.read(cx).is_dirty(),
+            Page::WebSocket(draft) => draft.read(cx).is_dirty(),
             Page::Collection(page) => page.read(cx).is_dirty(),
             Page::Environment(editor) => editor.read(cx).is_dirty(),
         }
     }
 
-    /// The HTTP method, or gRPC, shown before a request tab's title.
-    fn method(&self, cx: &App) -> Option<&'static str> {
+    /// The method or protocol shown before a request tab's title.
+    fn label(&self, cx: &App) -> Option<&'static str> {
         match self {
             Page::Request(draft) => Some(draft.read(cx).request.method.as_str()),
             Page::Grpc(_) => Some("gRPC"),
+            Page::WebSocket(_) => Some("WS"),
             Page::Collection(_) | Page::Environment(_) => None,
         }
     }
 
-    /// The saved request a request tab shows.
-    fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
+    /// Where a request tab's request is saved.
+    pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
         match self {
             Page::Request(draft) => draft.read(cx).location.as_ref(),
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
+            Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
             Page::Collection(_) | Page::Environment(_) => None,
         }
     }
 
     fn icon(&self) -> Option<&'static str> {
         match self {
-            Page::Request(_) | Page::Grpc(_) => None,
+            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
             Page::Collection(_) => Some("icons/package.svg"),
             Page::Environment(_) => Some("icons/globe.svg"),
         }
     }
 
-    /// Redraw the tab strip only when the tab's method or dirty marker changes.
+    /// Redraw the tab strip only when the tab's label or dirty marker changes.
     fn observe(&self, id: u64, cx: &mut Context<MainView>) -> Subscription {
         let on_change = move |this: &mut MainView, cx: &mut Context<MainView>| {
             let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) else {
                 return;
             };
-            let method = tab.page.method(cx);
+            let label = tab.page.label(cx);
             let dirty = tab.page.is_dirty(cx);
 
-            if tab.method != method || tab.dirty != dirty {
-                tab.method = method;
+            if tab.label != label || tab.dirty != dirty {
+                tab.label = label;
                 tab.dirty = dirty;
                 cx.notify();
             }
@@ -87,6 +91,7 @@ impl Page {
         match self {
             Page::Request(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Grpc(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
+            Page::WebSocket(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
             Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
         }
@@ -96,6 +101,7 @@ impl Page {
         match self {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
+            Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
             Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
         }
@@ -107,6 +113,8 @@ impl Page {
             // a response must not invalidate a cache around the entire page.
             Page::Request(draft) => draft.clone().into_any_element(),
             Page::Grpc(draft) => draft.clone().into_any_element(),
+            // The message log changes while streaming; the draft caches its controls.
+            Page::WebSocket(draft) => draft.clone().into_any_element(),
             Page::Collection(page) => page
                 .clone()
                 .cached(StyleRefinement::default().size_full())
@@ -122,7 +130,7 @@ impl Page {
 pub(crate) struct PageTab {
     pub(crate) id: u64,
     pub(crate) title: SharedString,
-    pub(crate) method: Option<&'static str>,
+    pub(crate) label: Option<&'static str>,
     dirty: bool,
     pub(crate) page: Page,
     _subscriptions: Vec<Subscription>,
@@ -196,7 +204,7 @@ impl MainView {
         self.tabs.push(PageTab {
             id,
             title: title.into(),
-            method: page.method(cx),
+            label: page.label(cx),
             dirty: page.is_dirty(cx),
             page,
             _subscriptions: vec![subscription],
@@ -228,6 +236,9 @@ impl MainView {
             }
             request::Request::Grpc(request) => {
                 self.open_grpc_draft(location.name.clone(), request.clone(), Some(location), cx)
+            }
+            request::Request::WebSocket(request) => {
+                self.open_websocket(location.name.clone(), request.clone(), Some(location), cx)
             }
         }
     }
@@ -265,6 +276,9 @@ impl MainView {
         match &tab.page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
+            Page::WebSocket(draft) => {
+                draft.update(cx, |draft, cx| draft.set_location(location, cx))
+            }
             Page::Collection(_) | Page::Environment(_) => {}
         }
     }
@@ -340,6 +354,26 @@ impl MainView {
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
         self.open_draft(title.into(), Default::default(), None, cx);
+    }
+
+    pub(crate) fn new_websocket_tab(&mut self, cx: &mut Context<Self>) {
+        let title = format!("Untitled {}", self.next_id);
+        self.open_websocket(title.into(), Default::default(), None, cx);
+    }
+
+    fn open_websocket(
+        &mut self,
+        title: SharedString,
+        request: request::WebSocketRequest,
+        location: Option<RequestLocation>,
+        cx: &mut Context<Self>,
+    ) {
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let draft =
+            cx.new(|cx| WebSocketDraft::new(request, location, sessions, Some(environments), cx));
+
+        self.open_tab(title, Page::WebSocket(draft), cx);
     }
 
     fn open_draft(
@@ -588,7 +622,7 @@ impl MainView {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
 
-                if self.save_request(id, location, request.clone().into(), window, cx) {
+                if self.save_request_at(id, location, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -597,7 +631,16 @@ impl MainView {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
 
-                if self.save_request(id, location, request.clone().into(), window, cx) {
+                if self.save_request_at(id, location, request.clone().into(), window, cx) {
+                    draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
+                    self.close_saved_tab(index, window, cx);
+                }
+            }
+            Page::WebSocket(draft) => {
+                let request = draft.read(cx).request.clone();
+                let location = draft.read(cx).location.clone();
+
+                if self.save_request_at(id, location, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -607,9 +650,9 @@ impl MainView {
         cx.notify();
     }
 
-    /// Save a request tab to its file. An unsaved draft opens the save dialog
-    /// instead, and false is returned until the dialog saves it.
-    fn save_request(
+    /// Save a request tab to its file. An unsaved request opens the dialog
+    /// that chooses where; that dialog marks the tab saved itself.
+    fn save_request_at(
         &mut self,
         tab_id: u64,
         location: Option<RequestLocation>,
@@ -663,14 +706,17 @@ impl MainView {
 
         match (&self.tabs[index].page, &file.request) {
             (Page::Request(draft), request::Request::Http(request)) => {
-                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx))
+                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
             }
             (Page::Grpc(draft), request::Request::Grpc(request)) => {
                 draft.update(cx, |draft, cx| {
                     // Saving can store `.proto` paths relative to the collection.
                     draft.set_definition(request.definition.clone(), window, cx);
                     draft.mark_saved(request.clone(), cx);
-                })
+                });
+            }
+            (Page::WebSocket(draft), request::Request::WebSocket(request)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
             }
             _ => {}
         }
@@ -754,17 +800,21 @@ impl MainView {
         }
     }
 
+    /// Send the active request. A WebSocket connects, or sends its message
+    /// once connected.
     pub(crate) fn send_request(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.selected.map(|index| &self.tabs[index].page) {
             Some(Page::Request(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
             Some(Page::Grpc(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
+            Some(Page::WebSocket(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
             _ => {}
         }
     }
 
-    /// Choose the protocol of a new request tab.
+    /// Choose the protocol of a new tab. The plus button opens HTTP requests.
     fn new_tab_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let view = cx.entity().downgrade();
+        let focus = self.focus.clone();
 
         Button::new("new-tab-menu")
             .debug_selector(|| "new-tab-menu".into())
@@ -772,31 +822,43 @@ impl MainView {
             .small()
             .flex_none()
             .icon(Icon::new(IconName::ChevronDown).size_3())
-            .accessibility_label("New request")
+            .accessibility_label("New tab of a type")
             .dropdown_menu(move |menu, _, _| {
-                let http = view.clone();
-                let grpc = view.clone();
+                let http_view = view.clone();
+                let grpc_view = view.clone();
+                let websocket_view = view.clone();
 
-                menu.item(
-                    PopupMenuItem::new("HTTP Request")
-                        .action(Box::new(NewTab))
-                        .on_click(move |_, window, cx| {
-                            let _ = http.update(cx, |view, cx| {
-                                view.new_tab(cx);
-                                view.focus(window, cx);
-                            });
-                        }),
-                )
-                .item(
-                    PopupMenuItem::new("gRPC Request")
-                        .action(Box::new(NewGrpcTab))
-                        .on_click(move |_, window, cx| {
-                            let _ = grpc.update(cx, |view, cx| {
-                                view.new_grpc_tab(cx);
-                                view.focus(window, cx);
-                            });
-                        }),
-                )
+                menu.action_context(focus.clone())
+                    .item(
+                        PopupMenuItem::new("HTTP Request")
+                            .action(Box::new(NewTab))
+                            .on_click(move |_, window, cx| {
+                                let _ = http_view.update(cx, |this, cx| {
+                                    this.new_tab(cx);
+                                    this.focus(window, cx);
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("gRPC Request")
+                            .action(Box::new(NewGrpcTab))
+                            .on_click(move |_, window, cx| {
+                                let _ = grpc_view.update(cx, |this, cx| {
+                                    this.new_grpc_tab(cx);
+                                    this.focus(window, cx);
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("WebSocket Request")
+                            .action(Box::new(NewWebSocketTab))
+                            .on_click(move |_, window, cx| {
+                                let _ = websocket_view.update(cx, |this, cx| {
+                                    this.new_websocket_tab(cx);
+                                    this.focus(window, cx);
+                                });
+                            }),
+                    )
             })
     }
 
@@ -919,15 +981,15 @@ impl MainView {
                         .text_color(cx.theme().muted_foreground),
                 )
             })
-            .when_some(tab.method, |this, method| {
+            .when_some(tab.label, |this, label| {
                 this.child(
                     div()
                         .debug_selector(move || format!("tab-method-{id}"))
                         .flex_none()
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(method_color(method, cx))
-                        .child(method),
+                        .text_color(method_color(label, cx))
+                        .child(label),
                 )
             })
             .child(

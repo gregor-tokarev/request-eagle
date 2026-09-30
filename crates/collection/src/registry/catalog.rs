@@ -87,6 +87,11 @@ impl CollectionRegistry {
         &self.collections
     }
 
+    /// Where new collections are created.
+    pub fn directory(&self) -> Option<&Path> {
+        self.directory.as_deref()
+    }
+
     pub fn file(&self, path: &Path) -> Option<&FileEntry> {
         self.collections.iter().find_map(|collection| {
             path.starts_with(&collection.path)

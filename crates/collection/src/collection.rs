@@ -313,6 +313,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         .and_then(Item::as_table_like_mut)
     {
         for field in [
+            "headers",
             "body",
             "query",
             "scripts",

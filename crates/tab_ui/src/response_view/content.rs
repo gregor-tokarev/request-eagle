@@ -93,6 +93,7 @@ impl ResponseContent {
     }
 }
 
-fn exceeds_editor_limit(text: &str) -> bool {
+/// Whether text is too large for the highlighted editor to stay responsive.
+pub(crate) fn exceeds_editor_limit(text: &str) -> bool {
     text.len() > 256 * 1024 || text.split('\n').any(|line| line.len() > 32 * 1024)
 }

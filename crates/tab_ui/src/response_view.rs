@@ -13,8 +13,11 @@ mod memory_tests;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use body::ResponseBodyEditor;
 pub use content::ResponseContent;
+pub(crate) use content::exceeds_editor_limit;
 pub use view::ResponseView;
+pub(crate) use virtual_body::VirtualBody;
 
 #[cfg(feature = "test-support")]
 mod test_support;
