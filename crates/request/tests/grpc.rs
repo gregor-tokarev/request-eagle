@@ -921,3 +921,41 @@ fn definitions_store_paths_inside_the_collection_relative_to_it() {
         }
     );
 }
+
+#[test]
+fn target_keys_change_with_named_variables_only() {
+    let request = GrpcRequest {
+        url: "{{host}}:50051".into(),
+        metadata: vec![("x-request-id".into(), "{{$guid}}".into())],
+        ..GrpcRequest::default()
+    };
+    let variables =
+        |host: &str| RequestVariables::new([("host".to_owned(), host.to_owned())].into(), None);
+
+    // A generated value differs on every use but names the same server.
+    assert_eq!(
+        variables("one").grpc_target_key(&request),
+        variables("one").grpc_target_key(&request)
+    );
+    assert_ne!(
+        variables("one").grpc_target_key(&request),
+        variables("two").grpc_target_key(&request)
+    );
+}
+
+#[tokio::test]
+async fn streams_open_before_their_message_variables_are_set() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let request = request(address, "Chat", r#"{"text": "{{next_message}}"}"#);
+    let definition = reflect(&request).await;
+
+    let (mut call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    assert!(matches!(
+        call.send(&request.message),
+        Err(GrpcError::Variables(_))
+    ));
+    call.end();
+
+    assert_eq!(status(&collect(events).await), (0, "OK".into()));
+}

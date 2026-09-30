@@ -130,20 +130,26 @@ impl GrpcClient {
             return Err(GrpcError::MissingMethod);
         }
 
-        let resolved = variables
-            .resolve_grpc_call(request)
-            .map_err(GrpcError::Variables)?;
         let method = definition
-            .descriptor(resolved.method.trim())
-            .ok_or_else(|| GrpcError::UnknownMethod(resolved.method.trim().to_owned()))?;
+            .descriptor(request.method.trim())
+            .ok_or_else(|| GrpcError::UnknownMethod(request.method.trim().to_owned()))?;
         let method_path = format!("/{}/{}", method.parent_service().full_name(), method.name());
         let path = PathAndQuery::try_from(method_path)
             .map_err(|error| GrpcError::UnknownMethod(error.to_string()))?;
+        let kind = definition
+            .method(request.method.trim())
+            .map_or(MethodKind::Unary, |method| method.kind);
+
+        // A streaming request's messages resolve as they are sent, so an
+        // unfinished draft does not stop the stream from opening.
+        let resolved = if kind.streams_requests() {
+            variables.resolve_grpc_target(request)
+        } else {
+            variables.resolve_grpc_call(request)
+        }
+        .map_err(GrpcError::Variables)?;
         let target = self.target(&resolved)?;
         let metadata = metadata(&resolved.metadata)?;
-        let kind = definition
-            .method(resolved.method.trim())
-            .map_or(MethodKind::Unary, |method| method.kind);
 
         let (events, receiver) = unbounded();
         let (messages, outgoing) = unbounded();

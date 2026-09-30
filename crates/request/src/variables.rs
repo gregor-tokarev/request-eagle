@@ -56,6 +56,33 @@ impl RequestVariables {
         self.resolve_grpc(request, false)
     }
 
+    /// The URL and metadata a gRPC request connects with, as a key that
+    /// changes when its variables point at another server. Generated
+    /// variables such as `{{$guid}}` stay as written, since they differ on
+    /// every use.
+    pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
+        let texts = std::iter::once(request.url.as_str()).chain(
+            request
+                .metadata
+                .iter()
+                .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
+        );
+        let mut resolver = VariableResolver::new(&self.values);
+
+        for text in texts.clone() {
+            for reference in text.split("{{").skip(1) {
+                if let Some((name, _)) = reference.split_once("}}")
+                    && name.trim().starts_with('$')
+                {
+                    let name = name.trim().to_owned();
+                    resolver.override_generated(name.clone(), format!("{{{{{name}}}}}"));
+                }
+            }
+        }
+
+        texts.map(|text| resolver.resolve(text).ok()).collect()
+    }
+
     /// Resolve the URL, metadata and message of a call together, so a
     /// generated value such as `{{$guid}}` is the same in each. Later stream
     /// messages resolve with `resolve_text`.

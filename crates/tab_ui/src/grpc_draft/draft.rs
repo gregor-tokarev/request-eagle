@@ -52,8 +52,8 @@ pub struct GrpcDraft {
     pub(crate) definition: DefinitionState,
     /// The settings the current definition was loaded or is loading for.
     pub(super) definition_source: Option<super::definition::DefinitionSource>,
-    /// The URL and metadata that reflection resolved them to.
-    pub(super) reflected_target: Option<(String, Vec<(String, String)>)>,
+    /// What the URL and metadata resolved to when reflection loaded.
+    pub(super) reflected_target: Option<Vec<String>>,
     pub(super) definition_task: Option<Task<()>>,
     /// Invoke once the definition finishes loading.
     pub(super) invoke_when_loaded: bool,

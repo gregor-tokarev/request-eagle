@@ -701,17 +701,14 @@ impl GrpcDraft {
     }
 }
 
-/// The URL and metadata a reflection request resolves to with these values.
+/// What a reflection request connects to with these variable values.
 pub(super) fn reflected_target(
     request: &request::GrpcRequest,
     variables: &request::RequestVariables,
-) -> Option<(String, Vec<(String, String)>)> {
+) -> Option<Vec<String>> {
     if !request.definition.is_reflection() {
         return None;
     }
 
-    variables
-        .resolve_grpc_target(request)
-        .ok()
-        .map(|request| (request.url, request.metadata))
+    variables.grpc_target_key(request)
 }
