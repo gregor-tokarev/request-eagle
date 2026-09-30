@@ -632,6 +632,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);
             }))
+            .on_action(cx.listener(|this, _: &NewGrpcTab, window, cx| {
+                this.update_tabs(window, cx, MainView::new_grpc_tab);
+            }))
             .on_action(cx.listener(|this, _: &NewWebSocketTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_websocket_tab);
             }))

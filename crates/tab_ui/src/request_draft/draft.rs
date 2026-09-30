@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields};
 use crate::response_view::ResponseView;
@@ -37,11 +37,17 @@ pub struct RequestLocation {
 }
 
 impl RequestLocation {
-    /// The collection environment that the request's variables resolve from.
-    pub(crate) fn environment_path(&self) -> Option<PathBuf> {
+    /// The directory of the collection that stores the request.
+    pub(crate) fn collection_path(&self) -> Option<PathBuf> {
         self.path
             .ancestors()
             .nth(self.folders.len() + 1)
+            .map(Path::to_path_buf)
+    }
+
+    /// The collection environment that the request's variables resolve from.
+    pub(crate) fn environment_path(&self) -> Option<PathBuf> {
+        self.collection_path()
             .map(|collection| collection.join("environment.toml"))
     }
 }

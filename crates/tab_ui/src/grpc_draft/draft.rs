@@ -1,0 +1,472 @@
+use std::path::PathBuf;
+
+use environment::EnvironmentSessions;
+use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
+use gpui_kit::component::{
+    input::{EditorState, InputEvent, InputState},
+    scroll::ScrollableElement as _,
+    select::{SelectEvent, SelectState},
+    *,
+};
+use gpui_kit::*;
+use request::{GrpcClient, GrpcRequest, MethodKind, RequestPreferences};
+
+use super::definition::DefinitionState;
+use super::methods::{MethodList, method_list};
+use crate::grpc_response::GrpcResponse;
+use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
+use crate::{
+    Environments,
+    variable_input::{VariableInput, VariableTarget},
+    variables::VariableScope,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GrpcSection {
+    Message,
+    Metadata,
+    Definition,
+    Settings,
+}
+
+/// An editable gRPC request owned by one tab: its address, method, message,
+/// metadata and service definition, and the call it is running.
+pub struct GrpcDraft {
+    /// Unsaved drafts have no location.
+    pub location: Option<RequestLocation>,
+    pub request: GrpcRequest,
+    saved_request: GrpcRequest,
+    pub(crate) section: GrpcSection,
+    pub(super) url: Option<Entity<InputState>>,
+    pub(super) url_completion: Option<Entity<VariableInput>>,
+    pub(super) message: Option<Entity<EditorState>>,
+    pub(super) message_completion: Option<Entity<VariableInput>>,
+    pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
+    pub(super) message_json_valid: bool,
+    pub(super) metadata: Option<Entity<RequestFields>>,
+    pub(super) methods: Option<Entity<SelectState<MethodList>>>,
+    pub(super) proto_path: Option<Entity<InputState>>,
+    pub(super) import_paths: Vec<Entity<InputState>>,
+    pub(super) server_name: Option<Entity<InputState>>,
+    pub(super) max_message: Option<Entity<InputState>>,
+    pub(crate) definition: DefinitionState,
+    /// The settings the current definition was loaded or is loading for.
+    pub(super) definition_source: Option<super::definition::DefinitionSource>,
+    /// What the URL and metadata resolved to when reflection loaded.
+    pub(super) reflected_target: Option<Vec<String>>,
+    pub(super) definition_task: Option<Task<()>>,
+    /// Invoke once the definition finishes loading.
+    pub(super) invoke_when_loaded: bool,
+    pub(super) variables: Entity<VariableScope>,
+    variable_sessions: EnvironmentSessions,
+    pub(crate) response: Entity<GrpcResponse>,
+    pub(crate) call: Option<request::GrpcCall>,
+    pub(super) call_task: Option<Task<()>>,
+    /// A message that could not be sent on the open stream.
+    pub(super) send_error: Option<SharedString>,
+    pub(super) client: Option<(RequestPreferences, GrpcClient)>,
+    split: Entity<ResizableState>,
+    address: Entity<GrpcAddress>,
+    configuration: Entity<GrpcConfiguration>,
+    pub(super) _subscriptions: Vec<Subscription>,
+}
+
+impl GrpcDraft {
+    /// Variables resolve from the request's collection environment, its
+    /// session values and the active global environment.
+    pub fn new(
+        request: GrpcRequest,
+        location: Option<RequestLocation>,
+        sessions: EnvironmentSessions,
+        environments: Option<Entity<Environments>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let environment_path = location
+            .as_ref()
+            .and_then(RequestLocation::environment_path);
+        // Switching the active environment changes which references resolve.
+        let subscriptions = environments
+            .iter()
+            .map(|environments| {
+                cx.observe(environments, |this: &mut Self, _, cx| {
+                    this.variables.update(cx, |scope, cx| scope.changed(cx));
+                })
+            })
+            .collect();
+        let variables = cx.new(|_| VariableScope {
+            session: sessions.for_path(environment_path.as_deref()),
+            path: environment_path,
+            environments,
+            names: None,
+        });
+
+        // Like the HTTP draft, create views that install window listeners
+        // only once the tab is visible.
+        let owner = cx.weak_entity();
+        let response = cx.new(GrpcResponse::new);
+        let split = cx.new(|_| ResizableState::default());
+        let address = cx.new(|_| GrpcAddress(owner.clone()));
+        let configuration = cx.new(|_| GrpcConfiguration(owner));
+
+        Self {
+            location,
+            saved_request: request.clone(),
+            request,
+            section: GrpcSection::Message,
+            url: None,
+            url_completion: None,
+            message: None,
+            message_completion: None,
+            message_vim: None,
+            message_json_valid: false,
+            metadata: None,
+            methods: None,
+            proto_path: None,
+            import_paths: Vec::new(),
+            server_name: None,
+            max_message: None,
+            definition: DefinitionState::Idle,
+            definition_source: None,
+            reflected_target: None,
+            definition_task: None,
+            invoke_when_loaded: false,
+            variables,
+            variable_sessions: sessions,
+            response,
+            call: None,
+            call_task: None,
+            send_error: None,
+            client: None,
+            split,
+            address,
+            configuration,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Redraw the address bar and sections after the draft changes what they
+    /// show. They are cached views, which a notification of the draft alone
+    /// does not invalidate; a change by keyboard or from a task would stay
+    /// hidden until the next mouse event.
+    pub(super) fn redraw(&mut self, cx: &mut Context<Self>) {
+        self.address.update(cx, |_, cx| cx.notify());
+        self.configuration.update(cx, |_, cx| cx.notify());
+        cx.notify();
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.request != self.saved_request
+    }
+
+    /// Follow the saved request to its current file and name.
+    pub fn set_location(&mut self, location: RequestLocation, cx: &mut Context<Self>) {
+        let path = location.environment_path();
+        let session = self.variable_sessions.for_path(path.as_deref());
+
+        self.variables.update(cx, |scope, cx| {
+            scope.path = path;
+            scope.session = session;
+            scope.changed(cx);
+        });
+
+        self.location = Some(location);
+        cx.notify();
+    }
+
+    pub fn mark_saved(&mut self, request: GrpcRequest, cx: &mut Context<Self>) {
+        self.saved_request = request;
+        cx.notify();
+    }
+
+    /// The directory relative `.proto` paths resolve from.
+    pub(crate) fn collection_path(&self) -> Option<PathBuf> {
+        self.location
+            .as_ref()
+            .and_then(RequestLocation::collection_path)
+    }
+
+    /// The selected method's kind, once the definition describes it.
+    pub(crate) fn method_kind(&self) -> Option<MethodKind> {
+        match &self.definition {
+            DefinitionState::Loaded(definition) => definition
+                .method(self.request.method.trim())
+                .map(|method| method.kind),
+            _ => None,
+        }
+    }
+
+    pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.variables.update(cx, |scope, cx| scope.changed(cx));
+
+        // Initialize newly activated controls before drawing, as the HTTP
+        // draft does, so their setup does not schedule another frame.
+        self.url_state(window, cx);
+        self.methods_state(window, cx);
+
+        match self.section {
+            GrpcSection::Message => {
+                self.message_state(window, cx);
+            }
+            GrpcSection::Metadata => {
+                self.metadata_state(window, cx);
+            }
+            GrpcSection::Definition => self.definition_inputs(window, cx),
+            GrpcSection::Settings => self.settings_inputs(window, cx),
+        }
+
+        // Load the services of a request opened with a URL or `.proto` file.
+        if matches!(self.definition, DefinitionState::Idle)
+            && self.definition_task.is_none()
+            && self.current_source().is_some()
+        {
+            self.load_definition(false, window, cx);
+        }
+    }
+
+    pub(super) fn url_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
+        let scope = self.variables.clone();
+
+        self.url
+            .get_or_insert_with(|| {
+                let url = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .placeholder("Enter URL")
+                        .default_value(self.request.url.clone())
+                });
+                self.url_completion = Some(cx.new(|cx| {
+                    VariableInput::new(VariableTarget::Input(url.clone()), scope, window, cx)
+                }));
+                self._subscriptions.push(cx.subscribe_in(
+                    &url,
+                    window,
+                    |this, input, event: &InputEvent, window, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let tls = this.request.tls;
+                            this.request.url = input.read(cx).value().to_string();
+                            this.request.tls = this.request.uses_tls();
+                            this.schedule_reflection(window, cx);
+
+                            // A scheme typed in the URL switches the lock.
+                            if this.request.tls != tls {
+                                this.redraw(cx);
+                            } else {
+                                cx.notify();
+                            }
+                        }
+                    },
+                ));
+
+                url
+            })
+            .clone()
+    }
+
+    pub(super) fn methods_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<SelectState<MethodList>> {
+        if let Some(methods) = &self.methods {
+            return methods.clone();
+        }
+
+        let methods =
+            cx.new(|cx| SelectState::new(method_list(&[]), None, window, cx).searchable(true));
+        self._subscriptions.push(cx.subscribe_in(
+            &methods,
+            window,
+            |this, _, event: &SelectEvent<MethodList>, _, cx| {
+                let SelectEvent::Confirm(Some(path)) = event else {
+                    return;
+                };
+
+                if this.request.method != *path {
+                    this.request.method = path.clone();
+                    this.redraw(cx);
+                }
+            },
+        ));
+        self.methods = Some(methods.clone());
+        self.refresh_methods(window, cx);
+
+        methods
+    }
+
+    pub(super) fn message_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
+        if let Some(message) = &self.message {
+            return message.clone();
+        }
+
+        let message = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("json")
+                .line_number(true)
+                .soft_wrap(true)
+                .placeholder("Compose message")
+                .default_value(self.request.message.clone())
+        });
+        let scope = self.variables.clone();
+        self.message_vim = Some(cx.new(|cx| crate::vim::Vim::new(message.clone(), cx)));
+        self.message_completion = Some(cx.new(|cx| {
+            VariableInput::new(VariableTarget::Editor(message.clone()), scope, window, cx)
+        }));
+        self._subscriptions.push(
+            cx.subscribe(&message, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = input.read(cx).value();
+                    this.message_json_valid =
+                        serde_json::from_str::<serde_json::Value>(&value).is_ok();
+                    this.request.message = value.to_string();
+                    this.send_error = None;
+                    cx.notify();
+                }
+            }),
+        );
+        self.message_json_valid =
+            serde_json::from_str::<serde_json::Value>(&self.request.message).is_ok();
+        self.message = Some(message.clone());
+
+        message
+    }
+
+    pub(super) fn metadata_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<RequestFields> {
+        if let Some(metadata) = &self.metadata {
+            return metadata.clone();
+        }
+
+        let scope = self.variables.clone();
+        let metadata = cx.new(|cx| {
+            RequestFields::new("metadata", &self.request.metadata, &[], scope, window, cx)
+        });
+        self._subscriptions.push(cx.subscribe_in(
+            &metadata,
+            window,
+            |this, _, event: &FieldsChanged, window, cx| {
+                let count = this.request.metadata.len();
+                this.request.metadata = event.0.clone();
+                // Servers may require credentials to answer reflection.
+                this.schedule_reflection(window, cx);
+
+                // The Metadata tab shows the count.
+                if this.request.metadata.len() != count {
+                    this.redraw(cx);
+                } else {
+                    cx.notify();
+                }
+            },
+        ));
+        self.metadata = Some(metadata.clone());
+
+        metadata
+    }
+}
+
+impl Render for GrpcDraft {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .debug_selector(|| "grpc-draft".into())
+            .size_full()
+            .min_w_0()
+            .px_4()
+            .pb_2()
+            .gap_2()
+            .text_sm()
+            .child(
+                self.address
+                    .clone()
+                    .cached(StyleRefinement::default().w_full().h_20().flex_none()),
+            )
+            .child(
+                div().flex_1().min_h_0().overflow_hidden().child(
+                    v_resizable("grpc-message-response-split")
+                        .with_state(&self.split)
+                        .child(
+                            resizable_panel()
+                                .size(rems(20.).to_pixels(window.rem_size()))
+                                .size_range(
+                                    rems(14.).to_pixels(window.rem_size())
+                                        ..rems(75.).to_pixels(window.rem_size()),
+                                )
+                                .child(
+                                    self.configuration
+                                        .clone()
+                                        .cached(StyleRefinement::default().size_full()),
+                                ),
+                        )
+                        .child(
+                            resizable_panel()
+                                .size_range(rems(12.).to_pixels(window.rem_size())..Pixels::MAX)
+                                .child(self.response.clone()),
+                        ),
+                ),
+            )
+    }
+}
+
+// Cache the editable controls independently of the response, so streamed
+// messages do not redraw the address bar and message editor.
+struct GrpcAddress(WeakEntity<GrpcDraft>);
+
+impl Render for GrpcAddress {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.0
+            .update(cx, |draft, cx| {
+                v_flex()
+                    .size_full()
+                    .gap_2()
+                    .child(crate::request_draft::request_header(
+                        "gRPC",
+                        draft.location.as_ref(),
+                        cx,
+                    ))
+                    .child(draft.url_bar(window, cx))
+            })
+            .unwrap_or_else(|_| div())
+    }
+}
+
+struct GrpcConfiguration(WeakEntity<GrpcDraft>);
+
+impl Render for GrpcConfiguration {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.0
+            .update(cx, |draft, cx| {
+                let content = match draft.section {
+                    GrpcSection::Message => draft.message_editor(window, cx),
+                    GrpcSection::Metadata => draft.metadata_state(window, cx).into_any_element(),
+                    GrpcSection::Definition => draft.definition_tab(window, cx),
+                    GrpcSection::Settings => draft.settings_tab(window, cx),
+                };
+
+                v_flex()
+                    .size_full()
+                    .min_h_0()
+                    .min_w_0()
+                    .gap_2()
+                    .pb_3()
+                    .child(draft.section_tabs(cx))
+                    .child(
+                        div()
+                            .id("grpc-section-content")
+                            .debug_selector(|| "grpc-section-content".into())
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
+                            .child(content),
+                    )
+            })
+            .unwrap_or_else(|_| div())
+    }
+}

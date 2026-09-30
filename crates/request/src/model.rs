@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     Http(HttpRequest),
+    Grpc(crate::GrpcRequest),
     #[serde(rename = "websocket")]
     WebSocket(WebSocketRequest),
 }
@@ -14,6 +15,7 @@ impl Request {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Http(request) => request.method.as_str(),
+            Self::Grpc(_) => "gRPC",
             Self::WebSocket(_) => "WS",
         }
     }
@@ -22,6 +24,7 @@ impl Request {
     pub fn url(&self) -> &str {
         match self {
             Self::Http(request) => &request.path,
+            Self::Grpc(request) => &request.url,
             Self::WebSocket(request) => &request.url,
         }
     }
@@ -70,6 +73,12 @@ impl HttpRequest {
 impl From<HttpRequest> for Request {
     fn from(request: HttpRequest) -> Self {
         Self::Http(request)
+    }
+}
+
+impl From<crate::GrpcRequest> for Request {
+    fn from(request: crate::GrpcRequest) -> Self {
+        Self::Grpc(request)
     }
 }
 

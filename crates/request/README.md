@@ -1,7 +1,7 @@
 # Request execution
 
 This crate owns the request data shared by saved collections and drafts, request
-preferences, and the executor. It does not depend on GPUI application or UI types.
+preferences, the HTTP executor and the gRPC client. It does not depend on GPUI application or UI types.
 `preferences` re-exports the request preference types, so its imports and
 serialized files remain compatible.
 
@@ -67,7 +67,10 @@ remain unchanged. Malformed input, transport failures, corrupt
 gzip streams, truncated bodies, timeouts, and oversized responses return typed errors.
 
 `Request` and `Response` are protocol enums. HTTP details live in `http.rs`, while
-`executor.rs` runs the scripts and sends the request. Only HTTP/HTTPS is implemented.
+`executor.rs` runs the scripts and sends the request.
+
+gRPC requests call servers' methods, including client, server and bidirectional
+streams. Their services come from server reflection or a `.proto` file.
 
 Run local-server tests, with request/response and error output:
 

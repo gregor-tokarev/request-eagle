@@ -1,6 +1,6 @@
-//! The pages shown in workspace tabs: HTTP request drafts with their responses,
-//! WebSocket drafts with their message logs, collection settings and global
-//! environment editors. The workspace owns tab selection, closing and
+//! The pages shown in workspace tabs: HTTP and gRPC request drafts with their
+//! responses, WebSocket drafts with their message logs, collection settings and
+//! global environment editors. The workspace owns tab selection, closing and
 //! collection storage.
 //!
 //! `Environments` lives here rather than in the workspace because request drafts
@@ -10,6 +10,8 @@ mod actions;
 mod collection_page;
 mod environment_editor;
 mod environments;
+mod grpc_draft;
+mod grpc_response;
 mod request_draft;
 mod response_view;
 mod script_editor;
@@ -35,5 +37,6 @@ pub use actions::SendRequest;
 pub use collection_page::{CollectionPage, CollectionSettings, SaveCollection};
 pub use environment_editor::EnvironmentEditor;
 pub use environments::{Environments, EnvironmentsEvent};
+pub use grpc_draft::GrpcDraft;
 pub use request_draft::{RequestDraft, RequestLocation};
 pub use websocket_draft::WebSocketDraft;

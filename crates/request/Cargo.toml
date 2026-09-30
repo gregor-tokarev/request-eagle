@@ -12,17 +12,30 @@ flate2 = "1"
 futures = "0.3"
 percent-encoding = "2"
 http_client = { package = "gpui-pre-http-client", version = "=0.3.5" }
+hyper-util = { version = "0.1", features = ["tokio"] }
 ipnet = "2"
 jsonschema = { version = "0.56", default-features = false, features = ["idna"] }
 # Use the same reqwest fork as GPUI's runtime adapter.
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = ["http2", "rustls-tls-native-roots", "macos-system-configuration"] }
 reqwest_client.workspace = true
 ring = "0.17"
+# gRPC: dynamic messages, .proto compilation and server reflection types.
+prost = "0.14"
+prost-reflect = { version = "0.16", features = ["serde"] }
+protox = "0.9"
 rquickjs = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 smol = "2"
 thiserror.workspace = true
+tokio = { version = "1", features = ["net", "rt", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+tonic = { version = "0.14", default-features = false, features = ["channel", "codegen"] }
+tonic-prost = "0.14"
+tonic-reflection = { version = "0.14", default-features = false }
+tower = { version = "0.5", features = ["util"] }
 # WebSocket framing over the connection upgraded by the HTTP client.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
@@ -32,5 +45,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 h2 = "0.4"
 rcgen = { version = "0.14", default-features = false, features = ["ring"] }
-tokio = { version = "1", features = ["net", "io-util"] }
+tempfile = "3"
+tokio = { version = "1", features = ["net", "io-util", "macros", "rt-multi-thread"] }
 tokio-rustls = "0.26"
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.14", default-features = false, features = ["router", "server"] }
+tonic-reflection = { version = "0.14", features = ["server"] }
+toml = "1.1.3"

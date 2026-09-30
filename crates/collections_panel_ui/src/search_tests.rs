@@ -211,3 +211,21 @@ fn updated_documents_replace_old_matches_and_can_revert() {
     assert_eq!(index.matching_rows("old"), vec![0]);
     assert_eq!(index.matching_rows("POST"), vec![2]);
 }
+
+#[test]
+fn grpc_requests_are_found_by_service_and_method() {
+    let directory = tempfile::tempdir().unwrap();
+    let collection = directory.path().join("API");
+    fs::create_dir_all(&collection).unwrap();
+    fs::write(
+        collection.join("Prod.toml"),
+        "id = \"prod\"\nname = \"Prod\"\nschema_version = 1\n\n[request]\ntype = \"grpc\"\nurl = \"localhost:50051\"\nmethod = \"helloworld.Greeter/SayHello\"\n",
+    )
+    .unwrap();
+
+    let tree = CollectionTree::new(&CollectionRegistry::from_path(directory.path()).unwrap());
+
+    for query in ["SayHello", "greeter", "localhost:50051", "gRPC"] {
+        assert_eq!(tree.search.matching_rows(query).len(), 1, "{query}");
+    }
+}

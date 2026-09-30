@@ -222,9 +222,13 @@ fn add_entries(
 /// A request row's method or protocol and the text the sidebar filter matches.
 fn request_row(file: &FileEntry) -> (&'static str, String) {
     let label = file.request.label();
+    let mut search_text = format!("{label} {} {}", file.name, file.request.url());
 
-    (
-        label,
-        format!("{label} {} {}", file.name, file.request.url()),
-    )
+    // A gRPC request is also found by its service and method.
+    if let request::Request::Grpc(request) = &file.request {
+        search_text.push(' ');
+        search_text.push_str(&request.method);
+    }
+
+    (label, search_text)
 }

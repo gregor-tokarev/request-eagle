@@ -31,14 +31,14 @@ pub enum Command {
     RequestsCreate {
         parent: PathBuf,
         name: String,
-        request: RequestInput,
+        request: SavedRequest,
     },
     /// Replace a saved request. Read requests.get first to obtain its ID and contents.
     #[serde(rename = "requests.update")]
     RequestsUpdate {
         path: PathBuf,
         expected_id: String,
-        request: RequestInput,
+        request: SavedRequest,
     },
     #[serde(rename = "entries.rename")]
     EntriesRename { path: PathBuf, name: String },
@@ -53,6 +53,8 @@ pub enum Command {
     EntriesDelete { path: PathBuf, confirm: bool },
     /// Execute a saved request and return the completed response. Script changes
     /// to environment variables last for this invocation and are never persisted.
+    /// A gRPC request sends its saved message once, including on client streams,
+    /// and returns every response message with the final status.
     #[serde(rename = "requests.run")]
     RequestsRun {
         path: PathBuf,
@@ -97,7 +99,58 @@ pub enum Command {
     },
 }
 
-/// Complete saved request. Body accepts UTF-8 text or an array of bytes.
+/// A complete HTTP or gRPC request.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SavedRequest {
+    Http(RequestInput),
+    Grpc(GrpcRequestInput),
+}
+
+/// Complete saved gRPC request. The method is `package.Service/Method`.
+/// Without `proto_file`, services are loaded with server reflection.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GrpcRequestInput {
+    pub protocol: GrpcProtocol,
+    /// `host:port`; a `grpcs://` scheme selects TLS and `grpc://` plaintext.
+    pub url: String,
+    #[serde(default)]
+    pub tls: bool,
+    #[serde(default)]
+    pub method: String,
+    /// JSON message sent when the method is invoked.
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub metadata: Vec<(String, String)>,
+    /// A `.proto` file; relative paths resolve from the collection directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto_file: Option<PathBuf>,
+    /// Directories that the `.proto` file's imports resolve from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_paths: Vec<PathBuf>,
+    /// Unset follows the ssl_certificate_verification setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_certificates: Option<bool>,
+    /// The certificate name to expect instead of the URL's host.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_name: String,
+    /// Include response fields with default values [default: true].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_default_fields: Option<bool>,
+    /// MiB, or 0 for any size. Unset follows max_response_size_mb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_response_message_mb: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrpcProtocol {
+    Grpc,
+}
+
+/// Complete saved HTTP request. Body accepts UTF-8 text or an array of bytes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestInput {

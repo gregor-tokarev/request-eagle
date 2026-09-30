@@ -4,7 +4,7 @@ use request::Request;
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
-use crate::commands::{Command, Placement, RequestInput};
+use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedRequest};
 
 pub fn load(root: &Path) -> Result<CollectionRegistry> {
     let registry = CollectionRegistry::from_path(root)?;
@@ -66,14 +66,14 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
         Command::CollectionsCreate {} => registry.create_collection()?,
         Command::FoldersCreate { parent } => registry.create_folder(&parent)?,
         Command::RequestsCreate { parent, name, request } => {
-            let path = registry.create_request_with(&parent, &name, request::HttpRequest::from(request).into())?;
+            let path = registry.create_request_with(&parent, &name, request.into())?;
             return Ok(request_json(registry.file(&path).context("Created request was not found")?));
         }
         Command::RequestsUpdate { path, expected_id, request } => {
             if let Some(Request::WebSocket(_)) = registry.file(&path).map(|file| &file.request) {
-                bail!("requests.update edits HTTP requests, and this is a WebSocket request");
+                bail!("requests.update edits HTTP and gRPC requests, and this is a WebSocket request");
             }
-            registry.update_request(&path, &expected_id, request::HttpRequest::from(request).into())?;
+            registry.update_request(&path, &expected_id, request.into())?;
             return Ok(request_json(registry.file(&path).context("Updated request was not found")?));
         }
         Command::EntriesRename { path, name } => registry.rename(&path, &name)?,
@@ -98,8 +98,20 @@ fn request_json(file: &FileEntry) -> Value {
         Request::Http(request) => {
             json!({"path": file.path, "id": file.id, "name": file.name, "request": RequestInput::from(request)})
         }
+        Request::Grpc(request) => {
+            json!({"path": file.path, "id": file.id, "name": file.name, "request": GrpcRequestInput::from(request)})
+        }
         Request::WebSocket(request) => {
             json!({"path": file.path, "id": file.id, "name": file.name, "websocket": request})
+        }
+    }
+}
+
+impl From<SavedRequest> for Request {
+    fn from(request: SavedRequest) -> Self {
+        match request {
+            SavedRequest::Http(request) => request::HttpRequest::from(request).into(),
+            SavedRequest::Grpc(request) => request::GrpcRequest::from(request).into(),
         }
     }
 }
@@ -123,6 +135,9 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
                 let value = match &file.request {
                     Request::Http(request) => {
                         json!({"path": file.path, "id": file.id, "name": file.name, "method": request.method, "url": request.path, "collection": collection})
+                    }
+                    Request::Grpc(request) => {
+                        json!({"path": file.path, "id": file.id, "name": file.name, "protocol": "grpc", "method": request.method, "url": request.url, "collection": collection})
                     }
                     Request::WebSocket(request) => {
                         json!({"path": file.path, "id": file.id, "name": file.name, "protocol": "websocket", "url": request.url, "collection": collection})

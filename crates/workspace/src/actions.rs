@@ -12,6 +12,7 @@ actions!(
         OpenGeneralSettings,
         SaveRequest,
         NewTab,
+        NewGrpcTab,
         NewWebSocketTab,
         CloseTab,
         PreviousTab,
@@ -79,6 +80,16 @@ pub(crate) fn init(cx: &mut App) {
         "secondary-t",
         cx,
     );
+    keybindings_service::register(
+        NewGrpcTab,
+        "New gRPC tab",
+        "Open an empty gRPC request.",
+        "Tabs",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("the gRPC tab action should register");
     keybindings_service::register(
         NewWebSocketTab,
         "New WebSocket tab",

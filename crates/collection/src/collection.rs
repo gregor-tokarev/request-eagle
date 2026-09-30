@@ -297,14 +297,54 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
                 source,
             })?;
 
+    // A request that changes protocol keeps none of its previous fields.
+    if document
+        .get("request")
+        .and_then(|request| request.get("type"))
+        .and_then(Item::as_str)
+        != updates["request"].get("type").and_then(Item::as_str)
+    {
+        document.remove("request");
+    }
+
     // Optional fields omitted by serialization must also disappear from the file.
     if let Some(request) = document
         .get_mut("request")
         .and_then(Item::as_table_like_mut)
     {
-        for field in ["headers", "body", "query", "scripts", "message"] {
+        for field in [
+            "headers",
+            "body",
+            "query",
+            "scripts",
+            "tls",
+            "method",
+            "message",
+            "metadata",
+            "definition",
+            "settings",
+        ] {
             if updates["request"].get(field).is_none() {
                 request.remove(field);
+            }
+        }
+
+        // gRPC definitions and settings also omit optional fields, such as
+        // import paths once they are removed.
+        for table in ["definition", "settings"] {
+            if let (Some(current), Some(update)) = (
+                request.get_mut(table).and_then(Item::as_table_like_mut),
+                updates["request"].get(table).and_then(Item::as_table_like),
+            ) {
+                let stale = current
+                    .iter()
+                    .map(|(key, _)| key.to_owned())
+                    .filter(|key| update.get(key).is_none())
+                    .collect::<Vec<_>>();
+
+                for key in stale {
+                    current.remove(&key);
+                }
             }
         }
     }

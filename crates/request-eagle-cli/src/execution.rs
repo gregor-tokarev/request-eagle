@@ -1,10 +1,14 @@
 use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use request::{HttpRequest, Method, RequestExecutor, RequestScripts, RequestVariables, Response};
+use futures::StreamExt as _;
+use request::{
+    GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcSettings, HttpRequest, Method,
+    RequestExecutor, RequestPreferences, RequestScripts, RequestVariables, Response,
+};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
-use crate::commands::{Body, Method as InputMethod, RequestInput};
+use crate::commands::{Body, GrpcProtocol, GrpcRequestInput, Method as InputMethod, RequestInput};
 
 pub async fn run(
     root: &Path,
@@ -16,14 +20,29 @@ pub async fn run(
 ) -> Result<Value> {
     let registry = crate::collections::load(root)?;
     let file = registry.file(path).context("Unknown saved request path")?;
-    let request::Request::Http(request) = file.request.clone() else {
-        bail!("requests.run sends HTTP requests. Open WebSocket requests in the app to connect");
-    };
     let collection = registry
         .collections()
         .iter()
         .find(|collection| path.starts_with(&collection.path))
         .context("Unknown collection")?;
+    let request = match file.request.clone() {
+        request::Request::Http(request) => request,
+        request::Request::Grpc(request) => {
+            let mut values = collection.local_env().entries.clone();
+            values.extend(variables);
+            let mut settings = preferences.request_preferences().await?;
+            if let Some(timeout) = timeout_ms {
+                settings.timeout_ms = timeout;
+            }
+
+            return run_grpc(path, &collection.path, request, values, &settings).await;
+        }
+        request::Request::WebSocket(_) => {
+            bail!(
+                "requests.run sends HTTP and gRPC requests. Open WebSocket requests in the app to connect"
+            )
+        }
+    };
     if (!request.scripts.is_empty() || !collection.scripts().is_empty()) && !trust_scripts {
         bail!(
             "Read the saved request and collection scripts, then set trust_scripts=true to approve this run"
@@ -58,6 +77,113 @@ pub async fn run(
         "headers": headers, "body_base64": STANDARD.encode(&response.body), "body_bytes": response.body.len(),
         "elapsed_ms": execution.elapsed.as_secs_f64() * 1000., "scripts": scripts,
     }))
+}
+
+/// Invoke a saved gRPC method, sending its message once, and collect the
+/// stream until the server's status.
+async fn run_grpc(
+    path: &Path,
+    collection: &Path,
+    request: GrpcRequest,
+    values: HashMap<String, String>,
+    settings: &RequestPreferences,
+) -> Result<Value> {
+    let client = GrpcClient::new(settings);
+    let variables =
+        || RequestVariables::with_environment_session(values.clone(), None, Default::default());
+    let definition = client
+        .load_definition(&request, &variables(), Some(collection))
+        .await?;
+    let (mut call, mut events) = client.invoke(&request, variables(), &definition)?;
+
+    if call.kind.streams_requests() {
+        call.send(&request.message)?;
+        call.end();
+    }
+
+    let mut messages = Vec::new();
+    let mut metadata = Vec::new();
+    // Streams have no deadline in the app; here the command must return.
+    let deadline = std::time::Duration::from_millis(match settings.timeout_ms {
+        0 => 60_000,
+        timeout => timeout,
+    });
+    let ends_at = std::time::Instant::now() + deadline;
+
+    while let Some(event) = smol::future::or(events.next(), async {
+        smol::Timer::at(ends_at).await;
+        None
+    })
+    .await
+    {
+        match event {
+            GrpcEvent::Metadata(pairs) => metadata = pairs,
+            GrpcEvent::Sent(message) => messages.push(json!({"direction": "sent", "message": serde_json::from_str::<Value>(&message.json)?})),
+            GrpcEvent::Received(message) => messages.push(json!({"direction": "received", "message": serde_json::from_str::<Value>(&message.json)?})),
+            GrpcEvent::Finished { status, trailers, elapsed } => {
+                return Ok(json!({
+                    "path": path, "protocol": "grpc", "method": request.method,
+                    "status": {"code": status.code, "name": status.name(), "message": status.message},
+                    "metadata": metadata, "trailers": trailers, "messages": messages,
+                    "elapsed_ms": elapsed.as_secs_f64() * 1000.,
+                }));
+            }
+            GrpcEvent::Failed(error) => return Err(error.into()),
+        }
+    }
+
+    bail!("The gRPC call did not finish within {deadline:?}; set timeout_ms to wait longer")
+}
+
+impl From<GrpcRequestInput> for GrpcRequest {
+    fn from(input: GrpcRequestInput) -> Self {
+        Self {
+            url: input.url,
+            tls: input.tls,
+            method: input.method,
+            message: input.message,
+            metadata: input.metadata,
+            definition: match input.proto_file {
+                Some(path) => GrpcDefinition::ProtoFile {
+                    path,
+                    import_paths: input.import_paths,
+                },
+                None => GrpcDefinition::Reflection,
+            },
+            settings: GrpcSettings {
+                verify_certificates: input.verify_certificates,
+                server_name: input.server_name,
+                include_default_fields: input.include_default_fields.unwrap_or(true),
+                max_response_message_mb: input.max_response_message_mb,
+            },
+        }
+    }
+}
+
+impl From<&GrpcRequest> for GrpcRequestInput {
+    fn from(request: &GrpcRequest) -> Self {
+        let (proto_file, import_paths) = match &request.definition {
+            GrpcDefinition::ProtoFile { path, import_paths } => {
+                (Some(path.clone()), import_paths.clone())
+            }
+            GrpcDefinition::Reflection => (None, Vec::new()),
+        };
+
+        Self {
+            protocol: GrpcProtocol::Grpc,
+            url: request.url.clone(),
+            tls: request.tls,
+            method: request.method.clone(),
+            message: request.message.clone(),
+            metadata: request.metadata.clone(),
+            proto_file,
+            import_paths,
+            verify_certificates: request.settings.verify_certificates,
+            server_name: request.settings.server_name.clone(),
+            include_default_fields: (!request.settings.include_default_fields).then_some(false),
+            max_response_message_mb: request.settings.max_response_message_mb,
+        }
+    }
 }
 
 impl From<RequestInput> for HttpRequest {

@@ -37,6 +37,20 @@ impl CollectionPanel {
         self.finish_creation(result, window, cx);
     }
 
+    pub(super) fn create_grpc_request(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self.collections.create_request_with(
+            parent,
+            "New gRPC Request",
+            request::GrpcRequest::default().into(),
+        );
+        self.finish_creation(result, window, cx);
+    }
+
     pub(super) fn create_websocket(
         &mut self,
         parent: &Path,
