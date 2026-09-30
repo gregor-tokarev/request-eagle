@@ -3,7 +3,7 @@ use std::time::Duration;
 use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
 use request::{Execution, ExecutionError, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
-use super::{ResponseContent, ResponseView};
+use super::{ResponseContent, ResponseView, body::Body};
 
 fn response(body: &[u8], content_type: &str) -> ResponseContent {
     let mut headers = HeaderMap::new();
@@ -69,7 +69,7 @@ fn large_response_stays_raw_and_retains_search_copy_and_wrapping(cx: &mut TestAp
     let format = cx.debug_bounds("response-format").unwrap();
     cx.simulate_click(format.center(), Modifiers::default());
     cx.run_until_parked();
-    cx.read(|cx| assert!(!view.read(cx).pretty));
+    cx.read(|cx| assert!(matches!(view.read(cx).body, Some(Body::Raw { .. }))));
 
     for (is_pretty, expected) in [
         (false, raw.as_str()),
@@ -81,12 +81,10 @@ fn large_response_stays_raw_and_retains_search_copy_and_wrapping(cx: &mut TestAp
         cx.simulate_input("needle ☃ tail");
         cx.read(|cx| {
             let view = view.read(cx);
-            assert!(!view.pretty);
-            assert!(view.editor.is_none());
             assert!(view.wrap);
-            let body = view.virtual_body.as_ref().unwrap().read(cx);
+            let body = view.body.as_ref().unwrap().raw().read(cx);
             assert!(body.wrap);
-            assert_eq!(body.text.to_string(), expected);
+            assert_eq!(body.source, expected);
             let start = expected.find("needle ☃ tail").unwrap();
             assert!(start > 1024 * 1024, "search must reach past the old cutoff");
             assert_eq!(body.selection, start..start + "needle ☃ tail".len());
@@ -114,14 +112,14 @@ fn large_response_stays_raw_and_retains_search_copy_and_wrapping(cx: &mut TestAp
         let wrap = cx.debug_bounds("response-wrap").unwrap();
         cx.simulate_click(wrap.center(), Modifiers::default());
     }
-    cx.read(|cx| assert!(view.read(cx).virtual_body.as_ref().unwrap().read(cx).wrap));
+    cx.read(|cx| assert!(view.read(cx).body.as_ref().unwrap().raw().read(cx).wrap));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.finish(Ok(response(b"short response", "text/plain")), window, cx)
         })
     });
     cx.read(|cx| {
-        assert!(view.read(cx).virtual_body.is_some());
+        assert!(matches!(view.read(cx).body, Some(Body::Raw { .. })));
         assert!(view.read(cx).wrap);
     });
 }
@@ -142,10 +140,10 @@ fn response_editor_is_readonly_and_errors_replace_previous_results(cx: &mut Test
     cx.simulate_click(body.center(), Modifiers::default());
     cx.simulate_input("overwrite");
     cx.read(|cx| {
-        assert_eq!(
-            view.read(cx).editor.as_ref().unwrap().read(cx).value(),
-            "{\n  \"a\": 1\n}"
-        )
+        let Some(Body::Pretty(editor)) = &view.read(cx).body else {
+            panic!("expected the pretty JSON editor");
+        };
+        assert_eq!(editor.read(cx).0.read(cx).value(), "{\n  \"a\": 1\n}")
     });
 
     cx.update(|window, cx| {
@@ -566,11 +564,12 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
         cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(pretty, window, cx)));
         cx.read(|cx| {
             let view = view.read(cx);
-            assert_eq!(view.pretty, pretty);
-            assert_eq!(view.editor.is_some(), pretty);
-            assert_eq!(view.virtual_body.is_some(), !pretty);
-            if let Some(body) = &view.virtual_body {
-                assert_eq!(body.read(cx).text.to_string(), raw);
+            match view.body.as_ref().unwrap() {
+                Body::Raw { view: body, .. } => {
+                    assert!(!pretty);
+                    assert_eq!(body.read(cx).source, raw);
+                }
+                Body::Pretty(_) => assert!(pretty),
             }
         });
     }
@@ -584,13 +583,7 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
     cx.simulate_input("overwrite");
     cx.read(|cx| {
         assert_eq!(
-            view.read(cx)
-                .virtual_body
-                .as_ref()
-                .unwrap()
-                .read(cx)
-                .text
-                .to_string(),
+            view.read(cx).body.as_ref().unwrap().raw().read(cx).source,
             raw
         )
     });

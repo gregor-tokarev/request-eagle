@@ -56,10 +56,10 @@ fn check_scroll_allocations(cx: &mut TestAppContext, body: String) {
         Root::new(response, window, cx)
     });
     let response = response_view.unwrap();
-    let viewer = cx.read(|cx| response.read(cx).virtual_body.clone().unwrap());
+    let viewer = cx.read(|cx| response.read(cx).body.as_ref().unwrap().raw().clone());
     cx.read(|cx| {
         assert!(viewer.read(cx).wrap);
-        assert_eq!(viewer.read(cx).text.len(), expected);
+        assert_eq!(viewer.read(cx).source.len(), expected);
     });
 
     for width in [1024., 640.] {
@@ -111,17 +111,8 @@ fn check_scroll_allocations(cx: &mut TestAppContext, body: String) {
     cx.simulate_keystrokes("secondary-f");
     assert!(cx.debug_bounds("response-body-search").is_some());
     cx.simulate_input("e");
-    cx.read(|cx| {
-        assert!(
-            response
-                .read(cx)
-                .body_search
-                .as_ref()
-                .unwrap()
-                .matches
-                .len()
-                > 100_000
-        )
+    response.update(cx, |response, _| {
+        assert!(response.body.as_mut().unwrap().search().matches.len() > 100_000)
     });
     let first = cx.read(|cx| viewer.read(cx).selection.clone());
     cx.simulate_keystrokes("enter");
@@ -175,9 +166,8 @@ fn moderate_raw_html_uses_plain_viewer_with_bounded_scroll_allocations(cx: &mut 
         let response = cx.new(|cx| {
             let mut view = ResponseView::new(cx);
             view.finish(Ok(content), window, cx);
-            assert!(view.editor.is_none());
             assert!(view.wrap);
-            editor = view.virtual_body.clone();
+            editor = view.body.as_ref().map(|body| body.raw().clone());
             view
         });
         Root::new(response, window, cx)
@@ -222,5 +212,5 @@ fn moderate_raw_html_uses_plain_viewer_with_bounded_scroll_allocations(cx: &mut 
         Some(body.as_str())
     );
     cx.simulate_input("overwrite");
-    cx.read(|cx| assert_eq!(editor.read(cx).text.to_string(), body));
+    cx.read(|cx| assert_eq!(editor.read(cx).source, body));
 }
