@@ -396,3 +396,64 @@ fn arrow_keys_move_between_messages(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("escape");
     assert_eq!(selected(cx), None);
 }
+
+#[gpui_kit::test]
+fn arrow_keys_start_from_the_rows_in_view(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(WebSocketRequest::default(), cx);
+    let log = log(&draft, cx);
+    push(
+        &log,
+        (0..100).map(|index| received(&index.to_string())).collect(),
+        cx,
+    );
+
+    // Focus the list without a selection, then scroll the newest rows away.
+    let newest = element_bounds(cx, "websocket-message-0").unwrap();
+    cx.simulate_click(newest.center(), Modifiers::default());
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| {
+        log.update(cx, |log, _| {
+            log.scroll.scroll_to_item(60, gpui_kit::ScrollStrategy::Top)
+        })
+    });
+    assert!(element_bounds(cx, "websocket-messages").is_some());
+
+    cx.simulate_keystrokes("down");
+    let row = cx.read(|cx| {
+        let log = log.read(cx);
+        let id = log.selected.unwrap();
+        log.visible.len() - 1 - log.visible.iter().position(|&row| row == id).unwrap()
+    });
+    assert_eq!(row, 60);
+}
+
+#[gpui_kit::test]
+fn new_messages_keep_scrolled_rows_in_place(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(WebSocketRequest::default(), cx);
+    let log = log(&draft, cx);
+    push(
+        &log,
+        (0..100).map(|index| received(&index.to_string())).collect(),
+        cx,
+    );
+    let row_height = element_bounds(cx, "websocket-message-0")
+        .unwrap()
+        .size
+        .height;
+
+    cx.update(|_, cx| {
+        log.update(cx, |log, _| {
+            log.scroll
+                .scroll_to_item(50, gpui_kit::ScrollStrategy::Top)
+        })
+    });
+    assert!(element_bounds(cx, "websocket-messages").is_some());
+    let offset = |cx: &mut VisualTestContext| {
+        cx.read(|cx| log.read(cx).scroll.0.borrow().base_handle.offset().y)
+    };
+    let before = offset(cx);
+    assert!(before < gpui_kit::px(0.));
+
+    push(&log, vec![received("a"), received("b"), received("c")], cx);
+    assert_eq!(offset(cx), before - row_height * 3.);
+}

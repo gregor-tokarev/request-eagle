@@ -102,7 +102,9 @@ pub(crate) struct MessageLog {
     pub(super) state: ConnectionState,
     /// The resolved URL of the current or last connection.
     url: SharedString,
-    scroll: UniformListScrollHandle,
+    pub(super) scroll: UniformListScrollHandle,
+    /// Measured at the interface size the list last used.
+    row_height: Pixels,
     /// The list takes keyboard focus to move between messages.
     focus: FocusHandle,
     split: Entity<ResizableState>,
@@ -125,6 +127,7 @@ impl MessageLog {
             state: ConnectionState::Disconnected,
             url: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
+            row_height: ROW_HEIGHT.to_pixels(cx.theme().font_size),
             focus: cx.focus_handle().tab_stop(true),
             split: cx.new(|_| ResizableState::default()),
             _search_subscription: None,
@@ -253,13 +256,10 @@ impl MessageLog {
         let state = self.scroll.0.borrow();
         let offset = state.base_handle.offset();
 
-        if let Some(size) = state.last_item_size
-            && added > 0
-            && offset.y < px(0.)
-        {
+        if added > 0 && offset.y < px(0.) {
             state
                 .base_handle
-                .set_offset(point(offset.x, offset.y - size.item.height * added as f32));
+                .set_offset(point(offset.x, offset.y - self.row_height * added as f32));
         }
     }
 
@@ -320,17 +320,33 @@ impl MessageLog {
             .map(|index| self.visible.len() - 1 - index)
     }
 
-    fn keyboard_row(&self) -> usize {
-        self.selected_row().unwrap_or(0)
+    /// Where the arrow keys act, which shows while the list has focus: the
+    /// selected row while it is in view, otherwise the first row in view.
+    fn keyboard_row(&self) -> Option<usize> {
+        let last = self.visible.len().checked_sub(1)?;
+        let state = self.scroll.0.borrow();
+        // The list's last layout measured its viewport, not its rows.
+        let viewport = state.last_item_size.map(|size| size.item.height);
+        let first = ((-state.base_handle.offset().y / self.row_height).ceil() as usize).min(last);
+        let count = viewport.map_or(self.visible.len(), |height| {
+            ((height / self.row_height).floor() as usize).max(1)
+        });
+
+        match self.selected_row() {
+            Some(row) if (first..first + count).contains(&row) => Some(row),
+            _ => Some(first),
+        }
     }
 
-    /// Up and Down show the neighboring message; Escape closes it.
+    /// Up and Down show the neighboring message; Escape closes it. From a
+    /// selection out of view, they show the first message in view.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let row = self.selected_row();
+        let row = self.keyboard_row();
+        let from_selection = row.is_some() && row == self.selected_row();
         let next = match (event.keystroke.key.as_str(), row) {
+            ("down" | "up", Some(row)) if !from_selection => Some(row),
             ("down", Some(row)) => (row + 1 < self.visible.len()).then_some(row + 1),
             ("up", Some(row)) => row.checked_sub(1),
-            ("down" | "up", None) => (!self.visible.is_empty()).then_some(0),
             ("escape", _) if self.selected.is_some() => {
                 self.selected = None;
                 self.detail = None;
@@ -496,11 +512,11 @@ impl MessageLog {
             )
     }
 
-    fn row(&self, row: usize, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&self, row: usize, keyboard_row: Option<usize>, cx: &mut Context<Self>) -> AnyElement {
         let (id, entry) = self.row_entry(row);
         let selected = self.selected == Some(id);
         // Where the arrow keys start: the selection, or else the newest row.
-        let keyboard = focused && self.keyboard_row() == row;
+        let keyboard = keyboard_row == Some(row);
         let (icon, color) = kind_icon(entry.kind, cx);
 
         h_flex()
@@ -576,8 +592,11 @@ impl MessageLog {
                     "websocket-messages",
                     self.visible.len(),
                     cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
-                        let focused = this.focus.is_focused(window);
-                        range.map(|row| this.row(row, focused, cx)).collect()
+                        this.row_height = ROW_HEIGHT.to_pixels(window.rem_size());
+                        let keyboard_row = this
+                            .keyboard_row()
+                            .filter(|_| this.focus.is_focused(window));
+                        range.map(|row| this.row(row, keyboard_row, cx)).collect()
                     }),
                 )
                 .size_full()
