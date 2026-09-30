@@ -2,6 +2,7 @@ mod collection;
 mod entry;
 mod order;
 mod registry;
+mod toml_merge;
 
 #[cfg(test)]
 mod tests;
