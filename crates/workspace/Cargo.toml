@@ -7,6 +7,7 @@ edition = "2024"
 environment = { path = "../environment" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
+request = { path = "../request" }
 settings_ui = { path = "../settings_ui" }
 tab_ui = { path = "../tab_ui" }
 gpui-kit = { workspace = true, features = ["component"] }
@@ -16,7 +17,6 @@ updater = { path = "../updater" }
 
 [dev-dependencies]
 request_eagle_theme = { package = "theme", path = "../theme" }
-request = { path = "../request" }
 serde_json = "1"
 tab_ui = { path = "../tab_ui", features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }

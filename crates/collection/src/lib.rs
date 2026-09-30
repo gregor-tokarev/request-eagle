@@ -12,4 +12,3 @@ pub use entry::{DirEntry, Entry, FileEntry};
 pub use registry::{
     CollectionEditError, CollectionRegistry, CollectionRegistryLoadError, MovePlacement,
 };
-pub use request::{HttpRequest, Method, Request, RequestScripts};

@@ -8,7 +8,6 @@ use crate::{
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
-use collection::{HttpRequest, Method};
 use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
@@ -17,6 +16,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
+use request::{HttpRequest, Method};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {

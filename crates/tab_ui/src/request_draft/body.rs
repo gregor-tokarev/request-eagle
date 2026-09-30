@@ -1,10 +1,10 @@
-use collection::Method;
 use gpui_kit::component::{
     button::*,
     input::{Editor, EditorState, InputEvent},
     *,
 };
 use gpui_kit::*;
+use request::Method;
 
 use super::draft::RequestDraft;
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};

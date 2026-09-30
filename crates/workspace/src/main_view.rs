@@ -7,8 +7,8 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use crate::actions::{CloseTab, NewTab, SaveRequest};
 use crate::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
 use crate::save_request;
-use collection::Method;
 use collections_panel_ui::CollectionPanel;
+use request::Method;
 use tab_ui::{
     CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft,
     RequestLocation, SaveCollection,
@@ -197,7 +197,7 @@ impl MainView {
     pub(crate) fn open_request(
         &mut self,
         location: RequestLocation,
-        request: &collection::Request,
+        request: &request::Request,
         cx: &mut Context<Self>,
     ) {
         if let Some(index) = self.request_tab(&location.path, &location.id, cx) {
@@ -206,7 +206,7 @@ impl MainView {
             return;
         }
 
-        let collection::Request::Http(request) = request;
+        let request::Request::Http(request) = request;
         self.open_draft(location.name.clone(), request.clone(), Some(location), cx);
     }
 
@@ -253,7 +253,7 @@ impl MainView {
         path: &Path,
         name: SharedString,
         variables: HashMap<String, String>,
-        scripts: collection::RequestScripts,
+        scripts: request::RequestScripts,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -324,7 +324,7 @@ impl MainView {
     fn open_draft(
         &mut self,
         title: SharedString,
-        request: collection::HttpRequest,
+        request: request::HttpRequest,
         location: Option<RequestLocation>,
         cx: &mut Context<Self>,
     ) {
@@ -592,7 +592,7 @@ impl MainView {
         self.set_request_location(index, location, cx);
 
         if let Page::Request(draft) = &self.tabs[index].page {
-            let collection::Request::Http(request) = &file.request;
+            let request::Request::Http(request) = &file.request;
             draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
         }
 

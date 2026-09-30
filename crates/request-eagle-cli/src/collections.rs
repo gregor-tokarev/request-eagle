@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result, bail};
-use collection::{CollectionRegistry, Entry, FileEntry, MovePlacement, Request};
+use collection::{CollectionRegistry, Entry, FileEntry, MovePlacement};
+use request::Request;
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 

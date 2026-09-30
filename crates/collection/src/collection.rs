@@ -12,7 +12,8 @@ use toml_edit::{DocumentMut, Item};
 use uuid::Uuid;
 
 use crate::toml_merge::merge_table;
-use crate::{CollectionEditError, DirEntry, Entry, FileEntry, RequestScripts};
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry};
+use request::RequestScripts;
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
 const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";

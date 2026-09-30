@@ -4,7 +4,8 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionRegistry, MovePlacement, Request, RequestScripts};
+use collection::{CollectionRegistry, MovePlacement};
+
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
@@ -12,6 +13,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::{Request, RequestScripts};
 
 use super::{
     actions::{DeleteItem, RenameItem},

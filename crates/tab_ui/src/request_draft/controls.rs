@@ -1,4 +1,3 @@
-use collection::Method;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -8,6 +7,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::Method;
 
 use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;

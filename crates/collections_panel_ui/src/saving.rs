@@ -4,8 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionEditError, FileEntry, Request, RequestScripts};
+use collection::{CollectionEditError, FileEntry};
+
 use gpui_kit::{Context, SharedString, Window};
+use request::{Request, RequestScripts};
 
 use super::{CollectionPanel, tree::ItemKind};
 

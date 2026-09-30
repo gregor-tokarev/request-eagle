@@ -3,7 +3,6 @@ use std::{
     path::PathBuf,
 };
 
-use collection::RequestScripts;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -13,6 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::RequestScripts;
 
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::variable_table::{VariableTable, VariablesChanged};

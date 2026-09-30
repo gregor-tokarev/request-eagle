@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use collection::RequestScripts;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use request::RequestScripts;
 
 use crate::CollectionPage;
 use crate::request_draft::tests::element_bounds;

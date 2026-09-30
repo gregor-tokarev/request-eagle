@@ -83,7 +83,7 @@ fn vim_edits_update_body_and_both_script_drafts(cx: &mut TestAppContext) {
     let (draft, cx) = draft(cx);
     cx.update(|window, cx| {
         draft.update(cx, |draft, cx| {
-            draft.set_method(collection::Method::Post, cx);
+            draft.set_method(request::Method::Post, cx);
             draft.section = RequestSection::Body;
             draft
                 .body_state(window, cx)

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use collection::{Collection, RequestScripts};
+use collection::Collection;
+
 use environment::{Environment, EnvironmentSession};
 use gpui_kit::{App, Entity};
+use request::RequestScripts;
 
 use crate::Environments;
 

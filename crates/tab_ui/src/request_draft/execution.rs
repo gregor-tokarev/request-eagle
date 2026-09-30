@@ -1,7 +1,7 @@
-use collection::{HttpRequest, Method};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::RequestExecutor;
+use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
 

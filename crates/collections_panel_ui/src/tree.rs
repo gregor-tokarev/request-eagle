@@ -3,8 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use collection::{CollectionRegistry, Entry, FileEntry, Request};
+use collection::{CollectionRegistry, Entry, FileEntry};
+
 use gpui_kit::SharedString;
+use request::Request;
 
 use super::search::SearchIndex;
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use collection::{HttpRequest, Method};
 use gpui_kit::{Context, Entity, Modifiers, TestAppContext, VisualTestContext};
+use request::{HttpRequest, Method};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, draft::RequestSection};

@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use collection::Method;
 use gpui_kit::{
     AppContext as _, Keystroke, TestAppContext,
     component::{Root, input::EditorState},
     px, size,
 };
+use request::Method;
 
 use super::{draft::RequestSection, tests::new_draft};
 

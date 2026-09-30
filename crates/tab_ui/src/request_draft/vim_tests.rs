@@ -24,7 +24,7 @@ fn body_and_script_clicks_cancel_pending_vim_commands(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let draft = cx.new(|cx| {
                 let mut draft = new_draft(cx);
-                draft.request.method = collection::Method::Post;
+                draft.request.method = request::Method::Post;
                 draft.section = section;
                 draft
                     .script_editor(cx)
@@ -77,7 +77,7 @@ fn cached_request_editors_repaint_the_vim_block_after_cursor_motion(cx: &mut Tes
         let (_, cx) = cx.add_window_view(|window, cx| {
             let draft = cx.new(|cx| {
                 let mut draft = new_draft(cx);
-                draft.request.method = collection::Method::Post;
+                draft.request.method = request::Method::Post;
                 draft.request.body =
                     Some(b"{\"first\": 1,\n\"second\": 2,\n\"third\": 3}".to_vec());
                 draft.request.scripts.pre_request =

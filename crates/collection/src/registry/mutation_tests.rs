@@ -5,9 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{
-    CollectionEditError, CollectionRegistry, Entry, FileEntry, HttpRequest, Method, Request,
-};
+use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
+
+use request::{HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -486,7 +486,7 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
     let root = &fixture.0;
     let collection = root.join("API");
     let mut registry = CollectionRegistry::from_path(root).unwrap();
-    let scripts = crate::RequestScripts {
+    let scripts = request::RequestScripts {
         pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
         post_response: String::new(),
     };
@@ -523,7 +523,7 @@ fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables(
     let environment = collection.join("environment.toml");
     let mut registry = CollectionRegistry::from_path(root).unwrap();
     let variables = registry.collections()[0].local_env().entries.clone();
-    let scripts = crate::RequestScripts {
+    let scripts = request::RequestScripts {
         pre_request: String::new(),
         post_response: "pm.test('ok', () => {});".into(),
     };
@@ -575,7 +575,7 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
         .local_env()
         .entries
         .clone();
-    let scripts = |source: &str| crate::RequestScripts {
+    let scripts = |source: &str| request::RequestScripts {
         pre_request: source.into(),
         post_response: String::new(),
     };

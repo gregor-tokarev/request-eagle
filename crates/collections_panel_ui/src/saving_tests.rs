@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc};
 
-use collection::{Method, Request};
 use gpui_kit::TestAppContext;
+use request::{Method, Request};
 
 use super::{
     editing_tests::{fixture, sidebar},

@@ -71,7 +71,7 @@ fn save_modal_cancels_without_changes_then_saves_same_tab_to_nested_folder(
     let file =
         collection::FileEntry::from_path(directory.path().join("API/Users/Create user.toml"))
             .unwrap();
-    let collection::Request::Http(saved) = file.request;
+    let request::Request::Http(saved) = file.request;
     cx.read(|cx| {
         assert_eq!(main.read(cx).tabs.len(), 1);
         assert_eq!(main.read(cx).tabs[0].draft(), draft);

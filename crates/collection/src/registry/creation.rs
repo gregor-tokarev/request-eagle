@@ -13,8 +13,9 @@ use super::mutations::find_entry;
 use crate::collection::is_reserved;
 use crate::{
     Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
-    FileEntry, HttpRequest, Method, Request,
+    FileEntry,
 };
+use request::{HttpRequest, Method, Request};
 
 impl CollectionRegistry {
     pub fn create_collection(&mut self) -> Result<PathBuf, CollectionEditError> {

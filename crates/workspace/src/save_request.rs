@@ -12,7 +12,7 @@ pub(crate) fn open(
     main: Entity<MainView>,
     sidebar: Entity<CollectionPanel>,
     tab_id: u64,
-    request: collection::HttpRequest,
+    request: request::HttpRequest,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -65,7 +65,7 @@ struct SaveRequestDialog {
     main: Entity<MainView>,
     sidebar: Entity<CollectionPanel>,
     tab_id: u64,
-    request: collection::HttpRequest,
+    request: request::HttpRequest,
     name: Entity<InputState>,
     filter: Entity<InputState>,
     destinations: Vec<SaveDestination>,

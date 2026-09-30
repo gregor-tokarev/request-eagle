@@ -1,5 +1,5 @@
-use collection::Method;
 use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+use request::Method;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::time::Duration;
 

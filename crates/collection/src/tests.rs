@@ -1,6 +1,8 @@
 use std::{fs, path::PathBuf, time::SystemTime};
 
-use crate::{CollectionRegistry, Entry, Method, Request};
+use crate::{CollectionRegistry, Entry};
+
+use request::{Method, Request};
 
 fn test_directory() -> PathBuf {
     std::env::temp_dir().join(format!(

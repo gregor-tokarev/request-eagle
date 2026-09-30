@@ -1188,6 +1188,7 @@ dependencies = [
  "collection",
  "gpui-kit",
  "keybindings_service",
+ "request",
  "suffix",
  "tempfile",
  "theme",
