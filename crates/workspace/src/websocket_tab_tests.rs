@@ -79,10 +79,8 @@ fn a_new_websocket_tab_is_saved_through_the_dialog(cx: &mut TestAppContext) {
     init(cx);
     let (layout, cx) = workspace(collections, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
-    cx.update(|window, cx| {
-        tabs.update(cx, |tabs, cx| tabs.focus(window, cx));
-        window.dispatch_action(Box::new(NewWebSocketTab), cx);
-    });
+    cx.update(|window, cx| tabs.update(cx, |tabs, cx| tabs.focus(window, cx)));
+    cx.dispatch_action(NewWebSocketTab);
 
     let draft = cx.read(|cx| {
         let tabs = tabs.read(cx);
@@ -124,10 +122,8 @@ fn the_send_shortcut_connects_a_websocket(cx: &mut TestAppContext) {
     init(cx);
     let (layout, cx) = workspace(CollectionRegistry::new(), no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
-    cx.update(|window, cx| {
-        tabs.update(cx, |tabs, cx| tabs.focus(window, cx));
-        window.dispatch_action(Box::new(NewWebSocketTab), cx);
-    });
+    cx.update(|window, cx| tabs.update(cx, |tabs, cx| tabs.focus(window, cx)));
+    cx.dispatch_action(NewWebSocketTab);
     let draft = cx.read(|cx| tabs.read(cx).tabs[1].websocket());
 
     click(cx, "websocket-url");

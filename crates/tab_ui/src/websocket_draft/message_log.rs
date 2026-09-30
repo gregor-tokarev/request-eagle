@@ -387,7 +387,7 @@ impl MessageLog {
                 h_flex()
                     .debug_selector(|| "websocket-status".into())
                     .flex_none()
-                    .gap_1p5()
+                    .gap_1()
                     .px_2()
                     .py_1()
                     .rounded(cx.theme().radius_tokens().md)
