@@ -1,42 +1,21 @@
-use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, component::Root};
+use gpui_kit::{Entity, Focusable, TestAppContext, VisualTestContext};
 
-use crate::workspace::{Layout, on_toggle_command_palette, on_toggle_sidebar};
+use crate::tests::{collections, init};
+use crate::workspace::{Workspace, on_toggle_command_palette, on_toggle_sidebar};
 
 /// A workspace with two requests in one collection, and the global
 /// environments Production and Staging, kept until the directory is dropped.
 fn workspace(
     cx: &mut TestAppContext,
-) -> (Entity<Layout>, &mut VisualTestContext, tempfile::TempDir) {
+) -> (Entity<Workspace>, &mut VisualTestContext, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let catalog = environment::GlobalEnvironments::new(directory.path());
     for name in ["Production", "Staging"] {
         catalog.create(name).unwrap();
     }
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        cx.set_reduce_motion(true);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            Layout::new(
-                crate::performance::collections(2),
-                catalog,
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-
-        Root::new(view, window, cx)
-    });
-    let layout = layout.unwrap();
+    init(cx);
+    let (layout, cx) = crate::tests::workspace(collections(2), catalog, cx);
 
     cx.update(|window, cx| {
         window.activate_window();
@@ -48,7 +27,7 @@ fn workspace(
     (layout, cx, directory)
 }
 
-fn palette_open(layout: &Entity<Layout>, cx: &mut VisualTestContext) -> bool {
+fn palette_open(layout: &Entity<Workspace>, cx: &mut VisualTestContext) -> bool {
     cx.run_until_parked();
     cx.read(|cx| {
         layout
@@ -72,7 +51,7 @@ fn next_frame(cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 
-fn tab_titles(layout: &Entity<Layout>, cx: &mut VisualTestContext) -> Vec<String> {
+fn tab_titles(layout: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<String> {
     cx.read(|cx| {
         layout
             .read(cx)

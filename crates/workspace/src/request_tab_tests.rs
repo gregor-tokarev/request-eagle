@@ -1,14 +1,15 @@
 use std::{
     fs,
-    sync::atomic::{AtomicUsize, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use collection::{CollectionRegistry, Method};
 use gpui_kit::{Modifiers, TestAppContext};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-use tab_ui::{CollectionPage, RequestDraft};
+use crate::main_view::Page;
+use crate::tests::{click, init, no_environments, workspace};
+use tab_ui::RequestDraft;
 
 #[gpui_kit::test]
 async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
@@ -38,39 +39,20 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}").await.unwrap();
     });
 
-    let directory = std::env::temp_dir().join(format!(
-        "request-eagle-open-saved-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-    ));
-    let file = directory.join("Saved API/Items/create.toml");
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("Saved API/Items/create.toml");
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     let original = format!(
         "id = \"create-item\"\nname = \"Create item\"\nschema_version = 1\n[request]\ntype = \"http\"\nmethod = \"POST\"\npath = \"{url}\"\nheaders = [[\"X-Saved\", \"first\"], [\"X-Saved\", \"second\"]]\nquery = [[\"tag\", \"one\"], [\"tag\", \"two\"]]\nbody = {:?}\n",
         b"{\"hello\":true}".as_slice(),
     );
     fs::write(&file, &original).unwrap();
-    let collections = CollectionRegistry::from_path(&directory).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path()).unwrap();
 
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
-            collections,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let (layout, cx) = workspace(collections, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
+    cx.update(|window, _| window.refresh());
     let row = cx.debug_bounds("collection-row-2").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());
     let draft = cx.read(|cx| {
@@ -78,17 +60,19 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].title, "Create item");
-        assert_eq!(tabs.tabs[1].badge.map(|badge| badge.label), Some("POST"));
-        assert_eq!(tabs.tabs[1].request_path.as_ref(), Some(&file));
-        let draft = tabs.tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        assert_eq!(tabs.tabs[1].method, Some(collection::Method::Post));
+        assert_eq!(
+            tabs.tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&file)
+        );
+        let draft = tabs.tabs[1].draft();
         let data = draft.read(cx);
-        assert_eq!(data.name, "Create item");
-        assert_eq!(data.collection.as_deref(), Some("Saved API"));
+        let location = data.location.as_ref().unwrap();
+        assert_eq!(location.name, "Create item");
+        assert_eq!(location.collection, "Saved API");
         assert_eq!(data.request.path, url);
         assert_eq!(data.url_input().unwrap().read(cx).value(), url);
         assert_eq!(data.request.headers.len(), 2);
@@ -158,8 +142,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(1));
-        assert_eq!(tabs.tabs[1].page.view().entity_id(), draft.entity_id());
-        assert_eq!(tabs.tabs[1].badge.map(|badge| badge.label), Some("PUT"));
+        assert_eq!(tabs.tabs[1].draft(), draft);
+        assert_eq!(tabs.tabs[1].method, Some(collection::Method::Put));
         assert_eq!(draft.read(cx).request.headers[0].1, "updated");
     });
     assert!(
@@ -181,12 +165,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
-        let reopened = tabs.tabs[2]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.tabs[2].draft();
         assert_ne!(reopened, draft);
         assert_eq!(reopened.read(cx).request.method, Method::Put);
         assert_eq!(reopened.read(cx).request.headers[0].1, "updated");
@@ -202,29 +181,18 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     let collection::Request::Http(persisted) = persisted.request;
     cx.read(|cx| assert_eq!(persisted, draft.read(cx).request));
     assert_ne!(fs::read_to_string(&file).unwrap(), original);
-    fs::remove_dir_all(directory).unwrap();
 }
 
-static NEXT_SAVED_FIXTURE: AtomicUsize = AtomicUsize::new(0);
-
-pub(super) struct SavedRequestFixture {
-    pub(super) directory: std::path::PathBuf,
-    pub(super) file: std::path::PathBuf,
+pub(crate) struct SavedRequestFixture {
+    pub(crate) directory: tempfile::TempDir,
+    pub(crate) file: std::path::PathBuf,
     original: String,
 }
 
 impl SavedRequestFixture {
-    pub(super) fn new() -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "request-eagle-save-{}-{}-{}",
-            std::process::id(),
-            NEXT_SAVED_FIXTURE.fetch_add(1, Ordering::Relaxed),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-        ));
-        let file = directory.join("API/example.toml");
+    pub(crate) fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("API/example.toml");
         let original = r#"id = "example"
 name = "Example"
 schema_version = 1
@@ -244,61 +212,26 @@ path = "https://example.com/original"
         }
     }
 
-    pub(super) fn open<'a>(
+    pub(crate) fn open<'a>(
         &self,
         cx: &'a mut TestAppContext,
     ) -> (
-        gpui_kit::Entity<crate::layout::main_view::MainView>,
+        gpui_kit::Entity<crate::main_view::MainView>,
         gpui_kit::Entity<RequestDraft>,
         &'a mut gpui_kit::VisualTestContext,
     ) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            preferences::init(cx);
-            request_eagle_theme::init(cx);
-            crate::actions::init(cx);
-        });
-        let registry = CollectionRegistry::from_path(&self.directory).unwrap();
-        let (layout, cx) = cx.add_window_view(|window, cx| {
-            crate::workspace::Layout::new(
-                registry,
-                crate::tests::no_environments(),
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
+        init(cx);
+        let registry = CollectionRegistry::from_path(self.directory.path()).unwrap();
+        let (layout, cx) = workspace(registry, no_environments(), cx);
         let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
         click(cx, "collection-row-1");
-        let draft = cx.read(|cx| {
-            tabs.read(cx).tabs[1]
-                .page
-                .view()
-                .downcast::<RequestDraft>()
-                .ok()
-                .unwrap()
-        });
+        let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
 
         (tabs, draft, cx)
     }
 }
 
-impl Drop for SavedRequestFixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
-    }
-}
-
-pub(super) fn click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
-    let bounds = cx
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("missing {selector}"));
-    cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
-    cx.simulate_click(bounds.center(), Modifiers::default());
-}
-
-pub(super) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
+pub(crate) fn edit_url(cx: &mut gpui_kit::VisualTestContext, url: &str) {
     click(cx, "request-url");
     cx.simulate_keystrokes("secondary-a");
     cx.simulate_input(url);
@@ -330,12 +263,7 @@ fn dirty_close_requires_an_explicit_discard_and_cancel_keeps_edits(cx: &mut Test
     assert_eq!(fs::read_to_string(&fixture.file).unwrap(), fixture.original);
     click(cx, "collection-row-1");
     cx.read(|cx| {
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(
             reopened.read(cx).request.path,
             "https://example.com/original"
@@ -373,12 +301,7 @@ fn save_and_close_persists_body_and_does_not_close_after_a_failed_save(cx: &mut 
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 1));
     click(cx, "collection-row-1");
     cx.read(|cx| {
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(reopened.read(cx).request.body, draft.read(cx).request.body);
         assert!(!reopened.read(cx).is_dirty());
     });
@@ -407,22 +330,9 @@ fn reverting_an_edit_clears_dirty_state_and_closes_without_prompt(cx: &mut TestA
 #[gpui_kit::test]
 fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
-            registry,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let (layout, cx) = workspace(registry, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
@@ -434,13 +344,7 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(tabs.tabs[1].title, "API");
-        assert!(
-            tabs.tabs[1]
-                .page
-                .view()
-                .downcast::<CollectionPage>()
-                .is_ok()
-        );
+        assert!(matches!(tabs.tabs[1].page, Page::Collection(_)));
     });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
@@ -450,7 +354,13 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
         assert_eq!(tabs.selected, Some(2));
-        assert_eq!(tabs.tabs[2].request_path.as_ref(), Some(&fixture.file));
+        assert_eq!(
+            tabs.tabs[2]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&fixture.file)
+        );
     });
     assert!(cx.debug_bounds("sidebar-rename-editor").is_none());
 
@@ -470,7 +380,7 @@ fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    fs::create_dir_all(fixture.directory.join("Other")).unwrap();
+    fs::create_dir_all(fixture.directory.path().join("Other")).unwrap();
     let (tabs, draft, cx) = fixture.open(cx);
     edit_url(cx, "https://example.com/edited-before-rename");
 
@@ -479,10 +389,19 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     cx.simulate_keystrokes("up f2");
     cx.simulate_input("Renamed API");
     cx.simulate_keystrokes("enter");
-    let renamed = fixture.directory.join("Renamed API/example.toml");
+    let renamed = fixture.directory.path().join("Renamed API/example.toml");
     cx.read(|cx| {
-        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&renamed));
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("Renamed API"));
+        assert_eq!(
+            tabs.read(cx).tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&renamed)
+        );
+        assert_eq!(
+            draft.read(cx).location.as_ref().unwrap().collection,
+            "Renamed API"
+        );
         assert!(draft.read(cx).is_dirty());
     });
     cx.simulate_keystrokes("secondary-s");
@@ -513,10 +432,19 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
         ..Default::default()
     });
     cx.run_until_parked();
-    let moved = fixture.directory.join("Other/example.toml");
+    let moved = fixture.directory.path().join("Other/example.toml");
     cx.read(|cx| {
-        assert_eq!(tabs.read(cx).tabs[1].request_path.as_ref(), Some(&moved));
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("Other"));
+        assert_eq!(
+            tabs.read(cx).tabs[1]
+                .location(cx)
+                .map(|location| location.path)
+                .as_ref(),
+            Some(&moved)
+        );
+        assert_eq!(
+            draft.read(cx).location.as_ref().unwrap().collection,
+            "Other"
+        );
     });
     edit_url(cx, "https://example.com/edited-after-move");
     cx.simulate_keystrokes("secondary-s");
@@ -524,12 +452,7 @@ fn saving_follows_collection_renames_and_request_moves(cx: &mut TestAppContext) 
     click(cx, "collection-row-2");
     cx.read(|cx| {
         assert_eq!(tabs.read(cx).tabs.len(), 2);
-        let reopened = tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap();
+        let reopened = tabs.read(cx).tabs[1].draft();
         assert_eq!(
             reopened.read(cx).request.path,
             "https://example.com/edited-after-move"
@@ -558,7 +481,7 @@ fn context_click(cx: &mut gpui_kit::VisualTestContext, selector: &'static str) {
 #[gpui_kit::test]
 fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut TestAppContext) {
     let mut fixture = SavedRequestFixture::new();
-    let reused = fixture.directory.join("API/New Request.toml");
+    let reused = fixture.directory.path().join("API/New Request.toml");
     fs::rename(&fixture.file, &reused).unwrap();
     fixture.file = reused;
     let (tabs, draft, cx) = fixture.open(cx);
@@ -590,8 +513,14 @@ fn deleted_request_cannot_save_over_a_new_request_at_the_same_path(cx: &mut Test
     cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3, "a new file needs its own draft");
-        assert_eq!(tabs.tabs[2].request_id.as_deref(), Some(before.id.as_str()));
-        assert_ne!(tabs.tabs[2].page.view().entity_id(), draft.entity_id());
+        assert_eq!(
+            tabs.tabs[2]
+                .location(cx)
+                .map(|location| location.id)
+                .as_deref(),
+            Some(before.id.as_str())
+        );
+        assert_ne!(tabs.tabs[2].draft(), draft);
     });
     edit_url(cx, "https://example.com/new-draft");
     cx.simulate_keystrokes("secondary-s");
@@ -633,39 +562,19 @@ fn second_close_shortcut_discards_only_the_pending_tab(cx: &mut TestAppContext) 
 #[gpui_kit::test]
 fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
-    let nested = fixture.directory.join("API/API/V2/example.toml");
+    let nested = fixture.directory.path().join("API/API/V2/example.toml");
     fs::create_dir_all(nested.parent().unwrap()).unwrap();
     fs::rename(&fixture.file, &nested).unwrap();
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
-    let registry = CollectionRegistry::from_path(&fixture.directory).unwrap();
-    let (layout, cx) = cx.add_window_view(|window, cx| {
-        crate::workspace::Layout::new(
-            registry,
-            crate::tests::no_environments(),
-            updater::init("1.2.3", cx),
-            window,
-            cx,
-        )
-    });
+    init(cx);
+    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let (layout, cx) = workspace(registry, no_environments(), cx);
     click(cx, "collection-row-3");
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
-    let draft = cx.read(|cx| {
-        tabs.read(cx).tabs[1]
-            .page
-            .view()
-            .downcast::<RequestDraft>()
-            .ok()
-            .unwrap()
-    });
+    let draft = cx.read(|cx| tabs.read(cx).tabs[1].draft());
     cx.read(|cx| {
-        assert_eq!(draft.read(cx).collection.as_deref(), Some("API"));
+        assert_eq!(draft.read(cx).location.as_ref().unwrap().collection, "API");
         assert_eq!(
-            draft.read(cx).folders,
+            draft.read(cx).location.as_ref().unwrap().folders,
             vec![gpui_kit::SharedString::from("API"), "V2".into()]
         );
     });
@@ -690,9 +599,9 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     cx.simulate_keystrokes("enter");
     cx.read(|cx| {
         assert_eq!(
-            draft.read(cx).folders,
+            draft.read(cx).location.as_ref().unwrap().folders,
             vec![gpui_kit::SharedString::from("Renamed folder"), "V2".into()]
         );
-        assert_eq!(draft.read(cx).name, "Example");
+        assert_eq!(draft.read(cx).location.as_ref().unwrap().name, "Example");
     });
 }

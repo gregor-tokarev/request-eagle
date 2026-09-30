@@ -1,59 +1,32 @@
 use environment::GlobalEnvironments;
-use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 use tab_ui::EnvironmentEditor;
 
-use crate::workspace::{Layout, SidebarSection};
+use crate::main_view::Page;
+use crate::tests::{click, init};
+use crate::workspace::{SidebarSection, Workspace};
 
 fn workspace(
     cx: &mut TestAppContext,
-) -> (Entity<Layout>, &mut VisualTestContext, tempfile::TempDir) {
+) -> (Entity<Workspace>, &mut VisualTestContext, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let catalog = GlobalEnvironments::new(directory.path());
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-        crate::actions::init(cx);
-    });
 
-    let mut layout = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            Layout::new(
-                collection::CollectionRegistry::new(),
-                catalog,
-                updater::init("1.2.3", cx),
-                window,
-                cx,
-            )
-        });
-        layout = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
+    init(cx);
+    let (workspace, cx) =
+        crate::tests::workspace(collection::CollectionRegistry::new(), catalog, cx);
 
-    (layout.unwrap(), cx, directory)
+    (workspace, cx, directory)
 }
 
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
-    let bounds = cx
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("missing {selector}"));
-    cx.simulate_click(bounds.center(), Modifiers::default());
-}
-
-fn active_editor(layout: &Entity<Layout>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {
+fn active_editor(layout: &Entity<Workspace>, cx: &VisualTestContext) -> Entity<EnvironmentEditor> {
     cx.read(|cx| {
         let view = layout.read(cx).main_view.read(cx);
-        let Ok(editor) = view.tabs[view.selected.unwrap()]
-            .page
-            .view()
-            .downcast::<EnvironmentEditor>()
-        else {
+        let Page::Environment(editor) = &view.tabs[view.selected.unwrap()].page else {
             panic!("an environment tab is selected");
         };
 
-        editor
+        editor.clone()
     })
 }
 
@@ -85,14 +58,7 @@ fn creates_names_activates_and_deletes_a_global_environment(cx: &mut TestAppCont
     cx.simulate_input("host");
     click(cx, "environment-value-0");
     cx.simulate_input("staging.example.com");
-    cx.read(|cx| {
-        assert!(
-            layout.read(cx).main_view.read(cx).tabs[1]
-                .page
-                .state(cx)
-                .dirty
-        )
-    });
+    cx.read(|cx| assert!(editor.read(cx).is_dirty()));
     cx.simulate_keystrokes("secondary-s");
     assert_eq!(
         environment::Environment::from_file(directory.path().join("Staging.toml"))
@@ -105,7 +71,7 @@ fn creates_names_activates_and_deletes_a_global_environment(cx: &mut TestAppCont
     // "No Environment".
     click(cx, "environment-picker");
     cx.simulate_keystrokes("down enter");
-    let environments = cx.read(|cx| layout.read(cx).environment_panel.read(cx).environments());
+    let environments = cx.read(|cx| layout.read(cx).main_view.read(cx).environments.clone());
     cx.read(|cx| assert_eq!(environments.read(cx).active().unwrap(), "Staging"));
 
     // Each opening starts with an empty search. A leftover "stag" would leave
@@ -152,7 +118,7 @@ fn creating_from_the_picker_closes_it_and_selects_the_new_name(cx: &mut TestAppC
     let editor = active_editor(&layout, cx);
     cx.read(|cx| assert_eq!(editor.read(cx).name, "QA"));
     assert!(directory.path().join("QA.toml").exists());
-    let environments = cx.read(|cx| layout.read(cx).environment_panel.read(cx).environments());
+    let environments = cx.read(|cx| layout.read(cx).main_view.read(cx).environments.clone());
     cx.read(|cx| assert!(environments.read(cx).active().is_none()));
 
     // The first click after creating reaches the table instead of a stale menu.

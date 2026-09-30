@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use collection::RequestScripts;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 
-use crate::{CollectionPage, TabPage as _, request_draft::tests::element_bounds};
+use crate::CollectionPage;
+use crate::request_draft::tests::element_bounds;
 
 fn page(cx: &mut TestAppContext) -> (Entity<CollectionPage>, &mut VisualTestContext) {
     cx.update(|cx| {
@@ -33,7 +34,7 @@ fn type_into(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
 #[gpui_kit::test]
 fn edits_name_and_variables_until_saved(cx: &mut TestAppContext) {
     let (page, cx) = page(cx);
-    assert!(cx.read(|cx| !page.read(cx).tab_state().dirty));
+    assert!(cx.read(|cx| !page.read(cx).is_dirty()));
 
     type_into(cx, "collection-name", " v2");
     type_into(cx, "collection-variable-name-1", "token");
@@ -41,7 +42,7 @@ fn edits_name_and_variables_until_saved(cx: &mut TestAppContext) {
 
     let settings = cx.read(|cx| {
         let page = page.read(cx);
-        assert!(page.tab_state().dirty);
+        assert!(page.is_dirty());
         // The saved name remains the tab title until the edits are saved.
         assert_eq!(page.name(), "API");
         page.settings().unwrap()

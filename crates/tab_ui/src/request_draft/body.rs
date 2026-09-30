@@ -38,7 +38,7 @@ impl RequestDraft {
                 .placeholder("Enter JSON request body")
                 .default_value(value)
         });
-        let scope = self.variables(cx);
+        let scope = self.variables.clone();
         self.body_vim = Some(cx.new(|cx| crate::vim::Vim::new(body.clone(), cx)));
         self.body_completion =
             Some(cx.new(|cx| {

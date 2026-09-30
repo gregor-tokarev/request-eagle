@@ -13,14 +13,14 @@ pub(crate) enum EnvironmentPickerEvent {
 }
 
 #[derive(Clone, PartialEq)]
-pub(crate) enum Choice {
+enum Choice {
     /// A global environment, or none.
     Environment(Option<SharedString>),
     Create,
 }
 
 #[derive(Clone)]
-pub(crate) struct EnvironmentChoice {
+struct EnvironmentChoice {
     title: SharedString,
     choice: Choice,
 }

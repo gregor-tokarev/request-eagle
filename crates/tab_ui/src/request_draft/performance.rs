@@ -7,7 +7,7 @@ use gpui_kit::{
     px, size,
 };
 
-use super::{RequestDraft, draft::RequestSection};
+use super::{draft::RequestSection, tests::new_draft};
 
 // Measures dispatch, effects, CPU drawing and cleanup without software GPU
 // presentation competing for CPU. Check the native FPS monitor separately.
@@ -66,7 +66,7 @@ fn vim_cursor_benchmark(cx: &mut TestAppContext) {
         let mut retained = Vec::with_capacity(retained_count);
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| {
-                let mut draft = RequestDraft::new();
+                let mut draft = new_draft(cx);
                 draft.request.method = Method::Post;
                 draft.section = if scripts {
                     RequestSection::Scripts

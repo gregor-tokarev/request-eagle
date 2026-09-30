@@ -13,13 +13,15 @@ fn deleting_an_earlier_row_keeps_checkbox_focus_on_the_same_header(cx: &mut Test
     let mut draft = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            let mut draft = RequestDraft::from_saved(
-                "Headers".into(),
-                "API".into(),
+            let mut draft = RequestDraft::new(
                 request::HttpRequest {
                     headers: vec![("First".into(), "1".into()), ("Second".into(), "2".into())],
                     ..Default::default()
                 },
+                None,
+                Default::default(),
+                None,
+                cx,
             );
             draft.prepare(window, cx);
             draft
@@ -180,7 +182,7 @@ fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut 
     let mut draft = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         // The initial untitled tab can render before prepare/focus is called.
-        let view = cx.new(|_| RequestDraft::new());
+        let view = cx.new(super::tests::new_draft);
         draft = Some(view.clone());
         gpui_kit::component::Root::new(view, window, cx)
     });

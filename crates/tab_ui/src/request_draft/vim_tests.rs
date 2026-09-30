@@ -4,7 +4,7 @@ use gpui_kit::{
     point, px, size,
 };
 
-use super::{RequestDraft, draft::RequestSection};
+use super::{draft::RequestSection, tests::new_draft};
 
 #[gpui_kit::test]
 fn body_and_script_clicks_cancel_pending_vim_commands(cx: &mut TestAppContext) {
@@ -23,7 +23,7 @@ fn body_and_script_clicks_cancel_pending_vim_commands(cx: &mut TestAppContext) {
         let mut editor = None;
         let (_, cx) = cx.add_window_view(|window, cx| {
             let draft = cx.new(|cx| {
-                let mut draft = RequestDraft::new();
+                let mut draft = new_draft(cx);
                 draft.request.method = collection::Method::Post;
                 draft.section = section;
                 draft
@@ -76,7 +76,7 @@ fn cached_request_editors_repaint_the_vim_block_after_cursor_motion(cx: &mut Tes
         let mut editor = None;
         let (_, cx) = cx.add_window_view(|window, cx| {
             let draft = cx.new(|cx| {
-                let mut draft = RequestDraft::new();
+                let mut draft = new_draft(cx);
                 draft.request.method = collection::Method::Post;
                 draft.request.body =
                     Some(b"{\"first\": 1,\n\"second\": 2,\n\"third\": 3}".to_vec());

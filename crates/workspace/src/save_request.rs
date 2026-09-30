@@ -6,19 +6,16 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::main_view::{MainView, NewRequestSaveRequested};
+use crate::main_view::MainView;
 
 pub(crate) fn open(
-    main: &Entity<MainView>,
-    sidebar: &Entity<CollectionPanel>,
-    event: &NewRequestSaveRequested,
+    main: Entity<MainView>,
+    sidebar: Entity<CollectionPanel>,
+    tab_id: u64,
+    request: collection::HttpRequest,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let main = main.clone();
-    let sidebar = sidebar.clone();
-    let request = event.request.clone();
-    let tab_id = event.tab_id;
     let dialog = cx.new(|cx| {
         let suggested = if request.path.trim().is_empty() {
             "New Request"
