@@ -428,19 +428,20 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert_eq!(sidebar.tree.items[selected].label, "Get post 7");
     });
 
-    cx.simulate_keystrokes("shift-tab shift-tab up");
+    // Import and New Collection sit between the tree and the search.
+    cx.simulate_keystrokes("shift-tab shift-tab shift-tab up");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.last().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab shift-tab enter");
+    cx.simulate_keystrokes("shift-tab shift-tab shift-tab enter");
     cx.read(|cx| {
         let sidebar = sidebar.read(cx);
         assert_eq!(sidebar.selected, sidebar.visible.first().copied());
     });
 
-    cx.simulate_keystrokes("shift-tab shift-tab left space right shift-up");
+    cx.simulate_keystrokes("shift-tab shift-tab shift-tab left space right shift-up");
     cx.update(|window, cx| {
         let search = &sidebar.read(cx).search;
         assert!(search.focus_handle(cx).is_focused(window));
@@ -455,7 +456,9 @@ fn keyboard_can_enter_filtered_results_without_a_click(cx: &mut TestAppContext) 
         assert!(sidebar.read(cx).visible.is_empty());
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });
-    cx.simulate_keystrokes("tab tab down up home end left right enter space shift-tab shift-tab");
+    cx.simulate_keystrokes(
+        "tab tab tab down up home end left right enter space shift-tab shift-tab shift-tab",
+    );
     cx.update(|window, cx| {
         assert!(sidebar.read(cx).search.focus_handle(cx).is_focused(window));
     });

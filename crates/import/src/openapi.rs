@@ -4,12 +4,13 @@
 use std::collections::HashMap;
 
 use collection::{ImportedCollection, ImportedItem};
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use request::{HttpRequest, Method, Request, RequestScripts};
 use serde_json::{Map, Value};
 
 use crate::{
     Import, ImportError,
-    body::{multipart_form, set_content_type, url_encoded_form},
+    body::{multipart_form, set_content_type, url_encoded_form, url_encoded_form_script},
     document::{clean_name, text},
 };
 
@@ -19,6 +20,20 @@ const BASE_URL: &str = "base_url";
 /// Deeper schemas are left out of generated bodies, which also ends
 /// recursive references.
 const MAX_SCHEMA_DEPTH: usize = 8;
+
+/// Characters that would end or restructure a path segment.
+const PATH_VALUE: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'/')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}');
 
 static NULL: Value = Value::Null;
 
@@ -156,28 +171,33 @@ impl<'a> Spec<'a> {
         let mut query = Vec::new();
         let mut form = Vec::new();
         let mut body_schema = None;
+        let mut pre_request = None;
 
         for parameter in self.parameters(path_item, operation) {
             let Some(name) = parameter["name"].as_str() else {
                 continue;
             };
             let required = parameter["required"].as_bool() == Some(true);
+            let value = || {
+                self.simple_value(parameter)
+                    .unwrap_or_else(|| variable(name))
+            };
 
             match parameter["in"].as_str() {
                 Some("path") => {
-                    path_values.insert(name, self.parameter_value(parameter));
+                    let value = match self.simple_value(parameter) {
+                        Some(value) => utf8_percent_encode(&value, PATH_VALUE).to_string(),
+                        None => variable(name),
+                    };
+                    path_values.insert(name, value);
                 }
                 // Optional parameters change what the server does, so only
                 // required ones are sent.
-                Some("query") if required => {
-                    query.push((name.to_owned(), self.parameter_value(parameter)));
-                }
-                Some("header") if required => {
-                    headers.push((name.to_owned(), self.parameter_value(parameter)));
-                }
+                Some("query") if required => query.extend(self.query_pairs(name, parameter)),
+                Some("header") if required => headers.push((name.to_owned(), value())),
                 Some("body") => body_schema = Some(&parameter["schema"]),
                 Some("formData") if parameter["type"] != "file" => {
-                    form.push((name.to_owned(), self.parameter_value(parameter)));
+                    form.push((name.to_owned(), value()));
                 }
                 _ => {}
             }
@@ -200,6 +220,7 @@ impl<'a> Spec<'a> {
             } else if consumes.is_some_and(|media_type| media_type.starts_with("multipart/")) {
                 Some(multipart_form(&form, &mut headers))
             } else {
+                pre_request = url_encoded_form_script(&form);
                 Some(url_encoded_form(&form, &mut headers))
             }
         } else {
@@ -212,7 +233,10 @@ impl<'a> Spec<'a> {
             headers,
             body,
             query,
-            scripts: RequestScripts::default(),
+            scripts: RequestScripts {
+                pre_request: pre_request.unwrap_or_default(),
+                post_response: String::new(),
+            },
         }
     }
 
@@ -235,10 +259,11 @@ impl<'a> Spec<'a> {
         parameters
     }
 
-    /// A parameter's example or default, or a variable named after it.
-    fn parameter_value(&self, parameter: &'a Value) -> String {
+    /// A parameter's example or default.
+    fn parameter_example(&self, parameter: &'a Value) -> Option<&'a Value> {
         let schema = self.resolve(&parameter["schema"]);
-        let value = [
+
+        [
             &parameter["example"],
             &parameter["x-example"],
             &parameter["default"],
@@ -246,11 +271,69 @@ impl<'a> Spec<'a> {
             &schema["default"],
         ]
         .into_iter()
-        .find(|value| !value.is_null());
+        .find(|value| !value.is_null())
+    }
+
+    /// A header, path or form parameter's example in the `simple` style that
+    /// OpenAPI uses for headers and paths, or in Swagger's `collectionFormat`.
+    fn simple_value(&self, parameter: &'a Value) -> Option<String> {
+        let value = self.parameter_example(parameter)?;
+        let separator = match parameter["collectionFormat"].as_str() {
+            Some("ssv") => " ",
+            Some("tsv") => "\t",
+            Some("pipes") => "|",
+            _ => ",",
+        };
+
+        Some(join_value(
+            value,
+            separator,
+            parameter["explode"].as_bool() == Some(true),
+        ))
+    }
+
+    /// A query parameter's pairs in its `style`, OpenAPI's `form` by default,
+    /// or in Swagger's `collectionFormat`. An exploded array repeats the
+    /// parameter for each item.
+    fn query_pairs(&self, name: &str, parameter: &'a Value) -> Vec<(String, String)> {
+        let Some(value) = self.parameter_example(parameter) else {
+            return vec![(name.to_owned(), variable(name))];
+        };
+        let style = parameter["style"].as_str().unwrap_or("form");
+        let (explode, separator) = if self.swagger {
+            match parameter["collectionFormat"].as_str() {
+                Some("multi") => (true, ","),
+                Some("ssv") => (false, " "),
+                Some("tsv") => (false, "\t"),
+                Some("pipes") => (false, "|"),
+                _ => (false, ","),
+            }
+        } else {
+            let separator = match style {
+                "spaceDelimited" => " ",
+                "pipeDelimited" => "|",
+                _ => ",",
+            };
+            (
+                parameter["explode"].as_bool().unwrap_or(style == "form"),
+                separator,
+            )
+        };
 
         match value {
-            Some(value) => text(Some(value)),
-            None => format!("{{{{{}}}}}", text(parameter.get("name"))),
+            Value::Array(items) if explode => items
+                .iter()
+                .map(|item| (name.to_owned(), text(Some(item))))
+                .collect(),
+            Value::Object(properties) if style == "deepObject" => properties
+                .iter()
+                .map(|(key, value)| (format!("{name}[{key}]"), text(Some(value))))
+                .collect(),
+            Value::Object(properties) if explode => properties
+                .iter()
+                .map(|(key, value)| (key.clone(), text(Some(value))))
+                .collect(),
+            value => vec![(name.to_owned(), join_value(value, separator, false))],
         }
     }
 
@@ -371,13 +454,17 @@ impl<'a> Spec<'a> {
 
         if let Some(schemas) = schema["allOf"].as_array() {
             let mut merged = Map::new();
-            for schema in schemas {
-                match self.sample(schema, depth + 1) {
+            for composed in schemas {
+                match self.sample(composed, depth + 1) {
                     Value::Object(properties) => merged.extend(properties),
-                    value if schemas.len() == 1 => return value,
+                    value if schemas.len() == 1 && schema.get("properties").is_none() => {
+                        return value;
+                    }
                     _ => {}
                 }
             }
+            // Properties beside `allOf` apply as well.
+            merged.extend(self.properties_sample(schema, depth));
 
             return Value::Object(merged);
         }
@@ -396,16 +483,9 @@ impl<'a> Spec<'a> {
         };
 
         match kind {
-            Some("object") | None if schema.get("properties").is_some() => Value::Object(
-                schema["properties"]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    // Servers set read-only properties, so requests leave them out.
-                    .filter(|(_, property)| self.resolve(property)["readOnly"] != true)
-                    .map(|(name, property)| (name.clone(), self.sample(property, depth + 1)))
-                    .collect(),
-            ),
+            Some("object") | None if schema.get("properties").is_some() => {
+                Value::Object(self.properties_sample(schema, depth))
+            }
             Some("object") => Value::Object(Map::new()),
             Some("array") => Value::Array(vec![self.sample(&schema["items"], depth + 1)]),
             Some("string") => Value::from(match schema["format"].as_str() {
@@ -421,6 +501,41 @@ impl<'a> Spec<'a> {
             _ => Value::Null,
         }
     }
+
+    fn properties_sample(&self, schema: &'a Value, depth: usize) -> Map<String, Value> {
+        schema["properties"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            // Servers set read-only properties, so requests leave them out.
+            .filter(|(_, property)| self.resolve(property)["readOnly"] != true)
+            .map(|(name, property)| (name.clone(), self.sample(property, depth + 1)))
+            .collect()
+    }
+}
+
+/// A variable named after a parameter, for the user to fill in.
+fn variable(name: &str) -> String {
+    format!("{{{{{name}}}}}")
+}
+
+/// Array items, or object keys and values, joined by `separator`. Exploded
+/// objects join `key=value` pairs instead.
+fn join_value(value: &Value, separator: &str, explode: bool) -> String {
+    let parts: Vec<_> = match value {
+        Value::Array(items) => items.iter().map(|item| text(Some(item))).collect(),
+        Value::Object(properties) if explode => properties
+            .iter()
+            .map(|(key, value)| format!("{key}={}", text(Some(value))))
+            .collect(),
+        Value::Object(properties) => properties
+            .iter()
+            .flat_map(|(key, value)| [key.clone(), text(Some(value))])
+            .collect(),
+        value => return text(Some(value)),
+    };
+
+    parts.join(separator)
 }
 
 /// The path with each `{parameter}` replaced by its value. Parameters the
@@ -436,7 +551,7 @@ fn fill_path(path: &str, values: &HashMap<&str, String>) -> String {
         filled.push_str(&rest[..start]);
         match values.get(name) {
             Some(value) => filled.push_str(value),
-            None => filled.push_str(&format!("{{{{{name}}}}}")),
+            None => filled.push_str(&variable(name)),
         }
         rest = &rest[start + length + 1..];
     }

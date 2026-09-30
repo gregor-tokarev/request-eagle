@@ -89,6 +89,7 @@ const COLLECTION: &str = r#"{
                     "urlencoded": [
                         {"key": "grant type", "value": "password & more"},
                         {"key": "scope", "value": "{{scope}}"},
+                        {"key": "id", "value": "{{$guid}}"},
                         {"key": "skip", "value": "x", "disabled": true}
                     ]
                 },
@@ -126,10 +127,10 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
             ("Authorization".to_owned(), "Bearer {{token}}".to_owned()),
         ]
     );
-    // Folder scripts run before the request's own.
+    // Folder scripts run before the request's own, each in its own block.
     assert_eq!(
         find.scripts.post_response,
-        "pm.test('folder', () => {});\n\npm.response.to.have.status(200);"
+        "{\npm.test('folder', () => {});\n}\n\n{\npm.response.to.have.status(200);\n}"
     );
     assert_eq!(find.scripts.pre_request, "");
 
@@ -158,7 +159,14 @@ fn postman_forms_and_basic_auth_are_encoded() {
     assert_eq!(login.method, Method::Post);
     assert_eq!(
         String::from_utf8(login.body.clone().unwrap()).unwrap(),
-        "grant%20type=password%20%26%20more&scope={{scope}}"
+        "grant%20type=password%20%26%20more&scope={{scope}}&id={{$guid}}"
+    );
+    // Variables are encoded once they are filled in, when sending.
+    assert!(
+        login
+            .scripts
+            .pre_request
+            .starts_with("// Encode the form after filling in its variables")
     );
     assert_eq!(
         login.headers,
@@ -194,11 +202,12 @@ fn postman_basic_auth_with_variables_is_encoded_when_sending() {
     let (_, me) = http(&import.collection.items[0]);
 
     assert!(me.headers.is_empty());
+    // Authorization follows the scripts that may set its credentials.
     assert_eq!(
         me.scripts.pre_request,
-        "pm.request.headers.upsert({key: \"Authorization\", value: \"Basic \" + \
-         pm.encoding.base64Encode(pm.variables.replaceIn(\"{{user}}:{{password}}\"))});\n\n\
-         console.log('me')"
+        "{\nconsole.log('me')\n}\n\n{\n\
+         pm.request.headers.upsert({key: \"Authorization\", value: \"Basic \" + \
+         pm.encoding.base64Encode(pm.variables.replaceIn(\"{{user}}:{{password}}\"))});\n}"
     );
 }
 
@@ -228,6 +237,17 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
                             "variables": "{\"first\": 2}"
                         }},
                         "url": "https://example.com/graphql"
+                    }
+                },
+                {
+                    "name": "Templated query",
+                    "request": {
+                        "method": "POST",
+                        "body": {"mode": "graphql", "graphql": {
+                            "query": "query($limit: Int!) { pets(limit: $limit) { id } }",
+                            "variables": "{\"limit\": {{limit}}}"
+                        }},
+                        "url": {"protocol": "https", "host": ["example", "com"], "port": "8443", "path": ["graphql"]}
                     }
                 },
                 {
@@ -264,7 +284,16 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
         serde_json::json!({"query": "query { pets { id } }", "variables": {"first": 2}})
     );
 
-    let (_, key) = http(&import.collection.items[2]);
+    // Variables that are JSON only once filled in are kept as written.
+    let (_, templated) = http(&import.collection.items[2]);
+    assert_eq!(
+        String::from_utf8(templated.body.clone().unwrap()).unwrap(),
+        "{\n  \"query\": \"query($limit: Int!) { pets(limit: $limit) { id } }\",\n  \
+         \"variables\": {\"limit\": {{limit}}}\n}"
+    );
+    assert_eq!(templated.path, "https://example.com:8443/graphql");
+
+    let (_, key) = http(&import.collection.items[3]);
     assert_eq!(key.method, Method::Get);
     assert_eq!(key.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
 }

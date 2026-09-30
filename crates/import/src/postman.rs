@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::{
     Import, ImportError,
-    body::{multipart_form, set_content_type, url_encoded_form},
+    body::{multipart_form, set_content_type, url_encoded_form, url_encoded_form_script},
     document::{clean_name, text},
 };
 
@@ -19,15 +19,19 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
     // inherit only its authorization.
     let inherited = Inherited {
         auth: own_auth(document),
-        scripts: RequestScripts::default(),
+        scripts: Scripts::default(),
     };
     let items = items(document, &inherited, &mut skipped);
+    let scripts = scripts(document);
 
     Ok(Import {
         collection: ImportedCollection {
             name: clean_name(document["info"]["name"].as_str(), "Postman Collection"),
             variables: variables(document),
-            scripts: scripts(document),
+            scripts: RequestScripts {
+                pre_request: join_scripts(&scripts.pre_request),
+                post_response: join_scripts(&scripts.post_response),
+            },
             items,
         },
         skipped,
@@ -39,7 +43,24 @@ struct Inherited<'a> {
     auth: Option<&'a Value>,
     /// Request Eagle has no folder scripts, so each request runs its folders'
     /// scripts before its own, in the order Postman runs them.
-    scripts: RequestScripts,
+    scripts: Scripts,
+}
+
+/// Scripts in the order Postman runs them, each kept separate until they are
+/// joined for a request.
+#[derive(Clone, Default)]
+struct Scripts {
+    pre_request: Vec<String>,
+    post_response: Vec<String>,
+}
+
+impl Scripts {
+    fn then(&self, next: Scripts) -> Scripts {
+        Scripts {
+            pre_request: [self.pre_request.clone(), next.pre_request].concat(),
+            post_response: [self.post_response.clone(), next.post_response].concat(),
+        }
+    }
 }
 
 fn items(parent: &Value, inherited: &Inherited, skipped: &mut Vec<String>) -> Vec<ImportedItem> {
@@ -55,7 +76,7 @@ fn items(parent: &Value, inherited: &Inherited, skipped: &mut Vec<String>) -> Ve
             if item.get("item").is_some() {
                 let inherited = Inherited {
                     auth: own_auth(item).or(inherited.auth),
-                    scripts: join_scripts(&inherited.scripts, &scripts(item)),
+                    scripts: inherited.scripts.then(scripts(item)),
                 };
 
                 return Some(ImportedItem::Folder {
@@ -104,9 +125,11 @@ fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest> {
     };
 
     let mut headers = pairs(&request["header"]);
-    let body = body(&request["body"], &mut headers);
     let mut query = Vec::new();
-    let mut scripts = join_scripts(&inherited.scripts, &scripts(item));
+    let mut scripts = inherited.scripts.then(scripts(item));
+    let body = body(&request["body"], &mut headers, &mut scripts);
+    // Postman applies authorization after the pre-request scripts, which may
+    // set the credentials it uses.
     authorize(
         own_auth(request).or(inherited.auth),
         &mut headers,
@@ -120,7 +143,10 @@ fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest> {
         headers,
         body,
         query,
-        scripts,
+        scripts: RequestScripts {
+            pre_request: join_scripts(&scripts.pre_request),
+            post_response: join_scripts(&scripts.post_response),
+        },
     })
 }
 
@@ -129,12 +155,15 @@ fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest> {
 fn url(url: &Value) -> String {
     let raw = match url {
         Value::String(raw) => return raw.clone(),
-        Value::Object(_) => url["raw"].as_str().unwrap_or_default(),
+        Value::Object(_) => match url["raw"].as_str() {
+            Some(raw) => raw.to_owned(),
+            None => assemble_url(url),
+        },
         _ => return String::new(),
     };
 
     let Some(variables) = url["variable"].as_array() else {
-        return raw.to_owned();
+        return raw;
     };
 
     let end = raw.find(['?', '#']).unwrap_or(raw.len());
@@ -159,7 +188,49 @@ fn url(url: &Value) -> String {
     path + rest
 }
 
-fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Vec<u8>> {
+/// A URL from the parts Postman stores beside, or instead of, the raw URL.
+fn assemble_url(url: &Value) -> String {
+    let join = |parts: &Value, separator: &str| match parts {
+        Value::Array(parts) => parts
+            .iter()
+            .map(|part| text(Some(part.get("value").unwrap_or(part))))
+            .collect::<Vec<_>>()
+            .join(separator),
+        part => text(Some(part)),
+    };
+
+    let mut assembled = String::new();
+    if let Some(protocol) = url["protocol"].as_str() {
+        assembled.push_str(&format!("{protocol}://"));
+    }
+    assembled.push_str(&join(&url["host"], "."));
+    if !url["port"].is_null() {
+        assembled.push_str(&format!(":{}", text(Some(&url["port"]))));
+    }
+
+    let path = join(&url["path"], "/");
+    if !path.is_empty() && !path.starts_with('/') {
+        assembled.push('/');
+    }
+    assembled.push_str(&path);
+
+    let query = pairs(&url["query"]);
+    if !query.is_empty() {
+        let query: Vec<_> = query
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        assembled.push_str(&format!("?{}", query.join("&")));
+    }
+
+    assembled
+}
+
+fn body(
+    body: &Value,
+    headers: &mut Vec<(String, String)>,
+    scripts: &mut Scripts,
+) -> Option<Vec<u8>> {
     if body["disabled"].as_bool() == Some(true) {
         return None;
     }
@@ -180,7 +251,12 @@ fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Vec<u8>> {
         }
         "urlencoded" => {
             let fields = pairs(&body["urlencoded"]);
-            (!fields.is_empty()).then(|| url_encoded_form(&fields, headers))
+            if fields.is_empty() {
+                return None;
+            }
+            scripts.pre_request.extend(url_encoded_form_script(&fields));
+
+            Some(url_encoded_form(&fields, headers))
         }
         "formdata" => {
             // Files are not part of a saved request, so only text fields remain.
@@ -198,18 +274,21 @@ fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Vec<u8>> {
         }
         "graphql" => {
             let graphql = &body["graphql"];
+            let query = serde_json::to_string(&text(graphql.get("query"))).ok()?;
+            // Variables are JSON once their `{{variables}}` are filled in, so
+            // they are kept as written.
             let variables = match &graphql["variables"] {
-                Value::String(variables) if variables.trim().is_empty() => Value::Null,
-                Value::String(variables) => serde_json::from_str(variables).unwrap_or(Value::Null),
-                variables => variables.clone(),
+                Value::String(variables) => variables.trim().to_owned(),
+                Value::Null => String::new(),
+                variables => serde_json::to_string_pretty(variables).ok()?,
             };
-            let mut payload = serde_json::json!({ "query": text(graphql.get("query")) });
-            if !variables.is_null() {
-                payload["variables"] = variables;
-            }
             set_content_type(headers, "application/json");
 
-            Some(serde_json::to_string_pretty(&payload).ok()?.into_bytes())
+            Some(if variables.is_empty() {
+                format!("{{\n  \"query\": {query}\n}}").into_bytes()
+            } else {
+                format!("{{\n  \"query\": {query},\n  \"variables\": {variables}\n}}").into_bytes()
+            })
         }
         _ => None,
     }
@@ -227,7 +306,7 @@ fn authorize(
     auth: Option<&Value>,
     headers: &mut Vec<(String, String)>,
     query: &mut Vec<(String, String)>,
-    scripts: &mut RequestScripts,
+    scripts: &mut Scripts,
 ) {
     let Some(auth) = auth else { return };
     let kind = auth["type"].as_str().unwrap_or_default();
@@ -251,10 +330,9 @@ fn authorize(
             if credentials.contains("{{") {
                 // Variables are resolved when sending, so encode them then.
                 let credentials = serde_json::to_string(&credentials).unwrap_or_default();
-                let script = format!(
+                scripts.pre_request.push(format!(
                     "pm.request.headers.upsert({{key: \"Authorization\", value: \"Basic \" + pm.encoding.base64Encode(pm.variables.replaceIn({credentials}))}});"
-                );
-                scripts.pre_request = join_script(&script, &scripts.pre_request);
+                ));
             } else {
                 headers.push((
                     "Authorization".into(),
@@ -302,8 +380,9 @@ fn variables(document: &Value) -> HashMap<String, String> {
     pairs(&document["variable"]).into_iter().collect()
 }
 
-fn scripts(item: &Value) -> RequestScripts {
-    let mut scripts = RequestScripts::default();
+/// The item's own scripts.
+fn scripts(item: &Value) -> Scripts {
+    let mut scripts = Scripts::default();
 
     for event in item["event"].as_array().into_iter().flatten() {
         if event["disabled"].as_bool() == Some(true) {
@@ -319,29 +398,29 @@ fn scripts(item: &Value) -> RequestScripts {
             Value::String(source) => source.clone(),
             _ => continue,
         };
+        if source.trim().is_empty() {
+            continue;
+        }
 
-        let script = match event["listen"].as_str() {
-            Some("prerequest") => &mut scripts.pre_request,
-            Some("test") => &mut scripts.post_response,
-            _ => continue,
-        };
-        *script = join_script(script, &source);
+        match event["listen"].as_str() {
+            Some("prerequest") => scripts.pre_request.push(source),
+            Some("test") => scripts.post_response.push(source),
+            _ => {}
+        }
     }
 
     scripts
 }
 
-fn join_scripts(first: &RequestScripts, second: &RequestScripts) -> RequestScripts {
-    RequestScripts {
-        pre_request: join_script(&first.pre_request, &second.pre_request),
-        post_response: join_script(&first.post_response, &second.post_response),
+/// Joins scripts that Postman runs one after another. Each keeps its own
+/// block, so declarations with the same name in two of them do not collide.
+fn join_scripts(scripts: &[String]) -> String {
+    match scripts {
+        [script] => script.clone(),
+        scripts => scripts
+            .iter()
+            .map(|script| format!("{{\n{script}\n}}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
     }
-}
-
-fn join_script(first: &str, second: &str) -> String {
-    [first, second]
-        .into_iter()
-        .filter(|script| !script.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }

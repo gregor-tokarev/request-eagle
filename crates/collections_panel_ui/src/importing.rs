@@ -1,12 +1,14 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use collection::{CollectionEditError, ImportedCollection};
+use collection::Collection;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use import::Import;
 
 use super::{panel::CollectionPanel, tree::path_name};
 
@@ -31,13 +33,14 @@ impl CollectionPanel {
 
     /// Adds an imported collection and selects it. Its folders start
     /// collapsed, so a large import shows its structure first.
-    pub fn import_collection(
+    pub fn add_imported_collection(
         &mut self,
-        imported: ImportedCollection,
+        collection: Collection,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<PathBuf, CollectionEditError> {
-        let path = self.collections.import_collection(imported)?;
+    ) {
+        let path = collection.path.clone();
+        self.collections.add_collection(collection);
         self.rename = None;
         self.pending_delete = None;
         self.error = None;
@@ -56,8 +59,6 @@ impl CollectionPanel {
         if let Some(row) = self.selected_row() {
             self.scroll_handle.scroll_to_item(row, ScrollStrategy::Top);
         }
-
-        Ok(path)
     }
 }
 
@@ -102,6 +103,9 @@ impl ImportDialog {
     }
 
     fn import_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = self.panel.upgrade() else {
+            return;
+        };
         if self.importing {
             return;
         }
@@ -110,23 +114,36 @@ impl ImportDialog {
         self.error = None;
         cx.notify();
 
-        let parsed = cx.background_executor().spawn(async move {
+        let directory = panel
+            .read(cx)
+            .collections
+            .directory()
+            .map(Path::to_path_buf);
+
+        // Writing a large collection takes a while, so it happens here too.
+        let imported = cx.background_executor().spawn(async move {
+            let directory = directory.ok_or("No collections directory is configured.")?;
             let source = std::fs::read_to_string(&path)
                 .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+            let import = import::parse(&source).map_err(|error| error.to_string())?;
+            let collection = import
+                .collection
+                .write(&directory)
+                .map_err(|error| format!("Could not import the collection: {error}"))?;
 
-            import::parse(&source).map_err(|error| error.to_string())
+            Ok::<_, String>((collection, import.skipped))
         });
 
         self._task = Some(cx.spawn_in(window, async move |this, cx| {
-            let parsed = parsed.await;
+            let imported = imported.await;
 
-            let _ = this.update_in(cx, |this, window, cx| this.finish(parsed, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.finish(imported, window, cx));
         }));
     }
 
     fn finish(
         &mut self,
-        parsed: Result<Import, String>,
+        imported: Result<(Collection, Vec<String>), String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -135,22 +152,22 @@ impl ImportDialog {
         let Some(panel) = self.panel.upgrade() else {
             return;
         };
-        let result = parsed.and_then(|import| {
-            panel
-                .update(cx, |panel, cx| {
-                    panel.import_collection(import.collection, window, cx)
-                })
-                .map(|path| (path, import.skipped))
-                .map_err(|error| format!("Could not import the collection: {error}"))
-        });
 
-        match result {
-            Ok((_, skipped)) if skipped.is_empty() => {
-                window.close_dialog(cx);
-                let focus = panel.read(cx).focus.clone();
-                window.focus(&focus, cx);
+        match imported {
+            Ok((collection, skipped)) => {
+                let name = path_name(&collection.path);
+                panel.update(cx, |panel, cx| {
+                    panel.add_imported_collection(collection, window, cx)
+                });
+
+                if skipped.is_empty() {
+                    window.close_dialog(cx);
+                    let focus = panel.read(cx).focus.clone();
+                    window.focus(&focus, cx);
+                } else {
+                    self.skipped = Some((name, skipped));
+                }
             }
-            Ok((path, skipped)) => self.skipped = Some((path_name(&path), skipped)),
             Err(error) => self.error = Some(error),
         }
 

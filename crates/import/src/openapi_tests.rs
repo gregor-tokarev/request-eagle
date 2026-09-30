@@ -51,9 +51,22 @@ paths:
           in: query
           required: true
           schema: {type: string, default: name}
+        - name: ids
+          in: query
+          required: true
+          schema: {type: array, items: {type: integer}, example: [1, 2]}
+        - name: filter
+          in: query
+          required: true
+          style: deepObject
+          schema: {type: object, example: {color: red}}
         - name: X-Trace
           in: header
           required: true
+        - name: X-Tags
+          in: header
+          required: true
+          schema: {type: array, example: [a, b]}
       responses:
         200:
           description: The pet
@@ -89,6 +102,11 @@ paths:
       responses:
         '201':
           description: Created
+  /files/{name}:
+    get:
+      security: []
+      parameters:
+        - {name: name, in: path, required: true, schema: {type: string, default: 'a#b/c'}}
 components:
   parameters:
     PetId:
@@ -112,6 +130,9 @@ components:
         owner: {$ref: '#/components/schemas/Owner'}
         status: {type: string, enum: [available, sold]}
     Owner:
+      type: object
+      properties:
+        email: {type: string, format: email}
       allOf:
         - type: object
           properties:
@@ -155,12 +176,21 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
 
     assert_eq!(find.method, Method::Get);
     assert_eq!(find.path, "{{base_url}}/pets/7");
-    // Optional parameters are left out.
-    assert_eq!(find.query, [("fields".to_owned(), "name".to_owned())]);
+    // Optional parameters are left out, and the rest follow their style.
+    assert_eq!(
+        find.query,
+        [
+            ("fields".to_owned(), "name".to_owned()),
+            ("ids".to_owned(), "1".to_owned()),
+            ("ids".to_owned(), "2".to_owned()),
+            ("filter[color]".to_owned(), "red".to_owned()),
+        ]
+    );
     assert_eq!(
         find.headers,
         [
             ("X-Trace".to_owned(), "{{X-Trace}}".to_owned()),
+            ("X-Tags".to_owned(), "a,b".to_owned()),
             (
                 "Authorization".to_owned(),
                 "Bearer {{bearerAuth}}".to_owned()
@@ -179,6 +209,10 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
         ]
     );
     assert_eq!(json_body(order), json!({"quantity": 2}));
+
+    // Path values cannot end or split their segment.
+    let (_, file) = http(&import.collection.items[3]);
+    assert_eq!(file.path, "{{base_url}}/files/a%23b%2Fc");
 }
 
 #[test]
@@ -199,6 +233,8 @@ fn openapi_bodies_are_generated_from_schemas() {
     assert_eq!(body["born"], "2024-01-01");
     assert_eq!(body["status"], "available");
     assert_eq!(body["owner"]["name"], "string");
+    // Properties beside `allOf` are part of the schema too.
+    assert_eq!(body["owner"]["email"], "user@example.com");
     assert!(body.get("id").is_none());
     // Recursive schemas stop instead of growing without end.
     assert!(body["owner"]["pets"][0]["owner"].is_object());

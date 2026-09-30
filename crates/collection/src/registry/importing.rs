@@ -37,36 +37,35 @@ pub enum ImportedItem {
 /// 255-byte limit of common filesystems.
 const MAX_FILE_STEM_BYTES: usize = 120;
 
-impl CollectionRegistry {
-    /// Writes an imported collection beside the others, numbering its name
-    /// when it is taken. A failed import removes everything it wrote.
-    pub fn import_collection(
-        &mut self,
-        imported: ImportedCollection,
-    ) -> Result<PathBuf, CollectionEditError> {
-        let directory = self
-            .directory
-            .as_ref()
-            .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
+impl ImportedCollection {
+    /// Writes the collection as a new directory in `directory`, numbering its
+    /// name when it is taken. A failed write removes everything it wrote.
+    ///
+    /// Large imports take a while, so this works without the registry and can
+    /// run in the background; add the result with
+    /// [`CollectionRegistry::add_collection`].
+    pub fn write(self, directory: &Path) -> Result<Collection, CollectionEditError> {
         fs::create_dir_all(directory)?;
         let path = create_unique(
             directory,
-            &file_stem(&imported.name, "Imported Collection"),
+            &file_stem(&self.name, "Imported Collection"),
             "",
+            1,
             &[],
             |path| fs::create_dir(path),
-        )?;
+        )?
+        .0;
 
-        match write_collection(&path, imported) {
-            Ok(collection) => {
-                self.collections.push(collection);
-                Ok(path)
-            }
-            Err(error) => {
-                let _ = fs::remove_dir_all(&path);
-                Err(error)
-            }
-        }
+        write_collection(&path, self).inspect_err(|_| {
+            let _ = fs::remove_dir_all(&path);
+        })
+    }
+}
+
+impl CollectionRegistry {
+    /// Adds a collection written outside the registry, such as an import.
+    pub fn add_collection(&mut self, collection: Collection) {
+        self.collections.push(collection);
     }
 }
 
@@ -97,17 +96,28 @@ fn write_items(
     reserved: &[PathBuf],
 ) -> Result<(), CollectionEditError> {
     let mut paths = Vec::with_capacity(items.len());
+    // The next number to try for each name, so that many items with the same
+    // name do not retry every number taken before them.
+    let mut next_numbers: HashMap<String, usize> = HashMap::new();
 
     for item in items {
-        let path = match item {
-            ImportedItem::Folder { name, items } => {
-                let path =
-                    create_unique(parent, &file_stem(name, "Folder"), "", reserved, |path| {
-                        fs::create_dir(path)
-                    })?;
-                write_items(&path, items, reserved)?;
+        let (stem, extension) = match item {
+            ImportedItem::Folder { name, .. } => (file_stem(name, "Folder"), ""),
+            ImportedItem::Request { name, .. } => (file_stem(name, "Request"), ".toml"),
+        };
+        // Filesystems can ignore case, so names that differ only in case share numbers.
+        let next_number = next_numbers
+            .entry(format!("{stem}{extension}").to_lowercase())
+            .or_insert(1);
 
-                path
+        let (path, number) = match item {
+            ImportedItem::Folder { items, .. } => {
+                let created = create_unique(parent, &stem, "", *next_number, reserved, |path| {
+                    fs::create_dir(path)
+                })?;
+                write_items(&created.0, items, reserved)?;
+
+                created
             }
             ImportedItem::Request { name, request } => {
                 let entry = FileEntry {
@@ -125,16 +135,13 @@ fn write_items(
                     }
                 })?;
 
-                create_unique(
-                    parent,
-                    &file_stem(name, "Request"),
-                    ".toml",
-                    reserved,
-                    |path| fs::File::create_new(path)?.write_all(content.as_bytes()),
-                )?
+                create_unique(parent, &stem, ".toml", *next_number, reserved, |path| {
+                    fs::File::create_new(path)?.write_all(content.as_bytes())
+                })?
             }
         };
 
+        *next_number = number + 1;
         paths.push(path);
     }
 
@@ -144,16 +151,18 @@ fn write_items(
     Ok(())
 }
 
-/// Runs `create` for the first of `stem`, `stem 2`, … that is neither
-/// reserved nor already taken, and returns that path.
+/// Runs `create` for the first of `stem`, `stem 2`, … from `first_number`
+/// that is neither reserved nor already taken, and returns that path and its
+/// number.
 fn create_unique(
     parent: &Path,
     stem: &str,
     extension: &str,
+    first_number: usize,
     reserved: &[PathBuf],
     mut create: impl FnMut(&Path) -> io::Result<()>,
-) -> io::Result<PathBuf> {
-    for number in 1.. {
+) -> io::Result<(PathBuf, usize)> {
+    for number in first_number.. {
         let name = if number == 1 {
             stem.to_owned()
         } else {
@@ -165,7 +174,7 @@ fn create_unique(
         }
 
         match create(&path) {
-            Ok(()) => return Ok(path),
+            Ok(()) => return Ok((path, number)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
         }

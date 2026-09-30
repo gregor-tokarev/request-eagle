@@ -46,28 +46,29 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
     let fixture = Fixture::new();
     let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
 
-    let path = registry
-        .import_collection(ImportedCollection {
-            name: "Pet Store".into(),
-            variables: HashMap::from([("base_url".into(), "https://pets.test".into())]),
-            scripts: RequestScripts {
-                pre_request: "pm.variables.set('a', 1)".into(),
-                post_response: String::new(),
+    let collection = ImportedCollection {
+        name: "Pet Store".into(),
+        variables: HashMap::from([("base_url".into(), "https://pets.test".into())]),
+        scripts: RequestScripts {
+            pre_request: "pm.variables.set('a', 1)".into(),
+            post_response: String::new(),
+        },
+        items: vec![
+            ImportedItem::Folder {
+                name: "Pets".into(),
+                items: vec![
+                    request("Update pet", "{{base_url}}/pets/1"),
+                    request("Add pet", "{{base_url}}/pets"),
+                ],
             },
-            items: vec![
-                ImportedItem::Folder {
-                    name: "Pets".into(),
-                    items: vec![
-                        request("Update pet", "{{base_url}}/pets/1"),
-                        request("Add pet", "{{base_url}}/pets"),
-                    ],
-                },
-                request("Health", "{{base_url}}/health"),
-            ],
-        })
-        .unwrap();
+            request("Health", "{{base_url}}/health"),
+        ],
+    }
+    .write(registry.directory().unwrap())
+    .unwrap();
+    registry.add_collection(collection);
 
-    assert_eq!(path, fixture.0.join("Pet Store"));
+    assert_eq!(registry.collections()[0].path, fixture.0.join("Pet Store"));
     assert_eq!(
         names(&registry.collections()[0].entries),
         ["Pets", "Health"]
@@ -99,7 +100,6 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
 #[test]
 fn imported_names_become_safe_unique_file_names() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
     let imported = || ImportedCollection {
         name: "../Pets".into(),
         variables: HashMap::new(),
@@ -107,6 +107,8 @@ fn imported_names_become_safe_unique_file_names() {
         items: vec![
             request("Get /pets/{id}", "/pets/{id}"),
             request("Get /pets/{id}", "/pets/{id}"),
+            // Filesystems can ignore case, so this is numbered too.
+            request("get /pets/{id}", "/pets/{id}"),
             // Would otherwise replace the collection's environment file.
             request("environment", "/environment"),
             request(".", "/"),
@@ -114,13 +116,12 @@ fn imported_names_become_safe_unique_file_names() {
         ],
     };
 
-    let first = registry.import_collection(imported()).unwrap();
-    let second = registry.import_collection(imported()).unwrap();
+    let collection = imported().write(&fixture.0).unwrap();
+    let second = imported().write(&fixture.0).unwrap();
 
-    assert_eq!(first, fixture.0.join("-Pets"));
-    assert_eq!(second, fixture.0.join("-Pets 2"));
+    assert_eq!(collection.path, fixture.0.join("-Pets"));
+    assert_eq!(second.path, fixture.0.join("-Pets 2"));
 
-    let collection = &registry.collections()[0];
     let files: Vec<_> = collection
         .entries
         .iter()
@@ -134,15 +135,16 @@ fn imported_names_become_safe_unique_file_names() {
         })
         .collect();
     assert_eq!(
-        files[..4],
+        files[..5],
         [
             "Get -pets-{id}.toml",
             "Get -pets-{id} 2.toml",
+            "get -pets-{id} 3.toml",
             "environment 2.toml",
             "Request.toml",
         ]
     );
-    assert!(files[4].len() < 130);
+    assert!(files[5].len() < 130);
 
     // Names shown in the sidebar are kept as imported.
     assert_eq!(
