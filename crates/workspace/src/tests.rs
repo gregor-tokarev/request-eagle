@@ -1,4 +1,5 @@
 use std::fs;
+use std::time::Duration;
 
 use crate::actions::{NewTab, ToggleLeftSidebar};
 use crate::bottom_panel::TOGGLE_SIDEBAR_BUTTON;
@@ -315,4 +316,47 @@ fn sidebar_sections_fold_and_reopen(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(height(cx, "collections-sidebar").is_some());
     assert!(cx.debug_bounds("import-dialog").is_some());
+}
+
+#[gpui_kit::test]
+fn sidebar_sections_fold_smoothly(cx: &mut TestAppContext) {
+    init(cx);
+    cx.update(|cx| cx.set_reduce_motion(false));
+    let directory = tempfile::tempdir().unwrap();
+    let (layout, cx) = workspace(
+        collections(2),
+        GlobalEnvironments::new(directory.path()),
+        cx,
+    );
+
+    let height = |cx: &mut VisualTestContext, selector| {
+        cx.update(|window, _| window.refresh());
+        cx.debug_bounds(selector).map(|bounds| bounds.size.height)
+    };
+    let open = height(cx, "collections-sidebar").unwrap();
+    let header = cx.read(|cx| layout.read(cx).collections_header.clone());
+
+    // A folding section shrinks over a few frames before it is removed.
+    click(cx, "collections-section");
+    cx.executor().advance_clock(Duration::from_millis(100));
+    let folding = height(cx, "collections-sidebar").unwrap();
+    assert!(folding > px(0.) && folding < open);
+
+    // Its rows can still be clicked, but they do not keep focus.
+    click(cx, "collections-search");
+    cx.executor().advance_clock(Duration::from_millis(200));
+    assert_eq!(height(cx, "collections-sidebar"), None);
+    cx.update(|window, cx| {
+        assert!(header.is_focused(window));
+        assert!(window.is_action_available(&NewTab, cx));
+    });
+
+    // Reopening grows it back to its share.
+    click(cx, "collections-section");
+    cx.executor().advance_clock(Duration::from_millis(100));
+    let opening = height(cx, "collections-sidebar").unwrap();
+    assert!(opening > px(0.) && opening < open);
+
+    cx.executor().advance_clock(Duration::from_millis(200));
+    assert_eq!(height(cx, "collections-sidebar"), Some(open));
 }

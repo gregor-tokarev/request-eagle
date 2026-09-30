@@ -303,36 +303,37 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        match section {
+            SidebarSection::Collections => self.collections_open = !self.collections_open,
+            SidebarSection::Environments => self.environments_open = !self.environments_open,
+        }
+
+        self.release_section_focus(section, window, cx);
+
+        cx.notify();
+    }
+
+    /// Keys must not go to the rows of a folded section. Its header can open
+    /// it again.
+    fn release_section_focus(&self, section: SidebarSection, window: &mut Window, cx: &mut App) {
         let (open, contains_focus, header) = match section {
-            SidebarSection::Collections => {
-                self.collections_open = !self.collections_open;
-
-                (
-                    self.collections_open,
-                    self.sidebar.read(cx).contains_focus(window, cx),
-                    &self.collections_header,
-                )
-            }
-            SidebarSection::Environments => {
-                self.environments_open = !self.environments_open;
-
-                (
-                    self.environments_open,
-                    self.environment_panel
-                        .focus_handle(cx)
-                        .contains_focused(window, cx),
-                    &self.environments_header,
-                )
-            }
+            SidebarSection::Collections => (
+                self.collections_open,
+                self.sidebar.read(cx).contains_focus(window, cx),
+                &self.collections_header,
+            ),
+            SidebarSection::Environments => (
+                self.environments_open,
+                self.environment_panel
+                    .focus_handle(cx)
+                    .contains_focused(window, cx),
+                &self.environments_header,
+            ),
         };
 
-        // Keys must not go to the rows of a folded section. Its header can
-        // open it again.
         if !open && contains_focus {
             window.focus(header, cx);
         }
-
-        cx.notify();
     }
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -361,9 +362,26 @@ impl Workspace {
             .update(cx, |view, cx| view.create_environment(window, cx));
     }
 
+    /// How far a section is open, from 0 when folded to 1 when open.
+    fn section_progress(&self, section: SidebarSection, window: &mut Window, cx: &mut App) -> f32 {
+        let (id, open) = match section {
+            SidebarSection::Collections => ("collections-section", self.collections_open),
+            SidebarSection::Environments => ("environments-section", self.environments_open),
+        };
+
+        motion::transition(
+            (id, "fold"),
+            if open { 1.0 } else { 0.0 },
+            Transition::new(Duration::from_millis(200)).ease(ease_in_out_cubic),
+            window,
+            cx,
+        )
+    }
+
     fn section_header(
         &self,
         section: SidebarSection,
+        progress: f32,
         count: usize,
         buttons: Vec<Button>,
         window: &Window,
@@ -413,13 +431,10 @@ impl Workspace {
                             this.toggle_sidebar_section(section, window, cx)
                         }))
                         .child(
-                            Icon::new(if open {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size_3p5()
-                            .flex_none(),
+                            Icon::new(IconName::ChevronRight)
+                                .size_3p5()
+                                .flex_none()
+                                .rotate(percentage(progress / 4.)),
                         )
                         .child(
                             div()
@@ -438,9 +453,16 @@ impl Workspace {
         )
     }
 
-    fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+        let collections_progress = self.section_progress(SidebarSection::Collections, window, cx);
+        let environments_progress = self.section_progress(SidebarSection::Environments, window, cx);
+
+        // A folding section's rows stay on screen, where a click can still
+        // focus them.
+        self.release_section_focus(SidebarSection::Collections, window, cx);
+        self.release_section_focus(SidebarSection::Environments, window, cx);
 
         let new_collection = Button::new("new-collection")
             .debug_selector(|| "new-collection".into())
@@ -459,7 +481,17 @@ impl Workspace {
             .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
 
         // Open sections share the height, like the sections of an editor sidebar.
-        let section_body = StyleRefinement::default().w_full().flex_1().min_h_0();
+        // A folding section gives its share away and clips its rows. An open
+        // one does not clip, so focus rings at its edges stay whole.
+        let section_body = |progress: f32, view: AnyView| {
+            div()
+                .w_full()
+                .flex_basis(relative(0.))
+                .flex_grow(progress)
+                .min_h_0()
+                .when(progress < 1.0, |this| this.overflow_hidden())
+                .child(view.cached(StyleRefinement::default().size_full()))
+        };
 
         v_flex()
             .size_full()
@@ -470,13 +502,17 @@ impl Workspace {
             .border_color(cx.theme().sidebar_border)
             .child(self.section_header(
                 SidebarSection::Collections,
+                collections_progress,
                 collection_count,
                 vec![new_collection, import_collection],
                 window,
                 cx,
             ))
-            .when(self.collections_open, |this| {
-                this.child(self.sidebar.clone().cached(section_body.clone()))
+            .when(collections_progress > 0.0, |this| {
+                this.child(section_body(
+                    collections_progress,
+                    self.sidebar.clone().into(),
+                ))
             })
             .child(
                 div()
@@ -487,13 +523,17 @@ impl Workspace {
             )
             .child(self.section_header(
                 SidebarSection::Environments,
+                environments_progress,
                 environment_count,
                 vec![new_environment],
                 window,
                 cx,
             ))
-            .when(self.environments_open, |this| {
-                this.child(self.environment_panel.clone().cached(section_body))
+            .when(environments_progress > 0.0, |this| {
+                this.child(section_body(
+                    environments_progress,
+                    self.environment_panel.clone().into(),
+                ))
             })
     }
 
