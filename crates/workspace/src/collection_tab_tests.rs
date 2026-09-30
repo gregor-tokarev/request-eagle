@@ -3,7 +3,7 @@ use std::{fs, time::Duration};
 use crate::main_view::Page;
 use crate::request_tab_tests::{SavedRequestFixture, edit_url};
 use crate::tests::click;
-use gpui_kit::{MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext, VisualTestContext};
+use gpui_kit::TestAppContext;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 #[gpui_kit::test]
@@ -30,11 +30,8 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
     let fixture = SavedRequestFixture::new();
     let (tabs, draft, cx) = fixture.open(cx);
 
-    // A click only expands or collapses the collection.
+    // A click opens the collection while it expands or collapses.
     click(cx, "collection-row-0");
-    cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 2));
-
-    double_click(cx, "collection-row-0");
     let page = cx.read(|cx| {
         let tabs = tabs.read(cx);
         assert_eq!(tabs.tabs.len(), 3);
@@ -46,7 +43,7 @@ async fn saved_collection_settings_rename_it_and_apply_to_its_requests(cx: &mut 
         page.clone()
     });
     // Opening it again selects the existing tab.
-    double_click(cx, "collection-row-0");
+    click(cx, "collection-row-0");
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 3));
 
     click(cx, "collection-name");
@@ -110,7 +107,7 @@ fn deleting_a_collection_closes_its_tab(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
     let (tabs, _, cx) = fixture.open(cx);
 
-    double_click(cx, "collection-row-0");
+    click(cx, "collection-row-0");
     cx.read(|cx| assert_eq!(tabs.read(cx).tabs.len(), 3));
     cx.simulate_keystrokes("backspace");
     click(cx, "confirm-sidebar-delete");
@@ -125,27 +122,4 @@ fn deleting_a_collection_closes_its_tab(cx: &mut TestAppContext) {
                 .all(|tab| !matches!(tab.page, Page::Collection(_)))
         );
     });
-}
-
-fn double_click(cx: &mut VisualTestContext, selector: &'static str) {
-    cx.update(|window, _| window.refresh());
-    let position = cx
-        .debug_bounds(selector)
-        .unwrap_or_else(|| panic!("missing {selector}"))
-        .center();
-
-    for click_count in 1..=2 {
-        cx.simulate_event(MouseDownEvent {
-            button: MouseButton::Left,
-            position,
-            click_count,
-            ..Default::default()
-        });
-        cx.simulate_event(MouseUpEvent {
-            button: MouseButton::Left,
-            position,
-            click_count,
-            ..Default::default()
-        });
-    }
 }

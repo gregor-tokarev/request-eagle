@@ -297,16 +297,21 @@ fn last_collection(
 }
 
 #[gpui_kit::test]
-fn double_click_opens_a_collection_that_collapsing_moved_away(cx: &mut TestAppContext) {
+fn a_click_opens_and_toggles_a_collection_once_even_in_a_double_click(cx: &mut TestAppContext) {
     let (sidebar, opened, cx) = clicking_sidebar(cx);
     let (path, selector, position) = last_collection(&sidebar, cx);
+    let index = cx.read(|cx| sidebar.read(cx).tree.index_of(&path).unwrap());
 
     click_at(cx, position, 1);
-    assert!(opened.borrow().is_empty());
+    assert_eq!(*opened.borrow(), [path.clone()]);
+    cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
     assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
 
+    // The second press neither reopens the collection nor reaches the row
+    // collapsing it moved under the pointer.
     click_at(cx, position, 2);
     assert_eq!(*opened.borrow(), [path]);
+    cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
 }
 
 #[gpui_kit::test]
@@ -336,6 +341,7 @@ fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) 
     // Scrolling after collapsing a collection leaves the next click on
     // the row now under the pointer.
     let (collection, _, position) = last_collection(&sidebar, cx);
+    let before = opened.borrow().len();
     click_at(cx, position, 1);
     cx.simulate_event(ScrollWheelEvent {
         position,
@@ -356,8 +362,7 @@ fn quick_clicks_that_reach_another_row_act_on_that_row(cx: &mut TestAppContext) 
     assert_ne!(under, collection);
 
     click_at(cx, position, 2);
-    assert_eq!(opened.borrow().last(), Some(&under));
-    assert!(!opened.borrow().contains(&collection));
+    assert_eq!(opened.borrow()[before..], [collection, under]);
 }
 
 #[gpui_kit::test]
