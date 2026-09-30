@@ -49,9 +49,6 @@ pub(crate) struct Workspace {
     _sidebar_visibility_subscription: Subscription,
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
-    _request_save_subscription: Subscription,
-    _new_request_save_subscription: Subscription,
-    _collection_save_subscription: Subscription,
     _settings_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -94,6 +91,7 @@ impl Workspace {
                             name.clone(),
                             variables.clone(),
                             scripts.clone(),
+                            window,
                             cx,
                         );
                         view.prepare_active_tab(window, cx);
@@ -177,51 +175,8 @@ impl Workspace {
             },
         );
 
-        let main_view = cx.new(|cx| MainView::new(environments, window, cx));
+        let main_view = cx.new(|cx| MainView::new(environments, sidebar.clone(), window, cx));
         main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
-        let request_save_subscription = cx.subscribe_in(
-            &main_view,
-            window,
-            |this, view, event: &crate::main_view::RequestSaveRequested, window, cx| {
-                let result = this.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.save_request(
-                        &event.path,
-                        &event.request_id,
-                        event.request.clone().into(),
-                        cx,
-                    )
-                });
-                view.update(cx, |view, cx| view.finish_save(event, result, window, cx));
-            },
-        );
-
-        let new_request_save_subscription = cx.subscribe_in(
-            &main_view,
-            window,
-            |this, view, event: &crate::main_view::NewRequestSaveRequested, window, cx| {
-                crate::save_request::open(view, &this.sidebar, event, window, cx);
-            },
-        );
-
-        let collection_save_subscription = cx.subscribe_in(
-            &main_view,
-            window,
-            |this, view, event: &crate::main_view::CollectionSaveRequested, window, cx| {
-                let settings = &event.settings;
-                let result = this.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.save_collection(
-                        &event.path,
-                        &settings.name,
-                        settings.variables.iter().cloned().collect(),
-                        settings.scripts.clone(),
-                        cx,
-                    )
-                });
-                view.update(cx, |view, cx| {
-                    view.finish_collection_save(event, result, window, cx)
-                });
-            },
-        );
 
         Self {
             top_panel: cx.new(|_| TopPanel),
@@ -239,9 +194,6 @@ impl Workspace {
             _sidebar_visibility_subscription: sidebar_visibility_subscription,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
-            _request_save_subscription: request_save_subscription,
-            _new_request_save_subscription: new_request_save_subscription,
-            _collection_save_subscription: collection_save_subscription,
             _settings_subscription: settings_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -523,9 +475,9 @@ impl Render for Workspace {
                 this.main_view
                     .update(cx, |view, cx| view.send_request(window, cx));
             }))
-            .on_action(cx.listener(|this, _: &SaveRequest, _, cx| {
+            .on_action(cx.listener(|this, _: &SaveRequest, window, cx| {
                 this.main_view
-                    .update(cx, |view, cx| view.save_active_request(cx));
+                    .update(cx, |view, cx| view.save_active_request(window, cx));
             }))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);

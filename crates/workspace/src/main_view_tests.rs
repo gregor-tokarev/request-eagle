@@ -5,7 +5,7 @@ use gpui_kit::{
     TouchPhase, VisualTestContext, point, px, size,
 };
 
-use crate::main_view::{MainView, Page};
+use crate::main_view::Page;
 use crate::workspace::Workspace;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
@@ -618,9 +618,8 @@ fn sidebar_requests_open_reuse_and_reopen_tabs(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn request_tabs_use_file_identity_and_refresh_names_when_reopened(cx: &mut TestAppContext) {
-    cx.update(gpui_kit::init);
-    let (view, cx) =
-        cx.add_window_view(|window, cx| MainView::new(crate::tests::environments(cx), window, cx));
+    let (layout, cx) = workspace(cx);
+    let view = cx.read(|cx| layout.read(cx).main_view.clone());
     let first_path = Path::new("/collection/first.toml");
     let second_path = Path::new("/collection/second.toml");
 
@@ -702,6 +701,7 @@ fn switching_keeps_page_entities_and_renders_only_the_active_page(cx: &mut TestA
                 "API".into(),
                 Default::default(),
                 Default::default(),
+                window,
                 cx,
             );
             view.focus(window, cx);

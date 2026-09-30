@@ -11,12 +11,6 @@ pub(crate) fn no_environments() -> environment::GlobalEnvironments {
     environment::GlobalEnvironments::new("/nonexistent/request-eagle/environments")
 }
 
-pub(crate) fn environments(cx: &mut gpui_kit::App) -> gpui_kit::Entity<tab_ui::Environments> {
-    use gpui_kit::AppContext as _;
-
-    cx.new(|_| tab_ui::Environments::new(no_environments(), None))
-}
-
 impl PageTab {
     /// The request draft shown in this tab.
     pub(crate) fn draft(&self) -> gpui_kit::Entity<tab_ui::RequestDraft> {

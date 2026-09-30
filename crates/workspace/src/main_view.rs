@@ -7,12 +7,14 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
 use crate::actions::{CloseTab, NewTab, SaveRequest};
+use crate::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
+use crate::save_request;
 use collection::Method;
+use collections_panel_ui::CollectionPanel;
 use tab_ui::{
-    CollectionPage, CollectionSettings, EnvironmentEditor, Environments, EnvironmentsEvent,
-    RequestDraft, SaveCollection,
+    CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, RequestDraft,
+    SaveCollection,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -124,34 +126,15 @@ pub(crate) struct MainView {
     variable_sessions: environment::EnvironmentSessions,
     pub(crate) environments: Entity<Environments>,
     environment_picker: Entity<EnvironmentPicker>,
+    /// Stores saved requests and collections.
+    sidebar: Entity<CollectionPanel>,
     _environment_subscriptions: [Subscription; 2],
 }
-
-pub(crate) struct RequestSaveRequested {
-    pub(crate) tab_id: u64,
-    pub(crate) path: PathBuf,
-    pub(crate) request_id: SharedString,
-    pub(crate) request: collection::HttpRequest,
-}
-
-pub(crate) struct NewRequestSaveRequested {
-    pub(crate) tab_id: u64,
-    pub(crate) request: collection::HttpRequest,
-}
-
-pub(crate) struct CollectionSaveRequested {
-    pub(crate) tab_id: u64,
-    pub(crate) path: PathBuf,
-    pub(crate) settings: CollectionSettings,
-}
-
-impl EventEmitter<RequestSaveRequested> for MainView {}
-impl EventEmitter<NewRequestSaveRequested> for MainView {}
-impl EventEmitter<CollectionSaveRequested> for MainView {}
 
 impl MainView {
     pub(crate) fn new(
         environments: Entity<Environments>,
+        sidebar: Entity<CollectionPanel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -181,6 +164,7 @@ impl MainView {
             variable_sessions: environment::EnvironmentSessions::default(),
             environments,
             environment_picker,
+            sidebar,
             _environment_subscriptions: [picker_subscription, environments_subscription],
         };
 
@@ -298,6 +282,7 @@ impl MainView {
         name: SharedString,
         variables: HashMap<String, String>,
         scripts: collection::RequestScripts,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(index) = self.collection_tab(path, cx) {
@@ -309,11 +294,15 @@ impl MainView {
             .new(|_| CollectionPage::new(path.to_path_buf(), name.to_string(), variables, scripts));
         let index = self.open_tab(name, Page::Collection(page.clone()), cx);
         let id = self.tabs[index].id;
-        let subscription = cx.subscribe(&page, move |this, _, _: &SaveCollection, cx| {
-            if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
-                this.save_tab(index, cx);
-            }
-        });
+        let subscription = cx.subscribe_in(
+            &page,
+            window,
+            move |this, _, _: &SaveCollection, window, cx| {
+                if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
+                    this.save_tab(index, window, cx);
+                }
+            },
+        );
         self.tabs[index]._subscriptions.push(subscription);
     }
 
@@ -533,73 +522,86 @@ impl MainView {
         cx.notify();
     }
 
-    pub(crate) fn save_active_request(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn save_active_request(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.selected {
-            self.save_tab(index, cx);
+            self.save_tab(index, window, cx);
         }
     }
 
-    fn save_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    fn save_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(index) else {
             return;
         };
-
-        if let Page::Environment(editor) = tab.page.clone() {
-            let id = tab.id;
-            // The editor shows its own save errors next to the variables.
-            let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
-            self.tabs[index].dirty = editor.read(cx).is_dirty();
-            self.save_error = None;
-
-            if saved && self.pending_close == Some(id) {
-                self.remove_tab(index, cx);
-            }
-
-            cx.notify();
-            return;
-        }
-
-        if let Page::Collection(page) = &tab.page {
-            let page = page.read(cx);
-            match page.settings() {
-                Ok(settings) => {
-                    self.save_error = None;
-                    cx.emit(CollectionSaveRequested {
-                        tab_id: tab.id,
-                        path: page.path.clone(),
-                        settings,
-                    });
-                }
-                Err(error) => self.save_error = Some(format!("Could not save collection: {error}")),
-            }
-            cx.notify();
-            return;
-        }
-
-        let Page::Request(draft) = &tab.page else {
-            return;
-        };
-        let (Some(path), Some(request_id)) = (tab.request_path.clone(), tab.request_id.clone())
-        else {
-            self.save_error = None;
-            cx.emit(NewRequestSaveRequested {
-                tab_id: tab.id,
-                request: draft.read(cx).request.clone(),
-            });
-            cx.notify();
-            return;
-        };
-
+        let id = tab.id;
         self.save_error = None;
-        cx.emit(RequestSaveRequested {
-            tab_id: tab.id,
-            path,
-            request_id,
-            request: draft.read(cx).request.clone(),
-        });
+
+        match tab.page.clone() {
+            Page::Environment(editor) => {
+                // The editor shows its own save errors next to the variables.
+                let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
+
+                if saved && self.pending_close == Some(id) {
+                    self.remove_tab(index, cx);
+                }
+            }
+            Page::Collection(page) => {
+                let path = page.read(cx).path.clone();
+                let result = page.read(cx).settings().and_then(|settings| {
+                    self.sidebar
+                        .update(cx, |sidebar, cx| {
+                            sidebar.save_collection(
+                                &path,
+                                &settings.name,
+                                settings.variables.iter().cloned().collect(),
+                                settings.scripts.clone(),
+                                cx,
+                            )
+                        })
+                        .map(|path| (path, settings))
+                        .map_err(|error| error.to_string())
+                });
+
+                match result {
+                    Ok((path, settings)) => {
+                        self.tabs[index].title = settings.name.clone().into();
+                        page.update(cx, |page, cx| page.mark_saved(path, settings, cx));
+                        self.close_saved_tab(index, window, cx);
+                    }
+                    Err(error) => {
+                        self.save_error = Some(format!("Could not save collection: {error}"))
+                    }
+                }
+            }
+            Page::Request(draft) => {
+                let request = draft.read(cx).request.clone();
+                let (Some(path), Some(request_id)) =
+                    (tab.request_path.clone(), tab.request_id.clone())
+                else {
+                    save_request::open(cx.entity(), self.sidebar.clone(), id, request, window, cx);
+                    cx.notify();
+                    return;
+                };
+
+                let result = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.save_request(&path, &request_id, request.clone().into(), cx)
+                });
+
+                match result {
+                    Ok(()) => {
+                        draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
+                        self.close_saved_tab(index, window, cx);
+                    }
+                    Err(error) => {
+                        self.save_error = Some(format!("Could not save request: {error}"))
+                    }
+                }
+            }
+        }
+
         cx.notify();
     }
 
+    /// Attach a new request draft to the file it was saved as.
     pub(crate) fn attach_saved_request(
         &mut self,
         tab_id: u64,
@@ -608,97 +610,37 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
+        let tab = &mut self.tabs[index];
         tab.request_path = Some(file.path.clone());
         tab.request_id = Some(file.id.clone().into());
         tab.title = file.name.clone().into();
+
         if let Page::Request(draft) = &tab.page {
+            let collection::Request::Http(request) = &file.request;
+
             draft.update(cx, |draft, cx| {
                 draft.name = file.name.clone().into();
                 draft.collection = Some(destination.collection.clone());
                 draft.set_variable_environment(&file.path, destination.folders.len(), cx);
                 draft.folders = destination.folders.clone();
-                cx.notify();
+                draft.mark_saved(request.clone(), cx);
             });
         }
-        let collection::Request::Http(request) = &file.request;
-        self.finish_save(
-            &RequestSaveRequested {
-                tab_id,
-                path: file.path.clone(),
-                request_id: file.id.clone().into(),
-                request: request.clone(),
-            },
-            Ok(()),
-            window,
-            cx,
-        );
-    }
 
-    pub(crate) fn finish_save(
-        &mut self,
-        event: &RequestSaveRequested,
-        result: Result<(), collection::CollectionEditError>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == event.tab_id) else {
-            return;
-        };
-
-        match result {
-            Ok(()) => {
-                if let Page::Request(draft) = &self.tabs[index].page {
-                    draft.update(cx, |draft, cx| draft.mark_saved(event.request.clone(), cx));
-                    self.tabs[index].dirty = draft.read(cx).is_dirty();
-                }
-                self.save_error = None;
-
-                if self.pending_close == Some(event.tab_id) && !self.tabs[index].dirty {
-                    self.remove_tab(index, cx);
-                    self.focus(window, cx);
-                }
-            }
-            Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
-        }
-
+        self.save_error = None;
+        self.close_saved_tab(index, window, cx);
         cx.notify();
     }
 
-    pub(crate) fn finish_collection_save(
-        &mut self,
-        event: &CollectionSaveRequested,
-        result: Result<PathBuf, collection::CollectionEditError>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == event.tab_id) else {
-            return;
-        };
-
-        match result {
-            Ok(path) => {
-                let tab = &mut self.tabs[index];
-                tab.title = event.settings.name.clone().into();
-                if let Page::Collection(page) = &tab.page {
-                    page.update(cx, |page, cx| {
-                        page.mark_saved(path, event.settings.clone(), cx)
-                    });
-                    tab.dirty = page.read(cx).is_dirty();
-                }
-                self.save_error = None;
-
-                if self.pending_close == Some(event.tab_id) && !self.tabs[index].dirty {
-                    self.remove_tab(index, cx);
-                    self.focus(window, cx);
-                }
-            }
-            Err(error) => self.save_error = Some(format!("Could not save collection: {error}")),
+    /// Finish closing a tab whose changes were saved from the close confirmation.
+    fn close_saved_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_close == Some(self.tabs[index].id) && !self.tabs[index].page.is_dirty(cx) {
+            self.remove_tab(index, cx);
+            self.focus(window, cx);
         }
-
-        cx.notify();
     }
 
     fn close_confirmation(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -721,7 +663,9 @@ impl MainView {
                     .primary()
                     .label("Save")
                     .tooltip_with_action("Save changes and close", &SaveRequest, Some("Workspace"))
-                    .on_click(cx.listener(|this, _, _, cx| this.save_active_request(cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.save_active_request(window, cx)),
+                    ),
             )
             .child(
                 Button::new("discard-request-changes")
