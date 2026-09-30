@@ -190,6 +190,7 @@ impl VariableInput {
             .aria_position_in_set(index + 1)
             .aria_size_of_set(self.suggestions.len())
             .debug_selector(move || format!("variable-suggestion-{index}"))
+            .w_full()
             .h_8()
             .px_2()
             .gap_2()

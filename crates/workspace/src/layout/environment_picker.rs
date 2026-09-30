@@ -1,5 +1,4 @@
 use gpui_kit::component::{
-    button::*,
     searchable_list::{SearchableListItem, SearchableVec},
     select::{Select, SelectEvent, SelectState},
     *,
@@ -7,10 +6,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::Environments;
 
-pub(crate) enum EnvironmentPickerEvent {
-    Open(SharedString),
-    Create,
-}
+pub(crate) struct CreateEnvironmentRequested;
 
 #[derive(Clone, PartialEq)]
 pub(crate) enum Choice {
@@ -64,7 +60,7 @@ pub(crate) struct EnvironmentPicker {
     _subscriptions: [Subscription; 2],
 }
 
-impl EventEmitter<EnvironmentPickerEvent> for EnvironmentPicker {}
+impl EventEmitter<CreateEnvironmentRequested> for EnvironmentPicker {}
 
 impl EnvironmentPicker {
     pub(crate) fn new(
@@ -92,7 +88,7 @@ impl EnvironmentPicker {
                         state.update(cx, |state, cx| {
                             state.set_selected_value(&active, window, cx)
                         });
-                        cx.emit(EnvironmentPickerEvent::Create);
+                        cx.emit(CreateEnvironmentRequested);
                     }
                     SelectEvent::Confirm(Some(Choice::Environment(name))) => {
                         let name = name.clone();
@@ -154,38 +150,17 @@ impl EnvironmentPicker {
 }
 
 impl Render for EnvironmentPicker {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.environments.read(cx).active().cloned();
-
-        h_flex()
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "environment-picker".into())
             .flex_none()
-            .gap_1()
+            .w(rems(11.))
             .child(
-                div()
-                    .debug_selector(|| "environment-picker".into())
-                    .w(rems(11.))
-                    .child(
-                        Select::new(&self.state)
-                            .small()
-                            .accessibility_label("Active environment")
-                            .menu_width(rems(18.))
-                            .search_placeholder("Search"),
-                    ),
-            )
-            .child(
-                Button::new("open-active-environment")
-                    .debug_selector(|| "open-active-environment".into())
-                    .ghost()
+                Select::new(&self.state)
                     .small()
-                    .icon(IconName::Eye)
-                    .disabled(active.is_none())
-                    .accessibility_label("Open active environment")
-                    .tooltip("Open active environment")
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        if let Some(name) = active.clone() {
-                            cx.emit(EnvironmentPickerEvent::Open(name));
-                        }
-                    })),
+                    .accessibility_label("Active environment")
+                    .menu_width(rems(18.))
+                    .search_placeholder("Search"),
             )
     }
 }

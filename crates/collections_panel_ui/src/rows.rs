@@ -21,6 +21,7 @@ impl CollectionPanel {
         let index = self.visible[row];
         let item = &self.tree.items[index];
         let branch = item.is_branch();
+        let collection = item.kind == ItemKind::Collection;
         let expanded = !self.query.is_empty() || !self.collapsed.contains(&index);
         let selected = self.selected == Some(index);
         let theme = cx.theme();
@@ -257,14 +258,17 @@ impl CollectionPanel {
                     this.move_item(&drag.path, index, placement, window, cx);
                 }
             }))
-            .on_click(cx.listener(move |this, _, window, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
 
                 if branch {
                     this.toggle(index, cx);
                 }
-                this.open(index, cx);
+                // A click expands a collection; its tab opens on double click.
+                if !collection || event.click_count() == 2 {
+                    this.open(index, cx);
+                }
             }))
             .capture_any_mouse_down(
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {

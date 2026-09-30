@@ -7,7 +7,7 @@ use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{button::*, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::environment_picker::{EnvironmentPicker, EnvironmentPickerEvent};
+use super::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::actions::{CloseTab, NewTab, SaveRequest};
 use tab_ui::{
     CollectionPage, CollectionSettings, EnvironmentEditor, Environments, EnvironmentsEvent,
@@ -78,11 +78,8 @@ impl MainView {
         let picker_subscription = cx.subscribe_in(
             &environment_picker,
             window,
-            |this, _, event: &EnvironmentPickerEvent, window, cx| match event {
-                EnvironmentPickerEvent::Open(name) => {
-                    this.open_environment(name.clone(), window, cx);
-                }
-                EnvironmentPickerEvent::Create => this.create_environment(window, cx),
+            |this, _, _: &CreateEnvironmentRequested, window, cx| {
+                this.create_environment(window, cx)
             },
         );
         let environments_subscription = cx.subscribe(&environments, Self::on_environments_event);

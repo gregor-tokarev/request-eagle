@@ -73,6 +73,12 @@ fn completion_virtualizes_large_environments_and_remeasures_at_each_zoom(cx: &mu
             assert!(cx.debug_bounds("variable-suggestion-999").is_none());
             let first = cx.debug_bounds("variable-suggestion-0").unwrap();
             assert_eq!(first.size.height, px(font_size * 2.));
+            // Rows span the popup, so the highlight fills its width.
+            let completions = cx.debug_bounds("variable-completions").unwrap();
+            assert_eq!(
+                first.left() - completions.left(),
+                completions.right() - first.right()
+            );
 
             // Up wraps from the first to the last model row, even though it
             // has no element until the virtual list scrolls it into view.
