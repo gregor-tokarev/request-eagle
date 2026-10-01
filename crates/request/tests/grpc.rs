@@ -14,8 +14,8 @@ use futures::{Stream, StreamExt as _, stream};
 use prost::Message as _;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, Value};
 use request::{
-    GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcSettings,
-    MethodKind, RequestPreferences, RequestVariables, ServiceDefinition,
+    GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts,
+    GrpcSettings, MethodKind, RequestPreferences, RequestVariables, ServiceDefinition,
 };
 use tonic::{
     Status, Streaming,
@@ -414,7 +414,10 @@ async fn unary_calls_return_the_message_metadata_and_status() {
     request.metadata = vec![("X-Echo".into(), "{{name}}".into())];
     let definition = reflect(&request).await;
 
-    let (call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     assert_eq!(call.kind, MethodKind::Unary);
     let events = collect(events).await;
 
@@ -434,7 +437,10 @@ async fn server_streams_arrive_in_order() {
     let request = request(address, "Count", r#"{"text": "tick", "times": 3}"#);
     let definition = reflect(&request).await;
 
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     assert_eq!(
@@ -454,7 +460,10 @@ async fn client_streams_send_each_message_until_ended() {
     let request = request(address, "Collect", "");
     let definition = reflect(&request).await;
 
-    let (mut call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (mut call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     call.send(r#"{"text": "a"}"#).unwrap();
     call.send(r#"{"text": "{{name}}"}"#).unwrap();
     assert!(matches!(
@@ -483,7 +492,10 @@ async fn bidirectional_streams_reply_while_open() {
     let request = request(address, "Chat", "");
     let definition = reflect(&request).await;
 
-    let (mut call, mut events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (mut call, mut events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     call.send(r#"{"text": "one"}"#).unwrap();
 
     // The reply arrives before the client ends its stream.
@@ -520,7 +532,10 @@ async fn cancelling_a_stream_stops_the_call() {
     let request = request(address, "Chat", "");
     let definition = reflect(&request).await;
 
-    let (call, mut events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (call, mut events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     drop(call);
 
     // Aborting the call closes its event channel without a status.
@@ -544,7 +559,10 @@ async fn error_statuses_complete_with_their_trailers() {
     let request = request(address, "Fail", "{}");
     let definition = reflect(&request).await;
 
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     match events.last().unwrap() {
@@ -575,6 +593,7 @@ async fn invalid_messages_are_rejected_before_connecting() {
 
     let error = client()
         .invoke(&request, variables(), &definition)
+        .await
         .err()
         .unwrap();
     assert!(matches!(error, GrpcError::InvalidMessage(_)), "{error}");
@@ -588,6 +607,7 @@ async fn invalid_messages_are_rejected_before_connecting() {
             variables(),
             &definition,
         )
+        .await
         .err()
         .unwrap();
     assert!(matches!(error, GrpcError::UnknownMethod(_)), "{error}");
@@ -605,6 +625,7 @@ async fn unreachable_servers_fail_without_a_status() {
 
     let (_call, events) = client()
         .invoke(&request(address, "Say", "{}"), variables(), &definition)
+        .await
         .unwrap();
     let events = collect(events).await;
 
@@ -629,7 +650,10 @@ async fn proto_files_resolve_imports_from_import_paths() {
     // Calls work with a local definition and a server without reflection.
     let address = serve(&protos, None).await;
     let request = request(address, "Say", r#"{"text": "proto"}"#);
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
 
     assert_eq!(
         received(&collect(events).await),
@@ -695,7 +719,10 @@ async fn example_messages_fill_every_field() {
         message: example.to_string(),
         ..GrpcRequest::default()
     };
-    let (call, _) = client().invoke(&request, variables(), &definition).unwrap();
+    let (call, _) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     drop(call);
 }
 
@@ -715,6 +742,10 @@ fn saved_requests_round_trip_through_toml() {
             include_default_fields: false,
             ..GrpcSettings::default()
         },
+        scripts: GrpcScripts {
+            on_message: "console.log(pm.message.data);".into(),
+            ..GrpcScripts::default()
+        },
     });
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -725,6 +756,9 @@ fn saved_requests_round_trip_through_toml() {
     let text = toml::to_string_pretty(&File { request }).unwrap();
     assert!(text.contains("type = \"grpc\""), "{text}");
     assert!(text.contains("source = \"proto_file\""), "{text}");
+    // Only the scripts that were written are saved.
+    assert!(text.contains("on_message = "), "{text}");
+    assert!(!text.contains("before_invoke"), "{text}");
 
     let File { request } = toml::from_str(&text).unwrap();
     let request::Request::Grpc(request) = request else {
@@ -733,6 +767,7 @@ fn saved_requests_round_trip_through_toml() {
     assert_eq!(request.url, "grpcs://example.com");
     assert_eq!(request.metadata.len(), 1);
     assert!(!request.settings.include_default_fields);
+    assert_eq!(request.scripts.on_message, "console.log(pm.message.data);");
 
     // Reflection is the default and is not written.
     let File { request } =
@@ -742,6 +777,7 @@ fn saved_requests_round_trip_through_toml() {
     };
     assert_eq!(request.definition, GrpcDefinition::Reflection);
     assert!(request.settings.is_default());
+    assert!(request.scripts.is_empty());
     assert!(!request.uses_tls());
 }
 
@@ -753,14 +789,20 @@ async fn default_fields_can_be_left_out_of_messages() {
     let definition = reflect(&request).await;
 
     // The first reply has index 0, a default value.
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     assert_eq!(
         received(&collect(events).await),
         [serde_json::json!({"text": "tick 0", "index": 0})]
     );
 
     request.settings.include_default_fields = false;
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     assert_eq!(
         received(&collect(events).await),
         [serde_json::json!({"text": "tick 0"})]
@@ -779,7 +821,10 @@ async fn response_messages_over_the_limit_end_the_call() {
     request.settings.max_response_message_mb = Some(1);
     let definition = reflect(&request).await;
 
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     assert_eq!(status(&events).1, "OUT_OF_RANGE");
@@ -797,7 +842,10 @@ async fn postman_echo_service() {
         ..GrpcRequest::default()
     };
     let definition = reflect(&request).await;
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     assert_eq!(status(&events), (0, "OK".into()));
@@ -810,7 +858,10 @@ async fn postman_echo_service() {
         method: "HelloService/LotsOfReplies".into(),
         ..request
     };
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     assert_eq!(status(&events), (0, "OK".into()));
@@ -828,7 +879,10 @@ async fn public_tls_service() {
         ..GrpcRequest::default()
     };
     let definition = reflect(&request).await;
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     assert_eq!(status(&events), (0, "OK".into()));
@@ -858,7 +912,10 @@ async fn generated_values_match_across_metadata_and_message() {
     request.metadata = vec![("x-echo".into(), "{{$guid}}".into())];
     let definition = reflect(&request).await;
 
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     let events = collect(events).await;
 
     let echoed = events
@@ -950,7 +1007,10 @@ async fn streams_open_before_their_message_variables_are_set() {
     let request = request(address, "Chat", r#"{"text": "{{next_message}}"}"#);
     let definition = reflect(&request).await;
 
-    let (mut call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (mut call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
     assert!(matches!(
         call.send(&request.message),
         Err(GrpcError::Variables(_))
@@ -958,4 +1018,116 @@ async fn streams_open_before_their_message_variables_are_set() {
     call.end();
 
     assert_eq!(status(&collect(events).await), (0, "OK".into()));
+}
+
+/// Each script report's label, whether its tests passed, and its error.
+fn script_results(events: &[GrpcEvent]) -> Vec<(String, bool, Option<String>)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            GrpcEvent::Script(report) => Some((
+                report.label(),
+                !report.tests.is_empty() && report.tests.iter().all(|test| test.error.is_none()),
+                report.error.clone(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn scripts_run_before_invoke_on_each_message_and_after_the_response() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Count", r#"{"text": "tick", "times": 5}"#);
+    request.scripts = GrpcScripts {
+        before_invoke: r#"
+            pm.request.metadata.add({key: "x-echo", value: "{{name}}"});
+            pm.request.message = {text: "tick", times: 2};
+            pm.test("runs first", () => {});
+        "#
+        .into(),
+        on_message: r#"
+            pm.test("tick", () => pm.expect(pm.message.data.text).to.match(/^tick \d$/));
+        "#
+        .into(),
+        after_response: r#"
+            pm.test("echoed and counted", () => {
+                pm.response.to.be.ok;
+                pm.response.to.have.metadata("x-echo", "eagle");
+                pm.expect(pm.response.messages.count()).to.equal(2);
+                pm.request.messages.to.include({text: "tick", times: 2});
+            });
+        "#
+        .into(),
+    };
+    let definition = reflect(&request).await;
+
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
+    let events = collect(events).await;
+
+    assert!(matches!(events.first(), Some(GrpcEvent::Script(_))));
+    assert_eq!(
+        script_results(&events),
+        [
+            ("Before invoke".into(), true, None),
+            ("On message 1".into(), true, None),
+            ("On message 2".into(), true, None),
+            ("After response".into(), true, None),
+        ]
+    );
+    assert_eq!(status(&events), (0, "OK".into()));
+}
+
+#[tokio::test]
+async fn after_response_sees_the_messages_sent_on_a_client_stream() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Collect", "");
+    request.scripts.after_response = r#"
+        pm.test("sent and collected", () => {
+            pm.expect(pm.request.messages.map(message => message.data.text)).to.eql(["a", "eagle"]);
+            pm.response.messages.to.include({text: "a,eagle", index: 2});
+        });
+    "#
+    .into();
+    let definition = reflect(&request).await;
+
+    let (mut call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
+    call.send(r#"{"text": "a"}"#).unwrap();
+    call.send(r#"{"text": "{{name}}"}"#).unwrap();
+    call.end();
+    let events = collect(events).await;
+
+    assert_eq!(
+        script_results(&events),
+        [("After response".into(), true, None)]
+    );
+}
+
+#[tokio::test]
+async fn failing_before_invoke_scripts_stop_the_call() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", "{}");
+    request.scripts.before_invoke = "throw new Error('no token');".into();
+    let definition = reflect(&request).await;
+
+    let error = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .err()
+        .unwrap();
+
+    assert!(
+        matches!(&error, GrpcError::Script { report, .. } if report.error.is_some()),
+        "{error}"
+    );
+    assert!(error.to_string().contains("no token"), "{error}");
 }

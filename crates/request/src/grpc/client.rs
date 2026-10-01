@@ -2,12 +2,14 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use futures::channel::mpsc::unbounded;
 use http_client::http::{HeaderMap, HeaderName, HeaderValue, uri::PathAndQuery};
+use prost_reflect::MethodDescriptor;
 use tonic::metadata::MetadataMap;
 
 use super::{
@@ -17,7 +19,9 @@ use super::{
     reflection,
     transport::{self, Target},
 };
-use crate::{RequestPreferences, RequestVariables};
+use crate::{
+    RequestExecutor, RequestPreferences, RequestVariables, ScriptReport, scripts::CallScripts,
+};
 
 /// Server reflection gives up here unless the request timeout is shorter.
 const REFLECTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -32,6 +36,9 @@ pub struct GrpcClient {
     /// Applies to unary calls and reflection. Streams stay open until the
     /// server ends them or the call is cancelled.
     timeout: Option<Duration>,
+    preferences: RequestPreferences,
+    /// Sends the HTTP requests of scripts, created when a script first runs.
+    script_executor: Arc<OnceLock<Result<RequestExecutor, String>>>,
 }
 
 impl GrpcClient {
@@ -41,6 +48,8 @@ impl GrpcClient {
             max_message_bytes: message_limit(preferences.max_response_size_mb),
             timeout: (preferences.timeout_ms != 0)
                 .then(|| Duration::from_millis(preferences.timeout_ms)),
+            preferences: preferences.clone(),
+            script_executor: Arc::default(),
         }
     }
 
@@ -118,27 +127,65 @@ impl GrpcClient {
         }
     }
 
-    /// Start a call. Unary and server streaming methods send the request's
-    /// message right away; streaming requests wait for `GrpcCall::send`.
+    /// Start a call once its Before invoke script has run. Unary and server
+    /// streaming methods then send the request's message right away;
+    /// streaming requests wait for `GrpcCall::send`. Dropping the future
+    /// interrupts the script.
     pub fn invoke(
         &self,
         request: &GrpcRequest,
-        variables: RequestVariables,
+        mut variables: RequestVariables,
         definition: &ServiceDefinition,
-    ) -> Result<(GrpcCall, GrpcEvents), GrpcError> {
-        if request.method.trim().is_empty() {
-            return Err(GrpcError::MissingMethod);
-        }
+    ) -> impl Future<Output = Result<(GrpcCall, GrpcEvents), GrpcError>> + Send + 'static + use<>
+    {
+        let client = self.clone();
+        let mut request = request.clone();
+        // An unknown method fails before any script runs.
+        let method = method(&request, definition);
 
-        let method = definition
-            .descriptor(request.method.trim())
-            .ok_or_else(|| GrpcError::UnknownMethod(request.method.trim().to_owned()))?;
+        async move {
+            let (method, kind) = method?;
+            let mut scripts = None;
+            let mut report = None;
+
+            if !request.scripts.is_empty() {
+                let executor = client.script_executor()?;
+                let mut call_scripts =
+                    CallScripts::new(std::mem::take(&mut request.scripts), &variables, executor);
+                report = call_scripts
+                    .before_invoke(&mut request, &mut variables)
+                    .await?;
+                scripts = Some(call_scripts);
+            }
+
+            client.start(&request, variables, method, kind, report, scripts)
+        }
+    }
+
+    fn script_executor(&self) -> Result<RequestExecutor, GrpcError> {
+        self.script_executor
+            .get_or_init(|| {
+                RequestExecutor::new(&self.preferences).map_err(|error| error.to_string())
+            })
+            .clone()
+            .map_err(GrpcError::ScriptSetup)
+    }
+
+    /// Resolve and send the call. `report` is its Before invoke script's, and
+    /// `scripts` follow its events when they have On message or After
+    /// response scripts.
+    fn start(
+        &self,
+        request: &GrpcRequest,
+        variables: RequestVariables,
+        method: MethodDescriptor,
+        kind: MethodKind,
+        report: Option<ScriptReport>,
+        scripts: Option<CallScripts>,
+    ) -> Result<(GrpcCall, GrpcEvents), GrpcError> {
         let method_path = format!("/{}/{}", method.parent_service().full_name(), method.name());
         let path = PathAndQuery::try_from(method_path)
             .map_err(|error| GrpcError::UnknownMethod(error.to_string()))?;
-        let kind = definition
-            .method(request.method.trim())
-            .map_or(MethodKind::Unary, |method| method.kind);
 
         // A streaming request's messages resolve as they are sent, so an
         // unfinished draft does not stop the stream from opening.
@@ -151,7 +198,20 @@ impl GrpcClient {
         let target = self.target(&resolved)?;
         let metadata = metadata(&resolved.metadata)?;
 
-        let (events, receiver) = unbounded();
+        // Scripts that follow the call see each event before passing it on.
+        let scripts = scripts.filter(CallScripts::follow_events);
+        let (events, raw) = unbounded();
+        let (output, receiver, raw) = if scripts.is_some() {
+            let (output, receiver) = unbounded();
+            (output, receiver, Some(raw))
+        } else {
+            (events.clone(), raw, None)
+        };
+
+        if let Some(report) = report {
+            let _ = output.unbounded_send(GrpcEvent::Script(report));
+        }
+
         let (messages, outgoing) = unbounded();
         let include_defaults = request.settings.include_default_fields;
         let mut call = GrpcCall::new(
@@ -166,6 +226,11 @@ impl GrpcClient {
         if !kind.streams_requests() {
             call.send_resolved(&resolved.message)?;
             call.end();
+        }
+
+        if let (Some(scripts), Some(raw)) = (scripts, raw) {
+            let task = reqwest_client::runtime().spawn(scripts.forward(resolved, raw, output));
+            call.tasks.push(task.abort_handle());
         }
 
         let client = self.clone();
@@ -205,10 +270,31 @@ impl GrpcClient {
                 Err(error) => GrpcEvent::Failed(error),
             });
         });
-        call.task = Some(task.abort_handle());
+        call.tasks.push(task.abort_handle());
 
         Ok((call, receiver))
     }
+}
+
+/// The selected method's descriptor and kind.
+fn method(
+    request: &GrpcRequest,
+    definition: &ServiceDefinition,
+) -> Result<(MethodDescriptor, MethodKind), GrpcError> {
+    let path = request.method.trim();
+
+    if path.is_empty() {
+        return Err(GrpcError::MissingMethod);
+    }
+
+    let descriptor = definition
+        .descriptor(path)
+        .ok_or_else(|| GrpcError::UnknownMethod(path.to_owned()))?;
+    let kind = definition
+        .method(path)
+        .map_or(MethodKind::Unary, |method| method.kind);
+
+    Ok((descriptor, kind))
 }
 
 /// A limit in MiB as bytes; zero is unlimited.

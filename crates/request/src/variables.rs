@@ -11,6 +11,9 @@ pub struct RequestVariables {
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
     pub(crate) environment_error: Option<String>,
+    /// Values `{{$name}}` resolves to instead of generating new ones, set by
+    /// a gRPC call's Before invoke script.
+    pub(crate) generated: BTreeMap<String, String>,
 }
 
 impl RequestVariables {
@@ -25,6 +28,7 @@ impl RequestVariables {
             session: None,
             collection_scripts: Ok(RequestScripts::default()),
             environment_error,
+            generated: BTreeMap::new(),
         }
     }
 
@@ -92,6 +96,9 @@ impl RequestVariables {
 
     fn resolve_grpc(&self, request: &GrpcRequest, message: bool) -> Result<GrpcRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
+        for (name, value) in &self.generated {
+            resolver.override_generated(name.clone(), value.clone());
+        }
         let mut resolve = |text: &str| {
             resolver
                 .resolve(text)

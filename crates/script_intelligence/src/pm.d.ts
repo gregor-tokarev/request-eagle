@@ -452,11 +452,145 @@ declare namespace RequestEagle {
         match(pattern: RegExp, message?: string): Assertion;
     }
 
+    /** Common gRPC metadata keys. Any other key is also accepted. */
+    type MetadataKey =
+        | "authorization"
+        | "content-type"
+        | "grpc-encoding"
+        | "grpc-timeout"
+        | "user-agent"
+        | "x-api-key"
+        | "x-request-id"
+        | (string & {});
+
+    /** Metadata keys are case-insensitive. */
+    type Metadata = Entries<MetadataKey>;
+
+    type GrpcStatusName =
+        | "OK"
+        | "CANCELLED"
+        | "UNKNOWN"
+        | "INVALID_ARGUMENT"
+        | "DEADLINE_EXCEEDED"
+        | "NOT_FOUND"
+        | "ALREADY_EXISTS"
+        | "PERMISSION_DENIED"
+        | "RESOURCE_EXHAUSTED"
+        | "FAILED_PRECONDITION"
+        | "ABORTED"
+        | "OUT_OF_RANGE"
+        | "UNIMPLEMENTED"
+        | "INTERNAL"
+        | "UNAVAILABLE"
+        | "DATA_LOSS"
+        | "UNAUTHENTICATED";
+
+    /** A message sent or received during a gRPC call. */
+    interface GrpcMessage {
+        /** The message as JSON, with lowerCamelCase field names. 64-bit integers are strings. */
+        readonly data: any;
+        /** When the message was sent or received. */
+        readonly timestamp: Date;
+    }
+
+    interface GrpcMessageAssertions {
+        /** Assert that a message has these fields. Nested objects match the fields they name. */
+        include(fields: unknown): void;
+        readonly not: {
+            /** Assert that no message has these fields. */
+            include(fields: unknown): void;
+        };
+        readonly have: {
+            /** Assert that every message has a property path such as user.id, optionally with this value. */
+            property(path: string, value?: unknown): void;
+            /** Assert that every message matches the schema. */
+            jsonSchema(schema: JSONSchema): void;
+        };
+    }
+
+    /** Messages in the order they were sent or received: an array with list helpers. */
+    interface GrpcMessageList extends Array<GrpcMessage> {
+        /** Return the message at an index; negative indexes count from the end. */
+        idx(index: number): GrpcMessage | undefined;
+        count(): number;
+        /** Copy the messages into a plain array. */
+        all(): GrpcMessage[];
+        each(callback: (message: GrpcMessage, index: number) => void): void;
+        filter<S extends GrpcMessage>(predicate: (message: GrpcMessage, index: number, messages: GrpcMessage[]) => message is S): S[];
+        filter(predicate: (message: GrpcMessage, index: number, messages: GrpcMessage[]) => unknown): GrpcMessage[];
+        /** Return the messages that have these fields, such as {data: {type: "ping"}}. */
+        filter(fields: Record<string, unknown>): GrpcMessage[];
+        readonly to: GrpcMessageAssertions;
+    }
+
+    /** The call as it was invoked. */
+    interface GrpcRequest {
+        /** The server address. */
+        readonly url: string;
+        /** The method as package.Service/Method. */
+        readonly methodPath: string;
+        readonly metadata: Metadata;
+        /** The composed message as JSON text. */
+        readonly message: string;
+    }
+
+    /** The call about to be invoked. Edits never modify the request draft or saved file. */
+    interface GrpcInvokeRequest extends GrpcRequest {
+        /** Assign a server address, which may contain {{variables}}. */
+        url: string;
+        /** Assign text or an object to change the message unary and server streaming methods send. */
+        get message(): string;
+        set message(value: string | object);
+    }
+
+    interface GrpcSentRequest extends GrpcRequest {
+        /** The messages sent during the call, up to the latest 8 MiB. */
+        readonly messages: GrpcMessageList;
+    }
+
+    interface GrpcResponseHaveAssertions {
+        /** Assert the status code, such as 0 for OK. */
+        statusCode(code: number): void;
+        /** Assert the status code or name. */
+        status(codeOrName: number | GrpcStatusName): void;
+        /** Assert that the server sent this metadata; optionally compare its first value. */
+        metadata(key: MetadataKey, value?: string): void;
+        /** Assert that the server sent this trailer; optionally compare its first value. */
+        trailer(key: MetadataKey, value?: string): void;
+        /** Assert that a received message deeply equals this one. */
+        message(expected: unknown): void;
+    }
+
+    interface GrpcResponseBeAssertions {
+        /** Assert status 0 OK. */
+        readonly ok: void;
+        /** Assert a status other than OK. */
+        readonly error: void;
+    }
+
+    interface GrpcResponse {
+        /** The status code: 0 for OK. */
+        readonly code: number;
+        readonly status: GrpcStatusName;
+        /** The server's status message, or an empty string. */
+        readonly statusMessage: string;
+        /** Milliseconds from invoking until the status arrived. */
+        readonly responseTime: number;
+        /** The server's initial metadata, its response headers. */
+        readonly metadata: Metadata;
+        readonly trailers: Metadata;
+        /** The received messages, up to the latest 8 MiB. */
+        readonly messages: GrpcMessageList;
+        readonly to: {
+            readonly have: GrpcResponseHaveAssertions;
+            readonly be: GrpcResponseBeAssertions;
+        };
+    }
+
     /** The callback receives either an error or a response. Thrown errors reject sendRequest. */
     type RequestCallback = (error: Error | null, response: Response | null) => unknown;
 
     interface CommonAPI {
-        readonly request: Request;
         readonly variables: LocalVariables;
         readonly environment: EnvironmentVariables;
         readonly crypto: Crypto;
@@ -482,6 +616,7 @@ declare namespace RequestEagle {
     }
 
     interface PreRequestAPI extends CommonAPI {
+        readonly request: Request;
         readonly execution: {
             /** Stop the pre-request script and skip sending the primary request with a visible reason. */
             skipRequest(reason?: string): never;
@@ -489,7 +624,27 @@ declare namespace RequestEagle {
     }
 
     interface PostResponseAPI extends CommonAPI {
+        readonly request: Request;
         readonly response: Response;
+    }
+
+    interface GrpcBeforeInvokeAPI extends CommonAPI {
+        readonly request: GrpcInvokeRequest;
+        readonly execution: {
+            /** Stop the script and do not invoke the method, with a visible reason. */
+            skipRequest(reason?: string): never;
+        };
+    }
+
+    interface GrpcOnMessageAPI extends CommonAPI {
+        readonly request: GrpcRequest;
+        /** The message the server just sent. */
+        readonly message: GrpcMessage;
+    }
+
+    interface GrpcAfterResponseAPI extends CommonAPI {
+        readonly request: GrpcSentRequest;
+        readonly response: GrpcResponse;
     }
 
     interface Console {

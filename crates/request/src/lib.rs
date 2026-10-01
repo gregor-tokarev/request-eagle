@@ -23,7 +23,7 @@ mod scripts;
 mod variables;
 mod websocket;
 
-pub use scripts::{RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
+pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
 pub use error::ExecutionError;
 pub use executor::RequestExecutor;

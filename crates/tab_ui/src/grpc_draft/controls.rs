@@ -23,7 +23,7 @@ impl GrpcDraft {
         let url = self.url_state(window, cx);
         let methods = self.methods_state(window, cx);
         let tls = self.request.uses_tls();
-        let running = self.call.is_some() || self.invoke_when_loaded;
+        let running = self.is_running();
         let placeholder: SharedString = match &self.definition {
             DefinitionState::Loading => "Loading methods…".into(),
             _ if self.request.method.is_empty() => "Select a method".into(),
@@ -143,7 +143,7 @@ impl GrpcDraft {
                         button.tooltip_with_action("Invoke", &SendRequest, Some("Workspace"))
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if this.call.is_some() || this.invoke_when_loaded {
+                        if this.is_running() {
                             this.cancel(cx);
                         } else {
                             this.invoke(window, cx);
@@ -177,6 +177,7 @@ impl GrpcDraft {
                 self.request.metadata.len(),
             ),
             ("Service definition", GrpcSection::Definition, 0),
+            ("Scripts", GrpcSection::Scripts, self.script_count()),
             ("Settings", GrpcSection::Settings, 0),
         ];
 

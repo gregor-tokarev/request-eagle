@@ -14,7 +14,11 @@
 //! checks, the response message limit and the timeout (for unary calls and
 //! reflection) come from the request preferences unless the request's settings
 //! override them. Calls run on the Tokio runtime shared with the HTTP client.
-//! Scripts do not run for gRPC requests.
+//!
+//! The request's Before invoke script runs before the call starts and can
+//! change its URL, metadata and message. On message runs after each received
+//! message and After response before `Finished`; their reports arrive as
+//! `GrpcEvent::Script`.
 
 mod call;
 mod client;

@@ -314,3 +314,62 @@ fn clearing_the_source_drops_a_waiting_invoke(cx: &mut TestAppContext) {
     // Invoke runs again and explains what is missing.
     assert!(element_bounds(cx, "grpc-error").is_some());
 }
+
+#[gpui_kit::test]
+fn scripts_are_edited_for_each_hook(cx: &mut TestAppContext) {
+    // Script assistance uses the shared TypeScript worker outside GPUI's test executor.
+    cx.executor().allow_parking();
+    let (draft, cx) = draft(GrpcRequest::default(), cx);
+
+    let tab = element_bounds(cx, "grpc-section-Scripts").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+    assert!(element_bounds(cx, "request-scripts").is_some());
+
+    for (phase, selector) in [
+        ("Before invoke", "script-phase-Before invoke"),
+        ("On message", "script-phase-On message"),
+        ("After response", "script-phase-After response"),
+    ] {
+        let phase_tab = element_bounds(cx, selector).unwrap();
+        cx.simulate_click(phase_tab.center(), Modifiers::default());
+        let editor = element_bounds(cx, "script-editor").unwrap();
+        cx.simulate_click(editor.center(), Modifiers::default());
+        cx.simulate_input(&format!("// {phase}"));
+    }
+
+    draft.read_with(cx, |draft, _| {
+        let scripts = &draft.request.scripts;
+        assert_eq!(scripts.before_invoke, "// Before invoke");
+        assert_eq!(scripts.on_message, "// On message");
+        assert_eq!(scripts.after_response, "// After response");
+        assert_eq!(draft.script_count(), 3);
+        assert!(draft.is_dirty());
+    });
+}
+
+#[gpui_kit::test]
+fn a_before_invoke_script_can_skip_the_call(cx: &mut TestAppContext) {
+    // The script runs on a thread outside GPUI's test executor.
+    cx.executor().allow_parking();
+    let (_directory, echo, shared) = protos();
+    let mut request = proto_request(echo, shared, "Say");
+    request.scripts.before_invoke = "pm.execution.skipRequest('No token yet');".into();
+    let (draft, cx) = draft(request, cx);
+
+    let invoke = element_bounds(cx, "grpc-invoke").unwrap();
+    cx.simulate_click(invoke.center(), Modifiers::default());
+
+    for _ in 0..500 {
+        cx.run_until_parked();
+        if draft.read_with(cx, |draft, _| draft.call_task.is_none()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    draft.read_with(cx, |draft, _| {
+        assert!(draft.call.is_none());
+        assert!(draft.call_task.is_none());
+    });
+    assert!(element_bounds(cx, "grpc-skipped").is_some());
+}

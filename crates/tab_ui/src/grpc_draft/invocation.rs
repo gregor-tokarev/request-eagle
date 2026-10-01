@@ -3,7 +3,7 @@ use std::task::Poll;
 use futures::StreamExt as _;
 use gpui_kit::*;
 use preferences::Preferences;
-use request::{GrpcClient, GrpcEvent, GrpcEvents};
+use request::{GrpcClient, GrpcEvent, GrpcEvents, MethodKind};
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
@@ -29,6 +29,12 @@ impl GrpcDraft {
         }
     }
 
+    /// Whether a call is starting or open, including while its definition
+    /// loads or its Before invoke script runs.
+    pub(super) fn is_running(&self) -> bool {
+        self.call.is_some() || self.call_task.is_some() || self.invoke_when_loaded
+    }
+
     /// The send shortcut invokes the method, or sends the composed message
     /// while a client stream is open.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -36,16 +42,15 @@ impl GrpcDraft {
             Some(call) if call.kind.streams_requests() && call.is_sending() => {
                 self.send_message(window, cx)
             }
-            Some(_) => {}
-            None if self.invoke_when_loaded => {}
-            None => self.invoke(window, cx),
+            _ if self.is_running() => {}
+            _ => self.invoke(window, cx),
         }
     }
 
     /// Start a call. The service definition is loaded first when the request
     /// settings changed since it was last loaded.
     pub fn invoke(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.call.is_some() {
+        if self.call.is_some() || self.call_task.is_some() {
             return;
         }
 
@@ -92,64 +97,81 @@ impl GrpcDraft {
         let definition = definition.clone();
         let client = self.client(cx);
         let server: SharedString = self.request.url.trim().to_owned().into();
+        let kind = self.method_kind().unwrap_or(MethodKind::Unary);
+        // The Before invoke script and the HTTP client its requests use start
+        // off the main thread. Dropping the task cancels them.
+        let invoke =
+            cx.background_executor()
+                .spawn(client.invoke(&self.request, variables, &definition));
 
-        match client.invoke(&self.request, variables, &definition) {
-            Ok((call, events)) => {
-                let kind = call.kind;
-                self.response
-                    .update(cx, |response, cx| response.start(kind, server, window, cx));
-                self.call = Some(call);
-                self.call_task = Some(self.receive(events, window, cx));
-            }
-            Err(error) => self.response.update(cx, |response, cx| {
-                response.fail(error.to_string().into(), cx)
-            }),
-        }
+        self.response
+            .update(cx, |response, cx| response.start(kind, server, window, cx));
+        self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let events = match invoke.await {
+                Ok((call, events)) => {
+                    let opened = this.update(cx, |this, cx| {
+                        this.call = Some(call);
+                        this.redraw(cx);
+                    });
+
+                    if opened.is_err() {
+                        return;
+                    }
+
+                    events
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.call_task = None;
+                        this.response
+                            .update(cx, |response, cx| response.fail_invoke(error, cx));
+                        this.redraw(cx);
+                    });
+
+                    return;
+                }
+            };
+
+            Self::receive(this, events, cx).await;
+        }));
 
         self.redraw(cx);
     }
 
     /// Show call events as they arrive, until the call ends.
-    fn receive(
-        &mut self,
-        mut events: GrpcEvents,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Task<()> {
-        cx.spawn_in(window, async move |this, cx| {
-            while let Some(event) = events.next().await {
-                let mut batch = vec![event];
+    async fn receive(this: WeakEntity<Self>, mut events: GrpcEvents, cx: &mut AsyncWindowContext) {
+        while let Some(event) = events.next().await {
+            let mut batch = vec![event];
 
-                while batch.len() < EVENT_BATCH
-                    && let Ok(event) = events.try_recv()
-                {
-                    batch.push(event);
-                }
-
-                let finished = batch.iter().any(|event| {
-                    matches!(event, GrpcEvent::Finished { .. } | GrpcEvent::Failed(_))
-                });
-                let updated = this.update_in(cx, |this, window, cx| {
-                    this.response
-                        .update(cx, |response, cx| response.receive(batch, window, cx));
-
-                    // Messages redraw only the response; the draft changes
-                    // when the call ends.
-                    if finished {
-                        this.call = None;
-                        this.call_task = None;
-                        this.redraw(cx);
-                    }
-                });
-
-                if finished || updated.is_err() {
-                    return;
-                }
-
-                // Let input and drawing run before the next queued batch.
-                yield_now().await;
+            while batch.len() < EVENT_BATCH
+                && let Ok(event) = events.try_recv()
+            {
+                batch.push(event);
             }
-        })
+
+            let finished = batch
+                .iter()
+                .any(|event| matches!(event, GrpcEvent::Finished { .. } | GrpcEvent::Failed(_)));
+            let updated = this.update_in(cx, |this, window, cx| {
+                this.response
+                    .update(cx, |response, cx| response.receive(batch, window, cx));
+
+                // Messages redraw only the response; the draft changes
+                // when the call ends.
+                if finished {
+                    this.call = None;
+                    this.call_task = None;
+                    this.redraw(cx);
+                }
+            });
+
+            if finished || updated.is_err() {
+                return;
+            }
+
+            // Let input and drawing run before the next queued batch.
+            yield_now().await;
+        }
     }
 
     /// Send the composed message on the open stream.
@@ -176,11 +198,13 @@ impl GrpcDraft {
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self.invoke_when_loaded = false;
 
-        // Dropping the call resets its stream on the server.
-        let cancelled = self.call.take().is_some();
-        self.call_task = None;
+        // Dropping the call resets its stream on the server, and dropping
+        // its task interrupts a running Before invoke script.
+        let call = self.call.take();
+        let task = self.call_task.take();
+        let started = call.is_some() || task.is_some();
         self.response
-            .update(cx, |response, cx| response.cancel(cancelled, cx));
+            .update(cx, |response, cx| response.cancel(started, cx));
 
         self.redraw(cx);
     }
