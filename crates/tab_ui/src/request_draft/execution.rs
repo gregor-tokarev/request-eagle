@@ -94,16 +94,16 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     headers
 }
 
+/// The jar that requests store and send cookies in, while it is on.
+pub(super) fn active_jar(cx: &App) -> Option<request::CookieJar> {
+    cx.try_global::<Preferences>()
+        .is_none_or(|preferences| preferences.request.cookie_jar)
+        .then(|| Cookies::jar(cx))
+}
+
 /// The Cookie header that the jar adds to the request, while it is on.
 fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
-    let enabled = cx
-        .try_global::<Preferences>()
-        .is_none_or(|preferences| preferences.request.cookie_jar);
-    if !enabled {
-        return None;
-    }
-
-    let jar = Cookies::jar(cx);
+    let jar = active_jar(cx)?;
     let url = request_url(&request.path);
     let templated = url.contains("{{")
         || request

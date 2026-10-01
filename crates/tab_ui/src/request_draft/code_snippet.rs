@@ -12,6 +12,8 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::HttpRequest;
 
 use super::draft::RequestDraft;
+use super::execution::active_jar;
+use crate::Cookies;
 
 /// The request as a cURL command beside the request, like Postman's code
 /// snippet panel. It follows edits to the request and fills in the variables
@@ -29,7 +31,7 @@ pub(crate) struct CodeSnippet {
     /// Below the request in a narrow window, the snippet keeps its controls
     /// in one row to leave room for the response.
     pub(super) compact: bool,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 4],
 }
 
 impl CodeSnippet {
@@ -41,7 +43,9 @@ impl CodeSnippet {
         cx: &mut Context<Self>,
     ) -> Self {
         let values = draft.variable_values(cx);
-        let command = draft.request.curl_command(&values.0);
+        let command = draft
+            .request
+            .curl_command(&values.0, active_jar(cx).as_ref());
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("bash")
@@ -59,6 +63,13 @@ impl CodeSnippet {
             // The active environment or the collection's variables changed.
             cx.observe_in(&draft.variables, window, |this, _, window, cx| {
                 this.refresh(true, window, cx)
+            }),
+            // The command includes the jar's cookies, while the jar is on.
+            cx.observe_global_in::<Cookies>(window, |this, window, cx| {
+                this.refresh(false, window, cx)
+            }),
+            cx.observe_global_in::<preferences::Preferences>(window, |this, window, cx| {
+                this.refresh(false, window, cx)
             }),
         ];
 
@@ -85,7 +96,9 @@ impl CodeSnippet {
             self.values = draft.variable_values(cx);
         }
 
-        let command = draft.request.curl_command(&self.values.0);
+        let command = draft
+            .request
+            .curl_command(&self.values.0, active_jar(cx).as_ref());
         self.request = draft.request.clone();
 
         if command != self.command.as_ref() {
@@ -122,7 +135,9 @@ impl RequestDraft {
     /// Copies the request as a cURL command, with the variables that resolve
     /// filled in.
     pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
-        let command = self.request.curl_command(&self.variable_values(cx).0);
+        let command = self
+            .request
+            .curl_command(&self.variable_values(cx).0, active_jar(cx).as_ref());
         cx.write_to_clipboard(ClipboardItem::new_string(command));
         window.push_notification(Notification::success("Copied the request as cURL."), cx);
     }

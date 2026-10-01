@@ -5,14 +5,19 @@ use std::collections::HashMap;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{HttpRequest, Method};
+use crate::{CookieJar, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
     /// following redirects. `{{variables}}` that `values` defines are filled
     /// in as sending fills them, including `:name` path variables; others,
-    /// and generated ones such as `{{$guid}}`, stay as written.
-    pub fn curl_command(&self, values: &HashMap<String, String>) -> String {
+    /// and generated ones such as `{{$guid}}`, stay as written. The cookies
+    /// that `cookies` would add join the request's Cookie header.
+    pub fn curl_command(
+        &self,
+        values: &HashMap<String, String>,
+        cookies: Option<&CookieJar>,
+    ) -> String {
         let mut request = self.clone();
         // Sending leaves these bodies out before it resolves anything.
         if matches!(request.method, Method::Get | Method::Head) {
@@ -54,6 +59,26 @@ impl HttpRequest {
         }
         let url = url(&request.path, &request.query);
         let body = request.body.as_deref().filter(|body| !body.is_empty());
+
+        // The jar's cookies for the request's own URL. A redirect's cookies
+        // are not known until it is followed.
+        if let Some(jar_cookies) = cookies
+            .filter(|_| !url.contains("{{"))
+            .and_then(|jar| jar.cookie_header(&url, &request.headers))
+        {
+            let own = request
+                .headers
+                .iter_mut()
+                .rfind(|(name, _)| name.eq_ignore_ascii_case("cookie"));
+            match own {
+                Some((_, value)) if !value.trim().is_empty() => {
+                    value.push_str("; ");
+                    value.push_str(&jar_cookies);
+                }
+                Some((_, value)) => *value = jar_cookies,
+                None => request.headers.push(("Cookie".into(), jar_cookies)),
+            }
+        }
 
         let mut command = String::from("curl --location");
         // cURL would read brackets and braces as patterns of several URLs.
