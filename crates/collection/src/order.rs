@@ -99,14 +99,13 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
     with_saved_order(parent, &paths, || fs::rename(old, new))
 }
 
-/// Whether there is an order that loading left out, because its content or
-/// permissions do not let it be read. It is never saved over, so that it
-/// can still be repaired.
+/// Whether there is an order that loading left out because it cannot be
+/// read. It is never saved over, so that it can still be repaired.
 fn unreadable(parent: &Path) -> bool {
     match read(parent) {
         Ok(Some(bytes)) => serde_json::from_slice::<Vec<String>>(&bytes).is_err(),
         Ok(None) => false,
-        Err(error) => error.kind() == io::ErrorKind::PermissionDenied,
+        Err(_) => true,
     }
 }
 

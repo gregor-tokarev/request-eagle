@@ -153,14 +153,14 @@ fn invalid_moves_and_order_write_errors_leave_files_and_model_unchanged() {
         [nested.clone(), request.clone()]
     );
 
+    // An order that cannot be read is left for its user to repair, and
+    // does not stop the move.
     fs::remove_file(second.join(".request-eagle-order.json")).unwrap();
     fs::create_dir(second.join(".request-eagle-order.json")).unwrap();
-    assert!(
-        registry
-            .move_entry(&nested, &second, MovePlacement::Inside)
-            .is_err()
-    );
-    assert!(nested.is_dir());
-    assert!(!second.join(nested.file_name().unwrap()).exists());
-    assert_eq!(paths(&mut registry, &folder), [nested, request]);
+    let moved = registry
+        .move_entry(&nested, &second, MovePlacement::Inside)
+        .unwrap();
+    assert!(moved.is_dir());
+    assert!(second.join(".request-eagle-order.json").is_dir());
+    assert_eq!(paths(&mut registry, &folder), [request]);
 }
