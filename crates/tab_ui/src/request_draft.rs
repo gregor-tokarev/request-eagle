@@ -1,4 +1,5 @@
 mod body;
+mod code_snippet;
 mod controls;
 mod draft;
 mod execution;

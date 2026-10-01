@@ -11,6 +11,7 @@
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
 mod cookies;
+mod curl;
 mod error;
 mod event_stream;
 mod executor;
@@ -30,6 +31,8 @@ mod websocket;
 
 #[cfg(test)]
 mod cookies_tests;
+#[cfg(test)]
+mod curl_tests;
 #[cfg(test)]
 mod event_stream_tests;
 #[cfg(test)]

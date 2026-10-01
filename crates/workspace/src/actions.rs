@@ -12,6 +12,7 @@ actions!(
         OpenGeneralSettings,
         OpenCookies,
         SaveRequest,
+        CopyAsCurl,
         NewTab,
         NewGrpcTab,
         NewWebSocketTab,
@@ -73,6 +74,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default save request keybinding should be valid");
+
+    keybindings_service::register(
+        CopyAsCurl,
+        "Copy as cURL",
+        "Copy the HTTP request in the active tab as a cURL command.",
+        "Requests",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("the copy as cURL action should register");
 
     register_tab_action(
         NewTab,
