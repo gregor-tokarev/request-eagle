@@ -38,10 +38,10 @@ pub enum GrpcError {
     #[error("could not connect to the server: {0}")]
     Connect(String),
 
-    #[error("the server requires TLS. Turn on TLS to connect")]
+    #[error("the server requires TLS. Turn on TLS or use a grpcs:// URL")]
     TlsRequired,
 
-    #[error("the server does not support TLS. Turn off TLS to connect")]
+    #[error("the server does not support TLS. Turn off TLS or use a grpc:// URL")]
     TlsUnsupported,
 
     #[error("request timed out after {timeout:?}")]

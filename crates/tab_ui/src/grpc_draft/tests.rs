@@ -228,10 +228,42 @@ fn a_server_that_requires_tls_offers_to_turn_it_on(cx: &mut TestAppContext) {
     });
     let tab = element_bounds(cx, "grpc-section-Service definition").unwrap();
     cx.simulate_click(tab.center(), Modifiers::default());
-    let button = element_bounds(cx, "grpc-definition-toggle-tls").unwrap();
+    let button = element_bounds(cx, "grpc-definition-set-tls").unwrap();
     cx.simulate_click(button.center(), Modifiers::default());
 
     draft.read_with(cx, |draft, _| assert!(draft.request.uses_tls()));
+}
+
+#[gpui_kit::test]
+fn a_scheme_from_a_variable_is_not_switched_with_the_lock(cx: &mut TestAppContext) {
+    let request = GrpcRequest {
+        url: "{{server}}".into(),
+        ..GrpcRequest::default()
+    };
+    let (draft, cx) = draft(request, cx);
+
+    draft.update(cx, |draft, cx| {
+        let values = [("server".to_owned(), Some("grpcs://localhost:1".to_owned()))];
+        draft
+            .variables
+            .read(cx)
+            .session
+            .apply(&values.into())
+            .unwrap();
+        draft.definition = DefinitionState::Failed(GrpcError::TlsUnsupported);
+        draft.redraw(cx);
+    });
+    let tab = element_bounds(cx, "grpc-section-Service definition").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+
+    // The lock can't remove the variable's scheme, so only the error shows.
+    draft.read_with(cx, |draft, cx| {
+        let variables = draft.variables.read(cx).request_variables(cx);
+        let resolved = variables.resolve_grpc_target(&draft.request).unwrap();
+        assert!(resolved.uses_tls());
+    });
+    assert!(element_bounds(cx, "grpc-definition-detail").is_some());
+    assert!(element_bounds(cx, "grpc-definition-set-tls").is_none());
 }
 
 #[gpui_kit::test]

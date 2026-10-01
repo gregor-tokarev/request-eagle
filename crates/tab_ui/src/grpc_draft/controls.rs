@@ -88,7 +88,7 @@ impl GrpcDraft {
                                         })
                                         .tooltip(if tls { "Disable TLS" } else { "Enable TLS" })
                                         .on_click(cx.listener(|this, _, window, cx| {
-                                            this.toggle_tls(window, cx)
+                                            this.set_tls(!this.request.uses_tls(), window, cx)
                                         })),
                                 ),
                             )
@@ -152,9 +152,10 @@ impl GrpcDraft {
             )
     }
 
-    pub(super) fn toggle_tls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Turn TLS on or off, switching a scheme in the URL to match.
+    pub(super) fn set_tls(&mut self, tls: bool, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.request.url.clone();
-        self.request.set_tls(!self.request.uses_tls());
+        self.request.set_tls(tls);
 
         if self.request.url != url
             && let Some(input) = &self.url

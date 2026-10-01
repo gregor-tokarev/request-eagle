@@ -677,11 +677,12 @@ impl GrpcDraft {
                 ),
             };
         let failed = matches!(self.definition, DefinitionState::Failed(_));
-        let tls_mismatch = matches!(
-            self.definition,
-            DefinitionState::Failed(GrpcError::TlsRequired | GrpcError::TlsUnsupported)
-        );
-        let tls = self.request.uses_tls();
+        let needed_tls = match &self.definition {
+            DefinitionState::Failed(GrpcError::TlsRequired) => Some(true),
+            DefinitionState::Failed(GrpcError::TlsUnsupported) => Some(false),
+            _ => None,
+        }
+        .filter(|&tls| self.lock_sets_tls(tls, cx));
 
         // The detail and actions line up with the title, past the 1 rem icon.
         v_flex()
@@ -725,26 +726,39 @@ impl GrpcDraft {
                         .child(detail),
                 )
             })
-            .when(tls_mismatch, |status| {
+            .when_some(needed_tls, |status, tls| {
                 status.child(
                     h_flex().pl_6().pt_1().child(
-                        Button::new("grpc-definition-toggle-tls")
-                            .debug_selector(|| "grpc-definition-toggle-tls".into())
+                        Button::new("grpc-definition-set-tls")
+                            .debug_selector(|| "grpc-definition-set-tls".into())
                             .outline()
                             .small()
                             .icon(Icon::default().path(if tls {
-                                "icons/lock-open.svg"
-                            } else {
                                 "icons/lock.svg"
+                            } else {
+                                "icons/lock-open.svg"
                             }))
-                            .label(if tls { "Turn off TLS" } else { "Turn on TLS" })
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.toggle_tls(window, cx)),
-                            ),
+                            .label(if tls { "Turn on TLS" } else { "Turn off TLS" })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_tls(tls, window, cx)
+                            })),
                     ),
                 )
             })
             .into_any_element()
+    }
+
+    /// Whether switching the lock makes the request connect with `tls`. A
+    /// scheme that a variable supplies decides TLS instead.
+    fn lock_sets_tls(&self, tls: bool, cx: &App) -> bool {
+        let mut request = self.request.clone();
+        request.set_tls(tls);
+
+        self.variables
+            .read(cx)
+            .request_variables(cx)
+            .resolve_grpc_target(&request)
+            .is_ok_and(|request| request.uses_tls() == tls)
     }
 }
 
