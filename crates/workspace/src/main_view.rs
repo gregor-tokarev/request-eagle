@@ -712,13 +712,14 @@ impl MainView {
 
     fn save_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         // Saving an unsaved request suggests the name being typed in its tab.
+        // A rejected rename keeps its error.
+        self.save_error = None;
         self.commit_rename(cx);
 
         let Some(tab) = self.tabs.get(index) else {
             return;
         };
         let id = tab.id;
-        self.save_error = None;
 
         match tab.page.clone() {
             Page::Environment(editor) => {
@@ -892,6 +893,14 @@ impl MainView {
 
         let id = tab.id;
         let title = tab.title.clone();
+
+        // Renaming the same tab again keeps the name being typed.
+        if let Some(rename) = self.rename.as_ref().filter(|rename| rename.tab == id) {
+            rename.input.update(cx, |input, cx| input.focus(window, cx));
+            return;
+        }
+        self.commit_rename(cx);
+
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx).default_value(title);
             input.select_all(window, cx);
