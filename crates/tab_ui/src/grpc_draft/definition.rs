@@ -160,16 +160,22 @@ impl GrpcDraft {
     }
 
     /// Keep a definition an invoke loaded for the call its Before invoke
-    /// script prepared, so the method picker shows its methods.
+    /// script prepared, so the method picker shows its methods. `source` is
+    /// the settings it loaded from; it is dropped if they changed since.
     pub(super) fn keep_definition(
         &mut self,
         definition: ServiceDefinition,
+        source: Option<DefinitionSource>,
         target: Option<Vec<String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if source != self.current_source() {
+            return;
+        }
+
         self.definition = DefinitionState::Loaded(definition);
-        self.definition_source = self.current_source();
+        self.definition_source = source;
         // It replaces a load for the draft's settings that is still running.
         self.definition_task = None;
         self.reflected_target = target;

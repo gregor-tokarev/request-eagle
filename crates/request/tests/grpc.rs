@@ -1229,3 +1229,27 @@ async fn values_before_invoke_sets_last_for_the_call() {
         [("After response".into(), true, None)]
     );
 }
+
+#[tokio::test]
+async fn target_keys_follow_values_before_invoke_sets() {
+    let key = |server: &str| {
+        let request = GrpcRequest {
+            url: "{{$guid}}".into(),
+            method: "echo.v1.EchoService/Say".into(),
+            scripts: GrpcScripts {
+                before_invoke: "pm.variables.set('$guid', pm.environment.get('server'));".into(),
+                ..GrpcScripts::default()
+            },
+            ..GrpcRequest::default()
+        };
+        let variables = RequestVariables::new([("server".into(), server.into())].into(), None);
+
+        async move {
+            let prepared = client().prepare(&request, variables).await.unwrap();
+            prepared.variables().grpc_target_key(prepared.request())
+        }
+    };
+
+    assert_eq!(key("a:1").await, Some(vec!["a:1".to_owned()]));
+    assert_eq!(key("b:2").await, Some(vec!["b:2".to_owned()]));
+}

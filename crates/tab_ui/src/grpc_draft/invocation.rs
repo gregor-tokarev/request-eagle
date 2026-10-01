@@ -126,6 +126,7 @@ impl GrpcDraft {
     ) {
         let client = self.client(cx);
         let collection = self.collection_path();
+        let source = self.current_source();
         let loaded = match &self.definition {
             DefinitionState::Loaded(definition) if self.definition_is_current() => {
                 Some((definition.clone(), self.reflected_target.clone()))
@@ -166,15 +167,20 @@ impl GrpcDraft {
                     if let Ok(definition) = &result {
                         let definition = definition.clone();
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.keep_definition(definition, target, window, cx)
+                            this.keep_definition(definition, source, target, window, cx)
                         });
                     }
 
                     result
                 }
             };
+            // Resolving and encoding a large message takes a while.
             let result = match definition {
-                Ok(definition) => client.start(prepared, &definition),
+                Ok(definition) => {
+                    cx.background_executor()
+                        .spawn(async move { client.start(prepared, &definition) })
+                        .await
+                }
                 Err(error) => Err(prepared.fail(error)),
             };
 

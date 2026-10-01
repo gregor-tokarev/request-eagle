@@ -64,7 +64,7 @@ impl RequestVariables {
     /// The URL and metadata a gRPC request connects with, as a key that
     /// changes when its variables point at another server. Generated
     /// variables such as `{{$guid}}` stay as written, since they differ on
-    /// every use.
+    /// every use, unless a Before invoke script set them for the call.
     pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
         let texts = std::iter::once(request.url.as_str()).chain(
             request
@@ -72,12 +72,13 @@ impl RequestVariables {
                 .iter()
                 .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
         );
-        let mut resolver = VariableResolver::new(&self.values);
+        let mut resolver = self.resolver();
 
         for text in texts.clone() {
             for reference in text.split("{{").skip(1) {
                 if let Some((name, _)) = reference.split_once("}}")
                     && name.trim().starts_with('$')
+                    && !self.generated.contains_key(name.trim())
                 {
                     let name = name.trim().to_owned();
                     resolver.override_generated(name.clone(), format!("{{{{{name}}}}}"));
