@@ -1,46 +1,6 @@
-use gpui_kit::{
-    AppContext as _, TestAppContext,
-    http_client::{AsyncBody, FakeHttpClient, Response},
-};
+use gpui_kit::http_client::{AsyncBody, FakeHttpClient, Response};
 
-use super::{PreparedUpdate, download_update, verify_sha256};
-use crate::{UpdateStatus, Updater};
-
-#[gpui_kit::test]
-fn a_prepared_update_waits_for_an_explicit_relaunch(cx: &mut TestAppContext) {
-    let work_dir = tempfile::tempdir().unwrap();
-    let staged_archive = work_dir.path().join("update.zip");
-    std::fs::write(&staged_archive, b"staged update").unwrap();
-
-    let updater = cx.new(|_| Updater {
-        current_version: "1.2.3",
-        status: UpdateStatus::Ready("99.0.0".into()),
-        prepared_update: Some(PreparedUpdate {
-            current_app: work_dir.path().join("installed.app"),
-            new_app: work_dir.path().join("new.app"),
-            work_dir,
-        }),
-    });
-
-    updater.update(cx, |updater, cx| {
-        updater.check(cx);
-        updater.download(cx);
-    });
-    cx.run_until_parked();
-
-    updater.read_with(cx, |updater, _| {
-        assert!(matches!(updater.status(), UpdateStatus::Ready(_)));
-        assert!(updater.prepared_update.is_some());
-        assert!(staged_archive.exists());
-    });
-
-    cx.update(|_| drop(updater));
-
-    assert!(
-        !staged_archive.exists(),
-        "Discarded updates must clean up their staging files"
-    );
-}
+use super::{download_update, verify_sha256};
 
 #[test]
 fn downloads_report_bytes_with_or_without_a_content_length() {

@@ -18,26 +18,6 @@ pub(super) enum Body {
     Pretty(Entity<ResponseBodyEditor>),
 }
 
-#[cfg(test)]
-impl Body {
-    pub(super) fn raw(&self) -> &Entity<VirtualBody> {
-        match self {
-            Body::Raw { view, .. } => view,
-            Body::Pretty(_) => panic!("expected the raw body"),
-        }
-    }
-
-    pub(super) fn search(&mut self) -> &mut BodySearch {
-        match self {
-            Body::Raw {
-                search: Some(search),
-                ..
-            } => search,
-            _ => panic!("expected an open raw body search"),
-        }
-    }
-}
-
 /// Cache the editor independently so selecting response details does not lay
 /// out and paint an unchanged (potentially large) response body again.
 pub(crate) struct ResponseBodyEditor(pub(crate) Entity<EditorState>);

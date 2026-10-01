@@ -70,11 +70,6 @@ impl Vim {
         Some((&self.editor, cursor))
     }
 
-    #[cfg(test)]
-    pub(super) fn is_normal(&self) -> bool {
-        self.enabled && self.mode == Mode::Normal
-    }
-
     pub(crate) fn new(editor: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
         let registration = super::dispatch::register(&editor, cx);
         let preferences = cx.observe_global::<preferences::Preferences>(|this, cx| {
