@@ -15,7 +15,7 @@ mod store;
 mod tests;
 
 pub use appearance::{AppearanceMode, AppearancePreferences};
-pub use file::{Preferences, PreferencesFile};
+pub use file::{Preferences, PreferencesFile, UpdateChannel};
 pub use request::{HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol, RequestPreferences};
 #[cfg(feature = "ui")]
 pub use store::{credential_error, init, load, update, update_proxy};

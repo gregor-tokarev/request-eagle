@@ -8,12 +8,23 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Which releases the app updates to. Daily builds are published as GitHub
+/// pre-releases; stable releases are the ones promoted from them.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Daily,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Preferences {
     pub appearance: AppearancePreferences,
     pub request: RequestPreferences,
     pub vim_mode: bool,
+    pub update_channel: UpdateChannel,
     /// The global environment selected in the workspace, by name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_environment: Option<String>,

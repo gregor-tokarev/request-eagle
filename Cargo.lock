@@ -8513,6 +8513,7 @@ name = "updater"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "preferences",
  "rustix",
  "semver",
  "serde",

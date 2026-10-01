@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -54,7 +54,80 @@ async fn vim_toggle_saves_and_keeps_the_previous_value_if_saving_fails(cx: &mut 
 }
 
 #[gpui_kit::test]
-fn vim_setting_fits_general_at_each_zoom_and_theme(cx: &mut TestAppContext) {
+async fn daily_builds_toggle_saves_the_channel_and_checks_it(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let http = FakeHttpClient::create({
+        let requests = requests.clone();
+
+        move |request| {
+            let uri = request.uri().to_string();
+            requests.lock().unwrap().push(uri.clone());
+
+            async move {
+                let body = if uri.starts_with("https://api.github.com/") {
+                    serde_json::json!([{
+                        "tag_name": "v99.0.0",
+                        "draft": false,
+                        "prerelease": true,
+                        "assets": [{
+                            "name": "request-eagle-update.json",
+                            "browser_download_url": "https://example.test/v99.0.0/request-eagle-update.json",
+                        }],
+                    }])
+                    .to_string()
+                } else if uri.contains("v99.0.0") {
+                    manifest("99.0.0")
+                } else {
+                    manifest("1.2.3")
+                };
+
+                Ok(Response::builder().status(200).body(body.into()).unwrap())
+            }
+        }
+    });
+
+    cx.update(gpui_kit::init);
+    cx.update(|cx| preferences::load(directory.path(), cx))
+        .await
+        .unwrap();
+    cx.update(|cx| cx.set_http_client(http));
+    let updater = cx.update(|cx| updater::init("1.2.3", cx));
+    let (_, view) =
+        cx.add_window_view(|window, cx| GeneralSettings::new(updater.clone(), window, cx));
+    let toggle = view.debug_bounds("daily-builds").unwrap();
+
+    view.simulate_click(toggle.center(), Modifiers::default());
+    view.run_until_parked();
+
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(document["update_channel"], "daily");
+    view.read(|cx| {
+        assert!(matches!(
+            updater.read(cx).status(),
+            UpdateStatus::Available(manifest) if manifest.version == "99.0.0"
+        ));
+    });
+
+    // The available update adds a line above the switch.
+    let toggle = view.debug_bounds("daily-builds").unwrap();
+    view.simulate_click(toggle.center(), Modifiers::default());
+    view.run_until_parked();
+
+    view.read(|cx| {
+        assert_eq!(
+            cx.global::<preferences::Preferences>().update_channel,
+            preferences::UpdateChannel::Stable
+        );
+        assert!(matches!(updater.read(cx).status(), UpdateStatus::UpToDate));
+    });
+    assert_eq!(requests.lock().unwrap().len(), 3);
+}
+
+#[gpui_kit::test]
+fn switches_fit_general_at_each_zoom_and_theme(cx: &mut TestAppContext) {
     use gpui_kit::{px, size};
 
     cx.update(|cx| {
@@ -74,12 +147,18 @@ fn vim_setting_fits_general_at_each_zoom_and_theme(cx: &mut TestAppContext) {
                 window.refresh();
             });
             view.simulate_resize(size(px(30. * font_size), px(40. * font_size)));
-            let row = view.debug_bounds("vim-mode-row").unwrap();
-            let toggle = view.debug_bounds("vim-mode").unwrap();
-            assert!(toggle.origin.x >= row.origin.x);
-            assert!(toggle.right() <= row.right());
-            assert!(toggle.bottom() <= row.bottom());
-            assert!(toggle.bottom() <= px(40. * font_size));
+
+            for (row, toggle) in [
+                ("daily-builds-row", "daily-builds"),
+                ("vim-mode-row", "vim-mode"),
+            ] {
+                let row = view.debug_bounds(row).unwrap();
+                let toggle = view.debug_bounds(toggle).unwrap();
+                assert!(toggle.origin.x >= row.origin.x);
+                assert!(toggle.right() <= row.right());
+                assert!(toggle.bottom() <= row.bottom());
+                assert!(toggle.bottom() <= px(40. * font_size));
+            }
         }
     }
 }

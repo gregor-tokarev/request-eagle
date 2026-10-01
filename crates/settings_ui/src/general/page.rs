@@ -4,7 +4,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::*, *};
 
-use preferences::Preferences;
+use preferences::{Preferences, UpdateChannel};
 use updater::{UpdateStatus, Updater};
 
 use super::request::RequestSettings;
@@ -14,6 +14,7 @@ pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
     request: Entity<RequestSettings>,
     error: Option<String>,
+    channel_error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -30,6 +31,7 @@ impl GeneralSettings {
             updater,
             request: cx.new(|cx| RequestSettings::new(window, cx)),
             error: None,
+            channel_error: None,
             _subscriptions: vec![subscription, preferences],
         }
     }
@@ -165,6 +167,34 @@ impl Render for GeneralSettings {
                 this.child("Download verified. Quit and relaunch to finish installing the update.")
             });
 
+        let daily_builds = div()
+            .debug_selector(|| "daily-builds".into())
+            .flex_shrink_0()
+            .child(
+                Switch::new("daily-builds")
+                    .accessibility_label("Daily builds")
+                    .checked(cx.global::<Preferences>().update_channel == UpdateChannel::Daily)
+                    .on_click(cx.listener(|this, checked, _, cx| {
+                        let channel = if *checked {
+                            UpdateChannel::Daily
+                        } else {
+                            UpdateChannel::Stable
+                        };
+
+                        this.channel_error = preferences::update(cx, |preferences| {
+                            preferences.update_channel = channel;
+                        })
+                        .err()
+                        .map(|error| format!("Could not save daily builds: {error}"));
+
+                        if this.channel_error.is_none() {
+                            this.updater.update(cx, |updater, cx| updater.check(cx));
+                        }
+
+                        cx.notify();
+                    })),
+            );
+
         let vim_mode = div()
             .debug_selector(|| "vim-mode".into())
             .flex_shrink_0()
@@ -193,12 +223,27 @@ impl Render for GeneralSettings {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("General"),
             )
-            .child(section("Updates").child(row(
-                format!("Request Eagle {}", updater.current_version()),
-                update_status,
-                div().flex_shrink_0().child(update_button),
-                cx,
-            )))
+            .child(
+                section("Updates")
+                    .child(row(
+                        format!("Request Eagle {}", updater.current_version()),
+                        update_status,
+                        div().flex_shrink_0().child(update_button),
+                        cx,
+                    ))
+                    .child(
+                        row(
+                            "Daily builds",
+                            "Get new versions every day instead of waiting for stable releases.",
+                            daily_builds,
+                            cx,
+                        )
+                        .debug_selector(|| "daily-builds-row".into()),
+                    )
+                    .when_some(self.channel_error.clone(), |this, error| {
+                        this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                    }),
+            )
             .child(
                 section("Editor")
                     .child(
