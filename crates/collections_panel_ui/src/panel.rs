@@ -12,7 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Request, RequestScripts};
+use request::{HttpRequest, Request, RequestScripts};
 
 use super::{
     actions::{DeleteItem, RenameItem},
@@ -51,6 +51,8 @@ pub enum CollectionPanelEvent {
         folders: Vec<SharedString>,
         request: Request,
     },
+    /// A request imported without saving it, such as a pasted cURL command.
+    OpenUnsavedRequest(HttpRequest),
 }
 
 /// The collections tree and its search, editing, and drag interactions.

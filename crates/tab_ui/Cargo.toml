@@ -11,12 +11,13 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
 encoding_rs = "0.8"
 futures = "0.3"
-gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-yaml"] }
+gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-bash", "tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-yaml"] }
 # PDF responses render to page bitmaps, which GPUI shows as image frames.
 hayro = "0.7"
 # Previewed pages lose their images before GPUI Kit renders them.
 html5ever = "0.27"
 image = { version = "0.25", default-features = false }
+import = { path = "../import" }
 lsp-types = "0.97"
 markup5ever_rcdom = "0.3"
 preferences = { path = "../preferences" }

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use super::code_snippet::CodeSnippet;
 use super::fields::{FieldsChanged, RequestFields};
 use super::path_variables::{PathVariableChanged, PathVariables};
 use crate::response_view::{ResponseContent, ResponseView};
@@ -14,6 +15,7 @@ use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
+    notification::Notification,
     scroll::ScrollableElement as _,
     *,
 };
@@ -81,6 +83,11 @@ pub struct RequestDraft {
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
+    /// Shown beside the request while open.
+    pub(super) code_snippet: Option<Entity<CodeSnippet>>,
+    /// The snippet's height below the request, when the last frame was too
+    /// narrow for it beside the request.
+    code_snippet_below: Option<Pixels>,
     pub(super) task: Option<Task<()>>,
     /// The request being sent, which history keeps if it is cancelled after
     /// it went out.
@@ -157,6 +164,8 @@ impl RequestDraft {
             body_completion: None,
             response,
             split,
+            code_snippet: None,
+            code_snippet_below: None,
             task: None,
             sending: None,
             stop: None,
@@ -231,6 +240,71 @@ impl RequestDraft {
             self.section = RequestSection::Headers;
         }
 
+        cx.notify();
+    }
+
+    /// Replace the request with the one a pasted cURL command sends. Its
+    /// scripts stay. A command that cannot be read is explained instead.
+    pub(super) fn paste_curl(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request = match import::parse_curl(command) {
+            Ok(request) => request,
+            Err(error) => {
+                window.push_notification(
+                    Notification::error(error.to_string()).title("Could not import cURL"),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        self.request = HttpRequest {
+            scripts: std::mem::take(&mut self.request.scripts),
+            ..request
+        };
+
+        // The URL keeps focus. Path values given before belong to the replaced
+        // request. The other editors are created again from the new request
+        // when they are shown.
+        self.path_values.clear();
+        if let Some(url) = &self.url {
+            let path = self.request.path.clone();
+            url.update(cx, |url, cx| url.set_value(path, window, cx));
+        }
+        if let Some(url) = &self.url_completion {
+            url.update(cx, |url, cx| url.set_path_variables(HashSet::new(), cx));
+        }
+        self.params = None;
+        self.path_variables = None;
+        self.headers = None;
+        self.body = None;
+        self.body_vim = None;
+        self.body_completion = None;
+        self.body_task = None;
+
+        self.set_method(self.request.method, cx);
+        self.prepare(window, cx);
+        self.notify_address(cx);
+    }
+
+    pub(super) fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.code_snippet = match self.code_snippet {
+            Some(_) => None,
+            None => {
+                let entity = cx.entity();
+                let snippet = cx.new(|cx| CodeSnippet::new(self, &entity, window, cx));
+                // The layout was measured while the snippet was last open.
+                let compact = self.code_snippet_below.is_some();
+                snippet.update(cx, |snippet, _| snippet.compact = compact);
+                Some(snippet)
+            }
+        };
+
+        self.notify_address(cx);
         cx.notify();
     }
 
@@ -517,8 +591,8 @@ fn filled_path_variables(values: &[(String, String)]) -> HashSet<String> {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request = v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
             .min_w_0()
@@ -554,7 +628,85 @@ impl Render for RequestDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
-            )
+            );
+
+        let Some(code_snippet) = self.code_snippet.clone() else {
+            return request.into_any_element();
+        };
+
+        // The snippet sits beside the request when both fit, and below it in a
+        // narrow window, so the URL stays editable. Below, it leaves the
+        // request the height its configuration and response need, down to a
+        // few lines of its own. The size is measured while drawing, so a
+        // change applies from the next frame.
+        let draft = cx.entity().downgrade();
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let rem = |size: f32| rems(size).to_pixels(window.rem_size());
+                let below = (bounds.size.width < rem(40.))
+                    .then(|| (bounds.size.height - rem(32.)).max(rem(7.)).min(rem(16.)));
+
+                let _ = draft.update(cx, |draft, cx| {
+                    if draft.code_snippet_below != below {
+                        draft.code_snippet_below = below;
+                        // Notifying while drawing would not schedule the next
+                        // frame, so it waits until drawing is done.
+                        let draft = cx.entity();
+                        window.defer(cx, move |_, cx| {
+                            draft.update(cx, |draft, cx| {
+                                if let Some(snippet) = &draft.code_snippet {
+                                    let compact = draft.code_snippet_below.is_some();
+                                    snippet.update(cx, |snippet, cx| {
+                                        snippet.compact = compact;
+                                        cx.notify();
+                                    });
+                                }
+                                cx.notify();
+                            })
+                        });
+                    }
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+
+        if let Some(height) = self.code_snippet_below {
+            v_flex()
+                .relative()
+                .size_full()
+                .child(measure)
+                .child(div().flex_1().min_h_0().w_full().child(request))
+                .child(
+                    div()
+                        .flex_none()
+                        .h(height)
+                        .w_full()
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .child(code_snippet),
+                )
+                .into_any_element()
+        } else {
+            h_flex()
+                .relative()
+                .size_full()
+                .child(measure)
+                .child(div().flex_1().min_w_0().h_full().child(request))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(rems(24.))
+                        .max_w(relative(0.4))
+                        .h_full()
+                        .border_l_1()
+                        .border_color(cx.theme().border)
+                        .child(code_snippet),
+                )
+                .into_any_element()
+        }
     }
 }
 
@@ -570,11 +722,21 @@ impl Render for RequestAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(super::controls::request_header(
-                        "HTTP",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(super::controls::request_header(
+                                        "HTTP",
+                                        draft.location.as_ref(),
+                                        cx,
+                                    )),
+                            )
+                            .child(draft.code_snippet_button(cx)),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())
