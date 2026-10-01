@@ -162,10 +162,11 @@ request_custom = 'keep the request metadata'
     let updated = HttpRequest {
         scripts: Default::default(),
         method: Method::Post,
-        path: "https://example.com/v2/users".into(),
+        path: "https://example.com/v2/users/:team".into(),
         headers: vec![("Accept".into(), "application/json".into())],
         body: Some(b"new body".to_vec()),
         query: vec![("page".into(), "2".into())],
+        path_variables: vec![("team".into(), "core".into())],
     };
 
     registry
@@ -185,6 +186,7 @@ request_custom = 'keep the request metadata'
     assert_eq!(saved.headers, updated.headers);
     assert_eq!(saved.body, updated.body);
     assert_eq!(saved.query, updated.query);
+    assert_eq!(saved.path_variables, updated.path_variables);
     let content = fs::read_to_string(&path).unwrap();
     for preserved in [
         "# externally edited request",
@@ -203,6 +205,7 @@ request_custom = 'keep the request metadata'
     let cleared = HttpRequest {
         body: None,
         query: Vec::new(),
+        path_variables: Vec::new(),
         ..updated
     };
     registry
@@ -213,6 +216,12 @@ request_custom = 'keep the request metadata'
     };
     assert_eq!(reloaded.body, None);
     assert!(reloaded.query.is_empty());
+    assert!(reloaded.path_variables.is_empty());
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("path_variables")
+    );
 }
 
 #[test]

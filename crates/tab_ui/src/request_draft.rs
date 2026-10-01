@@ -3,6 +3,7 @@ mod controls;
 mod draft;
 mod execution;
 mod fields;
+mod path_variables;
 
 #[cfg(test)]
 pub(crate) mod script_completion_tests;
@@ -13,6 +14,8 @@ mod script_tests;
 mod event_stream_tests;
 #[cfg(test)]
 mod header_tests;
+#[cfg(test)]
+mod params_tests;
 #[cfg(test)]
 mod performance;
 #[cfg(test)]

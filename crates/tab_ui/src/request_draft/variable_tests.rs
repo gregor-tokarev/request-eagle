@@ -186,12 +186,7 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
     cx.simulate_input("{{$guid");
     assert!(popup(cx));
     click(cx, "variable-suggestion-0");
-    cx.read(|cx| {
-        assert_eq!(
-            draft.read(cx).request.query[0],
-            ("{{message}}".into(), "{{$guid}}".into())
-        )
-    });
+    cx.read(|cx| assert_eq!(draft.read(cx).request.path, "?{{message}}={{$guid}}"));
 
     click(cx, "request-section-Headers");
     click(cx, "headers-key-0");

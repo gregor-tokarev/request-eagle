@@ -239,7 +239,8 @@ impl HttpRequest {
         body_changed: bool,
     ) -> Result<Self, VariableError> {
         let mut request = self;
-        request.path = resolve_url(&request.path, resolver)?;
+        let path = crate::request_url::fill_path_variables(&request.path, &request.path_variables);
+        request.path = resolve_url(&path, resolver)?;
 
         for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = resolver.resolve(key)?;

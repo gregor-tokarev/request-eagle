@@ -75,10 +75,13 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         let location = data.location.as_ref().unwrap();
         assert_eq!(location.name, "Create item");
         assert_eq!(location.collection, "Saved API");
-        assert_eq!(data.request.path, url);
-        assert_eq!(data.url_input().unwrap().read(cx).value(), url);
+        // Saved query rows open in the URL, where the Params table edits them.
+        let opened = format!("{url}&tag=one&tag=two");
+        assert_eq!(data.request.path, opened);
+        assert_eq!(data.url_input().unwrap().read(cx).value(), opened);
         assert_eq!(data.request.headers.len(), 2);
-        assert_eq!(data.request.query.len(), 2);
+        assert!(data.request.query.is_empty());
+        assert!(!data.is_dirty());
         assert_eq!(
             data.request.body.as_deref(),
             Some(b"{\"hello\":true}".as_slice())
@@ -98,7 +101,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     cx.simulate_input("updated");
     let params = cx.debug_bounds("request-section-Params").unwrap();
     cx.simulate_click(params.center(), Modifiers::default());
-    let param = cx.debug_bounds("params-value-0").unwrap();
+    let param = cx.debug_bounds("params-value-1").unwrap();
     cx.simulate_click(param.center(), Modifiers::default());
     cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("edited");
@@ -114,13 +117,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
                 ("X-Saved".into(), "second".into())
             ]
         );
-        assert_eq!(
-            data.request.query,
-            &[
-                ("tag".into(), "edited".into()),
-                ("tag".into(), "two".into())
-            ]
-        );
+        assert_eq!(data.request.path, format!("{url}&tag=edited&tag=two"));
     });
 
     cx.simulate_keystrokes("secondary-enter");
@@ -157,7 +154,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
     let url_field = cx.debug_bounds("request-url").unwrap();
     cx.simulate_click(url_field.center(), Modifiers::default());
     cx.simulate_keystrokes("secondary-a");
-    cx.simulate_input(&format!("{url}&saved=true"));
+    let saved = format!("{url}&tag=edited&tag=two&saved=true");
+    cx.simulate_input(&saved);
     cx.simulate_keystrokes("secondary-s");
     cx.read(|cx| assert!(!draft.read(cx).is_dirty()));
     assert!(cx.debug_bounds("tab-dirty-2").is_none());
@@ -171,8 +169,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_ne!(reopened, draft);
         assert_eq!(reopened.read(cx).request.method, Method::Put);
         assert_eq!(reopened.read(cx).request.headers[0].1, "updated");
-        assert_eq!(reopened.read(cx).request.query[0].1, "edited");
-        assert_eq!(reopened.read(cx).request.path, format!("{url}&saved=true"));
+        assert!(reopened.read(cx).request.query.is_empty());
+        assert_eq!(reopened.read(cx).request.path, saved);
         assert_eq!(reopened.read(cx).request, draft.read(cx).request);
         assert!(!reopened.read(cx).is_dirty());
     });

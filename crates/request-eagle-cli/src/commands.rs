@@ -169,6 +169,10 @@ pub struct RequestInput {
     pub headers: Vec<(String, String)>,
     #[serde(default)]
     pub query: Vec<(String, String)>,
+    /// Values for `:name` segments of the URL's path, such as `id` in
+    /// `/pets/:id`. A variable without a value is sent as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_variables: Vec<(String, String)>,
     pub body: Option<Body>,
     #[serde(default)]
     pub pre_request: String,

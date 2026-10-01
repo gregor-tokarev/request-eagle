@@ -20,6 +20,12 @@ struct FieldRow {
     _subscriptions: Vec<Subscription>,
 }
 
+impl FieldRow {
+    fn is_sent(&self, cx: &App) -> bool {
+        self.enabled && !self.key.read(cx).value().trim().is_empty()
+    }
+}
+
 pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
 
 /// A request's editable key/value rows, including one trailing empty row.
@@ -83,7 +89,59 @@ impl RequestFields {
         cx.notify();
     }
 
+    /// Show `values` in the rows that are sent, as when the URL's query
+    /// changed. Disabled and keyless rows stay; other rows are updated, added
+    /// before the empty row or removed to match.
+    pub(crate) fn set_values(
+        &mut self,
+        values: &[(String, String)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut values = values.iter();
+        let mut index = 0;
+
+        while index < self.rows.len() {
+            let row = &self.rows[index];
+            if !row.is_sent(cx) {
+                index += 1;
+                continue;
+            }
+
+            let Some((key, value)) = values.next() else {
+                self.rows.remove(index);
+                continue;
+            };
+
+            for (input, text) in [(&row.key, key), (&row.value, value)] {
+                if input.read(cx).value() != text.as_str() {
+                    input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
+                }
+            }
+            index += 1;
+        }
+
+        for (key, value) in values {
+            let row = self.new_row(key, value, window, cx);
+            let empty = self.rows.len().saturating_sub(1);
+            self.rows.insert(empty, row);
+        }
+
+        cx.notify();
+    }
+
     fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let row = self.new_row(key, value, window, cx);
+        self.rows.push(row);
+    }
+
+    fn new_row(
+        &mut self,
+        key: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> FieldRow {
         let key = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Key")
@@ -123,30 +181,48 @@ impl RequestFields {
             })
             .collect();
 
-        self.rows.push(FieldRow {
+        FieldRow {
             enabled: true,
             key,
             value,
             description,
             completions,
             _subscriptions: subscriptions,
-        });
+        }
     }
 
     fn emit_change(&self, cx: &mut Context<Self>) {
         let values = self
             .rows
             .iter()
-            .filter_map(|row| {
-                let key = row.key.read(cx).value();
-
-                (row.enabled && !key.trim().is_empty())
-                    .then(|| (key.to_string(), row.value.read(cx).value().to_string()))
+            .filter(|row| row.is_sent(cx))
+            .map(|row| {
+                (
+                    row.key.read(cx).value().to_string(),
+                    row.value.read(cx).value().to_string(),
+                )
             })
             .collect();
 
         cx.emit(FieldsChanged(values));
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+impl RequestFields {
+    /// Each row's enabled state, key and value, including the empty row.
+    pub(crate) fn rows_for_test(&self, cx: &App) -> Vec<(bool, String, String)> {
+        self.rows
+            .iter()
+            .map(|row| {
+                (
+                    row.enabled,
+                    row.key.read(cx).value().to_string(),
+                    row.value.read(cx).value().to_string(),
+                )
+            })
+            .collect()
     }
 }
 
