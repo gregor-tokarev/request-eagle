@@ -143,6 +143,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                         ("X-Uuid".into(), "{{$randomUUID}}".into()),
                     ],
                     query: vec![("id".into(), "{{$guid}}".into())],
+                    path_variables: Vec::new(),
                     body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -293,6 +294,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             body: Some(vec![0, 255, 42]),
             scripts: Default::default(),
             query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
+            path_variables: Vec::new(),
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
@@ -323,6 +325,41 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             .map(|line| line.len() + 2)
             .sum();
         assert_eq!(response.metrics.request_header_bytes, sent_header_bytes);
+    });
+}
+
+#[test]
+fn fills_path_variables_and_sends_query_params_moved_into_the_url_unchanged() {
+    smol::block_on(async {
+        let response = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+        let (url, server) = serve(response.to_vec()).await;
+        let mut request = HttpRequest {
+            path: format!("{url}/pets/:id/toys/:toy?tag=existing#ignored"),
+            path_variables: vec![("id".into(), "{{pet}}".into())],
+            query: vec![
+                ("tag".into(), "a & b".into()),
+                ("tag".into(), "c+d {{tag}}".into()),
+            ],
+            ..Default::default()
+        };
+        request.inline_query();
+        assert!(request.query.is_empty());
+
+        let variables = RequestVariables::new(
+            HashMap::from([("pet".into(), "7".into()), ("tag".into(), "e".into())]),
+            None,
+        );
+        executor().execute(request, variables).await.unwrap();
+
+        // A path variable without a value is sent as written.
+        let received = server.await;
+        assert!(
+            received.head.starts_with(
+                "GET /pets/7/toys/:toy?tag=existing&tag=a+%26+b&tag=c%2Bd+e HTTP/1.1\r\n"
+            ),
+            "{}",
+            received.head
+        );
     });
 }
 

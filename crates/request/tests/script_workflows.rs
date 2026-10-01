@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use environment::EnvironmentSession;
+use environment::{EnvironmentSession, EnvironmentSessions, VariableScopes};
 use request::{
     ExecutionError, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables,
 };
@@ -104,7 +104,12 @@ impl Drop for Server {
 }
 
 fn variables(session: &EnvironmentSession) -> RequestVariables {
-    RequestVariables::with_environment_session(HashMap::new(), None, session.clone())
+    RequestVariables::with_environment_session(
+        HashMap::new(),
+        HashMap::new(),
+        None,
+        session.clone(),
+    )
 }
 
 fn no_variables() -> RequestVariables {
@@ -134,6 +139,57 @@ fn response_tokens_survive_execution_and_locals_do_not() {
     let isolated = EnvironmentSession::default();
     assert!(smol::block_on(executor.execute(next, variables(&isolated))).is_err());
     assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn postman_scopes_carry_values_to_later_requests_and_other_collections() {
+    let server = Server::new();
+    let executor = server.executor();
+    let workspace = EnvironmentSessions::default();
+    let session = |path: &str| {
+        RequestVariables::with_environment_session(
+            HashMap::from([("api".into(), "collection".into())]),
+            HashMap::new(),
+            None,
+            workspace.for_path(Some(path.as_ref())),
+        )
+    };
+    let login = server.request(
+        "",
+        r#"
+        const token = pm.response.json().token;
+        pm.globals.set("token", token);
+        pm.collectionVariables.set("user", require("lodash").get(pm.response.json(), "id"));
+        pm.test("signed", () => pm.expect(require("crypto-js").SHA256(token).toString()).to.have.lengthOf(64));
+        "#,
+    );
+    let result = smol::block_on(executor.execute(login, session("/one/environment.toml"))).unwrap();
+    assert!(
+        result.scripts[0].error.is_none(),
+        "{:?}",
+        result.scripts[0].error
+    );
+    assert!(result.scripts[0].tests[0].error.is_none());
+
+    let mut next = server.request("", "");
+    next.path = format!("{}/{{{{api}}}}/{{{{user}}}}", server.url);
+    next.headers
+        .push(("Authorization".into(), "Bearer {{token}}".into()));
+    smol::block_on(executor.execute(next.clone(), session("/one/environment.toml"))).unwrap();
+    let sent = server.requests.lock().unwrap()[1].to_lowercase();
+    assert!(sent.starts_with("get /collection/42 "), "{sent}");
+    assert!(sent.contains("authorization: bearer session-token"));
+
+    // Another collection sees the global token, but not the collection variable.
+    next.path = format!("{}/{{{{api}}}}", server.url);
+    smol::block_on(executor.execute(next.clone(), session("/two/environment.toml"))).unwrap();
+    assert!(
+        server.requests.lock().unwrap()[2]
+            .to_lowercase()
+            .contains("authorization: bearer session-token")
+    );
+    next.path = format!("{}/{{{{user}}}}", server.url);
+    assert!(smol::block_on(executor.execute(next, session("/two/environment.toml"))).is_err());
 }
 
 #[test]
@@ -370,7 +426,10 @@ fn local_overrides_reveal_environment_when_unset_and_failed_phases_do_not_commit
     let server = Server::new();
     let session = EnvironmentSession::default();
     session
-        .apply(&[("token".into(), Some("initial".into()))].into())
+        .apply(&VariableScopes {
+            environment: [("token".into(), Some("initial".into()))].into(),
+            ..Default::default()
+        })
         .unwrap();
     let executor = server.executor();
     let request = server.request(
@@ -385,13 +444,19 @@ fn local_overrides_reveal_environment_when_unset_and_failed_phases_do_not_commit
     );
     let result = smol::block_on(executor.execute(request, variables(&session))).unwrap();
     assert!(result.scripts[1].error.is_some());
-    assert_eq!(session.values(HashMap::new())["token"], "pre");
+    assert_eq!(
+        session.values(HashMap::new(), HashMap::new())["token"],
+        "pre"
+    );
     let request = server.request(
         "pm.environment.set('token', 'failed'); throw Error('discard');",
         "",
     );
     assert!(smol::block_on(executor.execute(request, variables(&session))).is_err());
-    assert_eq!(session.values(HashMap::new())["token"], "pre");
+    assert_eq!(
+        session.values(HashMap::new(), HashMap::new())["token"],
+        "pre"
+    );
 }
 
 #[test]
@@ -485,7 +550,7 @@ fn cancellation_during_script_http_does_not_commit_environment_or_send_main() {
         },
     ));
     thread::sleep(Duration::from_millis(100));
-    assert!(session.values(HashMap::new()).is_empty());
+    assert!(session.values(HashMap::new(), HashMap::new()).is_empty());
     assert!(
         !server
             .requests

@@ -374,7 +374,7 @@ fn uncaught_errors_are_bounded_without_splitting_unicode() {
 #[test]
 fn runtime_is_isolated_and_has_no_host_io() {
     smol::block_on(async {
-        let source = "pm.test('sandbox', () => { for (const name of ['process', 'require', 'fetch', 'std', 'os']) pm.expect(typeof globalThis[name]).to.equal('undefined'); }); globalThis.leak = 42;";
+        let source = "pm.test('sandbox', () => { for (const name of ['process', 'fetch', 'std', 'os']) pm.expect(typeof globalThis[name]).to.equal('undefined'); for (const name of ['fs', 'child_process']) { try { require(name); throw new Error(`loaded ${name}`); } catch (error) { pm.expect(error.message).to.include('Cannot find module'); } } }); globalThis.leak = 42;";
         let (_, _, reports) = pre_request(scripted(source), no_variables()).await.unwrap();
         assert!(reports[0].tests[0].error.is_none());
         let (_, _, reports) = pre_request(
