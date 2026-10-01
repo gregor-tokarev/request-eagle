@@ -77,6 +77,8 @@ pub struct CollectionPanel {
     pub(super) scroll_handle: UniformListScrollHandle,
     pub(super) focus: FocusHandle,
     pub(super) delete_focus: FocusHandle,
+    /// Holds the skipped-file buttons, which are part of the panel's focus.
+    skipped_focus: FocusHandle,
     pub(super) rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
@@ -127,6 +129,7 @@ impl CollectionPanel {
             scroll_handle: UniformListScrollHandle::new(),
             focus,
             delete_focus: cx.focus_handle(),
+            skipped_focus: cx.focus_handle(),
             rows_task: None,
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
@@ -137,9 +140,11 @@ impl CollectionPanel {
         self.tree.roots.len()
     }
 
-    /// Whether focus is in the search field or the tree.
+    /// Whether focus is in the search field, the skipped files or the tree.
     pub fn contains_focus(&self, window: &Window, cx: &App) -> bool {
-        self.focus.contains_focused(window, cx) || self.search.focus_handle(cx).is_focused(window)
+        self.focus.contains_focused(window, cx)
+            || self.search.focus_handle(cx).is_focused(window)
+            || self.skipped_focus.contains_focused(window, cx)
     }
 
     pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -390,6 +395,7 @@ impl CollectionPanel {
 
         v_flex()
             .debug_selector(|| "collections-skipped".into())
+            .track_focus(&self.skipped_focus)
             .px_2()
             .pb_2()
             .gap_1()

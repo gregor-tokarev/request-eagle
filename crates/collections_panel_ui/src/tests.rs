@@ -157,7 +157,14 @@ fn files_that_could_not_be_loaded_are_listed(cx: &mut TestAppContext) {
     }
     let collections = CollectionRegistry::from_path(directory.path());
 
-    let (_, cx) = cx.add_window_view(|window, cx| CollectionPanel::new(collections, window, cx));
+    let mut panel = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| CollectionPanel::new(collections, window, cx));
+        panel = Some(view.clone());
+
+        Root::new(view, window, cx)
+    });
+    let panel = panel.unwrap();
     cx.simulate_resize(size(px(300.), px(600.)));
     cx.run_until_parked();
 
@@ -166,6 +173,18 @@ fn files_that_could_not_be_loaded_are_listed(cx: &mut TestAppContext) {
     // The list scrolls rather than pushing the collection out of view.
     assert!(cx.debug_bounds("collections-skipped").unwrap().size.height < px(300.));
     assert!(cx.debug_bounds("collection-row-0").unwrap().top() < px(600.));
+
+    // The keyboard reaches the files after the search field, and they count
+    // as the panel's focus.
+    cx.update(|window, _| window.activate_window());
+    cx.update(|window, cx| panel.update(cx, |panel, cx| panel.focus_search(window, cx)));
+    cx.simulate_keystrokes("tab");
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        let panel = panel.read(cx);
+        assert!(!panel.search.focus_handle(cx).is_focused(window));
+        assert!(panel.contains_focus(window, cx));
+    });
 }
 
 #[gpui_kit::test]

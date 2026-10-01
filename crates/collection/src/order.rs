@@ -31,9 +31,7 @@ pub(crate) fn apply(parent: &Path, entries: &mut [Entry]) -> io::Result<()> {
 }
 
 pub(crate) fn save(parent: &Path, paths: &[PathBuf]) -> io::Result<()> {
-    // Loading left out an order that cannot be read. Keep it as it is, so
-    // that it can still be repaired.
-    if read(parent)?.is_some_and(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).is_err()) {
+    if unreadable(parent) {
         return Ok(());
     }
 
@@ -52,6 +50,11 @@ pub(crate) fn with_saved_order<T>(
     paths: &[PathBuf],
     operation: impl FnOnce() -> io::Result<T>,
 ) -> io::Result<T> {
+    // An unreadable order is not saved over, so there is nothing to restore.
+    if unreadable(parent) {
+        return operation();
+    }
+
     let previous = read(parent)?;
     save(parent, paths)?;
     match operation() {
@@ -76,8 +79,10 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("Cannot rename the filesystem root."))?;
     // Without a readable order, there are no names to update.
-    let Some(names) =
-        read(parent)?.and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+    let Some(names) = read(parent)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
     else {
         return fs::rename(old, new);
     };
@@ -92,6 +97,17 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
         })
         .collect::<Vec<_>>();
     with_saved_order(parent, &paths, || fs::rename(old, new))
+}
+
+/// Whether there is an order that loading left out, because its content or
+/// permissions do not let it be read. It is never saved over, so that it
+/// can still be repaired.
+fn unreadable(parent: &Path) -> bool {
+    match read(parent) {
+        Ok(Some(bytes)) => serde_json::from_slice::<Vec<String>>(&bytes).is_err(),
+        Ok(None) => false,
+        Err(error) => error.kind() == io::ErrorKind::PermissionDenied,
+    }
 }
 
 fn read(parent: &Path) -> io::Result<Option<Vec<u8>>> {

@@ -133,3 +133,35 @@ fn unreadable_files_are_left_out_and_untouched() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn an_order_that_cannot_be_read_does_not_block_new_items() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = test_directory();
+    let api = root.join("API");
+    let order = api.join(".request-eagle-order.json");
+    fs::create_dir_all(&api).unwrap();
+    fs::write(&order, "[]").unwrap();
+    fs::set_permissions(&order, fs::Permissions::from_mode(0o200)).unwrap();
+
+    // Privileged users read the file anyway.
+    if fs::read(&order).is_err() {
+        let mut registry = CollectionRegistry::from_path(&root);
+        assert_eq!(registry.skipped()[0].path, order);
+
+        registry
+            .create_request_with(&api, "Health", request::HttpRequest::default().into())
+            .unwrap();
+        let folder = registry.create_folder(&api).unwrap();
+        registry.rename(&folder, "Users").unwrap();
+        assert!(api.join("Health.toml").is_file());
+        assert!(api.join("Users").is_dir());
+
+        fs::set_permissions(&order, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&order).unwrap(), "[]");
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
