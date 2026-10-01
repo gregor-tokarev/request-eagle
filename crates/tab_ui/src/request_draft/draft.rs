@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields};
 use super::path_variables::{PathVariableChanged, PathVariables};
-use crate::response_view::ResponseView;
+use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
-    Environments,
+    Environments, RequestSent,
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
@@ -82,6 +82,9 @@ pub struct RequestDraft {
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
+    /// The request being sent, which history keeps if it is cancelled after
+    /// it went out.
+    pub(super) sending: Option<(RequestSent, request::Dispatch)>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
     /// Whether the response is an event stream that has not ended yet.
@@ -91,6 +94,8 @@ pub struct RequestDraft {
     configuration: Entity<RequestConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<RequestSent> for RequestDraft {}
 
 impl RequestDraft {
     /// Variables resolve from the request's collection environment, its
@@ -153,6 +158,7 @@ impl RequestDraft {
             response,
             split,
             task: None,
+            sending: None,
             stop: None,
             streaming: false,
             executor: None,
@@ -190,6 +196,25 @@ impl RequestDraft {
 
         self.location = Some(location);
         cx.notify();
+    }
+
+    /// Show the response, or the failure, that history kept for this request.
+    pub fn show_recorded(
+        &mut self,
+        response: Option<request_history::Response>,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.response
+            .update(cx, |view, cx| match (response, error) {
+                (Some(response), _) => {
+                    let content = ResponseContent::recorded(response);
+                    view.finish(Ok(content), window, cx);
+                }
+                (None, Some(error)) => view.fail(error.into(), cx),
+                (None, None) => {}
+            });
     }
 
     pub fn mark_saved(&mut self, mut request: HttpRequest, cx: &mut Context<Self>) {

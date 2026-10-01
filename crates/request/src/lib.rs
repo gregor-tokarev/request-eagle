@@ -36,7 +36,7 @@ pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptRep
 
 pub use error::ExecutionError;
 pub use event_stream::{
-    EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
+    Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
 };
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;

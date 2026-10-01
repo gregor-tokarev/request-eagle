@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use environment::EnvironmentSessions;
 use futures::{FutureExt as _, StreamExt as _};
@@ -15,11 +15,11 @@ use preferences::Preferences;
 use request::{WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest};
 
 use super::message_log::MessageLog;
-use crate::Environments;
 use crate::actions::SendRequest;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation, request_header};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
+use crate::{Environments, RequestSent};
 
 /// The most events shown per update. A fast stream is drawn in batches
 /// instead of once for every message.
@@ -68,11 +68,16 @@ pub struct WebSocketDraft {
     pub(crate) log: Entity<MessageLog>,
     split: Entity<ResizableState>,
     connection: Option<WebSocketConnection>,
+    /// The request as it was when it started connecting. History keeps it
+    /// once it connects.
+    connecting: Option<RequestSent>,
     events: Option<Task<()>>,
     address: Entity<WebSocketAddress>,
     configuration: Entity<WebSocketConfiguration>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<RequestSent> for WebSocketDraft {}
 
 impl WebSocketDraft {
     /// Variables resolve from the request's collection environment, its
@@ -131,6 +136,7 @@ impl WebSocketDraft {
             log,
             split,
             connection: None,
+            connecting: None,
             events: None,
             address,
             configuration,
@@ -203,6 +209,10 @@ impl WebSocketDraft {
             .unwrap_or_default();
         let (connection, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
+        self.connecting = Some(RequestSent {
+            record: request_history::Record::sent(self.request.clone()),
+            sent_at: SystemTime::now(),
+        });
 
         self.connection = Some(connection);
         self.set_state(ConnectionState::Connecting, cx);
@@ -230,6 +240,7 @@ impl WebSocketDraft {
         match self.state {
             ConnectionState::Connecting => {
                 self.connection = None;
+                self.connecting = None;
                 self.events = None;
                 self.set_state(ConnectionState::Disconnected, cx);
             }
@@ -263,9 +274,14 @@ impl WebSocketDraft {
             match event.kind {
                 WebSocketEventKind::Connected(_) if state == ConnectionState::Connecting => {
                     state = ConnectionState::Connected;
+
+                    if let Some(sent) = self.connecting.take() {
+                        cx.emit(sent);
+                    }
                 }
                 WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
                     state = ConnectionState::Disconnected;
+                    self.connecting = None;
                 }
                 _ => {}
             }

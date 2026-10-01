@@ -100,6 +100,20 @@ impl GrpcDefinition {
             },
         }
     }
+
+    /// Resolve paths relative to `collection`, so the definition still
+    /// loads for a copy of the request kept outside it.
+    pub fn resolved_from(&self, collection: &Path) -> Self {
+        let resolved = |path: &PathBuf| collection.join(path);
+
+        match self {
+            Self::Reflection => Self::Reflection,
+            Self::ProtoFile { path, import_paths } => Self::ProtoFile {
+                path: resolved(path),
+                import_paths: import_paths.iter().map(resolved).collect(),
+            },
+        }
+    }
 }
 
 impl GrpcRequest {

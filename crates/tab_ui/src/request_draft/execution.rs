@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
@@ -7,6 +7,7 @@ use request::{EventStream, EventStreamUpdate, RequestExecutor};
 use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
+use crate::RequestSent;
 
 /// The most event-stream updates shown per redraw. A fast stream is drawn in
 /// batches instead of once for every event.
@@ -122,21 +123,37 @@ impl RequestDraft {
             .filter(|(settings, _)| settings == &preferences)
             .map(|(_, executor)| executor.clone());
         let (events, mut updates, stop) = EventStream::new();
+        let dispatch = events.dispatch();
         self.stop = Some(stop);
+        self.sending = Some((
+            RequestSent {
+                record: request_history::Record::sent(request.clone()),
+                sent_at: SystemTime::now(),
+            },
+            dispatch.clone(),
+        ));
         let task = cx.background_executor().spawn(async move {
             let executor = match cached
                 .map(Ok)
                 .unwrap_or_else(|| RequestExecutor::new(&preferences))
             {
                 Ok(executor) => executor,
-                Err(error) => return (None, Err(error)),
+                Err(error) => return (None, Err(error), None),
             };
-            let result = executor
-                .execute_streaming(request, variables, events)
-                .await
-                .map(crate::response_view::ResponseContent::new);
+            let result = executor.execute_streaming(request, variables, events).await;
+            // What history keeps of the outcome. A request that failed
+            // before it went out is left out.
+            let outcome = match &result {
+                Ok(execution) => Some(Ok(request_history::Response::new(execution))),
+                Err(error) if dispatch.started() => Some(Err(error.message_without_url())),
+                Err(_) => None,
+            };
 
-            (Some((preferences, executor)), result)
+            (
+                Some((preferences, executor)),
+                result.map(crate::response_view::ResponseContent::new),
+                outcome,
+            )
         });
 
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -169,8 +186,18 @@ impl RequestDraft {
                 }
             });
 
-            let (executor, result) = task.await;
+            let (executor, result, outcome) = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                if let Some((mut sent, _)) = this.sending.take()
+                    && let Some(outcome) = outcome
+                {
+                    match outcome {
+                        Ok(response) => sent.record.response = Some(response),
+                        Err(error) => sent.record.error = Some(error),
+                    }
+                    cx.emit(sent);
+                }
+
                 this.executor = executor;
                 this.task = None;
                 this.stop = None;
@@ -234,6 +261,14 @@ impl RequestDraft {
         self.task = None;
         self.stop = None;
         self.streaming = false;
+
+        // The server may already act on a request that went out.
+        if let Some((mut sent, dispatch)) = self.sending.take()
+            && dispatch.started()
+        {
+            sent.record.error = Some("Request cancelled".into());
+            cx.emit(sent);
+        }
 
         self.response.update(cx, |response, cx| response.cancel(cx));
 
