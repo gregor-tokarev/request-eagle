@@ -1,14 +1,18 @@
-(function (source, log, test, expect, dynamic, readBody, send, utilities, protocol) {
+(function (source, log, test, expect, dynamic, readBody, send, utilities, library, protocol) {
     "use strict";
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
-    const variables = Object.assign(Object.create(null), input.variables.values);
-    const environment = Object.assign(Object.create(null), input.variables.environment);
-    const environmentChanges = Object.create(null);
+    const object = values => Object.assign(Object.create(null), values);
+    const variables = object(input.variables.values);
+    // From lowest to highest: the environment covers the collection's
+    // variables, which cover the globals. Null hides a name in its scope and
+    // the scopes beneath it.
+    const scopes = [input.variables.globals, input.variables.collection, input.variables.environment].map(object);
+    const changes = scopes.map(() => Object.create(null));
     let skipReason = null;
     const skipSignal = {};
     let pendingTests = 0;
-    const generated = Object.assign(Object.create(null), input.variables.generated);
+    const generated = object(input.variables.generated);
     const format = value => {
         try { return typeof value === "string" ? value : (stringify(value) ?? String(value)); }
         catch {
@@ -51,7 +55,40 @@
         }
     };
 
-    const visibleVariables = () => Object.assign(Object.create(null), environment, variables);
+    // A scope reads the scopes from `top` down to `bottom`.
+    const scopeValue = (key, top, bottom = 0) => {
+        for (let index = top; index >= bottom; index--) {
+            if (Object.hasOwn(scopes[index], key)) return scopes[index][key] ?? undefined;
+        }
+    };
+    const scopeValues = (top, bottom = 0) => {
+        const values = Object.create(null);
+        for (const scope of scopes.slice(bottom, top + 1)) {
+            for (const [key, value] of Object.entries(scope)) {
+                if (value === null) delete values[key];
+                else values[key] = value;
+            }
+        }
+        return values;
+    };
+    function scope(top, bottom) {
+        const values = () => scopeValues(top, bottom);
+        const read = key => scopeValue(String(key), top, bottom);
+        return {
+            get: read,
+            has: key => read(key) !== undefined,
+            set(key, value) {
+                key = String(key);
+                if (!key || key.startsWith("$")) throw new Error("Variable names must be nonempty and cannot start with $");
+                scopes[top][key] = changes[top][key] = String(value);
+            },
+            unset(key) { key = String(key); scopes[top][key] = changes[top][key] = null; },
+            clear() { for (const key of Object.keys(values())) this.unset(key); },
+            toObject: () => ({...values()}),
+            replaceIn: text => substitute(text, values()),
+        };
+    }
+    const visibleVariables = () => Object.assign(scopeValues(2), variables);
     const replaceIn = text => substitute(text, visibleVariables());
 
     function entries(pairs, ignoreCase = false) {
@@ -73,27 +110,18 @@
 
     const pm = {
         variables: {
-            get: key => variables[key] ?? environment[key],
-            has: key => Object.hasOwn(variables, key) || Object.hasOwn(environment, key),
+            get: key => variables[key] ?? scopeValue(String(key), 2),
+            has: key => Object.hasOwn(variables, key) || scopeValue(String(key), 2) !== undefined,
             set(key, value) { variables[String(key)] = String(value); },
             unset(key) { delete variables[key]; },
             clear() { for (const key of Object.keys(variables)) delete variables[key]; },
             toObject: visibleVariables,
             replaceIn,
         },
-        environment: {
-            get: key => environment[key],
-            has: key => Object.hasOwn(environment, key),
-            set(key, value) {
-                key = String(key);
-                if (!key || key.startsWith("$")) throw new Error("Environment variable names must be nonempty and cannot start with $");
-                environment[key] = environmentChanges[key] = String(value);
-            },
-            unset(key) { key = String(key); delete environment[key]; environmentChanges[key] = null; },
-            clear() { for (const key of Object.keys(environment)) this.unset(key); },
-            toObject: () => ({...environment}),
-            replaceIn: text => substitute(text, environment),
-        },
+        globals: scope(0, 0),
+        collectionVariables: scope(1, 1),
+        // The environment includes the collection's variables.
+        environment: scope(2, 1),
         crypto: {
             sha256: utilities.sha256,
             hmacSha256: utilities.hmacSha256,
@@ -223,11 +251,80 @@
         throw skipSignal;
     }
 
+    // Postman's sandbox libraries. Each loads the first time it is required.
+    const uuid = Object.assign(() => dynamic("$guid"), {v4: () => dynamic("$guid")});
+    const builtins = {atob: utilities.atob, btoa: utilities.btoa, uuid};
+    const modules = new Map();
+    const getRandomValues = array => {
+        if (!(array instanceof Int8Array || array instanceof Uint8Array || array instanceof Uint8ClampedArray
+            || array instanceof Int16Array || array instanceof Uint16Array || array instanceof Int32Array
+            || array instanceof Uint32Array || array instanceof BigInt64Array || array instanceof BigUint64Array)) {
+            throw new TypeError("getRandomValues requires an integer typed array");
+        }
+        const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+        const hex = utilities.randomBytes(bytes.length);
+        for (let index = 0; index < bytes.length; index++) bytes[index] = parseInt(hex.substr(index * 2, 2), 16);
+        return array;
+    };
+    function require(name) {
+        name = String(name);
+        if (modules.has(name)) return modules.get(name).exports;
+        if (Object.hasOwn(builtins, name)) {
+            modules.set(name, {exports: builtins[name], loaded: true});
+            return builtins[name];
+        }
+
+        const load = library(name);
+        if (!load) throw new Error(`Cannot find module '${name}'. Scripts can require atob, btoa, crypto-js, lodash, moment and uuid.`);
+        // Like Node, a module required while it loads returns its exports so far.
+        const module = {exports: {}, loaded: false};
+        modules.set(name, module);
+        try {
+            load.call(module.exports, module, module.exports, {crypto: {getRandomValues}});
+        } catch (error) {
+            modules.delete(name);
+            throw error;
+        }
+        module.loaded = true;
+        return module.exports;
+    }
+    // Postman also provides some libraries as globals.
+    for (const [name, module] of [["_", "lodash"], ["CryptoJS", "crypto-js"]]) {
+        const replace = value => Object.defineProperty(globalThis, name, {value, writable: true, configurable: true});
+        Object.defineProperty(globalThis, name, {
+            configurable: true,
+            get() {
+                // Lodash reads `_` while it loads, to restore it on noConflict.
+                if (modules.get(module)?.loaded === false) return undefined;
+                const value = require(module);
+                replace(value);
+                return value;
+            },
+            set: replace,
+        });
+    }
+
     // The protocol adds pm.request, pm.response and pm.execution, and
     // reports the request changes to send.
-    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip});
+    const warn = message => log("warn", message);
+    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip, warn});
     globalThis.pm = pm;
     globalThis.console = Object.fromEntries(["log", "info", "warn", "error", "debug"].map(level => [level, (...values) => log(level, values.map(format).join(" "))]));
+    globalThis.require = require;
+    globalThis.atob = utilities.atob;
+    globalThis.btoa = utilities.btoa;
+    // Postman's legacy API. Sending one request has no next request to set.
+    globalThis.postman = {
+        setNextRequest() {},
+        getEnvironmentVariable: key => pm.environment.get(key),
+        setEnvironmentVariable: (key, value) => pm.environment.set(key, value),
+        clearEnvironmentVariable: key => pm.environment.unset(key),
+        clearEnvironmentVariables: () => pm.environment.clear(),
+        getGlobalVariable: key => pm.globals.get(key),
+        setGlobalVariable: (key, value) => pm.globals.set(key, value),
+        clearGlobalVariable: key => pm.globals.unset(key),
+        clearGlobalVariables: () => pm.globals.clear(),
+    };
 
     return {
         isSkipped: () => skipReason !== null,
@@ -235,8 +332,8 @@
             if (pendingTests && skipReason === null) throw new Error("A test is awaiting a promise that cannot settle");
             return stringify({
                 request: exportRequest(),
-                variables: {values: variables, environment, generated},
-                environment_changes: environmentChanges,
+                variables: {values: variables, globals: scopes[0], collection: scopes[1], environment: scopes[2], generated},
+                changes: {globals: changes[0], collection: changes[1], environment: changes[2]},
                 skip_reason: skipReason,
             });
         },
