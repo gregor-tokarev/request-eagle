@@ -5,10 +5,14 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::ExecutionError;
+use request::{
+    Execution, ExecutionError, HeaderMap, HttpMetrics, HttpResponse, Response, ServerSentEvent,
+    StatusCode, Version,
+};
 
 use super::body::Body;
 use super::content::ResponseContent;
+use super::events::EventLog;
 use crate::actions::SendRequest;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -25,6 +29,8 @@ pub struct ResponseView {
     pub(super) content: Option<ResponseContent>,
     /// Present exactly when `content` is.
     pub(super) body: Option<Body>,
+    /// The events of an event-stream response, while it is open and after it ends.
+    pub(super) events: Option<Entity<EventLog>>,
     pub(super) message: SharedString,
     loading: bool,
     error: bool,
@@ -43,6 +49,7 @@ impl ResponseView {
             focus: cx.focus_handle(),
             content: None,
             body: None,
+            events: None,
             message: "Send a request to see the response".into(),
             loading: false,
             error: false,
@@ -59,6 +66,7 @@ impl ResponseView {
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
         self.content = None;
         self.body = None;
+        self.events = None;
         self.scripts.clear();
         self.loading = true;
         self.error = false;
@@ -66,9 +74,65 @@ impl ResponseView {
         cx.notify();
     }
 
+    /// An event-stream response opened. Its head shows now, and its events as
+    /// they arrive.
+    pub(crate) fn open_stream(
+        &mut self,
+        status: StatusCode,
+        version: Version,
+        headers: HeaderMap,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let content = ResponseContent::new(Execution {
+            response: Response::Http(HttpResponse {
+                status,
+                version,
+                headers,
+                body: Vec::new(),
+                metrics: HttpMetrics::default(),
+            }),
+            elapsed: std::time::Duration::ZERO,
+            scripts: Vec::new(),
+        });
+
+        self.headers_list.reset(content.headers.len());
+        self.cookies_list.reset(content.cookies.len());
+        self.content = Some(content);
+        self.set_pretty(true, window, cx);
+        self.events = Some(cx.new(|cx| EventLog::new(window, cx)));
+        self.loading = false;
+        cx.notify();
+    }
+
+    pub(crate) fn receive_events(&mut self, events: Vec<ServerSentEvent>, cx: &mut Context<Self>) {
+        if let Some(log) = &self.events {
+            log.update(cx, |log, cx| log.push(events, cx));
+        }
+    }
+
+    pub(crate) fn stop_stream(&mut self, cx: &mut Context<Self>) {
+        if let Some(log) = &self.events {
+            log.update(cx, |log, cx| log.stop(cx));
+        }
+
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn events_for_test(&self) -> Option<Entity<EventLog>> {
+        self.events.clone()
+    }
+
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         self.loading = false;
         self.message = "Request cancelled".into();
+
+        if let Some(log) = self.events.as_ref().filter(|log| log.read(cx).is_open()) {
+            let message = self.message.clone();
+            log.update(cx, |log, cx| log.finish(Some(message), cx));
+        }
+
         cx.notify();
     }
 
@@ -94,6 +158,10 @@ impl ResponseView {
                 self.content = Some(content);
                 self.set_pretty(true, window, cx);
                 self.error = false;
+
+                if let Some(log) = &self.events {
+                    log.update(cx, |log, cx| log.finish(None, cx));
+                }
             }
             Err(error) => {
                 self.message = error.to_string().into();
@@ -118,8 +186,16 @@ impl ResponseView {
                 if let Some(reports) = reports {
                     self.scripts = reports;
                 }
-                self.content = None;
-                self.body = None;
+
+                if let Some(log) = &self.events {
+                    // A broken stream keeps its head and events, ending with the error.
+                    let message = self.message.clone();
+                    log.update(cx, |log, cx| log.finish(Some(message), cx));
+                    self.error = false;
+                } else {
+                    self.content = None;
+                    self.body = None;
+                }
             }
         }
 
@@ -150,7 +226,15 @@ impl ResponseView {
                     .gap_1()
                     .children(
                         [
-                            (Section::Body, "Body", 0),
+                            (
+                                Section::Body,
+                                if self.events.is_some() {
+                                    "Events"
+                                } else {
+                                    "Body"
+                                },
+                                0,
+                            ),
                             (Section::Cookies, "Cookies", cookies),
                             (Section::Headers, "Headers", headers),
                             (
@@ -194,7 +278,17 @@ impl ResponseView {
                     ),
             )
             .child(div().flex_1())
-            .when(self.content.is_some(), |row| row.child(self.metadata(cx)))
+            .when(self.content.is_some(), |row| {
+                if self
+                    .events
+                    .as_ref()
+                    .is_some_and(|events| events.read(cx).is_open())
+                {
+                    row.child(self.streaming_status(cx))
+                } else {
+                    row.child(self.metadata(cx))
+                }
+            })
     }
 
     fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
@@ -255,7 +349,10 @@ impl Render for ResponseView {
         let content = match self.section {
             Section::Tests if has_results => self.script_results(false, cx),
             Section::Console if has_results => self.script_results(true, cx),
-            Section::Body if has_response => self.body(cx),
+            Section::Body if has_response => match &self.events {
+                Some(events) => events.clone().into_any_element(),
+                None => self.body(cx),
+            },
             Section::Headers if has_response => self.headers(false, cx),
             Section::Cookies if has_response => self.headers(true, cx),
             _ => self.empty_state(window, cx),

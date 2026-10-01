@@ -653,3 +653,56 @@ fn response_zoom_reflows_visible_rows_and_preserves_selection(cx: &mut TestAppCo
         }
     }
 }
+
+#[gpui_kit::test]
+fn a_broken_event_stream_keeps_its_head_and_events(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", "text/event-stream".parse().unwrap());
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = ResponseView::new(cx);
+        view.start(cx);
+        view.open_stream(StatusCode::OK, Version::HTTP_11, headers, window, cx);
+        view.receive_events(
+            vec![request::ServerSentEvent {
+                time: std::time::SystemTime::now(),
+                event: "message".into(),
+                data: "first".into(),
+                id: String::new(),
+            }],
+            cx,
+        );
+        view
+    });
+    assert!(cx.debug_bounds("response-streaming").is_some());
+
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let error = std::io::Error::other("connection reset");
+            view.finish(Err(ExecutionError::ReadBody(error)), window, cx)
+        })
+    });
+
+    let rows = cx.read(|cx| view.read(cx).events.as_ref().unwrap().read(cx).rows());
+    assert_eq!(
+        rows,
+        [
+            (
+                String::new(),
+                "could not read the HTTP response body: connection reset".to_owned()
+            ),
+            ("message".to_owned(), "first".to_owned()),
+        ]
+    );
+    assert!(cx.debug_bounds("response-events").is_some());
+    assert!(cx.debug_bounds("response-empty").is_none());
+    assert!(cx.debug_bounds("response-streaming").is_none());
+
+    let headers = cx.debug_bounds("response-section-Headers").unwrap();
+    cx.simulate_click(headers.center(), Modifiers::default());
+    assert!(cx.debug_bounds("response-header-table").is_some());
+}

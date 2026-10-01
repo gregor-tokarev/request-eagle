@@ -1,13 +1,14 @@
 use std::{
     future::Future,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
 
 use crate::{
-    Execution, ExecutionError, HttpRequest, RequestPreferences, RequestVariables, Response,
-    http::HttpExecutor, scripts,
+    EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences, RequestVariables,
+    Response, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
@@ -36,7 +37,29 @@ impl RequestExecutor {
         request: HttpRequest,
         variables: RequestVariables,
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+        self.run(request, variables, None)
+    }
+
+    /// Like `execute`, but an event-stream response reports its events through
+    /// `events` as they arrive. Once it opens, the request timeout no longer
+    /// applies: the stream lasts until the server ends it or it is stopped.
+    pub fn execute_streaming(
+        &self,
+        request: HttpRequest,
+        variables: RequestVariables,
+        events: EventStream,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+        self.run(request, variables, Some(events))
+    }
+
+    fn run(
+        &self,
+        request: HttpRequest,
+        variables: RequestVariables,
+        mut events: Option<EventStream>,
+    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
         let executor = self.clone();
+        let opened = events.as_ref().map(|events| events.opened.clone());
 
         async move {
             let cancellation = scripts::Cancellation::new();
@@ -60,7 +83,10 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
-                let response = executor.http.execute(&request, body).await?;
+                let response = executor
+                    .http
+                    .execute(&request, body, events.as_mut())
+                    .await?;
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
@@ -74,6 +100,13 @@ impl RequestExecutor {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;
+
+                        if opened
+                            .as_ref()
+                            .is_some_and(|opened| opened.load(Ordering::SeqCst))
+                        {
+                            std::future::pending::<()>().await;
+                        }
 
                         Err(ExecutionError::Timeout { timeout })
                     })

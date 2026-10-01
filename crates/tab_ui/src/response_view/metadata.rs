@@ -32,15 +32,7 @@ impl ResponseView {
                 })
             });
         let decoded = !encoded || metrics.encoded_response_body_bytes.is_some();
-        let color = if status.is_success() {
-            cx.theme().success
-        } else if status.is_redirection() {
-            cx.theme().warning
-        } else if status.is_informational() {
-            cx.theme().info
-        } else {
-            cx.theme().danger
-        };
+        let color = status_color(status, cx);
         let focus = self.focus.clone();
         let time_focus = focus.clone();
         let size_focus = focus.clone();
@@ -124,6 +116,51 @@ impl ResponseView {
             )
             .child("•")
             .child(div().cursor_text().child(SelectableText::new("response-version", format!("{:?}", response.version)).document_order(3)))
+    }
+}
+
+impl ResponseView {
+    /// While an event stream is open, its time and size are still growing.
+    pub(super) fn streaming_status(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let status = self.content.as_ref().unwrap().http().status;
+        let color = status_color(status, cx);
+
+        h_flex()
+            .debug_selector(|| "response-streaming".into())
+            .gap_2()
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(
+                div()
+                    .debug_selector(|| "response-status".into())
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius_tokens().md)
+                    .bg(color.opacity(0.15))
+                    .text_color(color)
+                    .child(status.to_string()),
+            )
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius_tokens().md)
+                    .bg(cx.theme().info.opacity(0.15))
+                    .text_color(cx.theme().info)
+                    .child("STREAMING"),
+            )
+    }
+}
+
+fn status_color(status: StatusCode, cx: &App) -> Hsla {
+    if status.is_success() {
+        cx.theme().success
+    } else if status.is_redirection() {
+        cx.theme().warning
+    } else if status.is_informational() {
+        cx.theme().info
+    } else {
+        cx.theme().danger
     }
 }
 
