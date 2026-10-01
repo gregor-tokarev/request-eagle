@@ -6656,7 +6656,7 @@ dependencies = [
 
 [[package]]
 name = "request-eagle"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "collection",
  "environment",
@@ -7367,9 +7367,6 @@ dependencies = [
  "gpui-kit",
  "keybindings_service",
  "preferences",
- "serde_json",
- "smol",
- "tempfile",
  "theme",
  "updater",
 ]
@@ -7938,7 +7935,6 @@ dependencies = [
  "environment",
  "futures",
  "gpui-kit",
- "gpui-pre-reqwest-client",
  "hayro",
  "image",
  "lsp-types",
@@ -7949,10 +7945,7 @@ dependencies = [
  "script_intelligence",
  "serde_json",
  "smol",
- "tempfile",
  "theme",
- "tokio",
- "tokio-tungstenite",
  "tree-sitter",
  "tree-sitter-xml",
  "unicode-segmentation",
@@ -10143,11 +10136,8 @@ dependencies = [
  "keybindings_service",
  "preferences",
  "request",
- "serde_json",
  "settings_ui",
- "smol",
  "tab_ui",
- "tempfile",
  "theme",
  "updater",
 ]

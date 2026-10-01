@@ -533,21 +533,6 @@ impl EventLog {
     }
 }
 
-#[cfg(test)]
-impl EventLog {
-    /// The event type and preview of each shown row, newest first.
-    pub(crate) fn rows(&self) -> Vec<(String, String)> {
-        self.shown
-            .iter()
-            .rev()
-            .map(|&index| {
-                let entry = &self.entries[index];
-                (entry.event.to_string(), entry.preview.to_string())
-            })
-            .collect()
-    }
-}
-
 impl Render for EventLog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()

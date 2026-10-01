@@ -32,6 +32,3 @@ security-framework = "3"
 security-framework-sys = "2"
 core-foundation = "0.10"
 smol = "2"
-
-[dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }

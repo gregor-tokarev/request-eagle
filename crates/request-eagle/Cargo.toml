@@ -1,6 +1,6 @@
 [package]
 name = "request-eagle"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 
 [features]
@@ -20,6 +20,3 @@ workspace = { package = "workspace", path = "../workspace" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSWorkspace"] }
-
-[dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }

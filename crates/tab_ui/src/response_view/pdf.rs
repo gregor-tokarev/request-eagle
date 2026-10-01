@@ -95,14 +95,6 @@ impl PdfPreview {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn rendered_pages(&self) -> usize {
-        self.pages
-            .iter()
-            .filter(|page| page.image.is_some())
-            .count()
-    }
-
     pub(super) fn page_count(&self) -> Option<usize> {
         matches!(self.document, Some(Ok(_))).then_some(self.pages.len())
     }

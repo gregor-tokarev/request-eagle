@@ -6,7 +6,7 @@ use gpui_kit::*;
 /// An image body, decoded off the UI thread. It shows at its own size, or
 /// smaller to fit. Its texture is released with the view.
 pub(super) struct ImagePreview {
-    pub(super) decoded: Option<Result<Arc<RenderImage>, SharedString>>,
+    decoded: Option<Result<Arc<RenderImage>, SharedString>>,
     /// Bitmap pixels per image pixel. GPUI renders SVG larger, for smooth edges.
     scale: f32,
     _decode: Task<()>,
