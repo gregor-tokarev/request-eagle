@@ -142,6 +142,15 @@ pub struct GrpcRequestInput {
     /// MiB, or 0 for any size. Unset follows max_response_size_mb.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_response_message_mb: Option<u64>,
+    /// JavaScript run before the method is invoked.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub before_invoke: String,
+    /// JavaScript run for each message the server sends.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub on_message: String,
+    /// JavaScript run after the server ends the call.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub after_response: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

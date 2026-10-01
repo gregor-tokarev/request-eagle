@@ -10,7 +10,7 @@ use super::{
     codec::DynamicCodec,
     definition::{format_message, parse_message},
 };
-use crate::RequestVariables;
+use crate::{RequestVariables, ScriptReport};
 
 /// Controls a running call. Dropping it cancels the call.
 pub struct GrpcCall {
@@ -21,7 +21,8 @@ pub struct GrpcCall {
     events: UnboundedSender<GrpcEvent>,
     variables: RequestVariables,
     include_defaults: bool,
-    pub(super) task: Option<tokio::task::AbortHandle>,
+    /// The call and the scripts that follow its events.
+    pub(super) tasks: Vec<tokio::task::AbortHandle>,
 }
 
 /// Everything that happens during a call, in order. The stream ends after
@@ -43,6 +44,9 @@ pub enum GrpcEvent {
     },
     /// The call ended without a status from the server.
     Failed(GrpcError),
+    /// A script ran: Before invoke first, On message after its message and
+    /// After response just before `Finished`.
+    Script(ScriptReport),
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +73,7 @@ impl GrpcCall {
             events,
             variables,
             include_defaults,
-            task: None,
+            tasks: Vec::new(),
         }
     }
 
@@ -115,7 +119,7 @@ impl GrpcCall {
 
 impl Drop for GrpcCall {
     fn drop(&mut self) {
-        if let Some(task) = &self.task {
+        for task in &self.tasks {
             task.abort();
         }
     }

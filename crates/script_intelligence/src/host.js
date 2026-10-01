@@ -225,8 +225,7 @@
         }
         if (phase !== nextPhase) {
             phase = nextPhase;
-            files["pm.d.ts"] = declarations + "\ndeclare const pm: RequestEagle." +
-                (phase === "post" ? "PostResponseAPI" : "PreRequestAPI") + ";\n";
+            files["pm.d.ts"] = declarations + "\ndeclare const pm: RequestEagle." + phase + ";\n";
             snapshots.delete("pm.d.ts");
             declarationVersion++;
         }

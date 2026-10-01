@@ -9,21 +9,25 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{GrpcEvent, GrpcStatus, MethodKind};
+use request::{GrpcError, GrpcEvent, GrpcStatus, MethodKind, ScriptReport};
 
 use crate::actions::SendRequest;
+use crate::response_view::script_results;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
     Response,
     Metadata,
     Trailers,
+    Tests,
+    Console,
 }
 
 pub(super) enum CallState {
     Idle,
-    /// Loading the service definition before invoking.
-    Waiting,
+    /// Preparing the call, such as loading the service definition, with a
+    /// title saying what for.
+    Waiting(SharedString),
     Running,
     Finished {
         status: GrpcStatus,
@@ -31,6 +35,8 @@ pub(super) enum CallState {
     },
     /// The call could not start, or ended without a status.
     Failed(SharedString),
+    /// Its Before invoke script skipped the call, for this reason.
+    Skipped(SharedString),
     Cancelled,
 }
 
@@ -69,6 +75,8 @@ pub(crate) struct GrpcResponse {
     pub(super) section: Section,
     pub(super) metadata: Vec<(SharedString, SharedString)>,
     pub(super) trailers: Vec<(SharedString, SharedString)>,
+    /// In the order the scripts ran.
+    pub(crate) scripts: Vec<ScriptReport>,
     /// The unary response message.
     pub(super) body: Option<Entity<EditorState>>,
     /// In arrival order. The stream shows the newest first.
@@ -96,6 +104,7 @@ impl GrpcResponse {
             section: Section::Response,
             metadata: Vec::new(),
             trailers: Vec::new(),
+            scripts: Vec::new(),
             body: None,
             entries: Vec::new(),
             hidden: 0,
@@ -112,6 +121,7 @@ impl GrpcResponse {
     fn reset(&mut self) {
         self.metadata.clear();
         self.trailers.clear();
+        self.scripts.clear();
         self.body = None;
         self.entries.clear();
         self.hidden = 0;
@@ -121,10 +131,10 @@ impl GrpcResponse {
         self.list.reset(0);
     }
 
-    /// Waiting for the service definition before the call starts.
-    pub(crate) fn wait(&mut self, cx: &mut Context<Self>) {
+    /// Preparing the call before it starts, as `title` says.
+    pub(crate) fn wait(&mut self, title: SharedString, cx: &mut Context<Self>) {
         self.reset();
-        self.state = CallState::Waiting;
+        self.state = CallState::Waiting(title);
         cx.notify();
     }
 
@@ -169,6 +179,40 @@ impl GrpcResponse {
         self.reset();
         self.state = CallState::Failed(message);
         cx.notify();
+    }
+
+    /// A call that did not start. Its Before invoke script may have failed or
+    /// skipped it, and its results show.
+    pub(crate) fn fail_invoke(&mut self, error: GrpcError, cx: &mut Context<Self>) {
+        self.reset();
+
+        match error {
+            GrpcError::Skipped { reason, report } => {
+                self.state = CallState::Skipped(reason.into());
+                self.scripts.push(*report);
+            }
+            GrpcError::Script { message, report } => {
+                self.state = CallState::Failed(message.into());
+                self.scripts.push(*report);
+            }
+            GrpcError::ScriptedCall { source, report } => {
+                self.state = CallState::Failed(source.to_string().into());
+                self.scripts.push(*report);
+            }
+            error => self.state = CallState::Failed(error.to_string().into()),
+        }
+
+        self.show_failures();
+        cx.notify();
+    }
+
+    /// Like an HTTP response, show the tests when a script or test failed.
+    fn show_failures(&mut self) {
+        if self.scripts.iter().any(|report| {
+            report.error.is_some() || report.tests.iter().any(|test| test.error.is_some())
+        }) {
+            self.section = Section::Tests;
+        }
     }
 
     pub(crate) fn cancel(&mut self, call_started: bool, cx: &mut Context<Self>) {
@@ -248,6 +292,7 @@ impl GrpcResponse {
                         detail: None,
                     });
                     self.state = CallState::Finished { status, elapsed };
+                    self.show_failures();
                 }
                 GrpcEvent::Failed(error) => {
                     let message: SharedString = error.to_string().into();
@@ -258,7 +303,9 @@ impl GrpcResponse {
                         detail: None,
                     });
                     self.state = CallState::Failed(message);
+                    self.show_failures();
                 }
+                GrpcEvent::Script(report) => self.scripts.push(report),
             }
         }
 
@@ -339,6 +386,16 @@ impl GrpcResponse {
                             (Section::Response, response_label, 0),
                             (Section::Metadata, "Metadata", self.metadata.len()),
                             (Section::Trailers, "Trailers", self.trailers.len()),
+                            (
+                                Section::Tests,
+                                "Tests",
+                                self.scripts.iter().map(|report| report.tests.len()).sum(),
+                            ),
+                            (
+                                Section::Console,
+                                "Console",
+                                self.scripts.iter().map(|report| report.logs.len()).sum(),
+                            ),
                         ]
                         .into_iter()
                         .map(|(section, label, count)| {
@@ -401,11 +458,10 @@ impl GrpcResponse {
     fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
         let header = match &self.state {
-            CallState::Waiting | CallState::Running => {
-                let title = if matches!(self.state, CallState::Waiting) {
-                    "Loading the service definition…"
-                } else {
-                    "Waiting for the response…"
+            CallState::Waiting(_) | CallState::Running => {
+                let title = match &self.state {
+                    CallState::Waiting(title) => title.clone(),
+                    _ => "Waiting for the response…".into(),
                 };
 
                 EmptyHeader::new()
@@ -438,6 +494,16 @@ impl GrpcResponse {
                         div()
                             .debug_selector(|| "grpc-error".into())
                             .child(status_description(status)),
+                    ),
+                ),
+            CallState::Skipped(reason) => EmptyHeader::new()
+                .media(media.child(Icon::new(IconName::CircleX)))
+                .title(EmptyTitle::new().child("Call skipped"))
+                .description(
+                    EmptyDescription::new().child(
+                        div()
+                            .debug_selector(|| "grpc-skipped".into())
+                            .child(reason.clone()),
                     ),
                 ),
             CallState::Cancelled => EmptyHeader::new()
@@ -544,11 +610,18 @@ impl Render for GrpcResponse {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = !matches!(
             self.state,
-            CallState::Idle | CallState::Waiting | CallState::Failed(_)
+            CallState::Idle | CallState::Waiting(_) | CallState::Failed(_) | CallState::Skipped(_)
         ) || !self.entries.is_empty();
         let unary = self.kind == Some(MethodKind::Unary);
+        let has_results = started || !self.scripts.is_empty();
 
         let content = match self.section {
+            Section::Tests | Section::Console if has_results => script_results(
+                &self.scripts,
+                self.section == Section::Console,
+                "invoke the method",
+                cx,
+            ),
             _ if !started => self.empty_state(window, cx),
             Section::Metadata => {
                 self.pairs_table("grpc-response-metadata", &self.metadata, "No metadata", cx)
@@ -579,7 +652,7 @@ impl Render for GrpcResponse {
                     .into_any_element(),
                 None => self.empty_state(window, cx),
             },
-            Section::Response => self.stream(cx),
+            _ => self.stream(cx),
         };
 
         v_flex()
@@ -598,7 +671,7 @@ impl Render for GrpcResponse {
                     cx.notify();
                 }
             }))
-            .when(started, |view| view.child(self.toolbar(cx)))
+            .when(has_results, |view| view.child(self.toolbar(cx)))
             .child(content)
     }
 }

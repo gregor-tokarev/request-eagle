@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, time::SystemTime};
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Method, Request};
+use request::{GrpcRequest, GrpcScripts, Method, Request};
 
 fn test_directory() -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -79,6 +79,50 @@ request_custom = "keep me too"
     };
 
     assert_eq!(request.path, "/v2/users");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cleared_grpc_scripts_are_removed_from_the_file() {
+    let root = test_directory();
+    let collection = root.join("API");
+    let request_path = collection.join("say.toml");
+
+    fs::create_dir_all(&collection).unwrap();
+    fs::write(
+        &request_path,
+        r#"id = "say"
+name = "Say"
+schema_version = 1
+
+[request]
+type = "grpc"
+url = "localhost:50051"
+
+[request.scripts]
+before_invoke = "console.log(1);"
+on_message = "console.log(2);"
+"#,
+    )
+    .unwrap();
+
+    let mut registry = CollectionRegistry::from_path(&root).unwrap();
+    let request = GrpcRequest {
+        url: "localhost:50051".into(),
+        scripts: GrpcScripts {
+            on_message: "console.log(2);".into(),
+            ..GrpcScripts::default()
+        },
+        ..GrpcRequest::default()
+    };
+    registry
+        .update_request(&request_path, "say", request.into())
+        .unwrap();
+
+    let saved = fs::read_to_string(&request_path).unwrap();
+    assert!(!saved.contains("before_invoke"), "{saved}");
+    assert!(saved.contains("on_message"), "{saved}");
 
     fs::remove_dir_all(root).unwrap();
 }

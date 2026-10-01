@@ -329,9 +329,9 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             }
         }
 
-        // gRPC definitions and settings also omit optional fields, such as
-        // import paths once they are removed.
-        for table in ["definition", "settings"] {
+        // gRPC definitions, settings and scripts also omit optional fields,
+        // such as import paths once they are removed.
+        for table in ["definition", "settings", "scripts"] {
             if let (Some(current), Some(update)) = (
                 request.get_mut(table).and_then(Item::as_table_like_mut),
                 updates["request"].get(table).and_then(Item::as_table_like),

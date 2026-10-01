@@ -11,6 +11,9 @@ pub struct RequestVariables {
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
     pub(crate) environment_error: Option<String>,
+    /// Values `{{$name}}` resolves to instead of generating new ones, set by
+    /// a gRPC call's Before invoke script for the whole call.
+    pub(crate) generated: BTreeMap<String, String>,
 }
 
 impl RequestVariables {
@@ -25,6 +28,7 @@ impl RequestVariables {
             session: None,
             collection_scripts: Ok(RequestScripts::default()),
             environment_error,
+            generated: BTreeMap::new(),
         }
     }
 
@@ -54,12 +58,13 @@ impl RequestVariables {
     /// message is left as written.
     pub fn resolve_grpc_target(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
         self.resolve_grpc(request, false)
+            .map(|(request, _)| request)
     }
 
     /// The URL and metadata a gRPC request connects with, as a key that
     /// changes when its variables point at another server. Generated
     /// variables such as `{{$guid}}` stay as written, since they differ on
-    /// every use.
+    /// every use, unless a Before invoke script set them for the call.
     pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
         let texts = std::iter::once(request.url.as_str()).chain(
             request
@@ -67,12 +72,13 @@ impl RequestVariables {
                 .iter()
                 .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
         );
-        let mut resolver = VariableResolver::new(&self.values);
+        let mut resolver = self.resolver();
 
         for text in texts.clone() {
             for reference in text.split("{{").skip(1) {
                 if let Some((name, _)) = reference.split_once("}}")
                     && name.trim().starts_with('$')
+                    && !self.generated.contains_key(name.trim())
                 {
                     let name = name.trim().to_owned();
                     resolver.override_generated(name.clone(), format!("{{{{{name}}}}}"));
@@ -83,15 +89,16 @@ impl RequestVariables {
         texts.map(|text| resolver.resolve(text).ok()).collect()
     }
 
-    /// Resolve the URL, metadata and message of a call together, so a
-    /// generated value such as `{{$guid}}` is the same in each. Later stream
-    /// messages resolve with `resolve_text`.
-    pub(crate) fn resolve_grpc_call(&self, request: &GrpcRequest) -> Result<GrpcRequest, String> {
-        self.resolve_grpc(request, true)
-    }
-
-    fn resolve_grpc(&self, request: &GrpcRequest, message: bool) -> Result<GrpcRequest, String> {
-        let mut resolver = VariableResolver::new(&self.values);
+    /// Resolve the URL, metadata and, with `message`, the message of a call
+    /// together, so a generated value such as `{{$guid}}` is the same in each.
+    /// Also returns the generated values, which the call's later scripts see.
+    /// Later stream messages resolve with `resolve_text`.
+    pub(crate) fn resolve_grpc(
+        &self,
+        request: &GrpcRequest,
+        message: bool,
+    ) -> Result<(GrpcRequest, HashMap<String, String>), String> {
+        let mut resolver = self.resolver();
         let mut resolve = |text: &str| {
             resolver
                 .resolve(text)
@@ -109,7 +116,18 @@ impl RequestVariables {
             request.message = resolve(&request.message)?;
         }
 
-        Ok(request)
+        Ok((request, resolver.generated_values().clone()))
+    }
+
+    /// A resolver that keeps the values a Before invoke script generated or set.
+    fn resolver(&self) -> VariableResolver<'_> {
+        let mut resolver = VariableResolver::new(&self.values);
+
+        for (name, value) in &self.generated {
+            resolver.override_generated(name.clone(), value.clone());
+        }
+
+        resolver
     }
 
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
@@ -147,9 +165,10 @@ impl RequestVariables {
             .map_err(|error| describe_error(error, self.environment_error.as_deref()))
     }
 
-    /// Resolve one outgoing WebSocket or gRPC stream message.
+    /// Resolve one outgoing WebSocket or gRPC stream message. Other generated
+    /// values are new for each message.
     pub(crate) fn resolve_text(&self, text: &str) -> Result<String, String> {
-        VariableResolver::new(&self.values)
+        self.resolver()
             .resolve(text)
             .map_err(|error| describe_error(error, self.environment_error.as_deref()))
     }

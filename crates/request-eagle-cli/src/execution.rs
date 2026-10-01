@@ -2,8 +2,9 @@ use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
 use request::{
-    GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcSettings, HttpRequest, Method,
-    RequestExecutor, RequestPreferences, RequestScripts, RequestVariables, Response,
+    GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest,
+    Method, RequestExecutor, RequestPreferences, RequestScripts, RequestVariables, Response,
+    ScriptPhase, ScriptReport,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
@@ -28,6 +29,12 @@ pub async fn run(
     let request = match file.request.clone() {
         request::Request::Http(request) => request,
         request::Request::Grpc(request) => {
+            if !request.scripts.is_empty() && !trust_scripts {
+                bail!(
+                    "Read the saved request's scripts, then set trust_scripts=true to approve this run"
+                );
+            }
+
             let mut values = collection.local_env().entries.clone();
             values.extend(variables);
             let mut settings = preferences.request_preferences().await?;
@@ -64,13 +71,11 @@ pub async fn run(
     let headers = response.headers.iter().map(|(name, value)| json!({
         "name": name.as_str(), "value": value.to_str().ok(), "value_base64": STANDARD.encode(value.as_bytes()),
     })).collect::<Vec<_>>();
-    let scripts = execution.scripts.iter().map(|report| json!({
-        "phase": match report.phase { request::ScriptPhase::PreRequest => "pre_request", request::ScriptPhase::PostResponse => "post_response" },
-        "collection": report.collection,
-        "error": report.error,
-        "tests": report.tests.iter().map(|test| json!({"name": test.name, "passed": test.error.is_none(), "error": test.error})).collect::<Vec<_>>(),
-        "logs": report.logs.iter().map(|log| json!({"level": log.level, "message": log.message})).collect::<Vec<_>>(),
-    })).collect::<Vec<_>>();
+    let scripts = execution
+        .scripts
+        .iter()
+        .map(script_json)
+        .collect::<Vec<_>>();
 
     Ok(json!({
         "path": path, "status": response.status.as_u16(), "http_version": format!("{:?}", response.version),
@@ -89,12 +94,13 @@ async fn run_grpc(
     settings: &RequestPreferences,
 ) -> Result<Value> {
     let client = GrpcClient::new(settings);
-    let variables =
-        || RequestVariables::with_environment_session(values.clone(), None, Default::default());
+    let variables = RequestVariables::with_environment_session(values, None, Default::default());
+    // Before invoke runs first, as it can set variables reflection needs.
+    let prepared = client.prepare(&request, variables).await?;
     let definition = client
-        .load_definition(&request, &variables(), Some(collection))
+        .load_definition(prepared.request(), prepared.variables(), Some(collection))
         .await?;
-    let (mut call, mut events) = client.invoke(&request, variables(), &definition)?;
+    let (mut call, mut events) = client.start(prepared, &definition)?;
 
     if call.kind.streams_requests() {
         call.send(&request.message)?;
@@ -103,6 +109,7 @@ async fn run_grpc(
 
     let mut messages = Vec::new();
     let mut metadata = Vec::new();
+    let mut scripts = Vec::new();
     // Streams have no deadline in the app; here the command must return.
     let deadline = std::time::Duration::from_millis(match settings.timeout_ms {
         0 => 60_000,
@@ -125,14 +132,32 @@ async fn run_grpc(
                     "path": path, "protocol": "grpc", "method": request.method,
                     "status": {"code": status.code, "name": status.name(), "message": status.message},
                     "metadata": metadata, "trailers": trailers, "messages": messages,
-                    "elapsed_ms": elapsed.as_secs_f64() * 1000.,
+                    "elapsed_ms": elapsed.as_secs_f64() * 1000., "scripts": scripts,
                 }));
             }
             GrpcEvent::Failed(error) => return Err(error.into()),
+            GrpcEvent::Script(report) => scripts.push(script_json(&report)),
         }
     }
 
     bail!("The gRPC call did not finish within {deadline:?}; set timeout_ms to wait longer")
+}
+
+fn script_json(report: &ScriptReport) -> Value {
+    json!({
+        "phase": match report.phase {
+            ScriptPhase::PreRequest => "pre_request",
+            ScriptPhase::PostResponse => "post_response",
+            ScriptPhase::BeforeInvoke => "before_invoke",
+            ScriptPhase::OnMessage => "on_message",
+            ScriptPhase::AfterResponse => "after_response",
+        },
+        "collection": report.collection,
+        "message": report.message,
+        "error": report.error,
+        "tests": report.tests.iter().map(|test| json!({"name": test.name, "passed": test.error.is_none(), "error": test.error})).collect::<Vec<_>>(),
+        "logs": report.logs.iter().map(|log| json!({"level": log.level, "message": log.message})).collect::<Vec<_>>(),
+    })
 }
 
 impl From<GrpcRequestInput> for GrpcRequest {
@@ -155,6 +180,11 @@ impl From<GrpcRequestInput> for GrpcRequest {
                 server_name: input.server_name,
                 include_default_fields: input.include_default_fields.unwrap_or(true),
                 max_response_message_mb: input.max_response_message_mb,
+            },
+            scripts: GrpcScripts {
+                before_invoke: input.before_invoke,
+                on_message: input.on_message,
+                after_response: input.after_response,
             },
         }
     }
@@ -182,6 +212,9 @@ impl From<&GrpcRequest> for GrpcRequestInput {
             server_name: request.settings.server_name.clone(),
             include_default_fields: (!request.settings.include_default_fields).then_some(false),
             max_response_message_mb: request.settings.max_response_message_mb,
+            before_invoke: request.scripts.before_invoke.clone(),
+            on_message: request.scripts.on_message.clone(),
+            after_response: request.scripts.after_response.clone(),
         }
     }
 }
