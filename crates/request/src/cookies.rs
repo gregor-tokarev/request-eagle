@@ -137,14 +137,15 @@ impl CookieJar {
             let deleted = std::mem::take(&mut *file.deleted.lock().unwrap());
             let merged = merge(&saved.cookies, &cookies, &deleted, current);
 
-            // The other process's cookies join this jar, as a change of its own.
+            // The other process's cookies join this jar, as a change of its
+            // own. Rebuilding the store also drops the expired cookies it keeps.
             let imported = merged.len() != cookies.iter_unexpired().count()
                 || merged.iter().any(|cookie| {
                     let (domain, path, name) = key(cookie);
                     cookies.get(&domain, &path, &name) != Some(cookie)
                 });
+            *cookies = store(&merged);
             if imported {
-                *cookies = store(&merged);
                 self.changed();
             }
 
@@ -153,8 +154,14 @@ impl CookieJar {
 
         let written = write(&file.path, &merged);
         if written.is_err() {
-            // Delete them from the file at the next save.
-            file.deleted.lock().unwrap().extend(deleted);
+            // Delete them from the file at the next save, unless a response
+            // set them again meanwhile.
+            let cookies = self.0.cookies.lock().unwrap();
+            file.deleted.lock().unwrap().extend(
+                deleted
+                    .into_iter()
+                    .filter(|(domain, path, name)| cookies.get(domain, path, name).is_none()),
+            );
         }
         written?;
 
