@@ -6,6 +6,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -17,6 +18,7 @@ use request::{
     GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts,
     GrpcSettings, MethodKind, RequestPreferences, RequestVariables, ServiceDefinition,
 };
+use tokio_rustls::{TlsAcceptor, rustls};
 use tonic::{
     Status, Streaming,
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
@@ -635,6 +637,75 @@ async fn unreachable_servers_fail_without_a_status() {
     ));
 }
 
+/// A server that only completes TLS handshakes, like a TLS port.
+async fn serve_tls() -> SocketAddr {
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(vec![cert.der().clone()], signing_key.into())
+    .unwrap();
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let _ = acceptor.accept(stream).await;
+            });
+        }
+    });
+
+    address
+}
+
+#[tokio::test]
+async fn tls_servers_reached_without_tls_ask_for_tls() {
+    let address = serve_tls().await;
+    let request = request(address, "Say", "{}");
+
+    let error = client()
+        .load_definition(&request, &variables(), None)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, GrpcError::TlsRequired), "{error}");
+
+    // Calls with a local definition explain it too.
+    let protos = protos();
+    let definition =
+        ServiceDefinition::from_proto_file(&protos.echo, std::slice::from_ref(&protos.shared))
+            .unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        collect(events).await.last(),
+        Some(GrpcEvent::Failed(GrpcError::TlsRequired))
+    ));
+}
+
+#[tokio::test]
+async fn plaintext_servers_reached_with_tls_ask_to_turn_it_off() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", "{}");
+    request.tls = true;
+
+    let error = client()
+        .load_definition(&request, &variables(), None)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, GrpcError::TlsUnsupported), "{error}");
+}
+
 #[tokio::test]
 async fn proto_files_resolve_imports_from_import_paths() {
     let protos = protos();
@@ -868,7 +939,7 @@ async fn postman_echo_service() {
     assert!(received(&events).len() > 1);
 }
 
-/// grpcb.in serves reflection over TLS on port 9001.
+/// grpcb.in serves reflection over TLS on ports 9001 and 443.
 #[tokio::test]
 #[ignore = "uses the network"]
 async fn public_tls_service() {
@@ -902,6 +973,19 @@ async fn public_tls_service() {
 
     request.settings.verify_certificates = Some(false);
     reflect(&request).await;
+
+    // Without TLS, the server's TLS ports ask for it.
+    for url in ["grpcb.in:9001", "grpcb.in:443"] {
+        let request = GrpcRequest {
+            url: url.into(),
+            ..GrpcRequest::default()
+        };
+        let error = client()
+            .load_definition(&request, &variables(), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, GrpcError::TlsRequired), "{url}: {error}");
+    }
 }
 
 #[tokio::test]

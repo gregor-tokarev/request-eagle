@@ -44,7 +44,7 @@ impl GrpcDraft {
         };
         let empty: SharedString = match &self.definition {
             DefinitionState::Loading => "Loading methods…".into(),
-            DefinitionState::Failed(error) => error.clone(),
+            DefinitionState::Failed(error) => error.to_string().into(),
             DefinitionState::Loaded(_) => "No methods found".into(),
             DefinitionState::Idle => "Enter a URL to load methods with server reflection".into(),
         };
@@ -88,7 +88,7 @@ impl GrpcDraft {
                                         })
                                         .tooltip(if tls { "Disable TLS" } else { "Enable TLS" })
                                         .on_click(cx.listener(|this, _, window, cx| {
-                                            this.toggle_tls(window, cx)
+                                            this.set_tls(!this.request.uses_tls(), window, cx)
                                         })),
                                 ),
                             )
@@ -152,9 +152,10 @@ impl GrpcDraft {
             )
     }
 
-    fn toggle_tls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Turn TLS on or off, switching a scheme in the URL to match.
+    pub(super) fn set_tls(&mut self, tls: bool, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.request.url.clone();
-        self.request.set_tls(!self.request.uses_tls());
+        self.request.set_tls(tls);
 
         if self.request.url != url
             && let Some(input) = &self.url

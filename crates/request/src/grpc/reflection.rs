@@ -10,7 +10,7 @@ use tonic_reflection::pb::v1::{
     server_reflection_response::MessageResponse,
 };
 
-use super::{GrpcError, GrpcStatus, ServiceDefinition};
+use super::{GrpcError, GrpcStatus, ServiceDefinition, transport};
 
 // v1alpha has the same messages under an older name. Servers built before v1
 // only offer v1alpha, so try it when v1 is not implemented.
@@ -32,7 +32,10 @@ pub(crate) async fn load(
         Code::Unimplemented => GrpcError::Reflection(
             "the server does not support reflection. Import a .proto file instead".into(),
         ),
-        _ => GrpcError::Reflection(GrpcStatus::from(&status).to_string()),
+        _ => match transport::connection_error(&status) {
+            Some(error) => GrpcError::Connect(error),
+            None => GrpcError::Reflection(GrpcStatus::from(&status).to_string()),
+        },
     })?;
 
     ServiceDefinition::from_files(files)
@@ -129,7 +132,7 @@ impl Reflection<'_> {
         self.grpc
             .ready()
             .await
-            .map_err(|error| Status::unavailable(super::transport::error_chain(&error)))?;
+            .map_err(|error| Status::unavailable(transport::error_chain(&error)))?;
 
         let mut call = tonic::Request::new(futures::stream::iter([ServerReflectionRequest {
             host: String::new(),

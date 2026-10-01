@@ -4,10 +4,11 @@ use std::time::Duration;
 use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
+    spinner::Spinner,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{GrpcDefinition, ServiceDefinition};
+use request::{GrpcDefinition, GrpcError, ServiceDefinition};
 
 use super::draft::GrpcDraft;
 use super::methods::method_list;
@@ -20,7 +21,7 @@ pub(crate) enum DefinitionState {
     Idle,
     Loading,
     Loaded(ServiceDefinition),
-    Failed(SharedString),
+    Failed(GrpcError),
 }
 
 /// The request settings a definition was loaded from. Changing them makes
@@ -91,6 +92,7 @@ impl GrpcDraft {
             })
         });
         self.refresh_methods(window, cx);
+        self.redraw(cx);
     }
 
     /// Load the services from the server or `.proto` file. Unless forced, a
@@ -136,7 +138,7 @@ impl GrpcDraft {
                 this.definition_task = None;
                 this.definition = match result {
                     Ok(definition) => DefinitionState::Loaded(definition),
-                    Err(error) => DefinitionState::Failed(error.to_string().into()),
+                    Err(error) => DefinitionState::Failed(error),
                 };
                 this.refresh_methods(window, cx);
 
@@ -613,6 +615,12 @@ impl GrpcDraft {
         };
         let stale =
             !self.definition_is_current() && matches!(self.definition, DefinitionState::Loaded(_));
+        // Reflection waits for typing to pause before it loads.
+        let loading = match self.definition {
+            DefinitionState::Loading => true,
+            DefinitionState::Idle => self.definition_task.is_some(),
+            _ => false,
+        };
         let retry = Button::new("grpc-reload-definition")
             .debug_selector(|| "grpc-reload-definition".into())
             .ghost()
@@ -622,21 +630,29 @@ impl GrpcDraft {
             .tooltip("Load again")
             .on_click(cx.listener(|this, _, window, cx| this.load_definition(true, window, cx)));
 
-        let (icon, title, detail): (Icon, SharedString, Option<SharedString>) =
+        let (icon, title, detail): (AnyElement, SharedString, Option<SharedString>) =
             match &self.definition {
+                _ if loading => (
+                    Spinner::new()
+                        .color(cx.theme().muted_foreground)
+                        .into_any_element(),
+                    format!("Loading {source}…").into(),
+                    None,
+                ),
                 DefinitionState::Idle if reflection => (
-                    Icon::new(IconName::Info).text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Info)
+                        .size_4()
+                        .text_color(cx.theme().muted_foreground)
+                        .into_any_element(),
                     "Using server reflection".into(),
                     Some("Enter the server URL to load its services.".into()),
                 ),
-                DefinitionState::Idle => (
-                    Icon::new(IconName::Info).text_color(cx.theme().muted_foreground),
+                DefinitionState::Idle | DefinitionState::Loading => (
+                    Icon::new(IconName::Info)
+                        .size_4()
+                        .text_color(cx.theme().muted_foreground)
+                        .into_any_element(),
                     format!("{source} is not imported yet").into(),
-                    None,
-                ),
-                DefinitionState::Loading => (
-                    Icon::new(IconName::Loader).text_color(cx.theme().muted_foreground),
-                    format!("Loading {source}…").into(),
                     None,
                 ),
                 DefinitionState::Loaded(definition) => {
@@ -644,7 +660,10 @@ impl GrpcDraft {
                     let methods: usize = services.iter().map(|service| service.methods.len()).sum();
 
                     (
-                    Icon::new(IconName::CircleCheck).text_color(cx.theme().success),
+                    Icon::new(IconName::CircleCheck)
+                        .size_4()
+                        .text_color(cx.theme().success)
+                        .into_any_element(),
                     format!("Using {source}").into(),
                     Some(
                         if stale {
@@ -670,21 +689,29 @@ impl GrpcDraft {
                 DefinitionState::Failed(error) => (
                     Icon::default()
                         .path("icons/circle-alert.svg")
-                        .text_color(cx.theme().danger),
+                        .size_4()
+                        .text_color(cx.theme().danger)
+                        .into_any_element(),
                     if reflection {
                         "Could not load server reflection".into()
                     } else {
                         format!("Could not import {source}").into()
                     },
-                    Some(error.clone()),
+                    Some(error.to_string().into()),
                 ),
             };
         let failed = matches!(self.definition, DefinitionState::Failed(_));
+        let needed_tls = match &self.definition {
+            DefinitionState::Failed(GrpcError::TlsRequired) => Some(true),
+            DefinitionState::Failed(GrpcError::TlsUnsupported) => Some(false),
+            _ => None,
+        }
+        .filter(|_| lock_decides_tls(&self.request.url));
 
-        h_flex()
+        // The detail and actions line up with the title, past the 1 rem icon.
+        v_flex()
             .debug_selector(|| "grpc-definition-status".into())
-            .items_start()
-            .gap_2()
+            .gap_1()
             .p_3()
             .rounded(cx.theme().radius_tokens().lg)
             .bg(if failed {
@@ -692,35 +719,56 @@ impl GrpcDraft {
             } else {
                 cx.theme().muted
             })
-            .child(div().pt_0p5().child(icon))
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_1()
-                    .child(div().font_weight(FontWeight::MEDIUM).child(title))
-                    .when_some(detail, |status, detail| {
-                        status.child(
-                            div()
-                                .debug_selector(|| "grpc-definition-detail".into())
-                                .text_color(if failed {
-                                    cx.theme().danger
-                                } else {
-                                    cx.theme().muted_foreground
-                                })
-                                .when(failed, |detail| {
-                                    detail
-                                        .font_family(cx.theme().mono_font_family.clone())
-                                        .text_xs()
-                                })
-                                .child(detail),
-                        )
-                    }),
+                h_flex()
+                    .gap_2()
+                    .child(icon)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(title),
+                    )
+                    .when(!loading, |header| header.child(retry)),
             )
-            .when(
-                !matches!(self.definition, DefinitionState::Loading),
-                |status| status.child(retry),
-            )
+            .when_some(detail, |status, detail| {
+                status.child(
+                    div()
+                        .debug_selector(|| "grpc-definition-detail".into())
+                        .pl_6()
+                        .text_color(if failed {
+                            cx.theme().danger
+                        } else {
+                            cx.theme().muted_foreground
+                        })
+                        .when(failed, |detail| {
+                            detail
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_xs()
+                        })
+                        .child(detail),
+                )
+            })
+            .when_some(needed_tls, |status, tls| {
+                status.child(
+                    h_flex().pl_6().pt_1().child(
+                        Button::new("grpc-definition-set-tls")
+                            .debug_selector(|| "grpc-definition-set-tls".into())
+                            .outline()
+                            .small()
+                            .icon(Icon::default().path(if tls {
+                                "icons/lock.svg"
+                            } else {
+                                "icons/lock-open.svg"
+                            }))
+                            .label(if tls { "Turn on TLS" } else { "Turn off TLS" })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_tls(tls, window, cx)
+                            })),
+                    ),
+                )
+            })
             .into_any_element()
     }
 }
@@ -735,4 +783,16 @@ pub(super) fn reflected_target(
     }
 
     variables.grpc_target_key(request)
+}
+
+/// Whether the lock decides how the request connects. A URL that starts
+/// with a variable may supply its own scheme, which decides TLS instead.
+pub(super) fn lock_decides_tls(url: &str) -> bool {
+    let url = url.trim();
+    // The lock rewrites a scheme written in the URL.
+    let written_scheme = url
+        .split_once("://")
+        .is_some_and(|(scheme, _)| matches!(scheme, "grpc" | "grpcs" | "http" | "https"));
+
+    written_scheme || !url.starts_with("{{")
 }
