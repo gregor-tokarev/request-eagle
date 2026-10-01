@@ -9,7 +9,8 @@ use std::{ffi::OsStr, fs, path::Path};
 
 use collection::{ImportedCollection, ImportedItem};
 use request::{
-    GrpcDefinition, GrpcRequest, GrpcSettings, Request, RequestScripts, WebSocketRequest,
+    GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, Request, RequestScripts,
+    WebSocketRequest,
 };
 use serde_json::{Map, Value, json};
 
@@ -208,8 +209,8 @@ fn http_item(request: &Value, auth: Value) -> Value {
 
 fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
     let mut metadata = postman::pairs(&entries(&request["metadata"]));
-    // gRPC calls have no query parameters or scripts, so only authorizations
-    // sent as metadata apply.
+    // gRPC calls have no query parameters, so only authorizations sent as
+    // metadata apply.
     let own = json!({ "auth": auth });
     postman::authorize(
         postman::own_auth(&own).or(inherited.auth),
@@ -235,7 +236,25 @@ fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> Grp
             // Postman also counts in MiB and takes zero as any size.
             max_response_message_mb: settings["maxResponseMessageSize"].as_u64(),
         },
+        scripts: grpc_scripts(&request["scripts"]),
     }
+}
+
+/// A gRPC request's scripts, one for each hook Postman names.
+fn grpc_scripts(scripts: &Value) -> GrpcScripts {
+    let mut result = GrpcScripts::default();
+
+    for script in scripts.as_array().into_iter().flatten() {
+        let hook = match script["type"].as_str() {
+            Some("beforeInvoke") => &mut result.before_invoke,
+            Some("onMessage") => &mut result.on_message,
+            Some("afterResponse") => &mut result.after_response,
+            _ => continue,
+        };
+        *hook = text(script.get("code"));
+    }
+
+    result
 }
 
 /// The method as `package.Service/Method`; Postman writes

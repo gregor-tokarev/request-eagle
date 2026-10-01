@@ -64,6 +64,7 @@ script results.
   `package.Service/Method` and a JSON `message`. Without `proto_file` their
   services come from server reflection. `requests.run` sends the message once,
   also on client streams, and returns every message with the final status;
-  non-OK gRPC statuses exit 0 like HTTP errors.
+  non-OK gRPC statuses exit 0 like HTTP errors. Their `before_invoke`,
+  `on_message` and `after_response` scripts also need `trust_scripts: true`.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

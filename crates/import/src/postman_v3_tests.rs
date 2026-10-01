@@ -2,7 +2,8 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    GrpcDefinition, GrpcRequest, GrpcSettings, HttpRequest, Method, Request, WebSocketRequest,
+    GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
+    WebSocketRequest,
 };
 
 use crate::{ImportError, read};
@@ -96,6 +97,12 @@ scripts:
   - type: beforeInvoke
     code: console.log('invoke');
     language: text/javascript
+  - type: onMessage
+    code: console.log(pm.message.data);
+    language: text/javascript
+  - type: afterResponse
+    code: pm.test('ok', () => pm.response.to.be.ok);
+    language: text/javascript
 order: 1000
 "#,
     );
@@ -130,6 +137,11 @@ order: 1000
                 server_name: "shop.internal".into(),
                 include_default_fields: false,
                 max_response_message_mb: Some(16),
+            },
+            scripts: GrpcScripts {
+                before_invoke: "console.log('invoke');".into(),
+                on_message: "console.log(pm.message.data);".into(),
+                after_response: "pm.test('ok', () => pm.response.to.be.ok);".into(),
             },
         }
     );

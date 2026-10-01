@@ -553,3 +553,36 @@ fn grpc_requests_are_saved_and_listed_with_their_protocol() {
         "{source}"
     );
 }
+
+#[test]
+fn grpc_scripts_are_saved_and_need_approval_to_run() {
+    let cli = Cli::new();
+    let collection = cli.collection();
+    let grpc = json!({
+        "protocol": "grpc",
+        "url": "127.0.0.1:1",
+        "tls": false,
+        "method": "echo.v1.EchoService/Say",
+        "message": "{}",
+        "metadata": [],
+        "before_invoke": "pm.request.metadata.add({key: 'x-id', value: '1'});",
+        "after_response": "pm.test('ok', () => pm.response.to.be.ok);",
+    });
+    let created = cli.create(&collection, grpc.clone());
+    assert_eq!(created["request"], grpc);
+
+    let source = fs::read_to_string(created["path"].as_str().unwrap()).unwrap();
+    assert!(source.contains("before_invoke"), "{source}");
+    assert!(!source.contains("on_message"), "{source}");
+
+    let (_, denied) =
+        cli.raw(&json!({"command":"requests.run","path":created["path"]}).to_string());
+    assert_eq!(denied["ok"], false);
+    assert!(
+        denied["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("trust_scripts"),
+        "{denied}"
+    );
+}

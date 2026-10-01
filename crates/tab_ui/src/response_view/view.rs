@@ -13,6 +13,7 @@ use request::{
 use super::body::Body;
 use super::content::ResponseContent;
 use super::events::EventLog;
+use super::scripts::script_results;
 use crate::actions::SendRequest;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -344,8 +345,12 @@ impl Render for ResponseView {
         let has_response = self.content.is_some();
 
         let content = match self.section {
-            Section::Tests if has_results => self.script_results(false, cx),
-            Section::Console if has_results => self.script_results(true, cx),
+            Section::Tests if has_results => {
+                script_results(&self.scripts, false, "send the request", cx)
+            }
+            Section::Console if has_results => {
+                script_results(&self.scripts, true, "send the request", cx)
+            }
             Section::Body if has_response => match &self.events {
                 Some(events) => events.clone().into_any_element(),
                 None => self.body(cx),

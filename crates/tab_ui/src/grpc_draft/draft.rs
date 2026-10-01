@@ -9,12 +9,13 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use request::{GrpcClient, GrpcRequest, MethodKind, RequestPreferences};
+use request::{GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
 
 use super::definition::DefinitionState;
 use super::methods::{MethodList, method_list};
 use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
+use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::{
     Environments,
     variable_input::{VariableInput, VariableTarget},
@@ -26,6 +27,7 @@ pub(crate) enum GrpcSection {
     Message,
     Metadata,
     Definition,
+    Scripts,
     Settings,
 }
 
@@ -44,6 +46,7 @@ pub struct GrpcDraft {
     pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
     pub(super) message_json_valid: bool,
     pub(super) metadata: Option<Entity<RequestFields>>,
+    pub(crate) scripts: Option<Entity<ScriptEditor<GrpcScripts>>>,
     pub(super) methods: Option<Entity<SelectState<MethodList>>>,
     pub(super) proto_path: Option<Entity<InputState>>,
     pub(super) import_paths: Vec<Entity<InputState>>,
@@ -120,6 +123,7 @@ impl GrpcDraft {
             message_vim: None,
             message_json_valid: false,
             metadata: None,
+            scripts: None,
             methods: None,
             proto_path: None,
             import_paths: Vec::new(),
@@ -211,6 +215,10 @@ impl GrpcDraft {
                 self.metadata_state(window, cx);
             }
             GrpcSection::Definition => self.definition_inputs(window, cx),
+            GrpcSection::Scripts => {
+                self.script_editor(cx)
+                    .update(cx, |scripts, cx| scripts.editor(window, cx));
+            }
             GrpcSection::Settings => self.settings_inputs(window, cx),
         }
 
@@ -371,6 +379,49 @@ impl GrpcDraft {
 
         metadata
     }
+
+    pub(crate) fn script_editor(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Entity<ScriptEditor<GrpcScripts>> {
+        if let Some(scripts) = &self.scripts {
+            return scripts.clone();
+        }
+
+        let scripts =
+            cx.new(|_| ScriptEditor::new(self.request.scripts.clone(), ScriptTarget::Request));
+        self._subscriptions.push(cx.subscribe(
+            &scripts,
+            |this, _, event: &ScriptsChanged<GrpcScripts>, cx| {
+                let count = this.script_count();
+                this.request.scripts = event.0.clone();
+
+                // The Scripts tab shows the count.
+                if this.script_count() != count {
+                    this.redraw(cx);
+                } else {
+                    cx.notify();
+                }
+            },
+        ));
+        self.scripts = Some(scripts.clone());
+
+        scripts
+    }
+
+    /// How many of the call's scripts are written.
+    pub(super) fn script_count(&self) -> usize {
+        let scripts = &self.request.scripts;
+
+        [
+            &scripts.before_invoke,
+            &scripts.on_message,
+            &scripts.after_response,
+        ]
+        .into_iter()
+        .filter(|script| !script.is_empty())
+        .count()
+    }
 }
 
 impl Render for GrpcDraft {
@@ -447,6 +498,7 @@ impl Render for GrpcConfiguration {
                     GrpcSection::Message => draft.message_editor(window, cx),
                     GrpcSection::Metadata => draft.metadata_state(window, cx).into_any_element(),
                     GrpcSection::Definition => draft.definition_tab(window, cx),
+                    GrpcSection::Scripts => draft.script_editor(cx).into_any_element(),
                     GrpcSection::Settings => draft.settings_tab(window, cx),
                 };
 

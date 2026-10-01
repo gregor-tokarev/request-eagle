@@ -582,6 +582,51 @@ fn invalid_offsets_and_large_sources_fail_without_entering_the_worker() {
 }
 
 #[test]
+fn grpc_phases_offer_the_call_message_and_response() {
+    let before = ScriptPhase::BeforeInvoke;
+    let message = ScriptPhase::OnMessage;
+    let after = ScriptPhase::AfterResponse;
+
+    assert_eq!(
+        labels(&complete("pm.request.m|", before)),
+        ["message", "metadata", "methodPath"]
+    );
+    assert_eq!(
+        labels(&complete("pm.request.metadata.ups|", before)),
+        ["upsert"]
+    );
+    assert_eq!(
+        labels(&complete("pm.execution.sk|", before)),
+        ["skipRequest"]
+    );
+    assert!(complete("pm.execution.sk|", message).is_empty());
+    assert!(complete("pm.res|", before).is_empty());
+
+    assert_eq!(
+        labels(&complete("pm.message.|", message)),
+        ["data", "timestamp"]
+    );
+    assert!(complete("pm.res|", message).is_empty());
+
+    assert!(complete("pm.mess|", after).is_empty());
+    assert!(labels(&complete("pm.request.|", after)).contains(&"messages"));
+    assert_eq!(
+        labels(&complete("pm.response.to.have.|", after)),
+        ["message", "metadata", "status", "statusCode", "trailer"]
+    );
+    for expected in ["idx", "count", "filter", "to"] {
+        assert!(
+            labels(&complete("pm.response.messages.|", after)).contains(&expected),
+            "{expected}"
+        );
+    }
+    assert_eq!(
+        labels(&complete("pm.response.messages.to.have.|", after)),
+        ["jsonSchema", "property"]
+    );
+}
+
+#[test]
 fn active_cancellation_preserves_the_compiler_for_same_and_changed_source_queries() {
     // Match the worker's native stack size. Cancel at actual language-service
     // checkpoints so this regression does not depend on scheduler/timer speed.

@@ -18,5 +18,6 @@ If the binary is missing, see [installation instructions](../../docs/cli.md#inst
 - Pass JSON through stdin with `call -`, especially when it contains secrets.
 - Inspect saved scripts, including collection scripts from `collections.get`,
   before opting into their execution.
-- Check the JSON result, HTTP status, and script test results. Exit code 0
-  means execution completed; HTTP errors and failed assertions can still occur.
+- Check the JSON result, HTTP or gRPC status, and script test results. Exit
+  code 0 means execution completed; error statuses and failed assertions can
+  still occur.

@@ -57,7 +57,7 @@ impl Compiler {
                 let query: Function = setup.call((libraries, include_str!("pm.d.ts")))?;
 
                 // Pay the first type-check/library binding cost while warming up.
-                query.call::<_, String>(("pm.", 3, "pre", "completions"))?;
+                query.call::<_, String>(("pm.", 3, "PreRequestAPI", "completions"))?;
                 cx.globals().set("requestEagleLanguageQuery", query)?;
 
                 Ok(())
@@ -86,10 +86,13 @@ impl Compiler {
         let result = self.context.with(|cx| {
             let execute = || -> rquickjs::Result<Option<String>> {
                 let query: Function = cx.globals().get("requestEagleLanguageQuery")?;
-                let phase = if phase == ScriptPhase::PreRequest {
-                    "pre"
-                } else {
-                    "post"
+                // The interface pm.d.ts declares for the phase's `pm`.
+                let phase = match phase {
+                    ScriptPhase::PreRequest => "PreRequestAPI",
+                    ScriptPhase::PostResponse => "PostResponseAPI",
+                    ScriptPhase::BeforeInvoke => "GrpcBeforeInvokeAPI",
+                    ScriptPhase::OnMessage => "GrpcOnMessageAPI",
+                    ScriptPhase::AfterResponse => "GrpcAfterResponseAPI",
                 };
 
                 let cancellation = Function::new(cx.clone(), cancelled)?;

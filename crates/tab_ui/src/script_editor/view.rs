@@ -6,7 +6,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{RequestScripts, ScriptPhase};
+use request::{GrpcScripts, RequestScripts, ScriptPhase};
 use std::rc::Rc;
 
 use super::{
@@ -84,6 +84,96 @@ const POST_SNIPPETS: &[(&str, &str)] = &[
     ),
 ];
 
+const BEFORE_INVOKE_SNIPPETS: &[(&str, &str)] = &[
+    ("Set a variable", "pm.variables.set(\"name\", \"value\");"),
+    (
+        "Add metadata",
+        "pm.request.metadata.upsert({\n    key: \"x-request-id\",\n    value: pm.variables.replaceIn(\"{{$guid}}\")\n});",
+    ),
+    (
+        "Fetch an access token",
+        "const auth = await pm.sendRequest({\n    url: \"{{base_url}}/login\",\n    method: \"POST\"\n});\npm.expect(auth.code).to.equal(200);\npm.request.metadata.upsert({\n    key: \"authorization\",\n    value: \"Bearer \" + auth.json().token\n});",
+    ),
+    (
+        "Change the message",
+        "const message = JSON.parse(pm.request.message || \"{}\");\nmessage.requestId = pm.variables.replaceIn(\"{{$guid}}\");\npm.request.message = message;",
+    ),
+    (
+        "Skip when a variable is missing",
+        "if (!pm.environment.get(\"token\")) {\n    pm.execution.skipRequest(\"No access token configured\");\n}",
+    ),
+    (
+        "Log the call",
+        "console.log(\"Invoking\", pm.request.methodPath, \"on\", pm.request.url);",
+    ),
+];
+const ON_MESSAGE_SNIPPETS: &[(&str, &str)] = &[
+    (
+        "Check each message",
+        "pm.test(\"Message has an ID\", function () {\n    pm.expect(pm.message.data).to.have.property(\"id\");\n});",
+    ),
+    (
+        "Count messages",
+        "pm.variables.set(\"messages\", Number(pm.variables.get(\"messages\") ?? 0) + 1);",
+    ),
+    (
+        "Save a value from a message",
+        "pm.environment.set(\"lastId\", pm.message.data.id);",
+    ),
+    (
+        "Log each message",
+        "console.log(pm.message.timestamp.toISOString(), pm.message.data);",
+    ),
+];
+const AFTER_RESPONSE_SNIPPETS: &[(&str, &str)] = &[
+    (
+        "Status is OK",
+        "pm.test(\"Status is OK\", function () {\n    pm.response.to.have.status(\"OK\");\n});",
+    ),
+    (
+        "Save a value from the response",
+        "pm.environment.set(\"token\", pm.response.messages.idx(0).data.token);",
+    ),
+    (
+        "A message has the expected fields",
+        "pm.test(\"A message has the expected fields\", function () {\n    pm.response.messages.to.include({success: true});\n});",
+    ),
+    (
+        "Every message has a property",
+        "pm.test(\"Every message has an ID\", function () {\n    pm.response.messages.to.have.property(\"id\");\n});",
+    ),
+    (
+        "Validate messages with a schema",
+        "pm.test(\"Messages match the schema\", function () {\n    pm.response.messages.to.have.jsonSchema({\n        type: \"object\",\n        required: [\"id\"],\n        properties: {id: {type: \"string\"}}\n    });\n});",
+    ),
+    (
+        "Check response metadata",
+        "pm.test(\"Content type is gRPC\", function () {\n    pm.response.to.have.metadata(\"content-type\", \"application/grpc\");\n});",
+    ),
+    (
+        "Count received messages",
+        "pm.test(\"Received 3 messages\", function () {\n    pm.expect(pm.response.messages.count()).to.equal(3);\n});",
+    ),
+    (
+        "Response time is below 1 second",
+        "pm.test(\"Response time is below 1 second\", function () {\n    pm.expect(pm.response.responseTime).to.be.below(1000);\n});",
+    ),
+    (
+        "Log the response",
+        "console.log(pm.response.status, pm.response.messages.all());",
+    ),
+];
+
+fn snippets(phase: ScriptPhase) -> &'static [(&'static str, &'static str)] {
+    match phase {
+        ScriptPhase::PreRequest => PRE_SNIPPETS,
+        ScriptPhase::PostResponse => POST_SNIPPETS,
+        ScriptPhase::BeforeInvoke => BEFORE_INVOKE_SNIPPETS,
+        ScriptPhase::OnMessage => ON_MESSAGE_SNIPPETS,
+        ScriptPhase::AfterResponse => AFTER_RESPONSE_SNIPPETS,
+    }
+}
+
 /// Whose scripts the editor changes. This only affects its guidance text.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScriptTarget {
@@ -94,70 +184,135 @@ pub(crate) enum ScriptTarget {
 impl ScriptTarget {
     fn description(self, phase: ScriptPhase) -> &'static str {
         match (self, phase) {
-            (Self::Request, ScriptPhase::PreRequest) => "Runs before this request is sent.",
-            (Self::Request, ScriptPhase::PostResponse) => "Runs after the response is received.",
             (Self::Collection, ScriptPhase::PreRequest) => {
                 "Runs before every request in this collection, ahead of the request's own script."
             }
             (Self::Collection, ScriptPhase::PostResponse) => {
                 "Runs after every response in this collection, ahead of the request's own script."
             }
+            (_, ScriptPhase::PreRequest) => "Runs before this request is sent.",
+            (_, ScriptPhase::PostResponse) => "Runs after the response is received.",
+            (_, ScriptPhase::BeforeInvoke) => "Runs before the method is invoked.",
+            (_, ScriptPhase::OnMessage) => "Runs for each message the server sends.",
+            (_, ScriptPhase::AfterResponse) => "Runs after the server ends the call.",
         }
     }
 
     fn placeholder(self, phase: ScriptPhase) -> &'static str {
         match (self, phase) {
-            (Self::Request, ScriptPhase::PreRequest) => {
-                "// Write JavaScript to run before this request"
-            }
-            (Self::Request, ScriptPhase::PostResponse) => {
-                "// Write tests to run after the response"
-            }
             (Self::Collection, ScriptPhase::PreRequest) => {
                 "// Write JavaScript to run before every request in this collection"
             }
             (Self::Collection, ScriptPhase::PostResponse) => {
                 "// Write tests to run after every response in this collection"
             }
+            (_, ScriptPhase::PreRequest) => "// Write JavaScript to run before this request",
+            (_, ScriptPhase::PostResponse) => "// Write tests to run after the response",
+            (_, ScriptPhase::BeforeInvoke) => {
+                "// Write JavaScript to run before invoking the method"
+            }
+            (_, ScriptPhase::OnMessage) => "// Write tests to run for each received message",
+            (_, ScriptPhase::AfterResponse) => "// Write tests to run after the call ends",
         }
     }
 
-    fn hint(self) -> &'static str {
+    fn hint(self, phase: ScriptPhase) -> &'static str {
         match self {
-            Self::Request => "Send to run scripts",
             Self::Collection => "Save, then send a request in this collection to run scripts",
+            Self::Request if phase.is_grpc() => "Invoke to run scripts",
+            Self::Request => "Send to run scripts",
+        }
+    }
+}
+
+/// The scripts an editor changes, one for each phase.
+pub(crate) trait Scripts: Clone + 'static {
+    /// The phases in the order the editor lists them.
+    const PHASES: &'static [ScriptPhase];
+
+    fn script(&self, phase: ScriptPhase) -> &str;
+
+    fn script_mut(&mut self, phase: ScriptPhase) -> &mut String;
+}
+
+impl Scripts for RequestScripts {
+    const PHASES: &'static [ScriptPhase] = &[ScriptPhase::PreRequest, ScriptPhase::PostResponse];
+
+    fn script(&self, phase: ScriptPhase) -> &str {
+        match phase {
+            ScriptPhase::PreRequest => &self.pre_request,
+            _ => &self.post_response,
+        }
+    }
+
+    fn script_mut(&mut self, phase: ScriptPhase) -> &mut String {
+        match phase {
+            ScriptPhase::PreRequest => &mut self.pre_request,
+            _ => &mut self.post_response,
+        }
+    }
+}
+
+impl Scripts for GrpcScripts {
+    const PHASES: &'static [ScriptPhase] = &[
+        ScriptPhase::BeforeInvoke,
+        ScriptPhase::OnMessage,
+        ScriptPhase::AfterResponse,
+    ];
+
+    fn script(&self, phase: ScriptPhase) -> &str {
+        match phase {
+            ScriptPhase::BeforeInvoke => &self.before_invoke,
+            ScriptPhase::OnMessage => &self.on_message,
+            _ => &self.after_response,
+        }
+    }
+
+    fn script_mut(&mut self, phase: ScriptPhase) -> &mut String {
+        match phase {
+            ScriptPhase::BeforeInvoke => &mut self.before_invoke,
+            ScriptPhase::OnMessage => &mut self.on_message,
+            _ => &mut self.after_response,
         }
     }
 }
 
 /// The edited scripts, emitted after every change.
-pub(crate) struct ScriptsChanged(pub RequestScripts);
+pub(crate) struct ScriptsChanged<S = RequestScripts>(pub S);
 
-/// Pre-request and post-response editors with completion, signature help and
-/// Vim mode. Each phase's editor is created when it is first shown.
-pub(crate) struct ScriptEditor {
+/// An editor for each script phase with completion, signature help and Vim
+/// mode. Each phase's editor is created when it is first shown.
+pub(crate) struct ScriptEditor<S: Scripts = RequestScripts> {
     target: ScriptTarget,
-    scripts: RequestScripts,
+    scripts: S,
     pub(crate) phase: ScriptPhase,
-    pub(crate) editors: [Option<Entity<EditorState>>; 2],
-    vim: [Option<Entity<crate::vim::Vim>>; 2],
-    pub(super) signatures: [Option<Entity<ScriptSignature>>; 2],
+    /// In the order of `S::PHASES`, like the other per-phase views.
+    pub(crate) editors: Vec<Option<Entity<EditorState>>>,
+    vim: Vec<Option<Entity<crate::vim::Vim>>>,
+    pub(super) signatures: Vec<Option<Entity<ScriptSignature>>>,
     _subscriptions: Vec<Subscription>,
 }
 
-impl EventEmitter<ScriptsChanged> for ScriptEditor {}
+impl<S: Scripts> EventEmitter<ScriptsChanged<S>> for ScriptEditor<S> {}
 
-impl ScriptEditor {
-    pub(crate) fn new(scripts: RequestScripts, target: ScriptTarget) -> Self {
+impl<S: Scripts> ScriptEditor<S> {
+    pub(crate) fn new(scripts: S, target: ScriptTarget) -> Self {
         Self {
             target,
             scripts,
-            phase: ScriptPhase::PreRequest,
-            editors: [None, None],
-            vim: [None, None],
-            signatures: [None, None],
+            phase: S::PHASES[0],
+            editors: vec![None; S::PHASES.len()],
+            vim: vec![None; S::PHASES.len()],
+            signatures: vec![None; S::PHASES.len()],
             _subscriptions: Vec::new(),
         }
+    }
+
+    fn index(&self) -> usize {
+        S::PHASES
+            .iter()
+            .position(|phase| *phase == self.phase)
+            .expect("the editor's phase")
     }
 
     pub(crate) fn select_phase(
@@ -178,24 +333,20 @@ impl ScriptEditor {
         cx: &mut Context<Self>,
     ) -> Entity<EditorState> {
         let phase = self.phase;
-        let index = usize::from(phase == ScriptPhase::PostResponse);
+        let index = self.index();
 
         if let Some(editor) = &self.editors[index] {
             return editor.clone();
         }
 
-        let value = if index == 0 {
-            &self.scripts.pre_request
-        } else {
-            &self.scripts.post_response
-        };
+        let value = self.scripts.script(phase);
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("javascript")
                 .line_number(true)
                 .soft_wrap(true)
                 .placeholder(self.target.placeholder(phase))
-                .default_value(value.clone())
+                .default_value(value.to_owned())
         });
         let completions = Rc::new(ScriptCompletions::new(phase, &editor));
         editor.update(cx, |editor, _| {
@@ -215,12 +366,7 @@ impl ScriptEditor {
                 }
 
                 if matches!(event, InputEvent::Change) {
-                    let value = editor.read(cx).value().to_string();
-                    if phase == ScriptPhase::PreRequest {
-                        this.scripts.pre_request = value;
-                    } else {
-                        this.scripts.post_response = value;
-                    }
+                    *this.scripts.script_mut(phase) = editor.read(cx).value().to_string();
                     cx.emit(ScriptsChanged(this.scripts.clone()));
                     cx.notify();
                 }
@@ -232,7 +378,7 @@ impl ScriptEditor {
     }
 }
 
-impl Render for ScriptEditor {
+impl<S: Scripts> Render for ScriptEditor<S> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let editor = self.editor(window, cx);
         editor.update(cx, |editor, _| {
@@ -252,16 +398,12 @@ impl Render for ScriptEditor {
                 .min(available.max(px(120.)));
         });
         let phase = self.phase;
-        let index = usize::from(phase == ScriptPhase::PostResponse);
+        let index = self.index();
         let signature = self.signatures[index].as_ref().unwrap().clone();
         let mouse_vim = self.vim[index].as_ref().unwrap().clone();
         let escape_editor = editor.clone();
         let escape_signature = signature.clone();
-        let snippets = if phase == ScriptPhase::PreRequest {
-            PRE_SNIPPETS
-        } else {
-            POST_SNIPPETS
-        };
+        let snippets = snippets(phase);
         let view = cx.entity().downgrade();
         let target = self.target;
 
@@ -284,36 +426,26 @@ impl Render for ScriptEditor {
                     .gap_1()
                     .border_r_1()
                     .border_color(cx.theme().border)
-                    .children(
-                        [ScriptPhase::PreRequest, ScriptPhase::PostResponse]
-                            .into_iter()
-                            .map(|option| {
-                                let present = if option == ScriptPhase::PreRequest {
-                                    !self.scripts.pre_request.is_empty()
-                                } else {
-                                    !self.scripts.post_response.is_empty()
-                                };
-                                Tab::new(option.label())
-                                    .debug_selector(move || {
-                                        format!("script-phase-{}", option.label())
-                                    })
-                                    .selected(phase == option)
-                                    .accessibility_label(option.label())
-                                    .h_8()
-                                    .px_2()
-                                    .gap_2()
-                                    .rounded(cx.theme().radius_tokens().md)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .when(phase == option, |tab| {
-                                        tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                                    })
-                                    .child(option.label())
-                                    .when(present, |tab| tab.child(div().text_xs().child("•")))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select_phase(option, window, cx);
-                                    }))
-                            }),
-                    ),
+                    .children(S::PHASES.iter().copied().map(|option| {
+                        let present = !self.scripts.script(option).is_empty();
+                        Tab::new(option.label())
+                            .debug_selector(move || format!("script-phase-{}", option.label()))
+                            .selected(phase == option)
+                            .accessibility_label(option.label())
+                            .h_8()
+                            .px_2()
+                            .gap_2()
+                            .rounded(cx.theme().radius_tokens().md)
+                            .text_color(cx.theme().muted_foreground)
+                            .when(phase == option, |tab| {
+                                tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
+                            })
+                            .child(option.label())
+                            .when(present, |tab| tab.child(div().text_xs().child("•")))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_phase(option, window, cx);
+                            }))
+                    })),
             )
             .child(
                 v_flex()
@@ -390,7 +522,7 @@ impl Render for ScriptEditor {
                                     .min_w_0()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(self.target.hint()),
+                                    .child(self.target.hint(phase)),
                             )
                             .child(
                                 Button::new("script-snippets")

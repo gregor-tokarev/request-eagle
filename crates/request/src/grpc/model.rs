@@ -23,6 +23,8 @@ pub struct GrpcRequest {
     pub definition: GrpcDefinition,
     #[serde(default, skip_serializing_if = "GrpcSettings::is_default")]
     pub settings: GrpcSettings,
+    #[serde(default, skip_serializing_if = "crate::GrpcScripts::is_empty")]
+    pub scripts: crate::GrpcScripts,
 }
 
 /// Per-request options, as in Postman's gRPC Settings tab.
