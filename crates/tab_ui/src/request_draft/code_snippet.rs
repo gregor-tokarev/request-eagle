@@ -156,11 +156,24 @@ impl Render for CodeSnippet {
             .on_click(move |_, window, cx| {
                 let _ = draft.update(cx, |draft, cx| draft.toggle_code_snippet(window, cx));
             });
+        // Written again when copied, as cookies may have expired since.
+        let current = self.draft.clone();
         let copy = div().debug_selector(|| "copy-code-snippet".into()).child(
             Clipboard::new("copy-code-snippet")
                 .small()
                 .tooltip("Copy snippet")
-                .value(self.command.clone()),
+                .value_fn(move |_, cx| {
+                    current
+                        .upgrade()
+                        .map(|draft| {
+                            let draft = draft.read(cx);
+                            draft
+                                .request
+                                .curl_command(&draft.variable_values(cx).0, active_jar(cx).as_ref())
+                                .into()
+                        })
+                        .unwrap_or_default()
+                }),
         );
         let language = div().flex_1().font_weight(FontWeight::MEDIUM).child("cURL");
 

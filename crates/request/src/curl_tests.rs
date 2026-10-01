@@ -221,3 +221,29 @@ fn includes_the_jar_cookies_for_the_url() {
         "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: own=typed'"
     );
 }
+
+#[test]
+fn includes_the_jar_cookies_beside_literal_braces() {
+    let jar = CookieJar::new();
+    jar.set(
+        &url::Url::parse("https://pets.test/").unwrap(),
+        "sid=abc; Path=/",
+    )
+    .unwrap();
+    let request = |path: &str| HttpRequest {
+        path: path.into(),
+        ..HttpRequest::default()
+    };
+
+    assert!(
+        request("https://pets.test/?q={{!literal}}")
+            .curl_command(&HashMap::new(), Some(&jar))
+            .ends_with("--header 'Cookie: sid=abc'")
+    );
+    // Without a known host, no cookies apply.
+    assert!(
+        !request("{{base}}/pets")
+            .curl_command(&HashMap::new(), Some(&jar))
+            .contains("Cookie")
+    );
+}

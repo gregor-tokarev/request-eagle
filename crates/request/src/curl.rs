@@ -60,11 +60,9 @@ impl HttpRequest {
         let url = url(&request.path, &request.query);
         let body = request.body.as_deref().filter(|body| !body.is_empty());
 
-        // The jar's cookies for the request's own URL. A redirect's cookies
-        // are not known until it is followed.
-        if let Some(jar_cookies) = cookies
-            .filter(|_| !url.contains("{{"))
-            .and_then(|jar| jar.cookie_header(&url, &request.headers))
+        // The jar's cookies for the request's own URL, which cURL sends on
+        // to redirects as well. A URL whose host is not known has none.
+        if let Some(jar_cookies) = cookies.and_then(|jar| jar.cookie_header(&url, &request.headers))
         {
             let own = request
                 .headers
