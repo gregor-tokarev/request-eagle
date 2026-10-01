@@ -9,16 +9,27 @@ aho-corasick = "1"
 anyhow.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
+encoding_rs = "0.8"
 futures = "0.3"
-gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-html", "tree-sitter-javascript"] }
+gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-yaml"] }
+# PDF responses render to page bitmaps, which GPUI shows as image frames.
+hayro = "0.7"
+# Previewed pages lose their images before GPUI Kit renders them.
+html5ever = "0.27"
+image = { version = "0.25", default-features = false }
 lsp-types = "0.97"
+markup5ever_rcdom = "0.3"
 preferences = { path = "../preferences" }
+quick-xml = "0.41"
 request = { path = "../request" }
 request_history = { package = "history", path = "../history" }
 request_eagle_theme = { package = "theme", path = "../theme" }
 ropey = "=2.0.0-beta.1"
 script_intelligence = { path = "../script_intelligence" }
 serde_json = "1"
+# GPUI Kit has no XML grammar; highlight XML responses with this one.
+tree-sitter = "0.26"
+tree-sitter-xml = "0.7"
 unicode-segmentation = "1.13"
 
 [dev-dependencies]

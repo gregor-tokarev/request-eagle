@@ -1,6 +1,14 @@
-use std::{collections::HashMap, io::Write as _, time::Duration};
+use std::{
+    collections::HashMap,
+    io::Write,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use flate2::{Compression, write::GzEncoder};
+use flate2::{
+    Compression,
+    write::{GzEncoder, ZlibEncoder},
+};
 use futures::StreamExt as _;
 use request::{
     EventStream, EventStreamUpdate, EventStreamUpdates, ExecutionError, HttpRequest, HttpVersion,
@@ -273,6 +281,83 @@ fn gzip_streams_decode_as_they_arrive() {
         assert!(response.metrics.encoded_response_body_bytes.is_some());
         server.await;
     });
+}
+
+/// Collects what an encoder writes, for the server to send after each flush.
+#[derive(Clone, Default)]
+struct Encoded(Arc<Mutex<Vec<u8>>>);
+
+impl Encoded {
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut self.0.lock().unwrap())
+    }
+}
+
+impl Write for Encoded {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn deflate_brotli_and_zstd_streams_decode_as_they_arrive() {
+    for coding in ["deflate", "br", "zstd"] {
+        smol::block_on(async {
+            let (received, receiving) = next_part();
+            let (url, server) = serve(move |mut stream| async move {
+                let encoded = Encoded::default();
+                // Dropping each encoder ends its stream.
+                let mut encoder: Box<dyn Write + Send> = match coding {
+                    "deflate" => {
+                        Box::new(ZlibEncoder::new(encoded.clone(), Compression::default()))
+                    }
+                    "br" => Box::new(brotli::CompressorWriter::new(encoded.clone(), 4096, 5, 22)),
+                    _ => Box::new(
+                        zstd::stream::write::Encoder::new(encoded.clone(), 3)
+                            .unwrap()
+                            .auto_finish(),
+                    ),
+                };
+                stream
+                    .write_all(
+                        format!("{STREAM_HEAD}Content-Encoding: {coding}\r\n\r\n").as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+
+                encoder.write_all(b"data: one\n\n").unwrap();
+                encoder.flush().unwrap();
+                stream.write_all(&encoded.take()).await.unwrap();
+                receiving.recv().await.unwrap();
+
+                encoder.write_all(b"data: two\n\n").unwrap();
+                drop(encoder);
+                stream.write_all(&encoded.take()).await.unwrap();
+            })
+            .await;
+            let (events, mut updates, _stop) = EventStream::new();
+            let run = smol::spawn(executor(RequestPreferences::default()).execute_streaming(
+                get(&url),
+                no_variables(),
+                events,
+            ));
+
+            opened(&mut updates).await;
+            assert_eq!(next_event(&mut updates).await.data, "one", "{coding}");
+            received.send(()).await.unwrap();
+            assert_eq!(next_event(&mut updates).await.data, "two", "{coding}");
+
+            let Response::Http(response) = run.await.unwrap().response;
+            assert_eq!(response.body, b"data: one\n\ndata: two\n\n");
+            assert!(response.metrics.encoded_response_body_bytes.is_some());
+            server.await;
+        });
+    }
 }
 
 #[test]

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 18] = [
+const LOCAL_ICONS: [(&str, &[u8]); 19] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -60,6 +60,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 18] = [
     (
         "icons/file-code.svg",
         include_bytes!("../assets/icons/file-code.svg"),
+    ),
+    (
+        "icons/download.svg",
+        include_bytes!("../assets/icons/download.svg"),
     ),
     // gRPC method kinds: a doubled arrow marks the side that streams.
     (

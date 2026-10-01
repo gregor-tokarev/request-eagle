@@ -112,6 +112,7 @@ impl RequestDraft {
 
         let scope = self.variables.clone();
         let request = self.request.clone();
+        let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
         let preferences = cx
             .try_global::<Preferences>()
@@ -151,7 +152,9 @@ impl RequestDraft {
 
             (
                 Some((preferences, executor)),
-                result.map(crate::response_view::ResponseContent::new),
+                result.map(|execution| {
+                    crate::response_view::ResponseContent::new(execution).named_after(&url)
+                }),
                 outcome,
             )
         });
