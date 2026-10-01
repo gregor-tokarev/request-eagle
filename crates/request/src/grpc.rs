@@ -15,10 +15,11 @@
 //! reflection) come from the request preferences unless the request's settings
 //! override them. Calls run on the Tokio runtime shared with the HTTP client.
 //!
-//! The request's Before invoke script runs before the call starts and can
-//! change its URL, metadata and message. On message runs after each received
-//! message and After response before `Finished`; their reports arrive as
-//! `GrpcEvent::Script`.
+//! `GrpcClient::prepare` runs the request's Before invoke script, which can
+//! change the call's URL, metadata and message and set its variables; load the
+//! definition for the prepared call, then `start` it. `invoke` does both with
+//! a loaded definition. On message runs after each received message and After
+//! response before `Finished`; their reports arrive as `GrpcEvent::Script`.
 
 mod call;
 mod client;
@@ -32,7 +33,7 @@ mod status;
 mod transport;
 
 pub use call::{GrpcCall, GrpcEvent, GrpcEvents, GrpcMessage};
-pub use client::GrpcClient;
+pub use client::{GrpcClient, PreparedCall};
 pub use definition::{GrpcMethod, GrpcService, MethodKind, ServiceDefinition};
 pub use error::GrpcError;
 pub use model::{GrpcDefinition, GrpcRequest, GrpcSettings};

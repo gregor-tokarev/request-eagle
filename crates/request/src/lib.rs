@@ -30,7 +30,8 @@ pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;
 pub use grpc::{
     GrpcCall, GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcMessage,
-    GrpcMethod, GrpcRequest, GrpcService, GrpcSettings, GrpcStatus, MethodKind, ServiceDefinition,
+    GrpcMethod, GrpcRequest, GrpcService, GrpcSettings, GrpcStatus, MethodKind, PreparedCall,
+    ServiceDefinition,
 };
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request, WebSocketRequest};

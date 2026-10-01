@@ -230,3 +230,26 @@ fn calls_stopped_by_before_invoke_show_why(cx: &mut TestAppContext) {
         assert!(matches!(response.state, CallState::Failed(_)));
     });
 }
+
+#[gpui_kit::test]
+fn failed_tests_show_when_the_call_fails_without_a_status(cx: &mut TestAppContext) {
+    let (response, cx) = response(cx);
+
+    response.update_in(cx, |response, window, cx| {
+        response.start(MethodKind::Unary, "localhost:1".into(), window, cx);
+        response.receive(
+            vec![
+                GrpcEvent::Script(report(
+                    ScriptPhase::BeforeInvoke,
+                    None,
+                    Some("expected 1 to equal 2"),
+                )),
+                GrpcEvent::Failed(GrpcError::Connect("refused".into())),
+            ],
+            window,
+            cx,
+        );
+    });
+
+    assert!(element_bounds(cx, "script-test-results").is_some());
+}

@@ -57,4 +57,12 @@ pub enum GrpcError {
 
     #[error("scripts could not start: {0}")]
     ScriptSetup(String),
+
+    /// The call did not start after its Before invoke script ran, whose
+    /// results it keeps.
+    #[error("{source}")]
+    ScriptedCall {
+        source: Box<GrpcError>,
+        report: Box<ScriptReport>,
+    },
 }

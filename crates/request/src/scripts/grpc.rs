@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, time::UNIX_EPOCH};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::UNIX_EPOCH,
+};
 
 use environment::EnvironmentSession;
 use futures::{StreamExt as _, channel::mpsc::UnboundedSender};
@@ -59,6 +62,12 @@ impl CallScripts {
             executor,
             cancellation: Cancellation::new(),
         }
+    }
+
+    /// Keep the values generated while resolving the call, so later scripts
+    /// resolve `{{$name}}` to what was sent.
+    pub fn keep_generated(&mut self, values: HashMap<String, String>) {
+        self.variables.generated.extend(values);
     }
 
     /// Whether a script runs on the call's events, after it is invoked.

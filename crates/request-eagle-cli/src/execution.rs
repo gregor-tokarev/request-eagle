@@ -94,12 +94,13 @@ async fn run_grpc(
     settings: &RequestPreferences,
 ) -> Result<Value> {
     let client = GrpcClient::new(settings);
-    let variables =
-        || RequestVariables::with_environment_session(values.clone(), None, Default::default());
+    let variables = RequestVariables::with_environment_session(values, None, Default::default());
+    // Before invoke runs first, as it can set variables reflection needs.
+    let prepared = client.prepare(&request, variables).await?;
     let definition = client
-        .load_definition(&request, &variables(), Some(collection))
+        .load_definition(prepared.request(), prepared.variables(), Some(collection))
         .await?;
-    let (mut call, mut events) = client.invoke(&request, variables(), &definition).await?;
+    let (mut call, mut events) = client.start(prepared, &definition)?;
 
     if call.kind.streams_requests() {
         call.send(&request.message)?;

@@ -121,7 +121,7 @@ fn before_invoke_changes_the_call_and_the_variables_it_resolves_with() {
     assert_eq!(request.metadata.len(), 1);
 
     // The generated value is the same in the script, metadata and message.
-    let resolved = variables.resolve_grpc_call(&request).unwrap();
+    let (resolved, _) = variables.resolve_grpc(&request, true).unwrap();
     let id = &resolved.metadata[0].1;
     let message: serde_json::Value = serde_json::from_str(&resolved.message).unwrap();
     assert_eq!(message, serde_json::json!({"text": "hi eagle", "id": id}));

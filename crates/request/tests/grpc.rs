@@ -1131,3 +1131,101 @@ async fn failing_before_invoke_scripts_stop_the_call() {
     );
     assert!(error.to_string().contains("no token"), "{error}");
 }
+
+#[tokio::test]
+async fn before_invoke_sets_the_metadata_reflection_needs() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", r#"{"text": "{{token}}"}"#);
+    request.metadata = vec![("x-echo".into(), "{{token}}".into())];
+    request.scripts.before_invoke = "pm.variables.set('token', 'secret');".into();
+
+    // Without the script, reflection cannot resolve the metadata.
+    assert!(
+        client()
+            .load_definition(&request, &variables(), None)
+            .await
+            .is_err()
+    );
+
+    let prepared = client().prepare(&request, variables()).await.unwrap();
+    let definition = client()
+        .load_definition(prepared.request(), prepared.variables(), None)
+        .await
+        .unwrap();
+    let (_call, events) = client().start(prepared, &definition).unwrap();
+    let events = collect(events).await;
+
+    assert_eq!(
+        received(&events),
+        [serde_json::json!({"text": "hello secret", "index": 0})]
+    );
+    assert!(events.iter().any(|event| matches!(event,
+        GrpcEvent::Metadata(metadata) if metadata.contains(&("x-echo".into(), "secret".into())))));
+}
+
+#[tokio::test]
+async fn calls_that_fail_after_before_invoke_keep_its_results() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", "{}");
+    request.scripts.before_invoke = r#"
+        console.log("prepared");
+        pm.request.message = {unknown: 1};
+    "#
+    .into();
+    let definition = reflect(&request).await;
+
+    let error = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .err()
+        .unwrap();
+
+    match error {
+        GrpcError::ScriptedCall { source, report } => {
+            assert!(matches!(*source, GrpcError::InvalidMessage(_)), "{source}");
+            assert_eq!(report.logs[0].message, "prepared");
+        }
+        error => panic!("expected the script's results, got {error}"),
+    }
+}
+
+#[tokio::test]
+async fn values_before_invoke_sets_last_for_the_call() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+
+    // Stream messages use the value the script set.
+    let mut stream = request(address, "Collect", "");
+    stream.scripts.before_invoke = "pm.variables.set('$guid', 'fixed');".into();
+    let definition = reflect(&stream).await;
+    let (mut call, events) = client()
+        .invoke(&stream, variables(), &definition)
+        .await
+        .unwrap();
+    call.send(r#"{"text": "{{$guid}}"}"#).unwrap();
+    call.send(r#"{"text": "{{$guid}}"}"#).unwrap();
+    call.end();
+    assert_eq!(
+        received(&collect(events).await),
+        [serde_json::json!({"text": "fixed,fixed", "index": 2})]
+    );
+
+    // After response sees the value generated when the call was sent.
+    let mut request = request(address, "Say", r#"{"text": "{{$guid}}"}"#);
+    request.scripts.after_response = r#"
+        pm.test("same value", () => {
+            pm.response.messages.to.include({text: "hello " + pm.variables.replaceIn("{{$guid}}")});
+        });
+    "#
+    .into();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
+    assert_eq!(
+        script_results(&collect(events).await),
+        [("After response".into(), true, None)]
+    );
+}

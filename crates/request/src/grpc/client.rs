@@ -127,24 +127,47 @@ impl GrpcClient {
         }
     }
 
-    /// Start a call once its Before invoke script has run. Unary and server
-    /// streaming methods then send the request's message right away;
+    /// Run the request's Before invoke script, then start the call. Unary
+    /// and server streaming methods send the request's message right away;
     /// streaming requests wait for `GrpcCall::send`. Dropping the future
     /// interrupts the script.
     pub fn invoke(
         &self,
         request: &GrpcRequest,
-        mut variables: RequestVariables,
+        variables: RequestVariables,
         definition: &ServiceDefinition,
     ) -> impl Future<Output = Result<(GrpcCall, GrpcEvents), GrpcError>> + Send + 'static + use<>
     {
         let client = self.clone();
-        let mut request = request.clone();
+        let definition = definition.clone();
         // An unknown method fails before any script runs.
-        let method = method(&request, definition);
+        let method = method(request, &definition).map(|_| ());
+        let prepare = self.prepare(request, variables);
 
         async move {
-            let (method, kind) = method?;
+            method?;
+
+            client.start(prepare.await?, &definition)
+        }
+    }
+
+    /// Run the request's Before invoke script, which can change the call and
+    /// set the variables it resolves with. Load the service definition for
+    /// the prepared call, since reflection may need them, then start it.
+    /// Dropping the future interrupts the script.
+    pub fn prepare(
+        &self,
+        request: &GrpcRequest,
+        mut variables: RequestVariables,
+    ) -> impl Future<Output = Result<PreparedCall, GrpcError>> + Send + 'static + use<> {
+        let client = self.clone();
+        let mut request = request.clone();
+
+        async move {
+            if request.method.trim().is_empty() {
+                return Err(GrpcError::MissingMethod);
+            }
+
             let mut scripts = None;
             let mut report = None;
 
@@ -158,7 +181,12 @@ impl GrpcClient {
                 scripts = Some(call_scripts);
             }
 
-            client.start(&request, variables, method, kind, report, scripts)
+            Ok(PreparedCall {
+                request,
+                variables,
+                report,
+                scripts,
+            })
         }
     }
 
@@ -171,35 +199,55 @@ impl GrpcClient {
             .map_err(GrpcError::ScriptSetup)
     }
 
-    /// Resolve and send the call. `report` is its Before invoke script's, and
-    /// `scripts` follow its events when they have On message or After
-    /// response scripts.
-    fn start(
+    /// Resolve and send a prepared call. Its errors keep the Before invoke
+    /// script's results.
+    pub fn start(
+        &self,
+        call: PreparedCall,
+        definition: &ServiceDefinition,
+    ) -> Result<(GrpcCall, GrpcEvents), GrpcError> {
+        let PreparedCall {
+            request,
+            variables,
+            report,
+            scripts,
+        } = call;
+
+        self.open(&request, variables, definition, report.clone(), scripts)
+            .map_err(|error| with_report(error, report))
+    }
+
+    /// `report` is the Before invoke script's, and `scripts` follow the
+    /// call's events when they have On message or After response scripts.
+    fn open(
         &self,
         request: &GrpcRequest,
         variables: RequestVariables,
-        method: MethodDescriptor,
-        kind: MethodKind,
+        definition: &ServiceDefinition,
         report: Option<ScriptReport>,
         scripts: Option<CallScripts>,
     ) -> Result<(GrpcCall, GrpcEvents), GrpcError> {
+        let (method, kind) = method(request, definition)?;
         let method_path = format!("/{}/{}", method.parent_service().full_name(), method.name());
         let path = PathAndQuery::try_from(method_path)
             .map_err(|error| GrpcError::UnknownMethod(error.to_string()))?;
 
         // A streaming request's messages resolve as they are sent, so an
         // unfinished draft does not stop the stream from opening.
-        let resolved = if kind.streams_requests() {
-            variables.resolve_grpc_target(request)
-        } else {
-            variables.resolve_grpc_call(request)
-        }
-        .map_err(GrpcError::Variables)?;
+        let (resolved, generated) = variables
+            .resolve_grpc(request, !kind.streams_requests())
+            .map_err(GrpcError::Variables)?;
         let target = self.target(&resolved)?;
         let metadata = metadata(&resolved.metadata)?;
 
-        // Scripts that follow the call see each event before passing it on.
-        let scripts = scripts.filter(CallScripts::follow_events);
+        // Scripts that follow the call see each event before passing it on,
+        // and the values generated for it.
+        let scripts = scripts
+            .filter(CallScripts::follow_events)
+            .map(|mut scripts| {
+                scripts.keep_generated(generated);
+                scripts
+            });
         let (events, raw) = unbounded();
         let (output, receiver, raw) = if scripts.is_some() {
             let (output, receiver) = unbounded();
@@ -273,6 +321,40 @@ impl GrpcClient {
         call.tasks.push(task.abort_handle());
 
         Ok((call, receiver))
+    }
+}
+
+/// A call whose Before invoke script has run. Its request and variables
+/// are what the script left them.
+pub struct PreparedCall {
+    request: GrpcRequest,
+    variables: RequestVariables,
+    report: Option<ScriptReport>,
+    scripts: Option<CallScripts>,
+}
+
+impl PreparedCall {
+    pub fn request(&self) -> &GrpcRequest {
+        &self.request
+    }
+
+    pub fn variables(&self) -> &RequestVariables {
+        &self.variables
+    }
+
+    /// A failure to start the call, with the Before invoke script's results.
+    pub fn fail(self, error: GrpcError) -> GrpcError {
+        with_report(error, self.report)
+    }
+}
+
+fn with_report(error: GrpcError, report: Option<ScriptReport>) -> GrpcError {
+    match report {
+        Some(report) => GrpcError::ScriptedCall {
+            source: Box::new(error),
+            report: Box::new(report),
+        },
+        None => error,
     }
 }
 

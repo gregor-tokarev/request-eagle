@@ -121,14 +121,18 @@ A gRPC request's **Scripts** section has three scripts:
 
 - **Before invoke** runs before the method is invoked. It can change the
   server URL, metadata and message of that call, and
-  `pm.execution.skipRequest(reason)` cancels it.
+  `pm.execution.skipRequest(reason)` cancels it. It runs before server
+  reflection loads the call's methods, so it can also set the metadata that
+  reflection needs.
 - **On message** runs for each message the server sends, in order.
 - **After response** runs once the server ends the call, including with an
   error status. It does not run when the call fails without a status, such as
   when the server is unreachable, or when you cancel it.
 
-The three scripts share `pm.variables` during the call. Collection scripts run
-only for HTTP requests.
+The three scripts share `pm.variables` during the call. A `{{$guid}}` or other
+generated value that Before invoke creates or sets keeps that value for the
+whole call, including stream messages. Collection scripts run only for HTTP
+requests.
 
 ```js
 // Before invoke

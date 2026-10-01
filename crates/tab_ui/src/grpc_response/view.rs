@@ -25,8 +25,9 @@ pub(super) enum Section {
 
 pub(super) enum CallState {
     Idle,
-    /// Loading the service definition before invoking.
-    Waiting,
+    /// Preparing the call, such as loading the service definition, with a
+    /// title saying what for.
+    Waiting(SharedString),
     Running,
     Finished {
         status: GrpcStatus,
@@ -75,7 +76,7 @@ pub(crate) struct GrpcResponse {
     pub(super) metadata: Vec<(SharedString, SharedString)>,
     pub(super) trailers: Vec<(SharedString, SharedString)>,
     /// In the order the scripts ran.
-    pub(super) scripts: Vec<ScriptReport>,
+    pub(crate) scripts: Vec<ScriptReport>,
     /// The unary response message.
     pub(super) body: Option<Entity<EditorState>>,
     /// In arrival order. The stream shows the newest first.
@@ -130,10 +131,10 @@ impl GrpcResponse {
         self.list.reset(0);
     }
 
-    /// Waiting for the service definition before the call starts.
-    pub(crate) fn wait(&mut self, cx: &mut Context<Self>) {
+    /// Preparing the call before it starts, as `title` says.
+    pub(crate) fn wait(&mut self, title: SharedString, cx: &mut Context<Self>) {
         self.reset();
-        self.state = CallState::Waiting;
+        self.state = CallState::Waiting(title);
         cx.notify();
     }
 
@@ -193,12 +194,25 @@ impl GrpcResponse {
             GrpcError::Script { message, report } => {
                 self.state = CallState::Failed(message.into());
                 self.scripts.push(*report);
-                self.section = Section::Tests;
+            }
+            GrpcError::ScriptedCall { source, report } => {
+                self.state = CallState::Failed(source.to_string().into());
+                self.scripts.push(*report);
             }
             error => self.state = CallState::Failed(error.to_string().into()),
         }
 
+        self.show_failures();
         cx.notify();
+    }
+
+    /// Like an HTTP response, show the tests when a script or test failed.
+    fn show_failures(&mut self) {
+        if self.scripts.iter().any(|report| {
+            report.error.is_some() || report.tests.iter().any(|test| test.error.is_some())
+        }) {
+            self.section = Section::Tests;
+        }
     }
 
     pub(crate) fn cancel(&mut self, call_started: bool, cx: &mut Context<Self>) {
@@ -278,14 +292,7 @@ impl GrpcResponse {
                         detail: None,
                     });
                     self.state = CallState::Finished { status, elapsed };
-
-                    // Like an HTTP response, show failed tests once the call ends.
-                    if self.scripts.iter().any(|report| {
-                        report.error.is_some()
-                            || report.tests.iter().any(|test| test.error.is_some())
-                    }) {
-                        self.section = Section::Tests;
-                    }
+                    self.show_failures();
                 }
                 GrpcEvent::Failed(error) => {
                     let message: SharedString = error.to_string().into();
@@ -296,6 +303,7 @@ impl GrpcResponse {
                         detail: None,
                     });
                     self.state = CallState::Failed(message);
+                    self.show_failures();
                 }
                 GrpcEvent::Script(report) => self.scripts.push(report),
             }
@@ -450,11 +458,10 @@ impl GrpcResponse {
     fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
         let header = match &self.state {
-            CallState::Waiting | CallState::Running => {
-                let title = if matches!(self.state, CallState::Waiting) {
-                    "Loading the service definition…"
-                } else {
-                    "Waiting for the response…"
+            CallState::Waiting(_) | CallState::Running => {
+                let title = match &self.state {
+                    CallState::Waiting(title) => title.clone(),
+                    _ => "Waiting for the response…".into(),
                 };
 
                 EmptyHeader::new()
@@ -603,7 +610,7 @@ impl Render for GrpcResponse {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = !matches!(
             self.state,
-            CallState::Idle | CallState::Waiting | CallState::Failed(_) | CallState::Skipped(_)
+            CallState::Idle | CallState::Waiting(_) | CallState::Failed(_) | CallState::Skipped(_)
         ) || !self.entries.is_empty();
         let unary = self.kind == Some(MethodKind::Unary);
         let has_results = started || !self.scripts.is_empty();
