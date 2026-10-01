@@ -599,6 +599,15 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
     let saved = fs::read_to_string(&settings).unwrap();
     fs::set_permissions(&environment, fs::Permissions::from_mode(0o444)).unwrap();
 
+    // Privileged users, such as root in CI containers, write it anyway.
+    if fs::OpenOptions::new()
+        .append(true)
+        .open(&environment)
+        .is_ok()
+    {
+        return;
+    }
+
     let result = registry.update_collection(
         &collection,
         [("token".into(), "secret".into())].into(),

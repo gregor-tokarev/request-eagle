@@ -29,6 +29,15 @@ jobs:
           if [[ -z "$TAG" ]]; then
             TAG="$(gh api "repos/$GH_REPO/releases" \
               --jq '[.[] | select(.prerelease and (.draft | not))][0].tag_name // empty')"
+            stable="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+
+            # Running it again must not move the stable release back to an
+            # older pre-release.
+            if [[ -n "$TAG" && -n "$stable" &&
+              "$(printf '%s\n' "$stable" "$TAG" | sort -V | tail -n 1)" == "$stable" ]]; then
+              echo "$stable is already newer than every pre-release; nothing to promote"
+              exit 0
+            fi
           fi
 
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
