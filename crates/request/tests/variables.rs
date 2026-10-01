@@ -1,12 +1,23 @@
+use environment::VariableScopes;
 use request::{HttpRequest, Method};
 use std::collections::HashMap;
+
+fn environment(changes: &[(&str, &str)]) -> VariableScopes {
+    VariableScopes {
+        environment: changes
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), Some((*value).to_owned())))
+            .collect(),
+        ..Default::default()
+    }
+}
 
 #[test]
 fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
     let session = environment::EnvironmentSession::default();
     let file_values = HashMap::from([("token".into(), "saved value".into())]);
     session
-        .apply(&[("token".into(), Some("response token".into()))].into())
+        .apply(&environment(&[("token", "response token")]))
         .unwrap();
     let draft = HttpRequest {
         path: "https://example.com".into(),
@@ -16,6 +27,7 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
 
     let first = request::RequestVariables::with_environment_session(
         file_values.clone(),
+        HashMap::new(),
         None,
         session.clone(),
     );
@@ -24,10 +36,14 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         "Bearer response token"
     );
     session
-        .apply(&[("token".into(), Some("refreshed token".into()))].into())
+        .apply(&environment(&[("token", "refreshed token")]))
         .unwrap();
-    let next =
-        request::RequestVariables::with_environment_session(file_values.clone(), None, session);
+    let next = request::RequestVariables::with_environment_session(
+        file_values.clone(),
+        HashMap::new(),
+        None,
+        session,
+    );
     assert_eq!(
         next.resolve(&draft).unwrap().headers[0].1,
         "Bearer refreshed token"
@@ -40,9 +56,10 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
 fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
     let session = environment::EnvironmentSession::default();
     session
-        .apply(&[("token".into(), Some("session token".into()))].into())
+        .apply(&environment(&[("token", "session token")]))
         .unwrap();
     let variables = request::RequestVariables::with_environment_session(
+        HashMap::new(),
         HashMap::new(),
         Some("Invalid environment file".into()),
         session,

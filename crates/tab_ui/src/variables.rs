@@ -40,29 +40,45 @@ impl VariableScope {
         // Sending still resolves session values when a file can't be read.
         let values = self
             .values(cx)
-            .unwrap_or_else(|_| self.session.values(HashMap::new()));
+            .unwrap_or_else(|_| self.session.values(HashMap::new(), HashMap::new()));
         let names = Rc::new(values.into_keys().collect::<HashSet<_>>());
         self.names = Some((revision, names.clone()));
 
         names
     }
 
-    /// The collection's environment file and the active global one, which
-    /// overrides it.
-    fn files(&self, cx: &App) -> Vec<PathBuf> {
+    /// Reload the collection's variables, so external edits appear on the
+    /// next send or completion.
+    fn collection_values(&self) -> Result<HashMap<String, String>, String> {
+        self.path
+            .as_deref()
+            .map_or_else(|| Ok(HashMap::new()), read_entries)
+    }
+
+    /// Reload the active global environment the same way.
+    fn environment_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
         let active = self
             .environments
             .as_ref()
             .and_then(|environments| environments.read(cx).active_path());
 
-        self.path.iter().cloned().chain(active).collect()
+        active
+            .as_deref()
+            .map_or_else(|| Ok(HashMap::new()), read_entries)
     }
 
-    /// When each environment file was last changed. A change made outside the
-    /// app changes these without notifying the scope.
+    /// When the collection's and the active environment's files were last
+    /// changed. A change made outside the app changes these without
+    /// notifying the scope.
     pub fn file_versions(&self, cx: &App) -> Vec<Option<SystemTime>> {
-        self.files(cx)
+        let active = self
+            .environments
+            .as_ref()
+            .and_then(|environments| environments.read(cx).active_path());
+
+        self.path
             .iter()
+            .chain(active.iter())
             .map(|path| {
                 std::fs::metadata(path)
                     .and_then(|file| file.modified())
@@ -71,31 +87,30 @@ impl VariableScope {
             .collect()
     }
 
-    /// Reload file values so external edits appear on the next send or
-    /// completion. The active global environment overrides the collection's.
-    fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
-        let mut values = HashMap::new();
-
-        for path in self.files(cx) {
-            values.extend(read_entries(&path)?);
-        }
-
-        Ok(values)
-    }
-
+    /// The values `{{name}}` resolves to. The active global environment
+    /// overrides the collection's variables.
     pub fn values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
-        self.file_values(cx)
-            .map(|values| self.session.values(values))
+        Ok(self
+            .session
+            .values(self.collection_values()?, self.environment_values(cx)?))
     }
 
     pub fn request_variables(&self, cx: &App) -> request::RequestVariables {
-        let (values, error) = match self.file_values(cx) {
-            Ok(values) => (values, None),
-            Err(error) => (HashMap::new(), Some(error)),
+        let files = self
+            .collection_values()
+            .and_then(|collection| Ok((collection, self.environment_values(cx)?)));
+        let ((collection, environment), error) = match files {
+            Ok(files) => (files, None),
+            Err(error) => (Default::default(), Some(error)),
         };
 
-        request::RequestVariables::with_environment_session(values, error, self.session.clone())
-            .with_collection_scripts(self.collection_scripts())
+        request::RequestVariables::with_environment_session(
+            collection,
+            environment,
+            error,
+            self.session.clone(),
+        )
+        .with_collection_scripts(self.collection_scripts())
     }
 
     /// Reload the collection's scripts so saved edits apply to the next send.

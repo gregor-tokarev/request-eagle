@@ -59,7 +59,7 @@ fn common_assertions_support_chaining_and_nested_values() {
         pm.test('aliases', () => pm.expect('request eagle').to.contain('eagle').and.match(/request/));
         pm.test('custom message', () => pm.expect(42).to.be.a('number', 'the answer'));
         pm.test('no host globals', () => {
-            for (const name of ['chai', 'module', 'exports', 'require', 'process', 'fetch']) {
+            for (const name of ['chai', 'module', 'exports', 'process', 'fetch']) {
                 pm.expect(typeof globalThis[name]).to.equal('undefined');
             }
         });

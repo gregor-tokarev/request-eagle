@@ -98,14 +98,36 @@ fn writes_urls_as_sending_does() {
         .curl_command(&values(&[("term", "hello world")]))
     };
 
-    // Sending encodes the space, including one a variable fills in.
+    // Sending encodes a variable's value within its query parameter.
     assert_eq!(
         command("https://example.com/search?q={{term}}"),
+        "curl --location 'https://example.com/search?q=hello+world'"
+    );
+    // A space written in the URL is encoded when the URL is parsed.
+    assert_eq!(
+        command("https://example.com/search?q=hello world"),
         "curl --location 'https://example.com/search?q=hello%20world'"
     );
     // cURL would otherwise expand `[1-3]` into three requests.
     assert_eq!(
         command("https://example.com/?filter[name]=Rex"),
         "curl --location --globoff 'https://example.com/?filter[name]=Rex'"
+    );
+}
+
+#[test]
+fn fills_variables_as_sending_does() {
+    let request = HttpRequest {
+        method: Method::Get,
+        path: "https://example.com/users/:id/posts?q={{term}}&page={{page}}".into(),
+        path_variables: vec![("id".into(), "{{user}}".into())],
+        ..HttpRequest::default()
+    };
+
+    // A value in the query is encoded within its parameter, a path variable
+    // is filled in, and an unknown variable stays as written.
+    assert_eq!(
+        request.curl_command(&values(&[("term", "a&b c"), ("user", "42")])),
+        "curl --location --globoff 'https://example.com/users/42/posts?q=a%26b+c&page={{page}}'"
     );
 }

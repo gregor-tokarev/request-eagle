@@ -119,8 +119,8 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     };
 
     // A request may be written as just its URL.
-    let path = match request {
-        Value::String(url) => url.clone(),
+    let (path, path_variables) = match request {
+        Value::String(url) => (url.clone(), Vec::new()),
         _ => url(&request["url"]),
     };
 
@@ -143,6 +143,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         headers,
         body,
         query,
+        path_variables,
         scripts: RequestScripts {
             pre_request: join_scripts(&scripts.pre_request),
             post_response: join_scripts(&scripts.post_response),
@@ -150,42 +151,28 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     })
 }
 
-/// The URL as Postman shows it, with path variables filled in. Its query stays
-/// in the URL as written, so encoded values are sent unchanged.
-fn url(url: &Value) -> String {
+/// The URL as Postman shows it, and the values of its `:name` path
+/// variables. Its query stays in the URL as written, so encoded values are
+/// sent unchanged.
+fn url(url: &Value) -> (String, Vec<(String, String)>) {
     let raw = match url {
-        Value::String(raw) => return raw.clone(),
+        Value::String(raw) => return (raw.clone(), Vec::new()),
         Value::Object(_) => match url["raw"].as_str() {
             Some(raw) => raw.to_owned(),
             None => assemble_url(url),
         },
-        _ => return String::new(),
+        _ => return (String::new(), Vec::new()),
     };
 
-    let Some(variables) = url["variable"].as_array() else {
-        return raw;
-    };
+    let names: Vec<&str> = request::path_variables(&raw)
+        .map(|(_, name)| name)
+        .collect();
+    let variables = pairs(&url["variable"])
+        .into_iter()
+        .filter(|(key, value)| !value.is_empty() && names.contains(&key.as_str()))
+        .collect();
 
-    let end = raw.find(['?', '#']).unwrap_or(raw.len());
-    let (path, rest) = raw.split_at(end);
-    let path = path
-        .split('/')
-        .map(|segment| {
-            segment
-                .strip_prefix(':')
-                .and_then(|key| {
-                    variables
-                        .iter()
-                        .find(|variable| variable["key"].as_str() == Some(key))
-                })
-                .map(|variable| text(variable.get("value")))
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| segment.to_owned())
-        })
-        .collect::<Vec<_>>()
-        .join("/");
-
-    path + rest
+    (raw, variables)
 }
 
 /// A URL from the parts Postman stores beside, or instead of, the raw URL.

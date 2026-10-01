@@ -29,6 +29,19 @@ impl VariableTarget {
         }
     }
 
+    /// Where a range of a single-line input is on screen this frame. Unlike
+    /// a chip's, its end cannot wrap onto another row.
+    fn range_bounds(&self, range: &Range<usize>, cx: &App) -> Option<Bounds<Pixels>> {
+        let Self::Input(input) = self else {
+            return None;
+        };
+
+        input
+            .read(cx)
+            .range_to_bounds(range)
+            .filter(|bounds| bounds.size.width > px(0.))
+    }
+
     /// The visible text area and where each chip is on screen this frame.
     fn chip_bounds(
         &self,
@@ -133,6 +146,10 @@ pub(crate) struct VariableInput {
     chips: Vec<Range<usize>>,
     /// Byte ranges of references that sending could not resolve.
     unresolved: Vec<Range<usize>>,
+    /// In a request URL, the `:name` path variables that have a value.
+    path_variables: Option<HashSet<String>>,
+    /// Byte ranges of the URL's path variables, and whether each has a value.
+    paths: Vec<(Range<usize>, bool)>,
     /// The text and names the chips were found with.
     chipped: (Rope, Rc<HashSet<String>>),
     _subscriptions: Vec<Subscription>,
@@ -172,9 +189,25 @@ impl VariableInput {
             scroll: UniformListScrollHandle::new(),
             chips: Vec::new(),
             unresolved: Vec::new(),
+            path_variables: None,
+            paths: Vec::new(),
             chipped: Default::default(),
             _subscriptions: vec![input_subscription, scope_subscription],
         }
+    }
+
+    /// Also mark the `:name` path variables of a request URL, colored by
+    /// whether `filled` has a value for them.
+    pub fn with_path_variables(mut self, filled: HashSet<String>) -> Self {
+        self.path_variables = Some(filled);
+        self
+    }
+
+    pub fn set_path_variables(&mut self, filled: HashSet<String>, cx: &mut Context<Self>) {
+        self.path_variables = Some(filled);
+        // Find the chips again on the next paint.
+        self.chipped = Default::default();
+        cx.notify();
     }
 
     /// Find and color the chips when the text or the resolvable names changed.
@@ -198,6 +231,11 @@ impl VariableInput {
                 names.contains(name)
             }
         });
+        if let Some(filled) = &self.path_variables {
+            self.paths = request::path_variables(&source)
+                .map(|(range, name)| (range, filled.contains(name)))
+                .collect();
+        }
         self.chipped = (text, names);
     }
 
@@ -207,23 +245,30 @@ impl VariableInput {
         self.update_chips(cx);
         let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
         let radius = cx.theme().radius_tokens().sm;
+        let (info, danger) = (cx.theme().info, cx.theme().danger);
 
-        for (chips, color) in [
-            (&self.chips, cx.theme().info),
-            (&self.unresolved, cx.theme().danger),
-        ] {
-            let (visible, chips) = self.target.chip_bounds(chips, cx);
-            // Let a chip at either edge of the text keep its padding.
-            let visible = visible.dilate(outset.x);
+        let (visible, resolved) = self.target.chip_bounds(&self.chips, cx);
+        let (_, unresolved) = self.target.chip_bounds(&self.unresolved, cx);
+        // A path variable without a value is sent as written.
+        let paths = self.paths.iter().filter_map(|(range, filled)| {
+            let bounds = self.target.range_bounds(range, cx)?;
+            Some((bounds, if *filled { info } else { danger }))
+        });
+        let chips: Vec<_> = resolved
+            .into_iter()
+            .map(|chip| (chip, info))
+            .chain(unresolved.into_iter().map(|chip| (chip, danger)))
+            .chain(paths)
+            .collect();
+        // Let a chip at either edge of the text keep its padding.
+        let visible = visible.dilate(outset.x);
 
-            window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
-                for chip in chips {
-                    let chip =
-                        Bounds::from_corners(chip.origin - outset, chip.bottom_right() + outset);
-                    window.paint_quad(fill(chip, color.opacity(0.25)).corner_radii(radius));
-                }
-            });
-        }
+        window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
+            for (chip, color) in chips {
+                let chip = Bounds::from_corners(chip.origin - outset, chip.bottom_right() + outset);
+                window.paint_quad(fill(chip, color.opacity(0.25)).corner_radii(radius));
+            }
+        });
     }
 
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -246,7 +291,7 @@ impl VariableInput {
                 let scope = self.scope.read(cx);
                 self.environment_names = scope
                     .values(cx)
-                    .unwrap_or_else(|_| scope.session.values(HashMap::new()))
+                    .unwrap_or_else(|_| scope.session.values(HashMap::new(), HashMap::new()))
                     .into_keys()
                     .filter(|name| environment::valid_variable_name(name))
                     .collect();

@@ -10,19 +10,32 @@ use crate::{HttpRequest, Method};
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
     /// following redirects. `{{variables}}` that `values` defines are filled
-    /// in; others, and generated ones such as `{{$guid}}`, stay as written.
+    /// in as sending fills them, including `:name` path variables; others,
+    /// and generated ones such as `{{$guid}}`, stay as written.
     pub fn curl_command(&self, values: &HashMap<String, String>) -> String {
         let mut request = self.clone();
-        request.path = fill_variables(&request.path, values);
-        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-            *key = fill_variables(key, values);
-            *value = fill_variables(value, values);
+        request.path = keep_unknown(&request.path, values);
+        for (key, value) in request
+            .headers
+            .iter_mut()
+            .chain(request.query.iter_mut())
+            .chain(request.path_variables.iter_mut())
+        {
+            *key = keep_unknown(key, values);
+            *value = keep_unknown(value, values);
         }
-        request.body = request
-            .body
-            .map(|body| fill_variables(&String::from_utf8_lossy(&body), values).into_bytes());
+        if let Some(body) = &mut request.body
+            && let Ok(text) = std::str::from_utf8(body)
+        {
+            *body = keep_unknown(text, values).into_bytes();
+        }
 
-        let request = request.prepare_for_send();
+        // A reference without its closing braces cannot be filled in, so the
+        // request is written as it is.
+        let request = request
+            .resolve_variables(values)
+            .unwrap_or_else(|_| self.clone())
+            .prepare_for_send();
         let url = url(&request.path, &request.query);
         let body = request.body.as_deref().filter(|body| !body.is_empty());
 
@@ -125,32 +138,32 @@ fn form_encode(text: &str) -> String {
     encoded
 }
 
-fn fill_variables(text: &str, values: &HashMap<String, String>) -> String {
-    let mut filled = String::new();
+/// Marks the references `values` cannot fill in as literal, `{{!name}}`, so
+/// resolving the request leaves them as written. Generated values such as
+/// `{{$guid}}` are new on every send, so they stay as written too.
+fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
+    let mut kept = String::new();
     let mut rest = text;
 
     while let Some(start) = rest.find("{{")
         && let Some(length) = rest[start + 2..].find("}}")
     {
         let reference = &rest[start + 2..start + 2 + length];
-        filled.push_str(&rest[..start]);
+        let end = start + 2 + length + 2;
+        let name = reference.trim();
+        kept.push_str(&rest[..start]);
 
-        // `{{!name}}` writes `{{name}}` itself.
-        if let Some(literal) = reference.strip_prefix('!') {
-            filled.push_str(&format!("{{{{{literal}}}}}"));
+        if reference.starts_with('!') || (values.contains_key(name) && !name.starts_with('$')) {
+            kept.push_str(&rest[start..end]);
         } else {
-            let name = reference.trim();
-            match values.get(name).filter(|_| !name.starts_with('$')) {
-                Some(value) => filled.push_str(value),
-                None => filled.push_str(&rest[start..start + 2 + length + 2]),
-            }
+            kept.push_str(&format!("{{{{!{reference}}}}}"));
         }
 
-        rest = &rest[start + 2 + length + 2..];
+        rest = &rest[end..];
     }
-    filled.push_str(rest);
+    kept.push_str(rest);
 
-    filled
+    kept
 }
 
 /// Quotes text for a POSIX shell.

@@ -114,7 +114,7 @@ impl RequestDraft {
         // Without the environment files, session values still resolve.
         let values = scope
             .values(cx)
-            .unwrap_or_else(|_| scope.session.values(HashMap::new()));
+            .unwrap_or_else(|_| scope.session.values(HashMap::new(), HashMap::new()));
 
         (values, version)
     }
