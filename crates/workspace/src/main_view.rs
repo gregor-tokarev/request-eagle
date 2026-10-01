@@ -3,6 +3,7 @@ use std::{collections::HashMap, path::Path};
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
+    input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -66,6 +67,16 @@ impl Page {
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
             Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+        }
+    }
+
+    /// Name a request tab's request before it is saved.
+    fn set_name(&self, name: SharedString, cx: &mut App) {
+        match self {
+            Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
+            Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
+            Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
         }
     }
 
@@ -174,6 +185,13 @@ pub(crate) struct PageTab {
     _subscriptions: Vec<Subscription>,
 }
 
+/// A request tab whose name is being edited in place.
+struct TabRename {
+    tab: u64,
+    input: Entity<InputState>,
+    _subscription: Subscription,
+}
+
 pub(crate) struct MainView {
     pub(crate) tabs: Vec<PageTab>,
     pub(crate) selected: Option<usize>,
@@ -182,6 +200,7 @@ pub(crate) struct MainView {
     scroll_to_tab: Option<usize>,
     focus: FocusHandle,
     pending_close: Option<u64>,
+    rename: Option<TabRename>,
     save_error: Option<String>,
     variable_sessions: environment::EnvironmentSessions,
     pub(crate) environments: Entity<Environments>,
@@ -220,6 +239,7 @@ impl MainView {
             scroll_to_tab: None,
             focus: cx.focus_handle(),
             pending_close: None,
+            rename: None,
             save_error: None,
             variable_sessions: environment::EnvironmentSessions::default(),
             environments,
@@ -734,8 +754,9 @@ impl MainView {
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
+                let name = draft.read(cx).name.clone();
 
-                if self.save_request_at(id, location, request.clone().into(), window, cx) {
+                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -743,8 +764,9 @@ impl MainView {
             Page::Grpc(draft) => {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
+                let name = draft.read(cx).name.clone();
 
-                if self.save_request_at(id, location, request.clone().into(), window, cx) {
+                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -752,8 +774,9 @@ impl MainView {
             Page::WebSocket(draft) => {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
+                let name = draft.read(cx).name.clone();
 
-                if self.save_request_at(id, location, request.clone().into(), window, cx) {
+                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -764,11 +787,13 @@ impl MainView {
     }
 
     /// Save a request tab to its file. An unsaved request opens the dialog
-    /// that chooses where; that dialog marks the tab saved itself.
+    /// that chooses where, suggesting the name given in its tab; that dialog
+    /// marks the tab saved itself.
     fn save_request_at(
         &mut self,
         tab_id: u64,
         location: Option<RequestLocation>,
+        name: Option<SharedString>,
         request: request::Request,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -778,6 +803,7 @@ impl MainView {
                 cx.entity(),
                 self.sidebar.clone(),
                 tab_id,
+                name,
                 request,
                 window,
                 cx,
@@ -844,6 +870,97 @@ impl MainView {
         if self.pending_close == Some(self.tabs[index].id) && !self.tabs[index].page.is_dirty(cx) {
             self.remove_tab(index, cx);
             self.focus(window, cx);
+        }
+    }
+
+    /// Edit a request tab's name in place. Other tabs are named after what
+    /// they show.
+    fn begin_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = &self.tabs[index];
+
+        if !matches!(
+            tab.page,
+            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_)
+        ) {
+            return;
+        }
+
+        let id = tab.id;
+        let title = tab.title.clone();
+        let input = cx.new(|cx| {
+            let mut input = InputState::new(window, cx).default_value(title);
+            input.select_all(window, cx);
+            input.focus(window, cx);
+            input
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
+                    this.commit_rename(cx);
+                    this.focus(window, cx);
+                }
+                // Clicking elsewhere keeps the new name, as Enter does.
+                InputEvent::Blur => this.commit_rename(cx),
+                _ => {}
+            },
+        );
+
+        self.rename = Some(TabRename {
+            tab: id,
+            input,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    fn on_rename_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key == "escape" {
+            self.rename = None;
+            self.focus(window, cx);
+            cx.stop_propagation();
+            cx.notify();
+        }
+    }
+
+    /// Rename a saved request in its collection, as the sidebar does. An
+    /// unsaved request keeps the name until it is saved.
+    fn commit_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(rename) = self.rename.take() else {
+            return;
+        };
+        cx.notify();
+
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == rename.tab) else {
+            return;
+        };
+        let name = rename.input.read(cx).value().trim().to_owned();
+
+        if name.is_empty() || name == tab.title.as_ref() {
+            return;
+        }
+
+        match tab.page.location(cx).cloned() {
+            // The tab follows the sidebar's relocation event.
+            Some(location) => {
+                let result = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.rename_request(&location.path, &name, cx)
+                });
+
+                if let Err(error) = result {
+                    self.save_error = Some(format!("Could not rename request: {error}"));
+                }
+            }
+            None => {
+                tab.title = name.clone().into();
+                tab.page.set_name(name.into(), cx);
+            }
         }
     }
 
@@ -1106,11 +1223,25 @@ impl MainView {
                 )
             })
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_ellipsis()
-                    .child(tab.title.clone()),
+                if let Some(rename) = self.rename.as_ref().filter(|rename| rename.tab == id) {
+                    div()
+                        .id("tab-rename-editor")
+                        .debug_selector(|| "tab-rename-editor".into())
+                        .flex_1()
+                        .min_w_0()
+                        .capture_key_down(cx.listener(Self::on_rename_key_down))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(Input::new(&rename.input).small())
+                        .into_any_element()
+                } else {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_ellipsis()
+                        .child(tab.title.clone())
+                        .into_any_element()
+                },
             )
             .child(
                 div()
@@ -1157,9 +1288,13 @@ impl MainView {
                             ),
                     ),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 this.select_tab(index, cx);
                 this.focus(window, cx);
+
+                if event.click_count() == 2 {
+                    this.begin_rename(index, window, cx);
+                }
             }))
     }
 }

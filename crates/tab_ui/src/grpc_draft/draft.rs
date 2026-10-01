@@ -38,6 +38,8 @@ pub(crate) enum GrpcSection {
 pub struct GrpcDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: GrpcRequest,
     saved_request: GrpcRequest,
     pub(crate) section: GrpcSection,
@@ -146,6 +148,7 @@ impl GrpcDraft {
 
         Self {
             location,
+            name: None,
             saved_request: request.clone(),
             request,
             section: GrpcSection::Message,
@@ -208,6 +211,12 @@ impl GrpcDraft {
         });
 
         self.location = Some(location);
+        cx.notify();
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
         cx.notify();
     }
 
@@ -526,6 +535,7 @@ impl Render for GrpcAddress {
                                 crate::request_draft::request_header(
                                     "gRPC",
                                     draft.location.as_ref(),
+                                    draft.name.as_ref(),
                                     cx,
                                 ),
                             ))
