@@ -761,4 +761,11 @@ fn the_keyboard_reaches_events_and_large_data_shows_in_a_viewer(cx: &mut TestApp
     // The large data does not lay out as one block of text.
     let viewer = cx.debug_bounds("response-virtual-text").unwrap();
     assert!(viewer.size.width > px(200.) && viewer.size.height > px(200.));
+
+    // The next tab stop is the viewer, which reads all of the data.
+    cx.simulate_keystrokes("tab secondary-a secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().unwrap().len(),
+        64 * 1024
+    );
 }

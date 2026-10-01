@@ -232,7 +232,12 @@ impl EventLog {
             let data = &self.entries[index].data;
             let text: SharedString = pretty_json(data).map_or_else(|| data.clone(), Into::into);
             let detail = if text.len() > INLINE_DETAIL_BYTES {
-                Detail::Viewer(cx.new(|cx| VirtualBody::new(text, true, cx)))
+                Detail::Viewer(cx.new(|cx| {
+                    let mut viewer = VirtualBody::new(text, true, cx);
+                    // Tab reaches the viewer, so the keyboard can scroll the rest.
+                    viewer.focus = viewer.focus.clone().tab_stop(true);
+                    viewer
+                }))
             } else {
                 Detail::Inline(text)
             };
