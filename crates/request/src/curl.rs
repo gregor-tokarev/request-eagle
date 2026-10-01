@@ -20,12 +20,7 @@ impl HttpRequest {
         }
 
         request.path = keep_unknown(&request.path, values);
-        for (key, value) in request
-            .headers
-            .iter_mut()
-            .chain(request.query.iter_mut())
-            .chain(request.path_variables.iter_mut())
-        {
+        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = keep_unknown(key, values);
             *value = keep_unknown(value, values);
         }
@@ -34,14 +29,29 @@ impl HttpRequest {
         {
             *body = keep_unknown(text, values).into_bytes();
         }
-        write_unknown_path_variables(&mut request);
+
+        // Filling in a path variable encodes its value, including the braces
+        // of an unknown reference. Such references stand in as placeholders
+        // that encoding leaves alone, and are written back afterwards.
+        let mut references = Vec::new();
+        for (_, value) in &mut request.path_variables {
+            *value = replace_unknown(value, values, |reference| {
+                references.push(format!("{{{{{reference}}}}}"));
+                format!("\u{E000}{}\u{E000}", references.len() - 1)
+            });
+        }
 
         // A reference without its closing braces cannot be filled in, so the
         // request is written as it is.
-        let request = request
+        let mut request = request
             .resolve_variables(values)
             .unwrap_or_else(|_| self.clone())
             .prepare_for_send();
+        for (index, reference) in references.iter().enumerate() {
+            request.path = request
+                .path
+                .replace(&format!("\u{E000}{index}\u{E000}"), reference);
+        }
         let url = url(&request.path, &request.query);
         let body = request.body.as_deref().filter(|body| !body.is_empty());
 
@@ -144,39 +154,20 @@ fn form_encode(text: &str) -> String {
     encoded
 }
 
-/// Writes the path variables whose values refer to unknown variables into the
-/// path. Filling them in would encode the braces of those references; in the
-/// path they stay readable, so the command can be imported back.
-fn write_unknown_path_variables(request: &mut HttpRequest) {
-    let unknown = |value: &str| value.contains("{{!");
-    let mut path = String::new();
-    let mut written = 0;
-
-    for (range, name) in crate::request_url::path_variables(&request.path) {
-        let Some((_, value)) = request
-            .path_variables
-            .iter()
-            .find(|(key, value)| key == name && !value.is_empty())
-        else {
-            continue;
-        };
-
-        if unknown(value) {
-            path.push_str(&request.path[written..range.start]);
-            path.push_str(value);
-            written = range.end;
-        }
-    }
-
-    path.push_str(&request.path[written..]);
-    request.path = path;
-    request.path_variables.retain(|(_, value)| !unknown(value));
+/// Marks the references `values` cannot fill in as literal, `{{!name}}`, so
+/// resolving the request leaves them as written.
+fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
+    replace_unknown(text, values, |reference| format!("{{{{!{reference}}}}}"))
 }
 
-/// Marks the references `values` cannot fill in as literal, `{{!name}}`, so
-/// resolving the request leaves them as written. Generated values such as
-/// `{{$guid}}` are new on every send, so they stay as written too.
-fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
+/// Replaces each reference `values` cannot fill in with `replace`'s text for
+/// it. Generated values such as `{{$guid}}` are new on every send, so they
+/// count as unknown too. Literal references, `{{!name}}`, stay as they are.
+fn replace_unknown(
+    text: &str,
+    values: &HashMap<String, String>,
+    mut replace: impl FnMut(&str) -> String,
+) -> String {
     let mut kept = String::new();
     let mut rest = text;
 
@@ -191,7 +182,7 @@ fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
         if reference.starts_with('!') || (values.contains_key(name) && !name.starts_with('$')) {
             kept.push_str(&rest[start..end]);
         } else {
-            kept.push_str(&format!("{{{{!{reference}}}}}"));
+            kept.push_str(&replace(reference));
         }
 
         rest = &rest[end..];

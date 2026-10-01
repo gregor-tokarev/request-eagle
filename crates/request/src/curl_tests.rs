@@ -164,4 +164,26 @@ fn keeps_unknown_references_of_path_variables_readable() {
         request.curl_command(&HashMap::new()),
         "curl --location --globoff 'https://example.com/users/{{user}}/posts/7'"
     );
+
+    // The value is encoded as sending encodes it, around the reference.
+    let request = HttpRequest {
+        path: "https://example.com/files/:file/details".into(),
+        path_variables: vec![("file".into(), "report#{{version}}".into())],
+        ..HttpRequest::default()
+    };
+    assert_eq!(
+        request.curl_command(&HashMap::new()),
+        "curl --location --globoff 'https://example.com/files/report%23{{version}}/details'"
+    );
+
+    // A path variable that a URL variable brings in is filled in too.
+    let request = HttpRequest {
+        path: "{{base}}/:id".into(),
+        path_variables: vec![("id".into(), "{{user}}".into())],
+        ..HttpRequest::default()
+    };
+    assert_eq!(
+        request.curl_command(&values(&[("base", "https://example.com/users/:id")])),
+        "curl --location --globoff 'https://example.com/users/{{user}}/{{user}}'"
+    );
 }
