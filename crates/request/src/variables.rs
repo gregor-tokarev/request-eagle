@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use environment::{EnvironmentSession, VariableError, VariableResolver};
+use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 
 use crate::{GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
+    /// The values `{{name}}` resolves to.
     pub(crate) values: HashMap<String, String>,
+    /// The scopes `values` come from, which scripts read and change.
+    pub(crate) scopes: VariableScopes,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
     pub(crate) environment_error: Option<String>,
@@ -17,19 +20,20 @@ pub struct RequestVariables {
 }
 
 impl RequestVariables {
+    /// Environment values without a session.
     pub fn new(mut values: HashMap<String, String>, environment_error: Option<String>) -> Self {
         if environment_error.is_some() {
             values.clear();
-        } else {
-            values.retain(|name, _| !name.starts_with('$'));
         }
-        Self {
-            values,
-            session: None,
-            collection_scripts: Ok(RequestScripts::default()),
-            environment_error,
-            generated: BTreeMap::new(),
-        }
+        let scopes = VariableScopes {
+            environment: values
+                .into_iter()
+                .map(|(name, value)| (name, Some(value)))
+                .collect(),
+            ..Default::default()
+        };
+
+        Self::from_scopes(scopes, environment_error, None)
     }
 
     /// Run the collection's scripts before the request's own script in each
@@ -39,19 +43,40 @@ impl RequestVariables {
         self
     }
 
-    /// Read the current session overlay while retaining file-read errors for
-    /// references that cannot be satisfied by the session itself.
+    /// Read the collection's variables and the active environment with the
+    /// session's changes over them, and the session's globals. Session
+    /// values still resolve when a file could not be read.
     pub fn with_environment_session(
-        values: HashMap<String, String>,
+        collection: HashMap<String, String>,
+        environment: HashMap<String, String>,
         environment_error: Option<String>,
         session: EnvironmentSession,
     ) -> Self {
-        let mut variables = Self::new(values, environment_error);
-        variables.values = session.values(variables.values);
-        variables.values.retain(|name, _| !name.starts_with('$'));
-        variables.session = Some(session);
+        let scopes = if environment_error.is_some() {
+            session.scopes(HashMap::new(), HashMap::new())
+        } else {
+            session.scopes(collection, environment)
+        };
 
-        variables
+        Self::from_scopes(scopes, environment_error, Some(session))
+    }
+
+    fn from_scopes(
+        mut scopes: VariableScopes,
+        environment_error: Option<String>,
+        session: Option<EnvironmentSession>,
+    ) -> Self {
+        // `{{$name}}` generates a value unless a script sets one for the send.
+        scopes.retain(|name| !name.starts_with('$'));
+
+        Self {
+            values: scopes.values(),
+            scopes,
+            session,
+            collection_scripts: Ok(RequestScripts::default()),
+            environment_error,
+            generated: BTreeMap::new(),
+        }
     }
 
     /// Resolve where a gRPC request connects: its URL and metadata. The

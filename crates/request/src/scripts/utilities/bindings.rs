@@ -45,6 +45,18 @@ pub(in crate::scripts) fn bindings<'js>(cx: Ctx<'js>) -> rquickjs::Result<Object
         )?;
     }
 
+    for (name, convert) in [
+        ("btoa", crypto::btoa as fn(&str) -> Result<String, String>),
+        ("atob", crypto::atob),
+    ] {
+        object.set(
+            name,
+            Function::new(cx.clone(), move |cx: Ctx<'js>, text: String| {
+                convert(&text).map_err(|error| Exception::throw_type(&cx, &error))
+            })?,
+        )?;
+    }
+
     object.set(
         "validateSchema",
         Function::new(cx, |cx: Ctx<'js>, data: String, schema: String| {

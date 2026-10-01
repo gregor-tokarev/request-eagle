@@ -56,7 +56,7 @@ pub(crate) async fn pre_request(
     cancelled: Arc<AtomicBool>,
 ) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
     let RequestVariables {
-        mut values,
+        scopes,
         session,
         collection_scripts,
         environment_error,
@@ -96,7 +96,7 @@ pub(crate) async fn pre_request(
         let mut reports = Vec::new();
         let mut state = ScriptState {
             variables: Variables {
-                environment: std::mem::take(&mut values).into_iter().collect(),
+                scopes,
                 ..Default::default()
             },
             session,
@@ -134,7 +134,7 @@ pub(crate) async fn pre_request(
 
             let output = output.expect("successful script output");
             if let Some(session) = &state.session
-                && let Err(message) = session.apply(&output.environment_changes)
+                && let Err(message) = session.apply(&output.changes)
             {
                 report.error = Some(message.into());
                 return Err(after_earlier_scripts(
@@ -172,13 +172,7 @@ pub(crate) async fn pre_request(
             request.body = None;
         }
 
-        values = state
-            .variables
-            .environment
-            .iter()
-            .chain(state.variables.values.iter())
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let values = state.variables.visible();
         let resolved = resolve_request(
             &values,
             environment_error.as_deref(),
@@ -274,7 +268,7 @@ pub(crate) async fn post_response(
                 && let Some(output) = output
             {
                 if let Some(session) = &state.session
-                    && let Err(message) = session.apply(&output.environment_changes)
+                    && let Err(message) = session.apply(&output.changes)
                 {
                     report.error = Some(message.into());
                 } else {

@@ -43,7 +43,7 @@ fn completion_previews_fit_one_row_without_losing_types_or_full_hover_informatio
     assert_eq!(detail("crypto"), "Crypto");
     assert_eq!(
         detail("execution"),
-        "{ skipRequest(reason?: string): never; }"
+        "{ skipRequest(reason?: string): never; setNextRequest(name: string | null): void; }"
     );
     assert!(detail("sendRequest").starts_with("sendRequest(config:"));
     assert!(detail("sendRequest").contains("Promise<Response>"));
@@ -410,6 +410,35 @@ fn phase_declarations_switch_without_leaking_response_or_execution_members() {
         labels(&complete("pm.res|", ScriptPhase::PostResponse)),
         ["response"]
     );
+}
+
+#[test]
+fn postman_scopes_cookies_and_libraries_complete() {
+    for (source, phase, expected) in [
+        ("pm.globals.s|", ScriptPhase::PreRequest, "set"),
+        (
+            "pm.collectionVariables.g|",
+            ScriptPhase::AfterResponse,
+            "get",
+        ),
+        ("pm.cookies.toO|", ScriptPhase::PreRequest, "toObject"),
+        ("pm.response.cookies.o|", ScriptPhase::PostResponse, "one"),
+        (
+            "pm.execution.setN|",
+            ScriptPhase::PostResponse,
+            "setNextRequest",
+        ),
+        ("postman.setN|", ScriptPhase::OnMessage, "setNextRequest"),
+        ("require('cr|')", ScriptPhase::PreRequest, "crypto-js"),
+        ("require('uuid').v|", ScriptPhase::PreRequest, "v4"),
+    ] {
+        assert!(
+            labels(&complete(source, phase)).contains(&expected),
+            "{source}"
+        );
+    }
+
+    assert!(complete("pm.cook|", ScriptPhase::BeforeInvoke).is_empty());
 }
 
 #[test]

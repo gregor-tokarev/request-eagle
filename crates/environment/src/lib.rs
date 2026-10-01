@@ -14,7 +14,7 @@ mod variable_tests;
 
 pub use environment::{Environment, EnvironmentLoadError, EnvironmentSaveError};
 pub use global::{GlobalEnvironmentError, GlobalEnvironments};
-pub use session::{EnvironmentSession, EnvironmentSessions};
+pub use session::{EnvironmentSession, EnvironmentSessions, VariableScopes};
 pub use variables::{
     GENERATED_VARIABLES, VariableError, VariableResolver, generate_variable, is_generated_variable,
     valid_variable_name,

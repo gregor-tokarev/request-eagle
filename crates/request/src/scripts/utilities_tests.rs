@@ -380,3 +380,26 @@ fn schema_bounds_cumulative_regex_work_across_patterns_and_values() {
         true
     );
 }
+
+#[test]
+fn atob_and_btoa_handle_bytes_as_characters_like_browsers() {
+    assert_eq!(evaluate("utilities.btoa('hi\\u00ff')").unwrap(), "aGn/");
+    assert_eq!(evaluate("utilities.atob('aGn/')").unwrap(), "hi\u{ff}");
+
+    // Whitespace and padding are optional when decoding.
+    for encoded in ["aGk=", "aGk", " aG\nk= "] {
+        assert_eq!(
+            evaluate(&format!("utilities.atob({})", json!(encoded))).unwrap(),
+            "hi"
+        );
+    }
+
+    for source in [
+        "utilities.btoa('€')",
+        "utilities.atob('a')",
+        "utilities.atob('aG=k')",
+        "utilities.atob('a*Gk')",
+    ] {
+        assert!(evaluate(source).is_err(), "{source}");
+    }
+}
