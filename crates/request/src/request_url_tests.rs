@@ -131,6 +131,17 @@ fn sending_resolves_variables_in_path_variable_values() {
         resolve(request, &[("file", "a#b?c{{d}}")]),
         "https://example.com/files/a%23b%3Fc%7B%7Bd%7D%7D/end?x=1"
     );
+
+    // A value after a fragment is not sent, so it is not resolved.
+    let request = HttpRequest {
+        path: "{{endpoint}}/files/:id?q=1".into(),
+        path_variables: pairs(&[("id", "{{missing}}")]),
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(request, &[("endpoint", "https://example.com/path#top")]),
+        "https://example.com/path?q=1"
+    );
 }
 
 #[test]

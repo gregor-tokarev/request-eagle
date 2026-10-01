@@ -20,14 +20,7 @@ struct FieldRow {
     _subscriptions: Vec<Subscription>,
 }
 
-impl FieldRow {
-    fn is_sent(&self, cx: &App) -> bool {
-        self.enabled
-            && (!self.key.read(cx).value().is_empty() || !self.value.read(cx).value().is_empty())
-    }
-}
-
-/// The enabled rows with a key or a value, in table order.
+/// The rows that are sent, in table order.
 pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
 
 /// A request's editable key/value rows, including one trailing empty row.
@@ -37,6 +30,9 @@ pub(crate) struct RequestFields {
     generated_headers: Vec<(SharedString, SharedString)>,
     focus: FocusHandle,
     scope: Entity<VariableScope>,
+    /// Whether a row with a value but no key is sent, as a query parameter
+    /// `=value` is. Headers and metadata need a name.
+    keyless_rows: bool,
 }
 
 impl EventEmitter<FieldsChanged> for RequestFields {}
@@ -59,6 +55,7 @@ impl RequestFields {
                 .collect(),
             focus: cx.focus_handle(),
             scope,
+            keyless_rows: false,
         };
 
         for (key, value) in values {
@@ -67,6 +64,20 @@ impl RequestFields {
         fields.append_row("", "", window, cx);
 
         fields
+    }
+
+    pub(crate) fn with_keyless_rows(mut self) -> Self {
+        self.keyless_rows = true;
+        self
+    }
+
+    /// Enabled rows with a key are sent, and with `keyless_rows` also those
+    /// with only a value.
+    fn is_sent(&self, row: &FieldRow, cx: &App) -> bool {
+        let key = row.key.read(cx).value();
+        let keyless = self.keyless_rows && !row.value.read(cx).value().is_empty();
+
+        row.enabled && (!key.trim().is_empty() || keyless)
     }
 
     pub(crate) fn set_generated_headers(
@@ -105,7 +116,7 @@ impl RequestFields {
 
         while index < self.rows.len() {
             let row = &self.rows[index];
-            if !row.is_sent(cx) {
+            if !self.is_sent(row, cx) {
                 index += 1;
                 continue;
             }
@@ -197,7 +208,7 @@ impl RequestFields {
         let values = self
             .rows
             .iter()
-            .filter(|row| row.is_sent(cx))
+            .filter(|row| self.is_sent(row, cx))
             .map(|row| {
                 (
                     row.key.read(cx).value().to_string(),

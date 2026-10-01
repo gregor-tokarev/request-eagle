@@ -240,12 +240,13 @@ impl HttpRequest {
         body_changed: bool,
     ) -> Result<Self, VariableError> {
         let mut request = self;
-        let path = crate::request_url::fill_path_variables(
-            &request.path,
-            &request.path_variables,
-            |value| resolver.resolve(value),
-        )?;
-        request.path = resolve_url(&path, resolver)?;
+        // Fill path variables only where the resolved URL is sent, so a value
+        // after a fragment is not resolved either.
+        let path = resolve_url(&request.path, resolver)?;
+        request.path =
+            crate::request_url::fill_path_variables(&path, &request.path_variables, |value| {
+                resolver.resolve(value)
+            })?;
 
         for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = resolver.resolve(key)?;

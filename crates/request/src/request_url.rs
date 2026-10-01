@@ -59,10 +59,10 @@ pub fn path_variables(url: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
     })
 }
 
-/// Substitute the path variables that have a value. Ones without a value are
-/// sent as written. Each value is resolved with `resolve` first, then the
-/// characters that would end the path or start a `{{variable}}` are encoded,
-/// so the value stays in its place. A `/` in a value is kept.
+/// Substitute the path variables of a resolved URL that have a value. Ones
+/// without a value are sent as written. Each value is resolved with `resolve`,
+/// then the characters that would end the path or start a `{{variable}}` are
+/// encoded, so the value stays in its segment. A `/` in a value is kept.
 pub(crate) fn fill_path_variables<E>(
     url: &str,
     values: &[(String, String)],

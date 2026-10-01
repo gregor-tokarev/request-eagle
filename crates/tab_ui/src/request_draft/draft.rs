@@ -397,12 +397,7 @@ impl RequestDraft {
         });
         self._subscriptions.push(
             cx.subscribe(&headers, |this, _, event: &FieldsChanged, cx| {
-                this.request.headers = event
-                    .0
-                    .iter()
-                    .filter(|(name, _)| !name.trim().is_empty())
-                    .cloned()
-                    .collect();
+                this.request.headers = event.0.clone();
                 this.refresh_generated_headers(cx);
                 cx.notify();
             }),
@@ -423,8 +418,10 @@ impl RequestDraft {
 
         let scope = self.variables.clone();
         let values = request::query_params(&self.request.path);
-        let params =
-            cx.new(|cx| RequestFields::new("params", &values, &[], scope.clone(), window, cx));
+        let params = cx.new(|cx| {
+            RequestFields::new("params", &values, &[], scope.clone(), window, cx)
+                .with_keyless_rows()
+        });
         self._subscriptions.push(cx.subscribe_in(
             &params,
             window,
