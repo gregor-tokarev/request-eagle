@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use collection::{ImportedCollection, ImportedItem};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
-use request::{HttpRequest, Method, Request, RequestScripts};
+use request::{Field, HttpRequest, Method, Request, RequestScripts};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -193,8 +193,12 @@ impl<'a> Spec<'a> {
                 }
                 // Optional parameters change what the server does, so only
                 // required ones are sent.
-                Some("query") if required => query.extend(self.query_pairs(name, parameter)),
-                Some("header") if required => headers.push((name.to_owned(), value())),
+                Some("query") if required => query.extend(
+                    self.query_pairs(name, parameter)
+                        .into_iter()
+                        .map(Field::from),
+                ),
+                Some("header") if required => headers.push(Field::new(name, value())),
                 Some("body") => body_schema = Some(&parameter["schema"]),
                 Some("formData") if parameter["type"] != "file" => {
                     form.push((name.to_owned(), value()));
@@ -338,11 +342,7 @@ impl<'a> Spec<'a> {
     }
 
     /// An OpenAPI 3 request body, preferring JSON.
-    fn request_body(
-        &self,
-        operation: &'a Value,
-        headers: &mut Vec<(String, String)>,
-    ) -> Option<Vec<u8>> {
+    fn request_body(&self, operation: &'a Value, headers: &mut Vec<Field>) -> Option<Vec<u8>> {
         let content = self.resolve(&operation["requestBody"])["content"].as_object()?;
         let (media_type, media) = content
             .iter()
@@ -376,8 +376,8 @@ impl<'a> Spec<'a> {
     fn authorize(
         &self,
         operation: &Value,
-        headers: &mut Vec<(String, String)>,
-        query: &mut Vec<(String, String)>,
+        headers: &mut Vec<Field>,
+        query: &mut Vec<Field>,
         variables: &mut HashMap<String, String>,
     ) {
         let requirements = operation
@@ -403,13 +403,13 @@ impl<'a> Spec<'a> {
             };
 
             if bearer {
-                headers.push(("Authorization".into(), format!("Bearer {credential}")));
+                headers.push(Field::new("Authorization", format!("Bearer {credential}")));
             } else if scheme["type"] == "apiKey"
                 && let Some(name) = scheme["name"].as_str()
             {
                 match scheme["in"].as_str() {
-                    Some("header") => headers.push((name.to_owned(), credential)),
-                    Some("query") => query.push((name.to_owned(), credential)),
+                    Some("header") => headers.push(Field::new(name, credential)),
+                    Some("query") => query.push(Field::new(name, credential)),
                     _ => continue,
                 }
             } else {
@@ -562,7 +562,7 @@ fn fill_path(path: &str, values: &HashMap<&str, String>) -> String {
 
 /// Encodes an example value as the body for its media type, and sets the
 /// media type as the request's `Content-Type`.
-fn encode(media_type: &str, value: &Value, headers: &mut Vec<(String, String)>) -> Option<Vec<u8>> {
+fn encode(media_type: &str, value: &Value, headers: &mut Vec<Field>) -> Option<Vec<u8>> {
     if value.is_null() {
         return None;
     }

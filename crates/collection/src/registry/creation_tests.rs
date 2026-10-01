@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Method, Request, WebSocketRequest};
+use request::{Field, Method, Request, WebSocketRequest};
 
 struct Fixture(PathBuf);
 
@@ -181,8 +181,8 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
     let collection = registry.create_collection().unwrap();
     let mut request = WebSocketRequest {
         url: "wss://{{host}}/feed".into(),
-        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
-        query: vec![("room".into(), "42".into())],
+        headers: vec![Field::new("Authorization", "Bearer {{token}}")],
+        query: vec![Field::new("room", "42")],
         message: "{\"subscribe\":\"prices\"}".into(),
     };
     let path = registry

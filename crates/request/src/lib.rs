@@ -43,7 +43,7 @@ pub use grpc::{
     ServiceDefinition,
 };
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
-pub use model::{HttpRequest, Method, Request, WebSocketRequest};
+pub use model::{Field, HttpRequest, Method, Request, WebSocketRequest};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};

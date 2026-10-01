@@ -6,7 +6,7 @@ use std::{
 use collection::CollectionRegistry;
 
 use gpui_kit::{Modifiers, TestAppContext};
-use request::Method;
+use request::{Field, Method};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::main_view::Page;
@@ -110,16 +110,13 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(
             data.request.headers,
             [
-                ("X-Saved".into(), "updated".into()),
-                ("X-Saved".into(), "second".into())
+                Field::new("X-Saved", "updated"),
+                Field::new("X-Saved", "second")
             ]
         );
         assert_eq!(
             data.request.query,
-            &[
-                ("tag".into(), "edited".into()),
-                ("tag".into(), "two".into())
-            ]
+            &[Field::new("tag", "edited"), Field::new("tag", "two")]
         );
     });
 
@@ -146,7 +143,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.tabs[1].draft(), draft);
         assert_eq!(tabs.tabs[1].label, Some("PUT"));
-        assert_eq!(draft.read(cx).request.headers[0].1, "updated");
+        assert_eq!(draft.read(cx).request.headers[0].value, "updated");
     });
     assert!(
         cx.debug_bounds("response-status").is_some(),
@@ -170,8 +167,8 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         let reopened = tabs.tabs[2].draft();
         assert_ne!(reopened, draft);
         assert_eq!(reopened.read(cx).request.method, Method::Put);
-        assert_eq!(reopened.read(cx).request.headers[0].1, "updated");
-        assert_eq!(reopened.read(cx).request.query[0].1, "edited");
+        assert_eq!(reopened.read(cx).request.headers[0].value, "updated");
+        assert_eq!(reopened.read(cx).request.query[0].value, "edited");
         assert_eq!(reopened.read(cx).request.path, format!("{url}&saved=true"));
         assert_eq!(reopened.read(cx).request, draft.read(cx).request);
         assert!(!reopened.read(cx).is_dirty());

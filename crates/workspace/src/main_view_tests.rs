@@ -8,6 +8,7 @@ use gpui_kit::{
 use crate::main_view::Page;
 use crate::tests::{click, collections, init, no_environments};
 use crate::workspace::Workspace;
+use request::Field;
 use tab_ui::RequestLocation;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
@@ -255,9 +256,9 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
         assert!(view.read(cx).tabs[0].location(cx).is_none());
         assert_eq!(
             draft.read(cx).request.headers,
-            [("Accept".into(), "application/json".into())]
+            [Field::new("Accept", "application/json")]
         );
-        assert_eq!(draft.read(cx).request.query, [("page".into(), "2".into())]);
+        assert_eq!(draft.read(cx).request.query, [Field::new("page", "2")]);
         assert_eq!(
             draft.read(cx).request.body.as_deref(),
             Some(b"hello".as_slice())
@@ -279,7 +280,7 @@ fn request_editor_preserves_fields_and_method_without_assigning_a_collection(
     assert!(cx.debug_bounds("params-key-1").is_some());
     cx.read(|cx| {
         assert_eq!(draft.read(cx).request.method, request::Method::Post);
-        assert_eq!(draft.read(cx).request.headers[0].1, "application/json");
+        assert_eq!(draft.read(cx).request.headers[0].value, "application/json");
     });
 }
 

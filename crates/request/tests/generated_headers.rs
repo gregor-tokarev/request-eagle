@@ -1,4 +1,4 @@
-use request::{Method, generated_headers};
+use request::{Field, Method, generated_headers};
 
 #[test]
 fn previews_only_headers_the_transport_adds() {
@@ -35,17 +35,17 @@ fn previews_only_headers_the_transport_adds() {
 #[test]
 fn explicit_headers_override_defaults_case_insensitively() {
     let headers = [
-        ("hOsT".into(), "virtual.example".into()),
-        ("ACCEPT".into(), "application/json".into()),
-        ("AcCePt-EnCoDiNg".into(), "identity".into()),
-        ("content-LENGTH".into(), "12".into()),
-        ("AUTHORIZATION".into(), "Bearer example".into()),
+        Field::new("hOsT", "virtual.example"),
+        Field::new("ACCEPT", "application/json"),
+        Field::new("AcCePt-EnCoDiNg", "identity"),
+        Field::new("content-LENGTH", "12"),
+        Field::new("AUTHORIZATION", "Bearer example"),
     ];
     assert!(
         generated_headers(Method::Post, "http://user:pass@example.com", &headers, 12).is_empty()
     );
 
-    let headers = [("Transfer-Encoding".into(), "chunked".into())];
+    let headers = [Field::new("Transfer-Encoding", "chunked")];
     assert!(
         !generated_headers(Method::Post, "http://example.com", &headers, 12)
             .iter()

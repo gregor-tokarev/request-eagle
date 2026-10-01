@@ -1,7 +1,7 @@
 use std::{net::TcpListener, sync::Arc};
 
 use request::{
-    ExecutionError, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
+    ExecutionError, Field, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
     RequestVariables, Response, Version,
 };
 use std::collections::HashMap;
@@ -153,8 +153,8 @@ fn assert_http2_request(explicit_host: bool) {
                     path: url,
                     headers: if explicit_host {
                         vec![
-                            ("Host".into(), host),
-                            ("User-Agent".into(), "requesteagleruntime/0.041".into()),
+                            Field::new("Host", host),
+                            Field::new("User-Agent", "requesteagleruntime/0.041"),
                         ]
                     } else {
                         Vec::new()
@@ -191,7 +191,7 @@ fn forced_http2_explains_unsupported_host_overrides_before_sending() {
             .execute(
                 HttpRequest {
                     path: "http://127.0.0.1:1".into(),
-                    headers: vec![("Host".into(), "virtual.example".into())],
+                    headers: vec![Field::new("Host", "virtual.example")],
                     ..HttpRequest::default()
                 },
                 no_variables(),
@@ -256,7 +256,7 @@ fn auto_host_override_uses_http1_preserving_destination_and_tls_name() {
             .execute(
                 HttpRequest {
                     path: url,
-                    headers: vec![("Host".into(), "virtual.example:8443".into())],
+                    headers: vec![Field::new("Host", "virtual.example:8443")],
                     ..HttpRequest::default()
                 },
                 no_variables(),

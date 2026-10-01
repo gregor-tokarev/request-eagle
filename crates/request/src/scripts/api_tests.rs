@@ -10,7 +10,7 @@ use super::{
     runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
-    Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
+    Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
     RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
@@ -229,24 +229,24 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
         let mut request = HttpRequest {
             method: crate::Method::Post,
             path: "https://example.com/{{!customer}}".into(),
-            headers: vec![("X-Literal".into(), "{{!$guid}}/{{!customer}}".into())],
-            query: vec![("{{!key}}".into(), "{{!customer}}".into())],
+            headers: vec![Field::new("X-Literal", "{{!$guid}}/{{!customer}}")],
+            query: vec![Field::new("{{!key}}", "{{!customer}}")],
             body: Some(b"{{!customer}}".to_vec()),
             ..Default::default()
         };
         if mode == "dynamic" {
-            request.headers.push(("X-Id".into(), "{{$guid}}".into()));
+            request.headers.push(Field::new("X-Id", "{{$guid}}"));
         } else if mode == "script" {
             request.scripts.pre_request =
                 "pm.variables.set('customer', 'must stay literal');".into();
         }
         let (sent, _, _) = send(request);
         assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
-        assert_eq!(sent.headers[0].1, "{{$guid}}/{{customer}}");
-        assert_eq!(sent.query, [("{{key}}".into(), "{{customer}}".into())]);
+        assert_eq!(sent.headers[0].value, "{{$guid}}/{{customer}}");
+        assert_eq!(sent.query, [Field::new("{{key}}", "{{customer}}")]);
         assert_eq!(sent.body.unwrap(), b"{{customer}}");
         if mode == "dynamic" {
-            uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
+            uuid::Uuid::parse_str(&sent.headers[1].value).unwrap();
         }
     }
 }
@@ -257,10 +257,10 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
         method: crate::Method::Post,
         path: "https://example.com/{{$guid}}".into(),
         headers: vec![
-            ("X-Time".into(), "{{$timestamp}}".into()),
-            ("{{$guid}}".into(), "{{$randomUUID}}".into()),
+            Field::new("X-Time", "{{$timestamp}}"),
+            Field::new("{{$guid}}", "{{$randomUUID}}"),
         ],
-        query: vec![("id".into(), "{{$randomUUID}}".into())],
+        query: vec![Field::new("id", "{{$randomUUID}}")],
         body: Some(br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#.to_vec()),
         ..Default::default()
     };
@@ -269,16 +269,16 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
     assert!(state.variables.values.is_empty());
     assert!(reports.is_empty());
     uuid::Uuid::parse_str(sent.path.strip_prefix("https://example.com/").unwrap()).unwrap();
-    assert!(sent.headers[0].1.parse::<i64>().unwrap() > 0);
-    uuid::Uuid::parse_str(&sent.headers[1].0).unwrap();
-    uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
-    assert_eq!(sent.query[0].1, sent.headers[1].1);
+    assert!(sent.headers[0].value.parse::<i64>().unwrap() > 0);
+    uuid::Uuid::parse_str(&sent.headers[1].key).unwrap();
+    uuid::Uuid::parse_str(&sent.headers[1].value).unwrap();
+    assert_eq!(sent.query[0].value, sent.headers[1].value);
     assert_eq!(
         sent.path.strip_prefix("https://example.com/").unwrap(),
-        sent.headers[1].0
+        sent.headers[1].key
     );
     let body: serde_json::Value = serde_json::from_slice(&sent.body.unwrap()).unwrap();
-    assert_eq!(body["id"], sent.headers[1].0);
+    assert_eq!(body["id"], sent.headers[1].key);
     chrono::DateTime::parse_from_rfc3339(body["time"].as_str().unwrap()).unwrap();
     assert!(body["n"].as_u64().unwrap() <= 1000);
 }

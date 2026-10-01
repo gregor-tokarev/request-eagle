@@ -4,7 +4,7 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{EventStream, EventStreamUpdate, RequestExecutor};
-use request::{HttpRequest, Method};
+use request::{Field, HttpRequest, Method};
 
 use super::draft::RequestDraft;
 
@@ -38,36 +38,28 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
         authority.contains("{{") || (scheme.contains("{{") && authority.contains('@'))
     });
-    let templated_header_names = request.headers.iter().any(|(name, _)| name.contains("{{"));
+    let has = |name: &str| {
+        Field::enabled(&request.headers).any(|(header, _)| header.eq_ignore_ascii_case(name))
+    };
+    let templated_header_names =
+        Field::enabled(&request.headers).any(|(name, _)| name.contains("{{"));
     let mut headers =
         request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
-    if supports_body
-        && request.body.is_some()
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-    {
+    if supports_body && request.body.is_some() && !has("content-type") {
         headers.push(("Content-Type".into(), "application/json".into()));
     }
 
     if request.path.contains("{{")
         && !headers.iter().any(|(name, _)| name == "Host")
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+        && !has("host")
     {
         headers.insert(0, ("Host".into(), "Resolved on Send".into()));
     }
 
     if templated_authorization
         && !headers.iter().any(|(name, _)| name == "Authorization")
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        && !has("authorization")
     {
         headers.push(("Authorization".into(), "Resolved on Send".into()));
     }

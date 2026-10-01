@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui_kit::{Context, Entity, Modifiers, TestAppContext, VisualTestContext};
-use request::{HttpRequest, Method};
+use request::{Field, HttpRequest, Method};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{RequestDraft, draft::RequestSection};
@@ -52,14 +52,14 @@ fn prepares_json_requests_without_mutating_the_draft() {
     assert_eq!(outgoing.path, "https://ifconfig.me/ip");
     assert_eq!(
         outgoing.headers,
-        [("Content-Type".into(), "application/json".into())]
+        [Field::new("Content-Type", "application/json")]
     );
     assert!(original.headers.is_empty());
     assert_eq!(original.path, "  ifconfig.me/ip  ");
 
     original
         .headers
-        .push(("content-type".into(), "application/custom+json".into()));
+        .push(Field::new("content-type", "application/custom+json"));
     assert_eq!(
         original.clone().prepare_for_send().headers,
         original.headers

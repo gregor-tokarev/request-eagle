@@ -10,8 +10,8 @@ use serde_json::json;
 
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
 use crate::{
-    Execution, ExecutionError, HttpRequest, Method, RequestExecutor, RequestVariables, Response,
-    variables::resolve_request,
+    Execution, ExecutionError, Field, HttpRequest, Method, RequestExecutor, RequestVariables,
+    Response, variables::resolve_request,
 };
 
 /// A dropped request future also interrupts a script on the blocking pool.
@@ -157,8 +157,8 @@ pub(crate) async fn pre_request(
             let changes = output.request;
             request.method = changes.method;
             request.path = changes.url;
-            request.query = changes.query;
-            request.headers = changes.headers;
+            request.query = changes.query.into_iter().map(Field::from).collect();
+            request.headers = changes.headers.into_iter().map(Field::from).collect();
             state.variables = output.variables;
 
             if changes.body_changed {
@@ -292,8 +292,8 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
-        "query": request.query,
-        "headers": request.headers,
+        "query": Field::enabled(&request.query).collect::<Vec<_>>(),
+        "headers": Field::enabled(&request.headers).collect::<Vec<_>>(),
         "variables": variables,
     })
 }

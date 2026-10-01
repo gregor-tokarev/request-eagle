@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
+    Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
     WebSocketRequest,
 };
 
@@ -125,8 +125,12 @@ order: 1000
             message: "{\n  \"id\": \"7\"\n}".into(),
             // The collection's authorization is sent as metadata.
             metadata: vec![
-                ("x-request-id".into(), "{{$guid}}".into()),
-                ("Authorization".into(), "Bearer {{token}}".into()),
+                Field::new("x-request-id", "{{$guid}}"),
+                Field {
+                    enabled: false,
+                    ..Field::new("x-debug", "1")
+                },
+                Field::new("Authorization", "Bearer {{token}}"),
             ],
             definition: GrpcDefinition::ProtoFile {
                 path: "/work/shop/api/product.proto".into(),
@@ -300,20 +304,18 @@ order: 2000
     assert_eq!(
         add.headers,
         [
-            ("Content-Type".to_owned(), "application/json".to_owned()),
-            (
-                "Authorization".to_owned(),
-                "Basic YWRtaW46c2VjcmV0".to_owned()
-            ),
+            Field {
+                enabled: false,
+                ..Field::new("X-Debug", "1")
+            },
+            Field::new("Content-Type", "application/json"),
+            Field::new("Authorization", "Basic YWRtaW46c2VjcmV0"),
         ]
     );
 
     let find = http(&pets[1]);
     assert_eq!(find.path, "{{base_url}}/pets/7?expand=owner");
-    assert_eq!(
-        find.headers,
-        [("Accept".to_owned(), "application/json".to_owned())]
-    );
+    assert_eq!(find.headers, [Field::new("Accept", "application/json")]);
     assert_eq!(
         find.scripts.post_response,
         "{\npm.test('folder', () => {});\n}\n\n{\npm.response.to.have.status(200);\n}"
@@ -327,7 +329,7 @@ order: 2000
         *updates,
         WebSocketRequest {
             url: "wss://pets.test/updates".into(),
-            headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+            headers: vec![Field::new("Authorization", "Bearer {{token}}")],
             ..WebSocketRequest::default()
         }
     );
@@ -391,7 +393,7 @@ auth:
 
     let import = read(&collection).unwrap();
     let items = &import.collection.items;
-    let bearer = |token: &str| vec![("Authorization".to_owned(), format!("Bearer {token}"))];
+    let bearer = |token: &str| vec![Field::new("Authorization", format!("Bearer {token}"))];
 
     assert_eq!(grpc(&items[0]).metadata, bearer("ONE"));
     assert_eq!(grpc(&items[1]).metadata, bearer("TWO"));

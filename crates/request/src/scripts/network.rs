@@ -12,7 +12,7 @@ use rquickjs::{Ctx, Exception, Function, Promise};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{HttpRequest, Method, RequestExecutor};
+use crate::{Field, HttpRequest, Method, RequestExecutor};
 
 const REQUEST_LIMIT: usize = 32;
 const REQUEST_BYTES: usize = 1024 * 1024;
@@ -79,7 +79,7 @@ impl<'js> Network<'js> {
                 let mut request = HttpRequest {
                     path: input.url,
                     method: input.method,
-                    headers: input.headers,
+                    headers: input.headers.into_iter().map(Field::from).collect(),
                     body: input.body.map(String::into_bytes),
                     ..Default::default()
                 };

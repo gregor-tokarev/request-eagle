@@ -9,8 +9,8 @@ use environment::Environment;
 use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
-use crate::collection::is_reserved;
-use crate::{Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, FileEntry};
+use crate::collection::{is_reserved, render};
+use crate::{Collection, CollectionEditError, CollectionRegistry, FileEntry};
 use request::{Request, RequestScripts};
 
 /// A collection read from another application's export, ready to be written
@@ -122,18 +122,13 @@ fn write_items(
             ImportedItem::Request { name, request } => {
                 let entry = FileEntry {
                     raw_content: String::new(),
-                    path: PathBuf::new(),
+                    path: parent.join(name),
                     id: Uuid::new_v4().to_string(),
                     name: name.clone(),
                     schema_version: 1,
                     request: request.clone(),
                 };
-                let content = toml::to_string_pretty(&entry).map_err(|source| {
-                    CollectionSaveError::Serialize {
-                        path: parent.join(name),
-                        source,
-                    }
-                })?;
+                let content = render(&entry)?.to_string();
 
                 create_unique(parent, &stem, ".toml", *next_number, reserved, |path| {
                     fs::File::create_new(path)?.write_all(content.as_bytes())

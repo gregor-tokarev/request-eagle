@@ -8,7 +8,7 @@ use std::{
 use environment::Environment;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use toml_edit::{DocumentMut, Item};
+use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
 use crate::toml_merge::merge_table;
@@ -276,18 +276,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         })?;
     }
 
-    let rendered =
-        toml::to_string_pretty(entry).map_err(|source| CollectionSaveError::Serialize {
-            path: entry.path.clone(),
-            source,
-        })?;
-    let updates = rendered
-        .parse::<DocumentMut>()
-        .map_err(|source| CollectionSaveError::Edit {
-            path: entry.path.clone(),
-            source,
-        })?;
-
+    let updates = render(entry)?;
     let mut document =
         entry
             .raw_content
@@ -362,6 +351,37 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
     entry.raw_content = raw_content;
 
     Ok(())
+}
+
+/// Serializes a request file. Header, parameter and metadata rows stay one
+/// inline array, which TOML would split into `[[request.headers]]` sections
+/// once every row is a table.
+pub(crate) fn render(entry: &FileEntry) -> Result<DocumentMut, CollectionSaveError> {
+    let rendered =
+        toml::to_string_pretty(entry).map_err(|source| CollectionSaveError::Serialize {
+            path: entry.path.clone(),
+            source,
+        })?;
+    let mut document =
+        rendered
+            .parse::<DocumentMut>()
+            .map_err(|source| CollectionSaveError::Edit {
+                path: entry.path.clone(),
+                source,
+            })?;
+
+    if let Some(request) = document
+        .get_mut("request")
+        .and_then(Item::as_table_like_mut)
+    {
+        for (_, item) in request.iter_mut() {
+            if let Item::ArrayOfTables(rows) = item {
+                *item = Item::Value(Value::Array(std::mem::take(rows).into_array()));
+            }
+        }
+    }
+
+    Ok(document)
 }
 
 fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {

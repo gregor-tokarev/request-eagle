@@ -3,7 +3,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::{SinkExt as _, StreamExt as _};
 use gpui_kit::{App, Entity, Modifiers, TestAppContext, VisualTestContext};
 use request::{
-    WebSocketClose, WebSocketEvent, WebSocketEventKind, WebSocketMessage, WebSocketRequest,
+    Field, WebSocketClose, WebSocketEvent, WebSocketEventKind, WebSocketMessage, WebSocketRequest,
 };
 use tokio_tungstenite::tungstenite::Message;
 
@@ -325,7 +325,7 @@ fn params_and_headers_edit_the_request(cx: &mut TestAppContext) {
     let (draft, cx) = draft(
         WebSocketRequest {
             url: "wss://example.com/socket".into(),
-            headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+            headers: vec![Field::new("Authorization", "Bearer {{token}}")],
             ..WebSocketRequest::default()
         },
         cx,

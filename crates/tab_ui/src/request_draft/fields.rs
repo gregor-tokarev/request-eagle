@@ -10,6 +10,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::Field;
 
 struct FieldRow {
     enabled: bool,
@@ -20,7 +21,8 @@ struct FieldRow {
     _subscriptions: Vec<Subscription>,
 }
 
-pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
+/// Every row with a key, including those switched off.
+pub(crate) struct FieldsChanged(pub Vec<Field>);
 
 /// A request's editable key/value rows, including one trailing empty row.
 pub(crate) struct RequestFields {
@@ -36,7 +38,7 @@ impl EventEmitter<FieldsChanged> for RequestFields {}
 impl RequestFields {
     pub(crate) fn new(
         id: &'static str,
-        values: &[(String, String)],
+        values: &[Field],
         generated_headers: &[(String, String)],
         scope: Entity<VariableScope>,
         window: &mut Window,
@@ -53,10 +55,10 @@ impl RequestFields {
             scope,
         };
 
-        for (key, value) in values {
-            fields.append_row(key, value, window, cx);
+        for field in values {
+            fields.append_row(field, window, cx);
         }
-        fields.append_row("", "", window, cx);
+        fields.append_row(&Field::new("", ""), window, cx);
 
         fields
     }
@@ -83,18 +85,22 @@ impl RequestFields {
         cx.notify();
     }
 
-    fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn append_row(&mut self, field: &Field, window: &mut Window, cx: &mut Context<Self>) {
         let key = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Key")
-                .default_value(key.to_owned())
+                .default_value(field.key.clone())
         });
         let value = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Value")
-                .default_value(value.to_owned())
+                .default_value(field.value.clone())
         });
-        let description = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
+        let description = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Description")
+                .default_value(field.description.clone())
+        });
         let completions = [&key, &value].map(|input| {
             cx.new(|cx| {
                 VariableInput::new(
@@ -105,7 +111,7 @@ impl RequestFields {
                 )
             })
         });
-        let subscriptions = [&key, &value]
+        let mut subscriptions: Vec<_> = [&key, &value]
             .into_iter()
             .map(|input| {
                 cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| {
@@ -114,7 +120,7 @@ impl RequestFields {
                             !row.key.read(cx).value().is_empty()
                                 || !row.value.read(cx).value().is_empty()
                         }) {
-                            this.append_row("", "", window, cx);
+                            this.append_row(&Field::new("", ""), window, cx);
                         }
 
                         this.emit_change(cx);
@@ -122,9 +128,16 @@ impl RequestFields {
                 })
             })
             .collect();
+        subscriptions.push(
+            cx.subscribe(&description, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.emit_change(cx);
+                }
+            }),
+        );
 
         self.rows.push(FieldRow {
-            enabled: true,
+            enabled: field.enabled,
             key,
             value,
             description,
@@ -140,8 +153,12 @@ impl RequestFields {
             .filter_map(|row| {
                 let key = row.key.read(cx).value();
 
-                (row.enabled && !key.trim().is_empty())
-                    .then(|| (key.to_string(), row.value.read(cx).value().to_string()))
+                (!key.trim().is_empty()).then(|| Field {
+                    key: key.to_string(),
+                    value: row.value.read(cx).value().to_string(),
+                    enabled: row.enabled,
+                    description: row.description.read(cx).value().to_string(),
+                })
             })
             .collect();
 

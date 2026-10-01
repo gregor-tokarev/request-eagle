@@ -1,5 +1,5 @@
 use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
-use request::Method;
+use request::{Field, Method};
 use std::collections::HashMap;
 
 use super::{RequestDraft, draft::RequestSection};
@@ -16,7 +16,7 @@ fn deleting_an_earlier_row_keeps_checkbox_focus_on_the_same_header(cx: &mut Test
         let view = cx.new(|cx| {
             let mut draft = RequestDraft::new(
                 request::HttpRequest {
-                    headers: vec![("First".into(), "1".into()), ("Second".into(), "2".into())],
+                    headers: vec![Field::new("First", "1"), Field::new("Second", "2")],
                     ..Default::default()
                 },
                 None,
@@ -50,13 +50,61 @@ fn deleting_an_earlier_row_keeps_checkbox_focus_on_the_same_header(cx: &mut Test
     cx.simulate_click(remove.center(), Modifiers::default());
     cx.update(|window, _| assert!(focus.is_focused(window)));
     toggle(cx);
-    cx.read(|cx| assert!(draft.read(cx).request.headers.is_empty()));
-
-    toggle(cx);
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).request.headers,
-            [("Second".into(), "2".into())]
+            [Field {
+                enabled: false,
+                ..Field::new("Second", "2")
+            }]
+        );
+    });
+
+    toggle(cx);
+    cx.read(|cx| {
+        assert_eq!(draft.read(cx).request.headers, [Field::new("Second", "2")]);
+    });
+}
+
+#[gpui_kit::test]
+fn descriptions_are_kept_with_their_rows(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let mut draft = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            let mut draft = RequestDraft::new(
+                request::HttpRequest {
+                    headers: vec![Field::new("X-Trace", "1")],
+                    ..Default::default()
+                },
+                None,
+                Default::default(),
+                None,
+                cx,
+            );
+            draft.prepare(window, cx);
+            draft
+        });
+        draft = Some(view.clone());
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let draft = draft.unwrap();
+
+    let description = super::tests::element_bounds(cx, "headers-description-0").unwrap();
+    cx.simulate_click(description.center(), Modifiers::default());
+    cx.simulate_input("Only while debugging");
+
+    cx.read(|cx| {
+        assert_eq!(
+            draft.read(cx).request.headers,
+            [Field {
+                description: "Only while debugging".into(),
+                ..Field::new("X-Trace", "1")
+            }]
         );
     });
 }
@@ -66,7 +114,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
     let request = request::HttpRequest {
         path: "http://example.com".into(),
         method: Method::Post,
-        headers: vec![("{{header_name}}".into(), "virtual.example".into())],
+        headers: vec![Field::new("{{header_name}}", "virtual.example")],
         body: Some(b"{}".to_vec()),
         ..Default::default()
     };
@@ -126,7 +174,7 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
 
         request
             .headers
-            .push(("AUTHORIZATION".into(), "Bearer explicit".into()));
+            .push(Field::new("AUTHORIZATION", "Bearer explicit"));
         assert!(
             super::execution::generated_headers(&request)
                 .iter()
@@ -160,9 +208,7 @@ fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
         let headers = super::execution::generated_headers(&request);
         assert_eq!(headers[0], ("Host".into(), expected.into()), "{path}");
 
-        request
-            .headers
-            .push(("hOsT".into(), "override.example".into()));
+        request.headers.push(Field::new("hOsT", "override.example"));
         assert!(
             super::execution::generated_headers(&request)
                 .iter()
@@ -225,8 +271,9 @@ fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut 
     let enabled = cx.debug_bounds("headers-enabled-0").unwrap();
     cx.simulate_click(enabled.center(), Modifiers::default());
     cx.read(|cx| {
+        // The row stays, switched off, and no longer replaces the default.
         assert_eq!(draft.read(cx).generated_headers[0].1, "example.com:8443");
-        assert!(draft.read(cx).request.headers.is_empty());
+        assert!(!draft.read(cx).request.headers[0].enabled);
     });
 
     cx.update(|window, cx| {

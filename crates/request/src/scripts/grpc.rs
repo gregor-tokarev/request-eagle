@@ -18,8 +18,8 @@ use super::{
     variables::Variables,
 };
 use crate::{
-    GrpcError, GrpcEvent, GrpcEvents, GrpcMessage, GrpcRequest, GrpcScripts, RequestExecutor,
-    RequestVariables,
+    Field, GrpcError, GrpcEvent, GrpcEvents, GrpcMessage, GrpcRequest, GrpcScripts,
+    RequestExecutor, RequestVariables,
 };
 
 /// After response sees the latest messages in each direction, up to this
@@ -124,7 +124,7 @@ impl CallScripts {
         }
 
         request.url = changes.url;
-        request.metadata = changes.metadata;
+        request.metadata = changes.metadata.into_iter().map(Field::from).collect();
         request.message = changes.message;
         self.variables = values;
 
@@ -270,7 +270,7 @@ impl CallScripts {
             "phase": phase,
             "url": request.url,
             "methodPath": request.method,
-            "metadata": request.metadata,
+            "metadata": Field::enabled(&request.metadata).collect::<Vec<_>>(),
             "message": request.message,
             "variables": self.variables,
         })

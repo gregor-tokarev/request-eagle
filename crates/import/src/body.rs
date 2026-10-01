@@ -2,6 +2,7 @@
 //! Eagle stores a body as raw bytes, so forms are encoded here.
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use request::Field;
 
 /// Separates multipart fields. Fixed, so that imports are reproducible.
 const BOUNDARY: &str = "RequestEagleFormBoundary";
@@ -29,10 +30,7 @@ if (pm.request.body.raw) {
 
 /// A URL-encoded form. Its `{{variables}}` are left for
 /// [`url_encoded_form_script`] to fill in and encode when sending.
-pub(crate) fn url_encoded_form(
-    fields: &[(String, String)],
-    headers: &mut Vec<(String, String)>,
-) -> Vec<u8> {
+pub(crate) fn url_encoded_form(fields: &[(String, String)], headers: &mut Vec<Field>) -> Vec<u8> {
     set_content_type(headers, "application/x-www-form-urlencoded");
 
     fields
@@ -70,10 +68,7 @@ fn encode_form_field(text: &str) -> String {
 }
 
 /// A multipart form of text fields.
-pub(crate) fn multipart_form(
-    fields: &[(String, String)],
-    headers: &mut Vec<(String, String)>,
-) -> Vec<u8> {
+pub(crate) fn multipart_form(fields: &[(String, String)], headers: &mut Vec<Field>) -> Vec<u8> {
     set_content_type(
         headers,
         &format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -92,11 +87,8 @@ pub(crate) fn multipart_form(
 }
 
 /// Adds a `Content-Type` header unless the request already has one.
-pub(crate) fn set_content_type(headers: &mut Vec<(String, String)>, content_type: &str) {
-    if !headers
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-    {
-        headers.push(("Content-Type".into(), content_type.into()));
+pub(crate) fn set_content_type(headers: &mut Vec<Field>, content_type: &str) {
+    if !Field::enabled(headers).any(|(name, _)| name.eq_ignore_ascii_case("content-type")) {
+        headers.push(Field::new("Content-Type", content_type));
     }
 }

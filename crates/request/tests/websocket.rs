@@ -7,8 +7,9 @@ use std::{
 
 use futures::{SinkExt as _, StreamExt as _};
 use request::{
-    ExecutionError, ProxyMode, RequestPreferences, RequestVariables, StatusCode, WebSocketClose,
-    WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage, WebSocketRequest,
+    ExecutionError, Field, ProxyMode, RequestPreferences, RequestVariables, StatusCode,
+    WebSocketClose, WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage,
+    WebSocketRequest,
 };
 use tokio_tungstenite::{
     WebSocketStream,
@@ -170,8 +171,8 @@ fn messages_stream_in_both_directions_until_the_server_closes() {
     let (connection, mut events) = WebSocketConnection::open(
         WebSocketRequest {
             url: format!("{url}/feed#ignored"),
-            headers: vec![("X-Token".into(), "{{token}}".into())],
-            query: vec![("room".into(), "{{room}}".into())],
+            headers: vec![Field::new("X-Token", "{{token}}")],
+            query: vec![Field::new("room", "{{room}}")],
             message: String::new(),
         },
         variables(&values),
@@ -537,7 +538,7 @@ fn the_handshake_reports_every_header_it_sent() {
 fn the_editor_previews_handshake_headers() {
     let preview = request::websocket_handshake_headers(
         "example.com/socket",
-        &[("Upgrade".into(), "websocket".into())],
+        &[Field::new("Upgrade", "websocket")],
     );
     assert_eq!(
         preview,

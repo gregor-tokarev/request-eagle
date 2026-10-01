@@ -15,7 +15,7 @@ use futures::{Stream, StreamExt as _, stream};
 use prost::Message as _;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, Value};
 use request::{
-    GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts,
+    Field, GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts,
     GrpcSettings, MethodKind, RequestPreferences, RequestVariables, ServiceDefinition,
 };
 use tokio_rustls::{TlsAcceptor, rustls};
@@ -413,7 +413,7 @@ async fn unary_calls_return_the_message_metadata_and_status() {
     let protos = protos();
     let address = serve(&protos, Some("v1")).await;
     let mut request = request(address, "Say", r#"{"text": "{{name}}"}"#);
-    request.metadata = vec![("X-Echo".into(), "{{name}}".into())];
+    request.metadata = vec![Field::new("X-Echo", "{{name}}")];
     let definition = reflect(&request).await;
 
     let (call, events) = client()
@@ -804,7 +804,7 @@ fn saved_requests_round_trip_through_toml() {
         tls: true,
         method: "echo.v1.EchoService/Say".into(),
         message: "{\"text\": \"hi\"}".into(),
-        metadata: vec![("authorization".into(), "Bearer {{token}}".into())],
+        metadata: vec![Field::new("authorization", "Bearer {{token}}")],
         definition: GrpcDefinition::ProtoFile {
             path: Path::new("protos/echo.proto").into(),
             import_paths: vec!["shared".into()],
@@ -993,7 +993,7 @@ async fn generated_values_match_across_metadata_and_message() {
     let protos = protos();
     let address = serve(&protos, Some("v1")).await;
     let mut request = request(address, "Say", r#"{"text": "{{$guid}}"}"#);
-    request.metadata = vec![("x-echo".into(), "{{$guid}}".into())];
+    request.metadata = vec![Field::new("x-echo", "{{$guid}}")];
     let definition = reflect(&request).await;
 
     let (_call, events) = client()
@@ -1067,7 +1067,7 @@ fn definitions_store_paths_inside_the_collection_relative_to_it() {
 fn target_keys_change_with_named_variables_only() {
     let request = GrpcRequest {
         url: "{{host}}:50051".into(),
-        metadata: vec![("x-request-id".into(), "{{$guid}}".into())],
+        metadata: vec![Field::new("x-request-id", "{{$guid}}")],
         ..GrpcRequest::default()
     };
     let variables =
@@ -1221,7 +1221,7 @@ async fn before_invoke_sets_the_metadata_reflection_needs() {
     let protos = protos();
     let address = serve(&protos, Some("v1")).await;
     let mut request = request(address, "Say", r#"{"text": "{{token}}"}"#);
-    request.metadata = vec![("x-echo".into(), "{{token}}".into())];
+    request.metadata = vec![Field::new("x-echo", "{{token}}")];
     request.scripts.before_invoke = "pm.variables.set('token', 'secret');".into();
 
     // Without the script, reflection cannot resolve the metadata.

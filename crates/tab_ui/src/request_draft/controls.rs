@@ -7,7 +7,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::Method;
+use request::{Field, Method};
 use request_eagle_theme::method_color;
 
 use super::draft::{RequestDraft, RequestLocation, RequestSection};
@@ -248,9 +248,10 @@ impl RequestDraft {
                 .children(sections.into_iter().map(|(label, section)| {
                     let selected = section == Some(self.section);
                     let count = match section {
-                        Some(RequestSection::Params) => self.request.query.len(),
+                        Some(RequestSection::Params) => Field::enabled(&self.request.query).count(),
                         Some(RequestSection::Headers) => {
-                            self.request.headers.len() + self.generated_headers.len()
+                            Field::enabled(&self.request.headers).count()
+                                + self.generated_headers.len()
                         }
                         Some(RequestSection::Scripts) => {
                             usize::from(!self.request.scripts.pre_request.is_empty())

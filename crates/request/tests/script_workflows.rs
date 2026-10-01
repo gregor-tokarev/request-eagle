@@ -12,7 +12,8 @@ use std::{
 
 use environment::EnvironmentSession;
 use request::{
-    ExecutionError, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables,
+    ExecutionError, Field, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences,
+    RequestVariables,
 };
 
 struct Server {
@@ -123,7 +124,7 @@ fn response_tokens_survive_execution_and_locals_do_not() {
     smol::block_on(executor.execute(login, variables(&session))).unwrap();
     let mut next = server.request("pm.expect(pm.variables.has('local')).to.be.false;", "");
     next.headers
-        .push(("Authorization".into(), "Bearer {{token}}".into()));
+        .push(Field::new("Authorization", "Bearer {{token}}"));
     smol::block_on(executor.execute(next.clone(), variables(&session))).unwrap();
     assert!(
         server.requests.lock().unwrap()[1]

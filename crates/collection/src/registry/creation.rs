@@ -10,11 +10,8 @@ use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
 use super::mutations::find_entry;
-use crate::collection::is_reserved;
-use crate::{
-    Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
-    FileEntry,
-};
+use crate::collection::{is_reserved, render};
+use crate::{Collection, CollectionEditError, CollectionRegistry, DirEntry, Entry, FileEntry};
 use request::{HttpRequest, Method, Request};
 
 impl CollectionRegistry {
@@ -105,12 +102,7 @@ impl CollectionRegistry {
                 schema_version: 1,
                 request: request.clone(),
             };
-            let content = toml::to_string_pretty(&entry).map_err(|source| {
-                CollectionSaveError::Serialize {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
+            let content = render(&entry)?.to_string();
             let mut file = match fs::File::create_new(&path) {
                 Ok(file) => file,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,

@@ -24,7 +24,9 @@ use tokio_tungstenite::{
     },
 };
 
-use crate::{ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest};
+use crate::{
+    ExecutionError, Field, Method, RequestPreferences, RequestVariables, WebSocketRequest,
+};
 
 /// Events wait in a queue until the tab reads them. When it holds this many
 /// events, or this many bytes of received messages, the connection stops
@@ -49,17 +51,10 @@ const UPGRADE_HEADERS: [(&str, &str); 4] = [
 
 /// The headers a handshake adds to the request's own, which take precedence.
 /// Before connecting, the key and any values from `{{variables}}` are placeholders.
-pub fn websocket_handshake_headers(
-    url: &str,
-    headers: &[(String, String)],
-) -> Vec<(String, String)> {
+pub fn websocket_handshake_headers(url: &str, headers: &[Field]) -> Vec<(String, String)> {
     let url = websocket_url(url);
     let templated = url.contains("{{");
-    let has = |name: &str| {
-        headers
-            .iter()
-            .any(|(key, _)| key.eq_ignore_ascii_case(name))
-    };
+    let has = |name: &str| Field::enabled(headers).any(|(key, _)| key.eq_ignore_ascii_case(name));
 
     // The HTTP client sends Host and Accept. Credentials in the URL become
     // Basic authorization, as for HTTP requests.
@@ -448,8 +443,9 @@ async fn handshake(
 
     // Fragments are never sent. Parameters from the editor follow the URL's own.
     url.set_fragment(None);
-    if !request.query.is_empty() {
-        url.query_pairs_mut().extend_pairs(&request.query);
+    let query: Vec<_> = Field::enabled(&request.query).collect();
+    if !query.is_empty() {
+        url.query_pairs_mut().extend_pairs(query);
     }
 
     let mut headers = websocket_handshake_headers(url.as_str(), &request.headers);
@@ -458,7 +454,9 @@ async fn handshake(
             *value = generate_key();
         }
     }
-    headers.extend(request.headers);
+    headers.extend(
+        Field::enabled(&request.headers).map(|(name, value)| (name.to_owned(), value.to_owned())),
+    );
 
     // Credentials are sent as the Authorization header above instead, and
     // are not shown with the URL.

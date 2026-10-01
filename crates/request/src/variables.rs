@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use environment::{EnvironmentSession, VariableError, VariableResolver};
 
-use crate::{GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -66,12 +66,8 @@ impl RequestVariables {
     /// variables such as `{{$guid}}` stay as written, since they differ on
     /// every use, unless a Before invoke script set them for the call.
     pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
-        let texts = std::iter::once(request.url.as_str()).chain(
-            request
-                .metadata
-                .iter()
-                .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
-        );
+        let texts = std::iter::once(request.url.as_str())
+            .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]));
         let mut resolver = self.resolver();
 
         for text in texts.clone() {
@@ -106,10 +102,11 @@ impl RequestVariables {
         };
         let mut request = request.clone();
         request.url = resolve(&request.url)?;
+        request.metadata.retain(|field| field.enabled);
 
-        for (key, value) in &mut request.metadata {
-            *key = resolve(key)?;
-            *value = resolve(value)?;
+        for field in &mut request.metadata {
+            field.key = resolve(&field.key)?;
+            field.value = resolve(&field.value)?;
         }
 
         if message {
@@ -149,12 +146,15 @@ impl RequestVariables {
     ) -> Result<WebSocketRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
         let mut request = request.clone();
+        request.headers.retain(|field| field.enabled);
+        request.query.retain(|field| field.enabled);
+
         let mut resolve = || {
             request.url = resolve_url(&request.url, &mut resolver)?;
 
-            for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-                *key = resolver.resolve(key)?;
-                *value = resolver.resolve(value)?;
+            for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+                field.key = resolver.resolve(&field.key)?;
+                field.value = resolver.resolve(&field.value)?;
             }
 
             Ok(())
@@ -240,10 +240,12 @@ impl HttpRequest {
     ) -> Result<Self, VariableError> {
         let mut request = self;
         request.path = resolve_url(&request.path, resolver)?;
+        request.headers.retain(|field| field.enabled);
+        request.query.retain(|field| field.enabled);
 
-        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-            *key = resolver.resolve(key)?;
-            *value = resolver.resolve(value)?;
+        for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+            field.key = resolver.resolve(&field.key)?;
+            field.value = resolver.resolve(&field.value)?;
         }
 
         if let Some(body) = &mut request.body

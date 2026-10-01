@@ -53,6 +53,9 @@ script results.
   changes. There is no live synchronization.
 - `requests.update` replaces the complete request. Read it first and preserve
   the fields you do not intend to change.
+- Headers, query parameters and gRPC metadata are `[key, value]` pairs. A row
+  written as `{"key": …, "value": …, "disabled": true, "description": …}` is
+  kept with the request but not sent.
 - WebSocket requests appear with a `websocket` object instead of `request`.
   The CLI can read, move, rename and delete them, but only the app connects
   to them or edits them.

@@ -1,5 +1,5 @@
 use collection::ImportedItem;
-use request::{HttpRequest, Method, Request};
+use request::{Field, HttpRequest, Method, Request};
 
 use crate::parse;
 
@@ -48,7 +48,7 @@ const COLLECTION: &str = r#"{
                         "method": "GET",
                         "header": [
                             {"key": "Accept", "value": "application/json"},
-                            {"key": "X-Debug", "value": "1", "disabled": true}
+                            {"key": "X-Debug", "value": "1", "disabled": true, "description": "Server traces"}
                         ],
                         "url": {
                             "raw": "{{base_url}}/pets/:id?expand=owner%20name",
@@ -121,11 +121,18 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     assert_eq!(name, "Find pet");
     assert_eq!(find.method, Method::Get);
     assert_eq!(find.path, "{{base_url}}/pets/7?expand=owner%20name");
+    // Headers that are switched off stay with their descriptions, but are
+    // not sent.
     assert_eq!(
         find.headers,
         [
-            ("Accept".to_owned(), "application/json".to_owned()),
-            ("Authorization".to_owned(), "Bearer {{token}}".to_owned()),
+            Field::new("Accept", "application/json"),
+            Field {
+                enabled: false,
+                description: "Server traces".into(),
+                ..Field::new("X-Debug", "1")
+            },
+            Field::new("Authorization", "Bearer {{token}}"),
         ]
     );
     // Folder scripts run before the request's own, each in its own block.
@@ -139,7 +146,7 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     assert_eq!(add.body.as_deref(), Some(br#"{"name": "Rex"}"#.as_slice()));
     assert_eq!(
         add.headers,
-        [("Content-Type".to_owned(), "application/json".to_owned())]
+        [Field::new("Content-Type", "application/json")]
     );
 }
 
@@ -172,14 +179,8 @@ fn postman_forms_and_basic_auth_are_encoded() {
     assert_eq!(
         login.headers,
         [
-            (
-                "Content-Type".to_owned(),
-                "application/x-www-form-urlencoded".to_owned()
-            ),
-            (
-                "Authorization".to_owned(),
-                "Basic YWRtaW46c2VjcmV0".to_owned()
-            ),
+            Field::new("Content-Type", "application/x-www-form-urlencoded"),
+            Field::new("Authorization", "Basic YWRtaW46c2VjcmV0"),
         ]
     );
 }
@@ -274,7 +275,7 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
          --RequestEagleFormBoundary--\r\n"
     );
     assert_eq!(
-        upload.headers[0].1,
+        upload.headers[0].value,
         "multipart/form-data; boundary=RequestEagleFormBoundary"
     );
 
@@ -296,5 +297,5 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
 
     let (_, key) = http(&import.collection.items[3]);
     assert_eq!(key.method, Method::Get);
-    assert_eq!(key.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
+    assert_eq!(key.query, [Field::new("api_key", "{{key}}")]);
 }

@@ -1,3 +1,4 @@
+use request::Field;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -123,7 +124,8 @@ pub struct GrpcRequestInput {
     #[serde(default)]
     pub message: String,
     #[serde(default)]
-    pub metadata: Vec<(String, String)>,
+    #[schemars(with = "Vec<FieldSchema>")]
+    pub metadata: Vec<Field>,
     /// A `.proto` file; relative paths resolve from the collection directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proto_file: Option<PathBuf>,
@@ -166,14 +168,33 @@ pub struct RequestInput {
     pub method: Method,
     pub url: String,
     #[serde(default)]
-    pub headers: Vec<(String, String)>,
+    #[schemars(with = "Vec<FieldSchema>")]
+    pub headers: Vec<Field>,
     #[serde(default)]
-    pub query: Vec<(String, String)>,
+    #[schemars(with = "Vec<FieldSchema>")]
+    pub query: Vec<Field>,
     pub body: Option<Body>,
     #[serde(default)]
     pub pre_request: String,
     #[serde(default)]
     pub post_response: String,
+}
+
+/// A header, query parameter or metadata row as `[key, value]`, or as an
+/// object to switch it off or describe it. Rows that are off are not sent.
+#[derive(JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum FieldSchema {
+    Pair(String, String),
+    Row {
+        key: String,
+        value: String,
+        #[serde(default)]
+        disabled: bool,
+        #[serde(default)]
+        description: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -7,7 +7,7 @@ use std::{
 
 use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
 
-use request::{HttpRequest, Method, Request};
+use request::{Field, HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -163,9 +163,9 @@ request_custom = 'keep the request metadata'
         scripts: Default::default(),
         method: Method::Post,
         path: "https://example.com/v2/users".into(),
-        headers: vec![("Accept".into(), "application/json".into())],
+        headers: vec![Field::new("Accept", "application/json")],
         body: Some(b"new body".to_vec()),
-        query: vec![("page".into(), "2".into())],
+        query: vec![Field::new("page", "2")],
     };
 
     registry
@@ -393,8 +393,8 @@ query = [
         "array formatting changed: {content}"
     );
 
-    request.headers[0].1 = "text/plain".into();
-    request.query[0].1 = "2".into();
+    request.headers[0].value = "text/plain".into();
+    request.query[0].value = "2".into();
     registry
         .update_request(&path, "list", request.clone().into())
         .unwrap();
@@ -467,9 +467,9 @@ query = [
     );
 
     request.headers.reverse();
-    request.headers[0].1 = "two".into();
+    request.headers[0].value = "two".into();
     request.query.reverse();
-    request.query[0].1 = "c".into();
+    request.query[0].value = "c".into();
 
     registry
         .update_request(&path, "list", request.clone().into())
@@ -660,4 +660,99 @@ fn collection_settings_files_cannot_be_replaced_by_entries() {
         Err(CollectionEditError::ReservedName)
     ));
     assert!(folder.is_dir());
+}
+
+#[test]
+fn rows_switched_off_or_described_survive_saving_with_their_annotations() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    fs::write(
+        &path,
+        r#"id = 'list'
+name = 'List users'
+schema_version = 1
+[request]
+type = 'http'
+method = 'GET'
+path = '/users'
+headers = [
+  ['Accept', 'application/json'], # Accept explanation.
+  ['X-Trace', 'one'], # Trace explanation.
+]
+"#,
+    )
+    .unwrap();
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
+        panic!("expected an HTTP request");
+    };
+    request.headers[1].enabled = false;
+    request.headers[1].description = "Only while debugging".into();
+    request.query = vec![Field {
+        enabled: false,
+        ..Field::new("page", "2")
+    }];
+
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains(
+            "  ['Accept', 'application/json'], # Accept explanation.\n  { key = \"X-Trace\", value = \"one\", disabled = true, description = \"Only while debugging\" }, # Trace explanation.\n"
+        ),
+        "{content}"
+    );
+    // Rows that are all tables stay an inline array too.
+    assert!(
+        content.contains("query = [{ key = \"page\", value = \"2\", disabled = true }]"),
+        "{content}"
+    );
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded.headers, request.headers);
+    assert_eq!(reloaded.query, request.query);
+}
+
+#[test]
+fn bodies_are_saved_as_text_unless_they_are_not_utf8() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut request = HttpRequest {
+        method: Method::Post,
+        path: "https://example.com/users".into(),
+        body: Some(b"{\n  \"name\": \"Ada\"\n}".to_vec()),
+        ..Default::default()
+    };
+
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains("body = \"\"\"\n{\n  \"name\": \"Ada\"\n}\"\"\""),
+        "{content}"
+    );
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded.body, request.body);
+
+    request.body = Some(vec![0xff, 0x00, b'a']);
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.contains("body = ["), "{content}");
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded.body, request.body);
 }

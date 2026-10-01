@@ -39,7 +39,7 @@ fn merge_value(target: &mut Value, update: &Value) {
             if target
                 .iter()
                 .chain(update.iter())
-                .all(|value| string_pair(value).is_some())
+                .all(|value| key_value(value).is_some())
             {
                 merge_key_value_rows(target, update);
 
@@ -67,7 +67,13 @@ fn merge_value(target: &mut Value, update: &Value) {
     }
 }
 
-fn string_pair(value: &Value) -> Option<(&str, &str)> {
+/// A header, parameter or metadata row's key and value. Rows are
+/// `[key, value]`, or tables when they are switched off or described.
+fn key_value(value: &Value) -> Option<(&str, &str)> {
+    if let Some(row) = value.as_inline_table() {
+        return Some((row.get("key")?.as_str()?, row.get("value")?.as_str()?));
+    }
+
     let values = value.as_array()?;
     if values.len() != 2 {
         return None;
@@ -113,7 +119,7 @@ fn merge_key_value_rows(target: &mut Array, update: &Array) {
         .map(|value| {
             let index = rows.iter().position(|row| {
                 row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current) == string_pair(value))
+                    .is_some_and(|(current, _)| key_value(current) == key_value(value))
             })?;
 
             rows[index].take()
@@ -125,10 +131,10 @@ fn merge_key_value_rows(target: &mut Array, update: &Array) {
 
     for (value, matched) in update.iter().zip(&mut matched) {
         if matched.is_none() {
-            let key = string_pair(value).unwrap().0;
+            let key = key_value(value).unwrap().0;
             if let Some(index) = rows.iter().position(|row| {
                 row.as_ref()
-                    .is_some_and(|(current, _)| string_pair(current).unwrap().0 == key)
+                    .is_some_and(|(current, _)| key_value(current).unwrap().0 == key)
             }) {
                 *matched = rows[index].take();
             }

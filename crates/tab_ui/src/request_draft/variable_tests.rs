@@ -1,5 +1,5 @@
 use gpui_kit::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext};
-use request::Method;
+use request::{Field, Method};
 use std::collections::HashMap;
 
 use std::path::Path;
@@ -189,7 +189,7 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).request.query[0],
-            ("{{message}}".into(), "{{$guid}}".into())
+            Field::new("{{message}}", "{{$guid}}")
         )
     });
 
@@ -203,7 +203,7 @@ fn variable_completion_works_in_params_headers_and_json(cx: &mut TestAppContext)
     cx.read(|cx| {
         assert_eq!(
             draft.read(cx).request.headers[0],
-            ("X-{{message}}".into(), "{{$timestamp}}".into())
+            Field::new("X-{{message}}", "{{$timestamp}}")
         )
     });
 
@@ -510,7 +510,7 @@ async fn send_resolves_environment_and_script_variables_once(cx: &mut TestAppCon
         draft.update(cx, |draft, cx| {
             draft.request.method = Method::Get;
             draft.request.path = "{{base_url}}/{{created}}".into();
-            draft.request.headers = vec![("{{header}}".into(), "text/plain".into())];
+            draft.request.headers = vec![Field::new("{{header}}", "text/plain")];
             draft.request.body = Some(b"{{message}}/{{!message}}/{{literal}}".to_vec());
             draft.request.scripts.pre_request = "pm.request.method = 'POST'; pm.expect(pm.variables.get('message')).to.equal('from file'); pm.variables.set('created', 'created'); pm.variables.set('message', 'local');".into();
             draft.send(window, cx);
@@ -587,10 +587,10 @@ fn environment_errors_are_reported_in_every_request_field() {
         let token = "{{ message }}".to_owned();
         match field {
             0 => request.path.push_str(&format!("/{token}")),
-            1 => request.headers.push((token, "value".into())),
-            2 => request.headers.push(("X-Message".into(), token)),
-            3 => request.query = vec![(token, "value".into())],
-            4 => request.query = vec![("message".into(), token)],
+            1 => request.headers.push(Field::new(token, "value")),
+            2 => request.headers.push(Field::new("X-Message", token)),
+            3 => request.query = vec![Field::new(token, "value")],
+            4 => request.query = vec![Field::new("message", token)],
             _ => request.body = Some(token.into_bytes()),
         }
         assert!(
@@ -798,7 +798,7 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
                 cx,
             );
             draft.request.path = format!("http://{address}/protected");
-            draft.request.headers = vec![("Authorization".into(), "Bearer {{token}}".into())];
+            draft.request.headers = vec![Field::new("Authorization", "Bearer {{token}}")];
             let scope = draft.variables.clone();
             let values = scope.read(cx).values(cx).unwrap();
             assert_eq!(values["token"], "response-token");
@@ -820,7 +820,12 @@ async fn response_token_is_reused_by_another_draft_and_appears_in_completion(
         panic!("both requests should reach the test server");
     })
     .await;
-    cx.read(|cx| assert_eq!(protected.read(cx).request.headers[0].1, "Bearer {{token}}"));
+    cx.read(|cx| {
+        assert_eq!(
+            protected.read(cx).request.headers[0].value,
+            "Bearer {{token}}"
+        )
+    });
     assert_eq!(
         std::fs::read_to_string(directory.path().join("environment.toml")).unwrap(),
         original_file

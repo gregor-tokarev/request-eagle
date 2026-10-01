@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use request::{
-    Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
+    Execution, ExecutionError, Field, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
     RequestPreferences, RequestVariables, Response, Version,
 };
 use smol::{
@@ -99,10 +99,10 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                     method: Method::Post,
                     path: format!("{url}/{{{{$guid}}}}"),
                     headers: vec![
-                        ("X-Id".into(), "{{$guid}}".into()),
-                        ("X-Uuid".into(), "{{$randomUUID}}".into()),
+                        Field::new("X-Id", "{{$guid}}"),
+                        Field::new("X-Uuid", "{{$randomUUID}}"),
                     ],
-                    query: vec![("id".into(), "{{$guid}}".into())],
+                    query: vec![Field::new("id", "{{$guid}}")],
                     body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -246,13 +246,10 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
         let request = HttpRequest {
             method: Method::Post,
             path: format!("{url}/submit?tag=existing#ignored"),
-            headers: vec![
-                ("X-Tag".into(), "one".into()),
-                ("X-Tag".into(), "two".into()),
-            ],
+            headers: vec![Field::new("X-Tag", "one"), Field::new("X-Tag", "two")],
             body: Some(vec![0, 255, 42]),
             scripts: Default::default(),
-            query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
+            query: vec![Field::new("tag", "a & b"), Field::new("tag", "c+d")],
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
@@ -283,6 +280,45 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             .map(|line| line.len() + 2)
             .sum();
         assert_eq!(response.metrics.request_header_bytes, sent_header_bytes);
+    });
+}
+
+#[test]
+fn rows_that_are_switched_off_are_neither_sent_nor_resolved() {
+    smol::block_on(async {
+        // Without a script and after a script changed the request.
+        for script in ["", "pm.request.headers.add({key: 'X-Script', value: '1'});"] {
+            let (url, server) = serve(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            )
+            .await;
+            // An unknown variable in a row that is off does not stop the send.
+            let off = |key: &str| Field {
+                enabled: false,
+                ..Field::new(key, "{{missing}}")
+            };
+            let mut request = HttpRequest {
+                method: Method::Post,
+                path: url,
+                headers: vec![Field::new("X-On", "1"), off("X-Off"), off("Content-Type")],
+                body: Some(b"{}".to_vec()),
+                query: vec![off("off"), Field::new("on", "1")],
+                ..HttpRequest::default()
+            };
+            request.scripts.pre_request = script.into();
+
+            executor().execute(request, no_variables()).await.unwrap();
+            let head = server.await.head.to_lowercase();
+
+            assert!(head.starts_with("post /?on=1 http/1.1\r\n"), "{head}");
+            assert!(head.contains("\r\nx-on: 1\r\n"), "{head}");
+            assert!(!head.contains("x-off"), "{head}");
+            // A Content-Type that is off leaves the JSON default in place.
+            assert!(
+                head.contains("\r\ncontent-type: application/json\r\n"),
+                "{head}"
+            );
+        }
     });
 }
 
@@ -558,8 +594,8 @@ fn cross_host_redirects_update_host_and_strip_sensitive_headers() {
                     HttpRequest {
                         path: url,
                         headers: vec![
-                            ("Authorization".into(), "Bearer test-token".into()),
-                            ("Cookie".into(), "session=test-session".into()),
+                            Field::new("Authorization", "Bearer test-token"),
+                            Field::new("Cookie", "session=test-session"),
                         ],
                         ..HttpRequest::default()
                     },
@@ -689,9 +725,9 @@ fn explicit_host_overrides_only_follow_redirects_on_the_same_authority() {
                             method: Method::Post,
                             path: url,
                             headers: vec![
-                                ("Host".into(), explicit_host),
-                                ("Authorization".into(), "Bearer test-token".into()),
-                                ("Cookie".into(), "session=test-session".into()),
+                                Field::new("Host", explicit_host),
+                                Field::new("Authorization", "Bearer test-token"),
+                                Field::new("Cookie", "session=test-session"),
                             ],
                             body: Some(b"payload".to_vec()),
                             ..HttpRequest::default()
@@ -727,7 +763,7 @@ fn explicit_host_does_not_follow_redirects_when_disabled() {
             .execute(
                 HttpRequest {
                     path: url,
-                    headers: vec![("Host".into(), "virtual.example".into())],
+                    headers: vec![Field::new("Host", "virtual.example")],
                     ..HttpRequest::default()
                 },
                 no_variables(),
@@ -792,7 +828,7 @@ fn explicit_host_redirects_share_the_transport_redirect_limit() {
                 .execute(
                     HttpRequest {
                         path: url,
-                        headers: vec![("Host".into(), "virtual.example".into())],
+                        headers: vec![Field::new("Host", "virtual.example")],
                         ..HttpRequest::default()
                     },
                     no_variables(),
@@ -833,7 +869,7 @@ fn rejects_invalid_urls_schemes_and_headers_before_sending() {
                 .execute(
                     HttpRequest {
                         path: "http://127.0.0.1:1".into(),
-                        headers: vec![(header.0.into(), header.1.into())],
+                        headers: vec![Field::new(header.0, header.1)],
                         ..HttpRequest::default()
                     },
                     no_variables(),
@@ -871,7 +907,7 @@ fn rejects_invalid_and_duplicate_host_headers_before_sending() {
                 .execute(
                     HttpRequest {
                         path: "http://127.0.0.1:1".into(),
-                        headers: vec![("hOsT".into(), value.into())],
+                        headers: vec![Field::new("hOsT", value)],
                         ..HttpRequest::default()
                     },
                     no_variables(),
@@ -889,8 +925,8 @@ fn rejects_invalid_and_duplicate_host_headers_before_sending() {
                 HttpRequest {
                     path: "http://127.0.0.1:1".into(),
                     headers: vec![
-                        ("Host".into(), "example.com".into()),
-                        ("host".into(), "example.com".into()),
+                        Field::new("Host", "example.com"),
+                        Field::new("host", "example.com"),
                     ],
                     ..HttpRequest::default()
                 },
@@ -926,8 +962,8 @@ fn preserves_valid_host_overrides_and_user_agent() {
                     HttpRequest {
                         path: url,
                         headers: vec![
-                            ("Host".into(), host.into()),
-                            ("User-Agent".into(), "requesteagleruntime/0.041".into()),
+                            Field::new("Host", host),
+                            Field::new("User-Agent", "requesteagleruntime/0.041"),
                         ],
                         ..HttpRequest::default()
                     },
@@ -956,7 +992,7 @@ fn generated_preview_matches_headers_received_by_the_server() {
             serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec())
                 .await;
         let path = url.replacen("http://", "http://user:p%40ss@", 1);
-        let headers = vec![("Content-Type".into(), "text/plain".into())];
+        let headers = vec![Field::new("Content-Type", "text/plain")];
         let preview = request::generated_headers(Method::Post, &path, &headers, 3);
         executor()
             .execute(
@@ -1395,10 +1431,10 @@ fn scripts_see_and_edit_query_rows() {
             let request = HttpRequest {
                 path: format!("{url}/path?tag=existing%20item#ignored"),
                 query: vec![
-                    ("tag".into(), "a & b".into()),
-                    ("tag".into(), "c+d".into()),
-                    ("Case".into(), "keep".into()),
-                    ("remove".into(), "yes".into()),
+                    Field::new("tag", "a & b"),
+                    Field::new("tag", "c+d"),
+                    Field::new("Case", "keep"),
+                    Field::new("remove", "yes"),
                 ],
                 scripts: request::RequestScripts {
                     pre_request: format!(
