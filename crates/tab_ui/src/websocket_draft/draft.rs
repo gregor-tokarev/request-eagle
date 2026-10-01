@@ -629,13 +629,6 @@ impl WebSocketDraft {
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
-impl WebSocketDraft {
-    pub fn is_connecting_for_test(&self) -> bool {
-        self.state == ConnectionState::Connecting
-    }
-}
-
 impl Render for WebSocketDraft {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         v_flex()

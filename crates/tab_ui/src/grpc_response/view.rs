@@ -343,12 +343,6 @@ impl GrpcResponse {
             && (self.query.is_empty() || entry.summary.to_lowercase().contains(&self.query))
     }
 
-    /// Visible entry indices, newest first.
-    #[cfg(test)]
-    pub(super) fn visible(&self) -> Vec<usize> {
-        self.shown.iter().rev().copied().collect()
-    }
-
     /// The entry at a position of the list, which shows the newest first.
     pub(super) fn entry_at(&self, position: usize) -> Option<usize> {
         self.shown
