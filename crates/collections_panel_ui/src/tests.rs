@@ -297,7 +297,7 @@ fn last_collection(
 }
 
 #[gpui_kit::test]
-fn a_click_opens_and_toggles_a_collection_once_even_in_a_double_click(cx: &mut TestAppContext) {
+fn quick_clicks_keep_toggling_the_collection_they_started_on(cx: &mut TestAppContext) {
     let (sidebar, opened, cx) = clicking_sidebar(cx);
     let (path, selector, position) = last_collection(&sidebar, cx);
     let index = cx.read(|cx| sidebar.read(cx).tree.index_of(&path).unwrap());
@@ -307,11 +307,34 @@ fn a_click_opens_and_toggles_a_collection_once_even_in_a_double_click(cx: &mut T
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
     assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
 
-    // The second press neither reopens the collection nor reaches the row
-    // collapsing it moved under the pointer.
+    // Presses inside the double click interval toggle the collection again
+    // rather than wait, and never reach the row collapsing moved under the
+    // pointer.
     click_at(cx, position, 2);
-    assert_eq!(*opened.borrow(), [path]);
+    cx.read(|cx| assert!(!sidebar.read(cx).collapsed.contains(&index)));
+
+    click_at(cx, position, 3);
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
+    assert_eq!(*opened.borrow(), [path.clone(), path.clone(), path]);
+}
+
+#[gpui_kit::test]
+fn quick_clicks_toggle_a_folder_each_time(cx: &mut TestAppContext) {
+    let (sidebar, _, cx) = clicking_sidebar(cx);
+    let index = cx.read(|cx| {
+        let items = &sidebar.read(cx).tree.items;
+        items
+            .iter()
+            .position(|item| item.kind == ItemKind::Folder)
+            .unwrap()
+    });
+    let position = cx.debug_bounds(row_selector(index)).unwrap().center();
+
+    click_at(cx, position, 1);
+    cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
+
+    click_at(cx, position, 2);
+    cx.read(|cx| assert!(!sidebar.read(cx).collapsed.contains(&index)));
 }
 
 #[gpui_kit::test]
