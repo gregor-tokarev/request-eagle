@@ -48,6 +48,7 @@ pub(crate) struct HistoryPanel {
     _worker: Task<()>,
     /// Today and Yesterday move on at midnight.
     _midnight: Task<()>,
+    _quit: Subscription,
     _search_subscription: Subscription,
 }
 
@@ -74,6 +75,13 @@ impl HistoryPanel {
                 job();
             }
         });
+        // Quitting waits for the changes already made to be saved.
+        let quit = cx.on_app_quit(|this: &mut Self, _| {
+            let saved = this.run(|| ());
+            async move {
+                let _ = saved.await;
+            }
+        });
         let midnight = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(until_midnight()).await;
@@ -97,6 +105,7 @@ impl HistoryPanel {
             jobs,
             _worker: worker,
             _midnight: midnight,
+            _quit: quit,
             _search_subscription: search_subscription,
         };
         panel.refresh(cx);
@@ -133,13 +142,21 @@ impl HistoryPanel {
     }
 
     fn save(&self, change: Change, cx: &mut Context<Self>) {
+        let added = change.added().map(ToOwned::to_owned);
         let saved = self.run(move || change.save());
 
         cx.spawn(async move |this, cx| {
             if let Ok(Err(error)) = saved.await {
                 let _ = this.update(cx, |this, cx| {
                     this.error = Some(format!("Could not save history: {error}"));
-                    cx.notify();
+
+                    // A request whose files were not written cannot be opened.
+                    if let Some(id) = added {
+                        let change = this.history.delete(&id);
+                        this.save(change, cx);
+                    }
+
+                    this.refresh(cx);
                 });
             }
         })

@@ -177,6 +177,11 @@ pub struct Change {
 }
 
 impl Change {
+    /// The id of the request this change adds.
+    pub fn added(&self) -> Option<&str> {
+        self.added.as_ref().map(|(id, _)| id.as_str())
+    }
+
     pub fn save(self) -> Result<(), HistoryError> {
         let entries = self.directory.join(ENTRIES);
 
