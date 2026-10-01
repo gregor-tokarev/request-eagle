@@ -367,15 +367,6 @@ impl VariableInput {
     }
 }
 
-#[cfg(test)]
-impl VariableInput {
-    /// Chips that resolve, then chips that don't, as the next paint shows them.
-    pub(crate) fn chips(&mut self, cx: &mut App) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
-        self.update_chips(cx);
-        (self.chips.clone(), self.unresolved.clone())
-    }
-}
-
 pub(crate) fn with_variables(completion: &Entity<VariableInput>, content: impl IntoElement) -> Div {
     use gpui_kit::component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp};
 

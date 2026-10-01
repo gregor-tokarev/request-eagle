@@ -120,11 +120,6 @@ impl ResponseView {
         cx.notify();
     }
 
-    #[cfg(test)]
-    pub(crate) fn events_for_test(&self) -> Option<Entity<EventLog>> {
-        self.events.clone()
-    }
-
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         self.loading = false;
         self.message = "Request cancelled".into();

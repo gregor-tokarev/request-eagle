@@ -210,11 +210,6 @@ impl CommandPalette {
             .map(|section| IndexPath::new(0).section(section))
     }
 
-    #[cfg(test)]
-    pub(crate) fn request_count(&self) -> usize {
-        self.groups[REQUESTS].len()
-    }
-
     fn render_row(&self, row: &Row, cx: &App) -> Div {
         let content = h_flex().w_full().min_w_0().gap_2();
         let muted = cx.theme().muted_foreground;

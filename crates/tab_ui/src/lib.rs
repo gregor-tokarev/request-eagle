@@ -24,14 +24,6 @@ mod vim;
 mod websocket_draft;
 
 #[cfg(test)]
-mod collection_page_tests;
-#[cfg(test)]
-mod environment_editor_tests;
-#[cfg(test)]
-mod test_allocator;
-#[cfg(feature = "test-support")]
-pub mod test_support;
-#[cfg(test)]
 mod variable_input_tests;
 
 pub use actions::SendRequest;
