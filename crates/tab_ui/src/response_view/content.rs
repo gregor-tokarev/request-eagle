@@ -1,4 +1,4 @@
-use gpui_kit::SharedString;
+use gpui_kit::{Image, ImageFormat, SharedString};
 use request::{Execution, HttpResponse, Response};
 use std::{
     sync::Arc,
@@ -7,13 +7,28 @@ use std::{
 
 pub struct ResponseContent {
     pub(super) execution: Execution,
+    /// The body as text. Empty when the body is binary.
     pub(super) raw: SharedString,
+    /// Highlighted text, reformatted for JSON and XML.
     pub(super) pretty: Option<SharedString>,
     pub(super) raw_only: bool,
     pub(super) language: &'static str,
+    /// Whether the body's bytes are not text.
+    pub(super) binary: bool,
+    pub(super) preview: Option<Preview>,
+    /// The last segment of the request's path, to name a saved body.
+    pub(super) url_name: Option<String>,
     pub(super) processing: Duration,
     pub(super) headers: Arc<[(SharedString, SharedString)]>,
     pub(super) cookies: Arc<[(SharedString, SharedString)]>,
+}
+
+/// A body that can be shown as what it represents, besides its text or bytes.
+#[derive(Clone)]
+pub(super) enum Preview {
+    Html,
+    Image(Arc<Image>),
+    Pdf,
 }
 
 impl ResponseContent {
@@ -21,21 +36,58 @@ impl ResponseContent {
     pub fn new(execution: Execution) -> Self {
         let started = Instant::now();
         let Response::Http(response) = &execution.response;
-        let raw: SharedString = String::from_utf8_lossy(&response.body).into_owned().into();
         let content_type = response
             .headers
             .get("content-type")
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
-        let is_json = content_type.contains("json") || raw.trim_start().starts_with(['{', '[']);
+        let mut parameters = content_type.split(';');
+        let media_type = parameters.next().unwrap_or("").trim().to_ascii_lowercase();
+        let charset = parameters
+            .filter_map(|parameter| parameter.split_once('='))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("charset"))
+            .and_then(|(_, label)| {
+                encoding_rs::Encoding::for_label(label.trim().trim_matches('"').as_bytes())
+            });
+        let body = &response.body;
+
+        let image = image_format(&media_type, body);
+        let pdf =
+            !body.is_empty() && (media_type == "application/pdf" || body.starts_with(b"%PDF-"));
+        let binary = match image {
+            Some(ImageFormat::Svg) => false,
+            Some(_) => true,
+            None => pdf || (!is_text(&media_type) && looks_binary(body)),
+        };
+
+        // Text is UTF-8 unless the response names another charset.
+        let raw: SharedString = if binary {
+            SharedString::default()
+        } else {
+            charset
+                .unwrap_or(encoding_rs::UTF_8)
+                .decode_without_bom_handling(body)
+                .0
+                .into_owned()
+                .into()
+        };
+        let language = if binary {
+            "text"
+        } else {
+            language(&media_type, &raw)
+        };
+
         let mut raw_only = exceeds_editor_limit(&raw);
-        let mut pretty: Option<SharedString> = if is_json && !raw_only {
-            serde_json::from_str::<serde_json::Value>(&raw)
+        let mut pretty = match language {
+            _ if raw_only => None,
+            "json" => serde_json::from_str::<serde_json::Value>(&raw)
                 .ok()
                 .and_then(|value| serde_json::to_string_pretty(&value).ok())
-                .map(Into::into)
-        } else {
-            None
+                .map(Into::into),
+            // Malformed XML still reads better highlighted.
+            "xml" => Some(pretty_xml(&raw).map_or_else(|| raw.clone(), Into::into)),
+            "html" | "javascript" | "css" | "yaml" => Some(raw.clone()),
+            _ => None,
         };
         if pretty
             .as_ref()
@@ -44,12 +96,15 @@ impl ResponseContent {
             raw_only = true;
             pretty = None;
         }
-        let language = if is_json {
-            "json"
-        } else if content_type.contains("html") {
-            "html"
-        } else {
-            "text"
+
+        let preview = match image {
+            Some(format) => Some(Preview::Image(Arc::new(Image::from_bytes(
+                format,
+                body.clone(),
+            )))),
+            None if pdf => Some(Preview::Pdf),
+            None if language == "html" && !raw.trim().is_empty() => Some(Preview::Html),
+            None => None,
         };
 
         let headers = response
@@ -81,19 +136,166 @@ impl ResponseContent {
             pretty,
             raw_only,
             language,
+            binary,
+            preview,
+            url_name: None,
             processing: started.elapsed(),
             headers,
             cookies,
         }
     }
 
+    /// Name a saved body after the request's URL, unless the server names it.
+    pub(crate) fn named_after(mut self, url: &str) -> Self {
+        self.url_name = super::save::url_file_name(url);
+        self
+    }
+
     pub(super) fn http(&self) -> &HttpResponse {
         let Response::Http(response) = &self.execution.response;
         response
+    }
+
+    /// What the body is, as the body toolbar names it.
+    pub(super) fn label(&self) -> &'static str {
+        match &self.preview {
+            Some(Preview::Image(image)) => match image.format {
+                ImageFormat::Png => "PNG",
+                ImageFormat::Jpeg => "JPEG",
+                ImageFormat::Webp => "WebP",
+                ImageFormat::Gif => "GIF",
+                ImageFormat::Svg => "SVG",
+                ImageFormat::Bmp => "BMP",
+                ImageFormat::Tiff => "TIFF",
+                ImageFormat::Ico => "ICO",
+                ImageFormat::Pnm => "PNM",
+            },
+            Some(Preview::Pdf) => "PDF",
+            _ if self.binary => "Binary",
+            _ => match self.language {
+                "json" => "JSON",
+                "html" => "HTML",
+                "xml" => "XML",
+                "javascript" => "JavaScript",
+                "css" => "CSS",
+                "yaml" => "YAML",
+                _ => "Text",
+            },
+        }
     }
 }
 
 /// Whether text is too large for the highlighted editor to stay responsive.
 pub(crate) fn exceeds_editor_limit(text: &str) -> bool {
     text.len() > 256 * 1024 || text.split('\n').any(|line| line.len() > 32 * 1024)
+}
+
+/// The format of an image body. Servers often label images generically, so
+/// distinctive signatures count regardless of the media type.
+fn image_format(media_type: &str, body: &[u8]) -> Option<ImageFormat> {
+    if body.is_empty() {
+        return None;
+    }
+
+    let signature = if body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(ImageFormat::Png)
+    } else if body.starts_with(b"\xff\xd8\xff") {
+        Some(ImageFormat::Jpeg)
+    } else if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
+        Some(ImageFormat::Gif)
+    } else if body.starts_with(b"RIFF") && body.get(8..12) == Some(b"WEBP") {
+        Some(ImageFormat::Webp)
+    } else {
+        None
+    };
+
+    let declared = match media_type {
+        "image/x-icon" | "image/vnd.microsoft.icon" => Some(ImageFormat::Ico),
+        "image/x-ms-bmp" => Some(ImageFormat::Bmp),
+        media_type => ImageFormat::from_mime_type(media_type),
+    };
+
+    signature.or(declared)
+}
+
+/// Media types whose bodies are text, even when they are not valid UTF-8.
+fn is_text(media_type: &str) -> bool {
+    media_type.starts_with("text/")
+        || is_xml(media_type)
+        || ["json", "javascript", "ecmascript", "yaml", "graphql"]
+            .iter()
+            .any(|name| media_type.contains(name))
+        || media_type == "application/x-www-form-urlencoded"
+}
+
+/// XML media types; Office documents mention XML in their names, but are ZIP files.
+fn is_xml(media_type: &str) -> bool {
+    media_type.ends_with("/xml") || media_type.ends_with("+xml")
+}
+
+/// Whether bytes of an undeclared kind are binary: their start contains a NUL
+/// byte or is not UTF-8.
+fn looks_binary(body: &[u8]) -> bool {
+    let start = &body[..body.len().min(8 * 1024)];
+
+    if start.contains(&0) {
+        return true;
+    }
+
+    match std::str::from_utf8(start) {
+        Ok(_) => false,
+        // The sample may end inside a character.
+        Err(error) => error.error_len().is_some() || start.len() == body.len(),
+    }
+}
+
+/// The highlighting language of a text body, by its media type or, for
+/// generic types, by how it starts.
+fn language(media_type: &str, text: &str) -> &'static str {
+    let start = text.trim_start_matches('\u{feff}').trim_start();
+    let starts_with = |prefix: &str| {
+        start
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    };
+
+    if media_type.contains("json") {
+        "json"
+    } else if media_type.contains("html") {
+        "html"
+    } else if is_xml(media_type) {
+        "xml"
+    } else if media_type.contains("javascript") || media_type.contains("ecmascript") {
+        "javascript"
+    } else if media_type == "text/css" {
+        "css"
+    } else if media_type.contains("yaml") {
+        "yaml"
+    } else if start.starts_with(['{', '[']) {
+        "json"
+    } else if starts_with("<!doctype html") || starts_with("<html") {
+        "html"
+    } else if starts_with("<?xml") {
+        "xml"
+    } else {
+        "text"
+    }
+}
+
+/// Indent XML elements, or `None` when the text is not well-formed XML.
+fn pretty_xml(text: &str) -> Option<String> {
+    use quick_xml::{Reader, Writer, events::Event};
+
+    let mut reader = Reader::from_str(text);
+    reader.config_mut().trim_text(true);
+    let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
+
+    loop {
+        match reader.read_event().ok()? {
+            Event::Eof => break,
+            event => writer.write_event(event).ok()?,
+        }
+    }
+
+    String::from_utf8(writer.into_inner()).ok()
 }

@@ -208,7 +208,7 @@ fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) 
         )
 }
 
-fn size_label(bytes: usize) -> String {
+pub(super) fn size_label(bytes: usize) -> String {
     match bytes {
         0..1024 => format!("{bytes} B"),
         1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.),

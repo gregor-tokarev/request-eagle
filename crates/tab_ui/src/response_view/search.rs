@@ -87,7 +87,7 @@ impl ResponseView {
                 let editor = editor.read(cx).0.clone();
                 editor.update(cx, |editor, cx| editor.open_search(false, cx));
             }
-            None => {}
+            _ => {}
         }
     }
 

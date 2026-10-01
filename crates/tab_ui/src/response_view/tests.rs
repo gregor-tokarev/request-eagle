@@ -3,7 +3,10 @@ use std::time::Duration;
 use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
 use request::{Execution, ExecutionError, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
-use super::{ResponseContent, ResponseView, body::Body};
+use super::{
+    ResponseContent, ResponseView,
+    body::{Body, BodyMode},
+};
 
 fn response(body: &[u8], content_type: &str) -> ResponseContent {
     let mut headers = HeaderMap::new();
@@ -76,7 +79,12 @@ fn large_response_stays_raw_and_retains_search_copy_and_wrapping(cx: &mut TestAp
         (true, raw.as_str()),
         (false, raw.as_str()),
     ] {
-        cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(is_pretty, window, cx)));
+        let mode = if is_pretty {
+            BodyMode::Pretty
+        } else {
+            BodyMode::Raw
+        };
+        cx.update(|window, cx| view.update(cx, |view, cx| view.show(mode, window, cx)));
         cx.update(|window, cx| view.update(cx, |view, cx| view.open_response_search(window, cx)));
         cx.simulate_input("needle ☃ tail");
         cx.read(|cx| {
@@ -561,7 +569,12 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
         view
     });
     for pretty in [false, true, false] {
-        cx.update(|window, cx| view.update(cx, |view, cx| view.set_pretty(pretty, window, cx)));
+        let mode = if pretty {
+            BodyMode::Pretty
+        } else {
+            BodyMode::Raw
+        };
+        cx.update(|window, cx| view.update(cx, |view, cx| view.show(mode, window, cx)));
         cx.read(|cx| {
             let view = view.read(cx);
             match view.body.as_ref().unwrap() {
@@ -570,6 +583,7 @@ fn raw_uses_plain_viewer_and_json_restores_highlighted_editor(cx: &mut TestAppCo
                     assert_eq!(body.read(cx).source, raw);
                 }
                 Body::Pretty(_) => assert!(pretty),
+                _ => panic!("expected text"),
             }
         });
     }

@@ -6,7 +6,10 @@ use gpui_kit::{
 };
 use request::{Execution, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
-use super::{ResponseContent, ResponseView};
+use super::{
+    ResponseContent, ResponseView,
+    body::{Body, BodyMode},
+};
 
 #[gpui_kit::test]
 fn full_single_line_response_scroll_has_bounded_allocations(cx: &mut TestAppContext) {
@@ -166,6 +169,9 @@ fn moderate_raw_html_uses_plain_viewer_with_bounded_scroll_allocations(cx: &mut 
         let response = cx.new(|cx| {
             let mut view = ResponseView::new(cx);
             view.finish(Ok(content), window, cx);
+            // HTML opens as highlighted source; Raw uses the plain viewer.
+            assert!(matches!(view.body, Some(Body::Pretty(_))));
+            view.show(BodyMode::Raw, window, cx);
             assert!(view.wrap);
             editor = view.body.as_ref().map(|body| body.raw().clone());
             view
