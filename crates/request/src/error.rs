@@ -87,3 +87,24 @@ pub enum ExecutionError {
     #[error("could not decode the gzip response body: {0}")]
     DecodeBody(#[source] io::Error),
 }
+
+impl ExecutionError {
+    /// The message without the address the request was sent to. Once
+    /// resolved, an address can hold secrets, such as a token in its query.
+    pub fn message_without_url(&self) -> String {
+        let message = self.to_string();
+        let url = match self {
+            Self::ScriptedRequest { source, .. } => return source.message_without_url(),
+            Self::Transport(error) => error
+                .chain()
+                .find_map(|error| error.downcast_ref::<reqwest::Error>())
+                .and_then(reqwest::Error::url),
+            _ => None,
+        };
+
+        match url {
+            Some(url) => message.replace(&format!(" for url ({url})"), ""),
+            None => message,
+        }
+    }
+}

@@ -67,13 +67,30 @@ impl StopEventStream {
     }
 }
 
-/// Follows a response that turns out to be an event stream. Pass it to
+/// Whether a request went out. Its scripts, variables or address can stop
+/// it before then.
+#[derive(Clone, Debug, Default)]
+pub struct Dispatch(Arc<AtomicBool>);
+
+impl Dispatch {
+    pub fn started(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn start(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Follows a request while it executes: whether it went out, and the events
+/// of a response that turns out to be an event stream. Pass it to
 /// `RequestExecutor::execute_streaming`.
 pub struct EventStream {
     updates: Option<mpsc::Sender<EventStreamUpdate>>,
     stop: oneshot::Receiver<()>,
     /// Set when the stream opens, after which the request timeout no longer applies.
     pub(crate) opened: Arc<AtomicBool>,
+    pub(crate) dispatch: Dispatch,
 }
 
 impl EventStream {
@@ -88,10 +105,16 @@ impl EventStream {
                 updates: Some(updates),
                 stop: stopped,
                 opened: Arc::default(),
+                dispatch: Dispatch::default(),
             },
             receiver,
             StopEventStream(stop),
         )
+    }
+
+    /// Tells whether the request went out, during and after its execution.
+    pub fn dispatch(&self) -> Dispatch {
+        self.dispatch.clone()
     }
 
     /// Report the response's events while reading its body. Returns the

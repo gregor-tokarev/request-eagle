@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use request::{
-    Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
-    RequestPreferences, RequestVariables, Response, Version,
+    EventStream, Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request,
+    RequestExecutor, RequestPreferences, RequestVariables, Response, Version,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -68,6 +68,46 @@ fn executor() -> RequestExecutor {
 
 fn no_variables() -> RequestVariables {
     RequestVariables::new(HashMap::new(), None)
+}
+
+#[test]
+fn tells_whether_a_request_went_out_and_keeps_its_secrets_out_of_failures() {
+    smol::block_on(async {
+        let variables = RequestVariables::new(
+            HashMap::from([("token".to_owned(), "s3cret".to_owned())]),
+            None,
+        );
+        let (events, _updates, _stop) = EventStream::new();
+        let dispatch = events.dispatch();
+        let request = HttpRequest {
+            path: "http://127.0.0.1:1/?token={{token}}".into(),
+            ..Default::default()
+        };
+
+        let error = executor()
+            .execute_streaming(request, variables, events)
+            .await
+            .unwrap_err();
+
+        assert!(dispatch.started());
+        assert!(error.to_string().contains("s3cret"), "{error}");
+        assert!(!error.message_without_url().contains("s3cret"), "{error}");
+
+        // An unknown variable stops the request before it goes out.
+        let (events, _updates, _stop) = EventStream::new();
+        let dispatch = events.dispatch();
+        let request = HttpRequest {
+            path: "http://127.0.0.1:1/{{missing}}".into(),
+            ..Default::default()
+        };
+
+        executor()
+            .execute_streaming(request, no_variables(), events)
+            .await
+            .unwrap_err();
+
+        assert!(!dispatch.started());
+    });
 }
 
 #[test]

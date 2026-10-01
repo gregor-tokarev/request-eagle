@@ -17,7 +17,7 @@ use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::{
-    Environments,
+    Environments, RequestSent,
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -73,6 +73,8 @@ pub struct GrpcDraft {
     configuration: Entity<GrpcConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<RequestSent> for GrpcDraft {}
 
 impl GrpcDraft {
     /// Variables resolve from the request's collection environment, its
