@@ -103,6 +103,9 @@ impl RequestDraft {
         let method = self.request.method;
         let draft = cx.entity().downgrade();
         let sending = self.task.is_some();
+        let streaming = self.streaming;
+        // Stopping lasts while the response completes and its scripts run.
+        let stopping = streaming && self.stop.is_none();
         let method_button = Button::new("request-method")
             .debug_selector(|| "request-method".into())
             .ghost()
@@ -195,17 +198,30 @@ impl RequestDraft {
                     .primary()
                     .min_w_20()
                     .flex_none()
-                    .label(if sending { "Cancel" } else { "Send" })
-                    .accessibility_label(if sending {
+                    .label(if stopping {
+                        "Stopping…"
+                    } else if streaming {
+                        "Stop"
+                    } else if sending {
+                        "Cancel"
+                    } else {
+                        "Send"
+                    })
+                    .accessibility_label(if streaming {
+                        "Stop event stream"
+                    } else if sending {
                         "Cancel request"
                     } else {
                         "Send request"
                     })
+                    .disabled(stopping)
                     .when(!sending, |button| {
                         button.tooltip_with_action("Send request", &SendRequest, Some("Workspace"))
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if this.task.is_some() {
+                        if this.streaming {
+                            this.stop(cx);
+                        } else if this.task.is_some() {
                             this.cancel(cx);
                         } else {
                             this.send(window, cx);

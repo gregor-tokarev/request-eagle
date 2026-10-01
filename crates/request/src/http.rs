@@ -6,7 +6,8 @@ use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion, RequestPreferences,
+    EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
+    RequestPreferences, event_stream,
 };
 
 #[derive(Clone)]
@@ -55,10 +56,13 @@ impl HttpExecutor {
         })
     }
 
+    /// Read the complete response. With `events`, an event-stream response
+    /// reports its events as they arrive.
     pub(crate) async fn execute(
         &self,
         request: &HttpRequest,
         body: Option<Bytes>,
+        events: Option<&mut EventStream>,
     ) -> Result<HttpResponse, ExecutionError> {
         let started = Instant::now();
         let is_head = request.method.as_str() == "HEAD";
@@ -139,41 +143,58 @@ impl HttpExecutor {
                 .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
-        let mut body = Vec::new();
-
-        match self.max_response_bytes {
-            Some(limit_bytes) => {
-                // Read at most one extra byte to distinguish an exact-limit
-                // response from an oversized stream, even without Content-Length.
-                stream
-                    .take(limit_bytes + 1)
-                    .read_to_end(&mut body)
-                    .await
-                    .map_err(ExecutionError::ReadBody)?;
-
-                if body.len() as u64 > limit_bytes {
-                    return Err(ExecutionError::ResponseTooLarge { limit_bytes });
-                }
-            }
-            None => {
-                stream
-                    .read_to_end(&mut body)
-                    .await
-                    .map_err(ExecutionError::ReadBody)?;
-            }
-        }
-
         // HEAD and statuses without a body may describe an encoded representation
         // in their headers, but there are no bytes to pass to a gzip decoder.
         // A 206 body contains a range of the encoded representation, which need
         // not be a complete gzip stream. Keep those bytes and headers intact.
-        let (body, encoded_response_body_bytes) =
-            if is_head || matches!(parts.status.as_u16(), 204 | 205 | 206 | 304) {
-                (body, None)
-            } else {
-                crate::response_encoding::decode_body(&parts.headers, body, self.max_response_bytes)
+        let has_body = !is_head && !matches!(parts.status.as_u16(), 204 | 205 | 206 | 304);
+        let event_stream = events
+            .filter(|_| has_body)
+            .and_then(|events| Some((events, event_stream::decoder(&parts.headers)?)));
+
+        let (body, encoded_response_body_bytes) = match event_stream {
+            Some((events, decoder)) => {
+                events
+                    .read(&parts, stream, decoder, self.max_response_bytes)
                     .await?
-            };
+            }
+            None => {
+                let mut body = Vec::new();
+
+                match self.max_response_bytes {
+                    Some(limit_bytes) => {
+                        // Read at most one extra byte to distinguish an exact-limit
+                        // response from an oversized stream, even without Content-Length.
+                        stream
+                            .take(limit_bytes + 1)
+                            .read_to_end(&mut body)
+                            .await
+                            .map_err(ExecutionError::ReadBody)?;
+
+                        if body.len() as u64 > limit_bytes {
+                            return Err(ExecutionError::ResponseTooLarge { limit_bytes });
+                        }
+                    }
+                    None => {
+                        stream
+                            .read_to_end(&mut body)
+                            .await
+                            .map_err(ExecutionError::ReadBody)?;
+                    }
+                }
+
+                if has_body {
+                    crate::response_encoding::decode_body(
+                        &parts.headers,
+                        body,
+                        self.max_response_bytes,
+                    )
+                    .await?
+                } else {
+                    (body, None)
+                }
+            }
+        };
         let download = received.elapsed();
         let response_header_bytes = parts
             .headers

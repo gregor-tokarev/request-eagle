@@ -1,9 +1,20 @@
+use std::time::Duration;
+
+use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
-use request::RequestExecutor;
+use request::{EventStream, EventStreamUpdate, RequestExecutor};
 use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
+
+/// The most event-stream updates shown per redraw. A fast stream is drawn in
+/// batches instead of once for every event.
+const UPDATE_BATCH: usize = 512;
+
+/// The pause after each batch, which lets the window draw and handle input
+/// while a stream keeps the queue full.
+const BATCH_PAUSE: Duration = Duration::from_millis(1);
 
 fn request_url(path: &str) -> String {
     let path = path.trim();
@@ -110,6 +121,8 @@ impl RequestDraft {
             .as_ref()
             .filter(|(settings, _)| settings == &preferences)
             .map(|(_, executor)| executor.clone());
+        let (events, mut updates, stop) = EventStream::new();
+        self.stop = Some(stop);
         let task = cx.background_executor().spawn(async move {
             let executor = match cached
                 .map(Ok)
@@ -119,7 +132,7 @@ impl RequestDraft {
                 Err(error) => return (None, Err(error)),
             };
             let result = executor
-                .execute(request, variables)
+                .execute_streaming(request, variables, events)
                 .await
                 .map(crate::response_view::ResponseContent::new);
 
@@ -127,10 +140,40 @@ impl RequestDraft {
         });
 
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
+            // An event stream shows its events while it is open. The updates
+            // end with the response body, before post-response scripts run.
+            while let Some(update) = updates.next().await {
+                let mut batch = vec![update];
+                while batch.len() < UPDATE_BATCH
+                    && let Some(Some(update)) = updates.next().now_or_never()
+                {
+                    batch.push(update);
+                }
+
+                if this
+                    .update_in(cx, |this, window, cx| this.receive(batch, window, cx))
+                    .is_err()
+                {
+                    return;
+                }
+
+                cx.background_executor().timer(BATCH_PAUSE).await;
+            }
+
+            // The body is complete; only scripts remain.
+            let _ = this.update(cx, |this, cx| {
+                if this.streaming {
+                    this.streaming = false;
+                    this.stop = None;
+                    this.notify_address(cx);
+                }
+            });
+
             let (executor, result) = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.executor = executor;
                 this.task = None;
+                this.stop = None;
                 scope.update(cx, |scope, cx| scope.changed(cx));
                 // Scripts may have changed variables that other visible tabs of
                 // the collection share; redraw so their chips recolor.
@@ -142,8 +185,55 @@ impl RequestDraft {
         cx.notify();
     }
 
+    fn receive(
+        &mut self,
+        updates: Vec<EventStreamUpdate>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut events = Vec::new();
+
+        for update in updates {
+            match update {
+                EventStreamUpdate::Opened {
+                    status,
+                    version,
+                    headers,
+                } => {
+                    self.streaming = true;
+                    self.response.update(cx, |response, cx| {
+                        response.open_stream(status, version, headers, window, cx)
+                    });
+                    self.notify_address(cx);
+                }
+                EventStreamUpdate::Event(event) => events.push(event),
+            }
+        }
+
+        if !events.is_empty() {
+            self.response
+                .update(cx, |response, cx| response.receive_events(events, cx));
+        }
+    }
+
+    /// End an open event stream. The response completes with the events that
+    /// arrived, and post-response scripts run.
+    pub fn stop(&mut self, cx: &mut Context<Self>) {
+        if self.streaming
+            && let Some(stop) = self.stop.take()
+        {
+            stop.stop();
+            self.response
+                .update(cx, |response, cx| response.stop_stream(cx));
+            self.notify_address(cx);
+            cx.notify();
+        }
+    }
+
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self.task = None;
+        self.stop = None;
+        self.streaming = false;
 
         self.response.update(cx, |response, cx| response.cancel(cx));
 

@@ -1,5 +1,6 @@
 mod body;
 mod content;
+mod events;
 mod headers;
 mod metadata;
 mod scripts;

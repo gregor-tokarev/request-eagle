@@ -10,6 +10,8 @@ pub(crate) mod script_completion_tests;
 mod script_tests;
 
 #[cfg(test)]
+mod event_stream_tests;
+#[cfg(test)]
 mod header_tests;
 #[cfg(test)]
 mod performance;

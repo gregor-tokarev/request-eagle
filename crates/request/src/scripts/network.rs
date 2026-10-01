@@ -89,7 +89,7 @@ impl<'js> Network<'js> {
                 let body = request.body.take().map(bytes::Bytes::from);
                 let started = Instant::now();
                 let send = async {
-                    http.execute(&request, body).await.map_err(|error| error.to_string())
+                    http.execute(&request, body, None).await.map_err(|error| error.to_string())
                 };
                 let response = match timeout {
                     Some(timeout) => smol::future::or(send, async {

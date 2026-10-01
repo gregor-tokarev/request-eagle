@@ -75,6 +75,10 @@ pub struct RequestDraft {
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
+    /// Ends the response if it is an event stream. Taken when it is stopped.
+    pub(super) stop: Option<request::StopEventStream>,
+    /// Whether the response is an event stream that has not ended yet.
+    pub(super) streaming: bool,
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
     address: Entity<RequestAddress>,
     configuration: Entity<RequestConfiguration>,
@@ -139,6 +143,8 @@ impl RequestDraft {
             response,
             split,
             task: None,
+            stop: None,
+            streaming: false,
             executor: None,
             address,
             configuration,
@@ -148,6 +154,11 @@ impl RequestDraft {
 
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request
+    }
+
+    /// Redraw the cached URL bar for a change that did not come from its input.
+    pub(super) fn notify_address(&self, cx: &mut Context<Self>) {
+        self.address.update(cx, |_, cx| cx.notify());
     }
 
     /// Follow the saved request to its current file and name.

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui_kit::base::{ElementExt as _, SelectableText, TextSelectionScopeId};
 use gpui_kit::component::{hover_card::HoverCard, *};
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::StatusCode;
 
 use super::{
@@ -32,15 +32,7 @@ impl ResponseView {
                 })
             });
         let decoded = !encoded || metrics.encoded_response_body_bytes.is_some();
-        let color = if status.is_success() {
-            cx.theme().success
-        } else if status.is_redirection() {
-            cx.theme().warning
-        } else if status.is_informational() {
-            cx.theme().info
-        } else {
-            cx.theme().danger
-        };
+        let color = status_color(status, cx);
         let focus = self.focus.clone();
         let time_focus = focus.clone();
         let size_focus = focus.clone();
@@ -124,6 +116,59 @@ impl ResponseView {
             )
             .child("•")
             .child(div().cursor_text().child(SelectableText::new("response-version", format!("{:?}", response.version)).document_order(3)))
+    }
+}
+
+impl ResponseView {
+    /// The status of an event stream that is open, whose time and size are
+    /// still growing, or that broke before they were measured.
+    pub(super) fn stream_status(
+        &self,
+        streaming: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let status = self.content.as_ref().unwrap().http().status;
+        let color = status_color(status, cx);
+
+        h_flex()
+            .debug_selector(|| "response-stream-status".into())
+            .gap_2()
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(
+                div()
+                    .debug_selector(|| "response-status".into())
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius_tokens().md)
+                    .bg(color.opacity(0.15))
+                    .text_color(color)
+                    .child(status.to_string()),
+            )
+            .when(streaming, |row| {
+                row.child(
+                    div()
+                        .debug_selector(|| "response-streaming".into())
+                        .px_2()
+                        .py_1()
+                        .rounded(cx.theme().radius_tokens().md)
+                        .bg(cx.theme().info.opacity(0.15))
+                        .text_color(cx.theme().info)
+                        .child("STREAMING"),
+                )
+            })
+    }
+}
+
+fn status_color(status: StatusCode, cx: &App) -> Hsla {
+    if status.is_success() {
+        cx.theme().success
+    } else if status.is_redirection() {
+        cx.theme().warning
+    } else if status.is_informational() {
+        cx.theme().info
+    } else {
+        cx.theme().danger
     }
 }
 
