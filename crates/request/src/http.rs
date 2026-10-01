@@ -77,14 +77,15 @@ impl HttpExecutor {
         })
     }
 
-    /// Read the complete response. With `events`, an event-stream response
-    /// reports its events as they arrive.
+    /// Read the complete response, and the URL it came from after redirects.
+    /// With `events`, an event-stream response reports its events as they
+    /// arrive.
     pub(crate) async fn execute(
         &self,
         request: &HttpRequest,
         body: Option<Bytes>,
         events: Option<&mut EventStream>,
-    ) -> Result<HttpResponse, ExecutionError> {
+    ) -> Result<(HttpResponse, Url), ExecutionError> {
         let started = Instant::now();
         let is_head = request.method.as_str() == "HEAD";
         let mut url = Url::parse(&request.path).map_err(ExecutionError::InvalidUrl)?;
@@ -176,7 +177,7 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
-        let response = crate::redirects::send(
+        let (response, url) = crate::redirects::send(
             client.as_ref(),
             request,
             url,
@@ -245,7 +246,7 @@ impl HttpExecutor {
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
             .sum();
 
-        Ok(HttpResponse {
+        let response = HttpResponse {
             status: parts.status,
             version: parts.version,
             headers: parts.headers,
@@ -259,7 +260,9 @@ impl HttpExecutor {
                 response_header_bytes,
                 encoded_response_body_bytes,
             },
-        })
+        };
+
+        Ok((response, url))
     }
 }
 

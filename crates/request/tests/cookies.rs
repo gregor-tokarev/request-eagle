@@ -385,6 +385,39 @@ fn after_a_response_pm_cookies_keeps_the_jar_order_and_set_returns_the_stored_co
 }
 
 #[test]
+fn after_a_redirect_pm_cookies_includes_what_the_final_response_set() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 302 Found\r\nLocation: /account/login\r\n",
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+
+        let execution = executor(true, &jar)
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/login"),
+                    scripts: RequestScripts {
+                        pre_request: String::new(),
+                        post_response: r#"pm.test("sid", () => pm.expect(pm.cookies.get("sid")).to.equal("abc"));"#.into(),
+                    },
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::new(), None),
+            )
+            .await
+            .unwrap();
+        server.await;
+
+        assert_eq!(jar.cookies()[0].path, "/account");
+        let tests = &execution.scripts[0].tests;
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].error, None);
+    });
+}
+
+#[test]
 fn saved_cookies_reopen_including_session_cookies() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

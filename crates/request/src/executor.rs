@@ -74,7 +74,7 @@ impl RequestExecutor {
             let cancellation = scripts::Cancellation::new();
             let mut reports = Vec::new();
             let run = async {
-                let (mut request, state, pre_reports) = scripts::pre_request(
+                let (mut request, mut state, pre_reports) = scripts::pre_request(
                     request,
                     variables,
                     executor.clone(),
@@ -92,10 +92,11 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
-                let response = executor
+                let (response, url) = executor
                     .http
                     .execute(&request, body, events.as_mut())
                     .await?;
+                state.response_url = Some(url.into());
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),

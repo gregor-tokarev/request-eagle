@@ -268,6 +268,7 @@ fn exchange(
         variables: Default::default(),
         session: None,
         collection_post_response: String::new(),
+        response_url: None,
     };
     let result = smol::block_on(post_response(
         request,

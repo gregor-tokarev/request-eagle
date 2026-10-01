@@ -146,7 +146,10 @@
         const headers = (input.response?.headers ?? [])
             .filter(([key]) => key.toLowerCase() === "set-cookie")
             .map(([, header]) => header);
-        if (headers.length) setInJar = JSON.parse(jar("stored", target, JSON.stringify(headers))).map(fromJar);
+        // A redirect's response came from its final URL, which decides the
+        // default path and host of its cookies.
+        const from = input.response?.url ?? target;
+        if (headers.length) setInJar = JSON.parse(jar("stored", from, JSON.stringify(headers))).map(fromJar);
     } catch {}
     const expired = cookie => cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
     let cookies;
