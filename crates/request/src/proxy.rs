@@ -220,27 +220,72 @@ impl ProxyPreferences {
                     && enabled
                     && !bypasses(url, &bypass_rules(&self.bypass))
             }
-            // As the transport reads them: the scheme's variable, then ALL_PROXY.
             ProxyMode::System => {
-                let names: &[&str] = match url.scheme() {
-                    "https" => &["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"],
-                    _ => &["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"],
-                };
-                let proxy = names
-                    .iter()
-                    .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
-                let bypass = ["NO_PROXY", "no_proxy"]
-                    .iter()
-                    .find_map(|name| std::env::var(name).ok())
-                    .unwrap_or_default();
-
-                proxy.is_some_and(|proxy| {
-                    proxy.trim().to_ascii_lowercase().starts_with("https://")
-                        && !bypasses(url, &bypass_rules(&bypass))
-                })
+                system_proxy(url.scheme())
+                    .is_some_and(|proxy| proxy.to_ascii_lowercase().starts_with("https://"))
+                    && !system_bypasses(url)
             }
         }
     }
+}
+
+/// The proxy that the transport takes from the environment for a scheme:
+/// its variable, else `ALL_PROXY`. CGI requests can set `HTTP_PROXY`, so it
+/// is ignored there. Other platform settings name HTTP proxies.
+fn system_proxy(scheme: &str) -> Option<String> {
+    let variable = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let specific = match scheme {
+        "https" => variable("HTTPS_PROXY").or_else(|| variable("https_proxy")),
+        "http" if std::env::var_os("REQUEST_METHOD").is_none() => {
+            variable("HTTP_PROXY").or_else(|| variable("http_proxy"))
+        }
+        _ => None,
+    };
+
+    specific
+        .or_else(|| variable("ALL_PROXY"))
+        .or_else(|| variable("all_proxy"))
+}
+
+/// Whether `NO_PROXY` sends `url` directly, by the transport's rules: IP
+/// addresses and ranges, `*`, and domains with their subdomains. Other
+/// patterns, such as `*.example.com`, match only themselves.
+fn system_bypasses(url: &url::Url) -> bool {
+    let Ok(list) = std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_matches(['[', ']']);
+    let address = host.parse::<std::net::IpAddr>().ok();
+
+    list.split(',')
+        .map(str::trim)
+        .filter(|rule| !rule.is_empty())
+        .any(|rule| {
+            if let Ok(network) = rule.parse::<ipnet::IpNet>() {
+                return address.is_some_and(|address| network.contains(&address));
+            }
+            if let Ok(rule) = rule.parse::<std::net::IpAddr>() {
+                return address == Some(rule);
+            }
+            if address.is_some() {
+                return false;
+            }
+
+            rule == "*"
+                || rule == host
+                || rule.strip_prefix('.') == Some(host)
+                || (host.ends_with(rule)
+                    && (rule.starts_with('.')
+                        || host.as_bytes().get(host.len() - rule.len() - 1) == Some(&b'.')))
+        })
 }
 
 /// Comma-separated hosts, domains or IP ranges, as `bypasses` compares them.

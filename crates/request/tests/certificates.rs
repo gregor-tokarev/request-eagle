@@ -608,3 +608,91 @@ async fn grpc_connections_present_the_client_certificate() {
 
     assert_eq!(handshakes.next().await, Some(Some(1)));
 }
+
+#[test]
+fn https_proxies_from_the_environment_follow_the_transport_bypass_rules() {
+    // A literal `*.localhost` does not bypass the proxy for the transport.
+    for (no_proxy, direct) in [
+        (None, false),
+        (Some("localhost"), true),
+        (Some("*.localhost"), false),
+    ] {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "system_proxy_child", "--nocapture"]);
+
+        // Use a child process so environment changes cannot race other tests.
+        for name in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+            "REQUEST_METHOD",
+        ] {
+            command.env_remove(name);
+        }
+        if let Some(no_proxy) = no_proxy {
+            command.env("NO_PROXY", no_proxy);
+        }
+
+        let output = command
+            .env("HTTPS_PROXY", "https://127.0.0.1:9")
+            .env("REQUEST_EAGLE_TEST_DIRECT", direct.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{no_proxy:?}: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn system_proxy_child() {
+    let Ok(direct) = std::env::var("REQUEST_EAGLE_TEST_DIRECT") else {
+        return;
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let ca = authority("Request Eagle Test CA");
+    let ca_path = directory.path().join("ca.pem");
+    std::fs::write(&ca_path, &ca.pem).unwrap();
+    let clients = authority("Request Eagle Client CA");
+    let (certificate, key) = issue(&clients, ExtendedKeyUsagePurpose::ClientAuth);
+    let certificate_path = directory.path().join("client.pem");
+    std::fs::write(
+        &certificate_path,
+        pem("CERTIFICATE", &certificate) + &key.serialize_pem(),
+    )
+    .unwrap();
+    let port = serve_https(acceptor(&ca, Some(&clients)));
+
+    let mut preferences = preferences(&ca_path);
+    preferences.proxy.mode = ProxyMode::System;
+    preferences.client_certificates = vec![client_certificate(
+        "localhost",
+        CertificateFiles::Pem {
+            certificate: certificate_path,
+            key: None,
+        },
+        "",
+    )];
+
+    smol::block_on(async {
+        let result = send(&preferences, port).await;
+
+        if direct == "true" {
+            assert_eq!(result.unwrap(), "1 certificates");
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.to_string().contains("proxy reached over HTTPS"),
+                "{error}"
+            );
+        }
+    });
+}
