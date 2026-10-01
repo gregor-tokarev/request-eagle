@@ -279,14 +279,11 @@ impl ResponseView {
             )
             .child(div().flex_1())
             .when(self.content.is_some(), |row| {
-                if self
-                    .events
-                    .as_ref()
-                    .is_some_and(|events| events.read(cx).is_open())
-                {
-                    row.child(self.streaming_status(cx))
-                } else {
-                    row.child(self.metadata(cx))
+                match self.events.as_ref().map(|events| events.read(cx)) {
+                    Some(events) if events.is_open() => row.child(self.stream_status(true, cx)),
+                    // A broken stream has its head, but no complete measurements.
+                    Some(events) if events.failed() => row.child(self.stream_status(false, cx)),
+                    _ => row.child(self.metadata(cx)),
                 }
             })
     }

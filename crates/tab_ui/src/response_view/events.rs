@@ -13,7 +13,13 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ServerSentEvent;
 
+use super::VirtualBody;
+
 const PREVIEW_CHARS: usize = 200;
+
+/// Larger event data shows in a scrolling viewer that lays out only the
+/// visible lines, instead of as text in the row.
+const INLINE_DETAIL_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum StreamState {
@@ -43,6 +49,13 @@ struct Entry {
     data: SharedString,
 }
 
+/// An expanded event's data, indented when it is JSON.
+#[derive(Clone)]
+enum Detail {
+    Inline(SharedString),
+    Viewer(Entity<VirtualBody>),
+}
+
 /// The events of an event-stream response, newest first, with search and a
 /// filter by event type.
 pub(crate) struct EventLog {
@@ -51,10 +64,11 @@ pub(crate) struct EventLog {
     entries: Vec<Entry>,
     /// Event types in the order they first arrived.
     types: Vec<SharedString>,
+    /// How many entries are events, rather than the row that ends the stream.
+    events: usize,
     /// Indices of the entries that pass the filter and search, oldest first.
     shown: Vec<usize>,
-    /// The details of expanded entries: their data, indented when it is JSON.
-    expanded: HashMap<usize, SharedString>,
+    expanded: HashMap<usize, Detail>,
     /// The event type shown, or every type.
     filter: Option<SharedString>,
     matcher: Option<AhoCorasick>,
@@ -86,6 +100,7 @@ impl EventLog {
             state: StreamState::Open,
             entries: Vec::new(),
             types: Vec::new(),
+            events: 0,
             shown: Vec::new(),
             expanded: HashMap::new(),
             filter: None,
@@ -100,6 +115,10 @@ impl EventLog {
         matches!(self.state, StreamState::Open | StreamState::Stopping)
     }
 
+    pub(super) fn failed(&self) -> bool {
+        matches!(self.state, StreamState::Failed(_))
+    }
+
     pub(super) fn push(&mut self, events: Vec<ServerSentEvent>, cx: &mut Context<Self>) {
         for event in events {
             let event_type: SharedString = event.event.into();
@@ -107,6 +126,7 @@ impl EventLog {
                 self.types.push(event_type.clone());
             }
 
+            self.events += 1;
             self.add(Entry {
                 kind: EntryKind::Event,
                 time: time_label(event.time),
@@ -175,16 +195,15 @@ impl EventLog {
     fn shows(&self, index: usize) -> bool {
         let entry = &self.entries[index];
 
-        // Rows that end the stream show with every type.
-        let kind = entry.kind != EntryKind::Event
+        // The row that ends the stream, or reports its error, always shows.
+        entry.kind != EntryKind::Event
             || self
                 .filter
                 .as_ref()
-                .is_none_or(|filter| *filter == entry.event);
-
-        kind && self.matcher.as_ref().is_none_or(|matcher| {
-            matcher.is_match(entry.event.as_ref()) || matcher.is_match(entry.data.as_ref())
-        })
+                .is_none_or(|filter| *filter == entry.event)
+                && self.matcher.as_ref().is_none_or(|matcher| {
+                    matcher.is_match(entry.event.as_ref()) || matcher.is_match(entry.data.as_ref())
+                })
     }
 
     fn refresh_list(&mut self, cx: &mut Context<Self>) {
@@ -211,7 +230,12 @@ impl EventLog {
     fn toggle(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.expanded.remove(&index).is_none() {
             let data = &self.entries[index].data;
-            let detail = pretty_json(data).map_or_else(|| data.clone(), Into::into);
+            let text: SharedString = pretty_json(data).map_or_else(|| data.clone(), Into::into);
+            let detail = if text.len() > INLINE_DETAIL_BYTES {
+                Detail::Viewer(cx.new(|cx| VirtualBody::new(text, true, cx)))
+            } else {
+                Detail::Inline(text)
+            };
             self.expanded.insert(index, detail);
         }
 
@@ -228,11 +252,7 @@ impl EventLog {
         let view = cx.entity().downgrade();
         let filter = self.filter.clone();
         let types = self.types.clone();
-        let events = self
-            .entries
-            .iter()
-            .filter(|entry| entry.kind == EntryKind::Event)
-            .count();
+        let events = self.events;
 
         h_flex()
             .flex_none()
@@ -335,9 +355,15 @@ impl EventLog {
                         .h_9()
                         .px_2()
                         .gap_3()
+                        .rounded(cx.theme().radius_tokens().md)
+                        .border_1()
+                        .border_color(transparent_black())
                         .when(is_event, |row| {
-                            row.cursor_pointer()
+                            // Enter or Space expands a focused row, as a click does.
+                            row.tab_index(0)
+                                .cursor_pointer()
                                 .hover(|row| row.bg(cx.theme().muted))
+                                .focus_visible(|row| row.border_color(cx.theme().ring))
                                 .on_click(move |_, _, cx| {
                                     let _ = toggle.update(cx, |log, cx| log.toggle(index, cx));
                                 })
@@ -431,19 +457,28 @@ impl EventLog {
                                             .debug_selector(move || {
                                                 format!("response-event-detail-{position}")
                                             })
-                                            .p_2()
                                             .rounded(cx.theme().radius_tokens().md)
-                                            .bg(cx.theme().muted)
-                                            .font_family(cx.theme().mono_font_family.clone())
-                                            .text_xs()
-                                            .cursor_text()
-                                            .child(
-                                                SelectableText::new(
-                                                    ("response-event-detail", index),
-                                                    detail,
-                                                )
-                                                .document_order(1),
-                                            ),
+                                            .overflow_hidden()
+                                            .map(|container| match detail {
+                                                Detail::Inline(text) => container
+                                                    .p_2()
+                                                    .bg(cx.theme().muted)
+                                                    .font_family(
+                                                        cx.theme().mono_font_family.clone(),
+                                                    )
+                                                    .text_xs()
+                                                    .cursor_text()
+                                                    .child(
+                                                        SelectableText::new(
+                                                            ("response-event-detail", index),
+                                                            text,
+                                                        )
+                                                        .document_order(1),
+                                                    ),
+                                                Detail::Viewer(viewer) => {
+                                                    container.h(rems(20.)).child(viewer)
+                                                }
+                                            }),
                                     ),
                             )
                             .child(

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui_kit::base::{ElementExt as _, SelectableText, TextSelectionScopeId};
 use gpui_kit::component::{hover_card::HoverCard, *};
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::StatusCode;
 
 use super::{
@@ -120,13 +120,18 @@ impl ResponseView {
 }
 
 impl ResponseView {
-    /// While an event stream is open, its time and size are still growing.
-    pub(super) fn streaming_status(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+    /// The status of an event stream that is open, whose time and size are
+    /// still growing, or that broke before they were measured.
+    pub(super) fn stream_status(
+        &self,
+        streaming: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
         let status = self.content.as_ref().unwrap().http().status;
         let color = status_color(status, cx);
 
         h_flex()
-            .debug_selector(|| "response-streaming".into())
+            .debug_selector(|| "response-stream-status".into())
             .gap_2()
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
@@ -140,15 +145,18 @@ impl ResponseView {
                     .text_color(color)
                     .child(status.to_string()),
             )
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .rounded(cx.theme().radius_tokens().md)
-                    .bg(cx.theme().info.opacity(0.15))
-                    .text_color(cx.theme().info)
-                    .child("STREAMING"),
-            )
+            .when(streaming, |row| {
+                row.child(
+                    div()
+                        .debug_selector(|| "response-streaming".into())
+                        .px_2()
+                        .py_1()
+                        .rounded(cx.theme().radius_tokens().md)
+                        .bg(cx.theme().info.opacity(0.15))
+                        .text_color(cx.theme().info)
+                        .child("STREAMING"),
+                )
+            })
     }
 }
 

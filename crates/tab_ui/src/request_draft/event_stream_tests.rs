@@ -91,5 +91,9 @@ async fn event_streams_show_their_events_until_stopped(cx: &mut TestAppContext) 
     let search = element_bounds(cx, "response-events-search").unwrap();
     cx.simulate_click(search.center(), Modifiers::default());
     cx.simulate_input("HELLO");
-    assert_eq!(cx.read(|cx| rows(&draft, cx)), [row("message", "hello")]);
+    // How the stream ended stays in view.
+    assert_eq!(
+        cx.read(|cx| rows(&draft, cx)),
+        [row("", "Stopped"), row("message", "hello")]
+    );
 }

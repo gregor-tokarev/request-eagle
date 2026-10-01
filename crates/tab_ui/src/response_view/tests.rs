@@ -701,8 +701,64 @@ fn a_broken_event_stream_keeps_its_head_and_events(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("response-events").is_some());
     assert!(cx.debug_bounds("response-empty").is_none());
     assert!(cx.debug_bounds("response-streaming").is_none());
+    // The stream broke before its time and size were measured.
+    assert!(cx.debug_bounds("response-stream-status").is_some());
+    assert!(cx.debug_bounds("response-metadata").is_none());
+
+    // Searching keeps the error in view.
+    let search = cx.debug_bounds("response-events-search").unwrap();
+    cx.simulate_click(search.center(), Modifiers::default());
+    cx.simulate_input("unrelated");
+    let rows = cx.read(|cx| view.read(cx).events.as_ref().unwrap().read(cx).rows());
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, "");
 
     let headers = cx.debug_bounds("response-section-Headers").unwrap();
     cx.simulate_click(headers.center(), Modifiers::default());
     assert!(cx.debug_bounds("response-header-table").is_some());
+}
+
+#[gpui_kit::test]
+fn the_keyboard_reaches_events_and_large_data_shows_in_a_viewer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        preferences::init(cx);
+        request_eagle_theme::init(cx);
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", "text/event-stream".parse().unwrap());
+    let event = |data: String| request::ServerSentEvent {
+        time: std::time::SystemTime::now(),
+        event: "message".into(),
+        data,
+        id: String::new(),
+    };
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let response = cx.new(|cx| {
+            let mut view = ResponseView::new(cx);
+            view.start(cx);
+            view.open_stream(StatusCode::OK, Version::HTTP_11, headers, window, cx);
+            view.receive_events(
+                vec![event("small".into()), event("x".repeat(64 * 1024))],
+                cx,
+            );
+            view
+        });
+        gpui_kit::component::Root::new(response, window, cx)
+    });
+
+    // Tab moves from the search field past the filter to the newest event,
+    // and Enter expands it, as a click does.
+    let search = cx.debug_bounds("response-events-search").unwrap();
+    cx.simulate_click(search.center(), Modifiers::default());
+    cx.simulate_keystrokes("tab tab enter");
+    cx.simulate_event(gpui_kit::KeyUpEvent {
+        keystroke: gpui_kit::Keystroke::parse("enter").unwrap(),
+    });
+    cx.update(|window, _| window.refresh());
+    assert!(cx.debug_bounds("response-event-detail-0").is_some());
+    assert!(cx.debug_bounds("response-event-detail-1").is_none());
+    // The large data does not lay out as one block of text.
+    let viewer = cx.debug_bounds("response-virtual-text").unwrap();
+    assert!(viewer.size.width > px(200.) && viewer.size.height > px(200.));
 }
