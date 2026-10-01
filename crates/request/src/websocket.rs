@@ -337,12 +337,9 @@ impl Connection {
 
         // Returns whether the close frame was sent.
         let writer = pin!(async move {
-            loop {
-                let (text, variables) = match future::select(messages.next(), &mut closing).await {
-                    Either::Left((Some(message), _)) => message,
-                    _ => break,
-                };
-
+            while let Either::Left((Some((text, variables)), _)) =
+                future::select(messages.next(), &mut closing).await
+            {
                 let kind = match variables.resolve_text(&text) {
                     Ok(text) => {
                         // A peer that stops reading can hold a send forever.

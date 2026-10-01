@@ -22,6 +22,8 @@ pub struct ImportedCollection {
     pub items: Vec<ImportedItem>,
 }
 
+// Most items are requests, so boxing them would not make imports smaller.
+#[allow(clippy::large_enum_variant)]
 pub enum ImportedItem {
     Folder {
         name: String,

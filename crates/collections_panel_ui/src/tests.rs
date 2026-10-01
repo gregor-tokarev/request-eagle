@@ -325,7 +325,7 @@ fn quick_clicks_keep_toggling_the_collection_they_started_on(cx: &mut TestAppCon
     let index = cx.read(|cx| sidebar.read(cx).tree.index_of(&path).unwrap());
 
     click_at(cx, position, 1);
-    assert_eq!(*opened.borrow(), [path.clone()]);
+    assert_eq!(*opened.borrow(), std::slice::from_ref(&path));
     cx.read(|cx| assert!(sidebar.read(cx).collapsed.contains(&index)));
     assert!(!cx.debug_bounds(selector).unwrap().contains(&position));
 

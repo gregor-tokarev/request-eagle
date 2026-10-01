@@ -24,6 +24,8 @@ type ServerSocket = WebSocketStream<tokio::net::TcpStream>;
 
 /// Accept one WebSocket connection and hand it to `handler` with the
 /// handshake's path and `X-Token` header.
+// The handshake callback returns tokio-tungstenite's own error response.
+#[allow(clippy::result_large_err)]
 fn serve<F, Fut>(handler: F) -> String
 where
     F: FnOnce(ServerSocket, String) -> Fut + Send + 'static,

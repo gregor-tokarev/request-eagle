@@ -21,6 +21,8 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
+// Events are passed on one at a time, so boxing the request would not help.
+#[allow(clippy::large_enum_variant)]
 pub enum CollectionPanelEvent {
     OpenCollection {
         path: PathBuf,
