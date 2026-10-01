@@ -85,6 +85,30 @@ fn schema_describes_only_saved_data_operations() {
 }
 
 #[test]
+fn every_unreadable_file_is_reported_with_its_error() {
+    let cli = Cli::new();
+    let [first, second] = [cli.collection(), cli.collection()]
+        .map(|path| Path::new(path.as_str().unwrap()).to_path_buf());
+    let request = first.join("Broken.toml");
+    let environment = second.join("environment.toml");
+    fs::write(&request, "id = ").unwrap();
+    fs::write(&environment, "<<<<<<< HEAD\n").unwrap();
+
+    let (code, output) = cli.raw(&json!({"command":"collections.list"}).to_string());
+
+    assert_eq!(code, 1, "{output}");
+    let message = output["error"]["message"].as_str().unwrap();
+    for file in [&request, &environment] {
+        let name = file.strip_prefix(file.parent().unwrap().parent().unwrap());
+        assert!(
+            message.contains(name.unwrap().to_str().unwrap()),
+            "{message}"
+        );
+    }
+    assert!(message.contains("line 1"), "{message}");
+}
+
+#[test]
 fn saved_collection_lifecycle_uses_the_backend_without_an_app() {
     let cli = Cli::new();
     assert_eq!(cli.call(json!({"command":"collections.list"})), json!([]));

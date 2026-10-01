@@ -8,14 +8,17 @@ use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedR
 
 pub fn load(root: &Path) -> Result<CollectionRegistry> {
     let registry = CollectionRegistry::from_path(root);
-    // The app leaves unreadable files out, but commands must not act on an
-    // incomplete view of the collections.
-    if let Some(skipped) = registry.skipped().first() {
-        bail!(
-            "Could not load {}: {}",
-            skipped.path.display(),
-            skipped.error
-        );
+    // The app leaves unreadable files out and only counts them, so the CLI
+    // is where agents learn which files to fix and why. Commands must not act
+    // on an incomplete view of the collections.
+    if !registry.skipped().is_empty() {
+        let files = registry
+            .skipped()
+            .iter()
+            .map(|skipped| format!("{}\n{}", skipped.path.display(), skipped.error))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        bail!("Could not load these files. Fix or remove them first.\n\n{files}");
     }
     validate_paths(&registry)?;
     Ok(registry)

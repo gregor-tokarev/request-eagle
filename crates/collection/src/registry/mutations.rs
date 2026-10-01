@@ -70,9 +70,6 @@ impl CollectionRegistry {
                 rebase_entries(&mut collection.entries, path, &destination);
                 rebase_path(&mut collection.local_env.path, path, &destination);
                 collection.path = destination.clone();
-                for skipped in &mut self.skipped {
-                    rebase_path(&mut skipped.path, path, &destination);
-                }
                 return Ok(destination);
             }
 
@@ -94,9 +91,6 @@ impl CollectionRegistry {
                         rebase_entries(&mut folder.entries, path, &destination);
                         folder.path = destination.clone();
                         folder.name = name.to_owned();
-                        for skipped in &mut self.skipped {
-                            rebase_path(&mut skipped.path, path, &destination);
-                        }
                         return Ok(destination);
                     }
                 }
@@ -221,7 +215,7 @@ pub(super) fn rebase_entries(entries: &mut [Entry], old: &Path, new: &Path) {
     }
 }
 
-pub(super) fn rebase_path(path: &mut PathBuf, old: &Path, new: &Path) {
+fn rebase_path(path: &mut PathBuf, old: &Path, new: &Path) {
     if let Ok(relative) = path.strip_prefix(old) {
         *path = if relative.as_os_str().is_empty() {
             new.to_path_buf()

@@ -7,7 +7,6 @@ use std::{
 use collection::{CollectionRegistry, MovePlacement};
 
 use gpui_kit::component::{
-    button::*,
     input::{Input, InputEvent, InputState},
     scroll::Scrollbar,
     *,
@@ -77,8 +76,6 @@ pub struct CollectionPanel {
     pub(super) scroll_handle: UniformListScrollHandle,
     pub(super) focus: FocusHandle,
     pub(super) delete_focus: FocusHandle,
-    /// Holds the skipped-file buttons, which are part of the panel's focus.
-    skipped_focus: FocusHandle,
     pub(super) rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
@@ -129,7 +126,6 @@ impl CollectionPanel {
             scroll_handle: UniformListScrollHandle::new(),
             focus,
             delete_focus: cx.focus_handle(),
-            skipped_focus: cx.focus_handle(),
             rows_task: None,
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
@@ -140,11 +136,9 @@ impl CollectionPanel {
         self.tree.roots.len()
     }
 
-    /// Whether focus is in the search field, the skipped files or the tree.
+    /// Whether focus is in the search field or the tree.
     pub fn contains_focus(&self, window: &Window, cx: &App) -> bool {
-        self.focus.contains_focused(window, cx)
-            || self.search.focus_handle(cx).is_focused(window)
-            || self.skipped_focus.contains_focused(window, cx)
+        self.focus.contains_focused(window, cx) || self.search.focus_handle(cx).is_focused(window)
     }
 
     pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -386,87 +380,6 @@ impl CollectionPanel {
         window.focus(&self.focus, cx);
         cx.stop_propagation();
     }
-
-    /// Lists the files that loading left out, each with why. Activating one
-    /// shows it in the file manager.
-    fn skipped_notice(&self, cx: &App) -> impl IntoElement + use<> {
-        let skipped = self.collections.skipped();
-        let directory = self.collections.directory();
-
-        v_flex()
-            .debug_selector(|| "collections-skipped".into())
-            .track_focus(&self.skipped_focus)
-            .px_2()
-            .pb_2()
-            .gap_1()
-            .text_xs()
-            .child(
-                h_flex()
-                    .px_1()
-                    .gap_1()
-                    .text_color(cx.theme().danger)
-                    .child(Icon::new(IconName::TriangleAlert).xsmall())
-                    .child(match skipped.len() {
-                        1 => "Couldn't load 1 file".to_owned(),
-                        count => format!("Couldn't load {count} files"),
-                    }),
-            )
-            .child(
-                v_flex()
-                    .id("skipped-files")
-                    // Many broken files must not push the collections out of view.
-                    .max_h(rems(10.))
-                    .overflow_y_scroll()
-                    .children(skipped.iter().enumerate().map(|(index, skipped)| {
-                        let path = skipped.path.clone();
-                        let shown = SharedString::from(
-                            directory
-                                .and_then(|directory| path.strip_prefix(directory).ok())
-                                .unwrap_or(&path)
-                                .display()
-                                .to_string(),
-                        );
-                        // TOML errors give the position first and the reason
-                        // last, around a quote of the line.
-                        let lines: Vec<_> = skipped
-                            .error
-                            .lines()
-                            .filter(|line| !line.trim().is_empty())
-                            .collect();
-                        let summary = match lines.as_slice() {
-                            [first, .., last] => format!("{first}: {last}"),
-                            lines => lines.concat(),
-                        };
-
-                        v_flex()
-                            .child(
-                                Button::new(("skipped-file", index))
-                                    .debug_selector(move || format!("skipped-file-{index}"))
-                                    .ghost()
-                                    .xsmall()
-                                    .w_full()
-                                    .tooltip(skipped.error.clone())
-                                    .accessibility_label(format!(
-                                        "Show {shown} in the file manager"
-                                    ))
-                                    .child(div().w_full().truncate().child(shown))
-                                    .on_click(move |_, _, cx| cx.reveal_path(&path)),
-                            )
-                            .child(
-                                div()
-                                    .px_1()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(summary),
-                            )
-                    })),
-            )
-            .child(
-                div()
-                    .px_1()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Fix them, then reopen Request Eagle."),
-            )
-    }
 }
 
 impl Focusable for CollectionPanel {
@@ -505,8 +418,22 @@ impl Render for CollectionPanel {
                         .child(error),
                 )
             })
+            // Only the count: request-eagle-cli tells agents which files and why.
             .when(!self.collections.skipped().is_empty(), |this| {
-                this.child(self.skipped_notice(cx))
+                this.child(
+                    h_flex()
+                        .debug_selector(|| "collections-skipped".into())
+                        .px_3()
+                        .pb_2()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(Icon::new(IconName::TriangleAlert).xsmall())
+                        .child(match self.collections.skipped().len() {
+                            1 => "Couldn't load 1 file".to_owned(),
+                            count => format!("Couldn't load {count} files"),
+                        }),
+                )
             })
             .child(
                 div()

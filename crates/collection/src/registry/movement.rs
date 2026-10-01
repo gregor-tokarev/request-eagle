@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::mutations::{rebase_entries, rebase_path};
+use super::mutations::rebase_entries;
 use crate::{CollectionEditError, CollectionRegistry, collection::is_reserved, order};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,9 +85,6 @@ impl CollectionRegistry {
             .remove(source_index);
         rebase_entries(std::slice::from_mut(&mut entry), source, &destination);
         self.entries_mut(parent).unwrap().insert(index, entry);
-        for skipped in &mut self.skipped {
-            rebase_path(&mut skipped.path, source, &destination);
-        }
         Ok(destination)
     }
 }

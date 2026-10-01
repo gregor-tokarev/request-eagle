@@ -119,16 +119,11 @@ fn unreadable_files_are_left_out_and_untouched() {
         "[\"Health.toml\","
     );
 
-    // Skipped files follow renamed folders and go with deleted ones.
-    let service = registry.rename(&api, "Service").unwrap();
+    // Skipped files go with their deleted folder.
+    registry.delete(&api.join("Users")).unwrap();
     assert_eq!(
         registry.skipped()[0].path,
-        service.join("Users/Broken.toml")
-    );
-    registry.delete(&service.join("Users")).unwrap();
-    assert_eq!(
-        registry.skipped()[0].path,
-        service.join(".request-eagle-order.json")
+        api.join(".request-eagle-order.json")
     );
 
     fs::remove_dir_all(root).unwrap();
