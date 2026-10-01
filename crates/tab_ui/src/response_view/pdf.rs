@@ -205,7 +205,7 @@ fn render(pdf: &Pdf, index: usize) -> Option<RenderImage> {
     // The page is opaque, so premultiplied pixels are the same as straight
     // ones. GPUI takes BGRA.
     let mut pixels = pixmap.data_as_u8_slice().to_vec();
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let buffer = image::RgbaImage::from_raw(

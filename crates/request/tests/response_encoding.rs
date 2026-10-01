@@ -46,8 +46,10 @@ fn zstd(body: &[u8]) -> Vec<u8> {
     zstd::encode_all(body, 3).unwrap()
 }
 
+type Encode = fn(&[u8]) -> Vec<u8>;
+
 /// Each supported coding with an encoder for it.
-const CODINGS: [(&str, fn(&[u8]) -> Vec<u8>); 5] = [
+const CODINGS: [(&str, Encode); 5] = [
     ("gzip", gzip),
     ("deflate", zlib),
     ("deflate", raw_deflate),
