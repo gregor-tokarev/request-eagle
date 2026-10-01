@@ -15,6 +15,20 @@ impl Global for Cookies {}
 
 impl Cookies {
     pub fn init(jar: CookieJar, cx: &mut App) {
+        // A change made just before quitting may still be waiting to be
+        // written. Saving blocks the quit until it is done.
+        let saved = jar.clone();
+        cx.on_app_quit(move |_| {
+            let result = saved.save();
+
+            async move {
+                if let Err(error) = result {
+                    eprintln!("Could not save cookies: {error}");
+                }
+            }
+        })
+        .detach();
+
         cx.set_global(Self {
             revision: jar.revision(),
             jar,

@@ -296,28 +296,35 @@ impl CookiePage {
     }
 }
 
-fn cell() -> Div {
-    div().min_w_0().px_2().py_2()
+/// Columns share the table's width in proportion, so each keeps room at
+/// every interface size.
+fn column(share: f32) -> Div {
+    div()
+        .flex_basis(relative(0.))
+        .flex_grow(share)
+        .min_w_0()
+        .px_2()
+        .py_2()
 }
 
 fn name_column() -> Div {
-    cell().w(rems(12.)).flex_none()
+    column(3.)
 }
 
 fn value_column() -> Div {
-    cell().flex_1()
+    column(5.)
 }
 
 fn path_column() -> Div {
-    cell().w(rems(8.)).flex_none()
+    column(2.)
 }
 
 fn expires_column() -> Div {
-    cell().w(rems(9.)).flex_none()
+    column(2.5)
 }
 
 fn attributes_column() -> Div {
-    cell().w(rems(11.)).flex_none()
+    column(2.5)
 }
 
 /// When a cookie expires, in local time. Session cookies have no expiry.
