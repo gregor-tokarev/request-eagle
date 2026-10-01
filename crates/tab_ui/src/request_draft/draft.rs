@@ -109,8 +109,9 @@ impl SnippetDraft for RequestDraft {
         &self.request
     }
 
-    fn command(&self, values: &HashMap<String, String>) -> String {
-        self.request.curl_command(values)
+    fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
+        self.request
+            .curl_command(values, super::execution::active_jar(cx).as_ref())
     }
 
     fn variables(&self) -> &Entity<VariableScope> {
@@ -142,7 +143,7 @@ impl RequestDraft {
             .as_ref()
             .and_then(RequestLocation::environment_path);
         // Switching the active environment changes which references resolve.
-        let subscriptions = environments
+        let mut subscriptions: Vec<_> = environments
             .iter()
             .map(|environments| {
                 cx.observe(environments, |this: &mut Self, _, cx| {
@@ -150,6 +151,11 @@ impl RequestDraft {
                 })
             })
             .collect();
+        // Other tabs, the cookies page and settings change the cookies shown
+        // among the generated headers.
+        subscriptions.push(cx.observe_global::<crate::Cookies>(Self::refresh_generated_headers));
+        subscriptions
+            .push(cx.observe_global::<preferences::Preferences>(Self::refresh_generated_headers));
         let variables = cx.new(|_| VariableScope {
             session: sessions.for_path(environment_path.as_deref()),
             path: environment_path,
@@ -478,6 +484,8 @@ impl RequestDraft {
         }
 
         self.keep_path_values_in_url();
+        // The filled path decides which cookies the jar sends.
+        self.refresh_generated_headers(cx);
 
         let filled = filled_path_variables(&self.path_values);
         if let Some(url) = &self.url_completion {

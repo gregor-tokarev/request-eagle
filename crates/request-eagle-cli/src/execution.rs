@@ -2,18 +2,20 @@ use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
 use request::{
-    GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest,
-    Method, RequestExecutor, RequestPreferences, RequestScripts, RequestVariables, Response,
-    ScriptPhase, ScriptReport,
+    CookieJar, GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings,
+    HttpRequest, Method, RequestExecutor, RequestPreferences, RequestScripts, RequestVariables,
+    Response, ScriptPhase, ScriptReport,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
 use crate::commands::{Body, GrpcProtocol, GrpcRequestInput, Method as InputMethod, RequestInput};
 
+/// `cookies` is the app's cookie jar file.
 pub async fn run(
     root: &Path,
     preferences: &preferences::PreferencesFile,
+    cookies: &Path,
     path: &Path,
     trust_scripts: bool,
     variables: HashMap<String, String>,
@@ -41,15 +43,20 @@ pub async fn run(
                 settings.timeout_ms = timeout;
             }
 
-            return run_grpc(
+            let jar = cookie_jar(cookies, &settings)?;
+            let result = run_grpc(
                 path,
                 &collection.path,
                 request,
                 collection_values,
                 variables,
                 &settings,
+                jar.as_ref(),
             )
             .await;
+            save(jar.as_ref())?;
+
+            return result;
         }
         request::Request::WebSocket(_) => {
             bail!(
@@ -77,8 +84,15 @@ pub async fn run(
         settings.timeout_ms = timeout;
     }
 
-    let executor = RequestExecutor::new(&settings)?;
-    let execution = executor.execute(request, variables).await?;
+    let jar = cookie_jar(cookies, &settings)?;
+    let mut executor = RequestExecutor::new(&settings)?;
+    if let Some(jar) = &jar {
+        executor = executor.with_cookie_jar(jar.clone());
+    }
+    // Keep the cookies that redirects set, also when the request then fails.
+    let execution = executor.execute(request, variables).await;
+    save(jar.as_ref())?;
+    let execution = execution?;
     let Response::Http(response) = execution.response;
     let headers = response.headers.iter().map(|(name, value)| json!({
         "name": name.as_str(), "value": value.to_str().ok(), "value_base64": STANDARD.encode(value.as_bytes()),
@@ -96,8 +110,24 @@ pub async fn run(
     }))
 }
 
+/// The app's cookie jar, unless the settings turn it off.
+fn cookie_jar(path: &Path, settings: &RequestPreferences) -> Result<Option<CookieJar>> {
+    settings
+        .cookie_jar
+        .then(|| crate::cookies::open(path))
+        .transpose()
+}
+
+fn save(jar: Option<&CookieJar>) -> Result<()> {
+    if let Some(jar) = jar {
+        jar.save().context("Could not save cookies")?;
+    }
+
+    Ok(())
+}
+
 /// Invoke a saved gRPC method, sending its message once, and collect the
-/// stream until the server's status.
+/// stream until the server's status. Its scripts' requests use `jar`.
 async fn run_grpc(
     path: &Path,
     collection: &Path,
@@ -105,8 +135,12 @@ async fn run_grpc(
     collection_values: HashMap<String, String>,
     values: HashMap<String, String>,
     settings: &RequestPreferences,
+    jar: Option<&CookieJar>,
 ) -> Result<Value> {
-    let client = GrpcClient::new(settings);
+    let mut client = GrpcClient::new(settings);
+    if let Some(jar) = jar {
+        client = client.with_cookie_jar(jar.clone());
+    }
     let variables = RequestVariables::with_environment_session(
         collection_values,
         values,

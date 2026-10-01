@@ -17,8 +17,8 @@ use crate::save_request;
 use collections_panel_ui::CollectionPanel;
 use request_eagle_theme::method_color;
 use tab_ui::{
-    CollectionPage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft, RequestDraft,
-    RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
+    CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft,
+    RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -34,6 +34,7 @@ pub(crate) enum Page {
     WebSocket(Entity<WebSocketDraft>),
     Collection(Entity<CollectionPage>),
     Environment(Entity<EnvironmentEditor>),
+    Cookies(Entity<CookiePage>),
 }
 
 impl Page {
@@ -44,6 +45,7 @@ impl Page {
             Page::WebSocket(draft) => draft.read(cx).is_dirty(),
             Page::Collection(page) => page.read(cx).is_dirty(),
             Page::Environment(editor) => editor.read(cx).is_dirty(),
+            Page::Cookies(_) => false,
         }
     }
 
@@ -53,7 +55,7 @@ impl Page {
             Page::Request(draft) => Some(draft.read(cx).request.method.as_str()),
             Page::Grpc(_) => Some("gRPC"),
             Page::WebSocket(_) => Some("WS"),
-            Page::Collection(_) | Page::Environment(_) => None,
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
@@ -63,7 +65,7 @@ impl Page {
             Page::Request(draft) => draft.read(cx).location.as_ref(),
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
-            Page::Collection(_) | Page::Environment(_) => None,
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
@@ -72,6 +74,7 @@ impl Page {
             Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
             Page::Collection(_) => Some("icons/package.svg"),
             Page::Environment(_) => Some("icons/globe.svg"),
+            Page::Cookies(_) => Some("icons/cookie.svg"),
         }
     }
 
@@ -97,6 +100,7 @@ impl Page {
             Page::WebSocket(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
             Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
+            Page::Cookies(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
         }
     }
 
@@ -120,7 +124,7 @@ impl Page {
             Page::Request(draft) => Some(record(draft, history, cx)),
             Page::Grpc(draft) => Some(record(draft, history, cx)),
             Page::WebSocket(draft) => Some(record(draft, history, cx)),
-            Page::Collection(_) | Page::Environment(_) => None,
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
@@ -131,6 +135,7 @@ impl Page {
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
             Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
+            Page::Cookies(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
         }
     }
 
@@ -147,6 +152,10 @@ impl Page {
                 .cached(StyleRefinement::default().size_full())
                 .into_any_element(),
             Page::Environment(editor) => editor
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            Page::Cookies(page) => page
                 .clone()
                 .cached(StyleRefinement::default().size_full())
                 .into_any_element(),
@@ -314,7 +323,7 @@ impl MainView {
             Page::WebSocket(draft) => {
                 draft.update(cx, |draft, cx| draft.set_location(location, cx))
             }
-            Page::Collection(_) | Page::Environment(_) => {}
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
         }
     }
 
@@ -530,6 +539,22 @@ impl MainView {
         editor
     }
 
+    /// Show the cookie jar, reusing its tab when it is open.
+    pub(crate) fn open_cookies(&mut self, cx: &mut Context<Self>) {
+        let open = self
+            .tabs
+            .iter()
+            .position(|tab| matches!(tab.page, Page::Cookies(_)));
+
+        match open {
+            Some(index) => self.select_tab(index, cx),
+            None => {
+                let page = cx.new(CookiePage::new);
+                self.open_tab("Cookies", Page::Cookies(page), cx);
+            }
+        }
+    }
+
     /// Open the environment's editor with its name selected for renaming.
     pub(crate) fn rename_environment(
         &mut self,
@@ -704,6 +729,8 @@ impl MainView {
                     }
                 }
             }
+            // The jar saves itself whenever it changes.
+            Page::Cookies(_) => {}
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();

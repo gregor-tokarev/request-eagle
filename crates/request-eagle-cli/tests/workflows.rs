@@ -281,6 +281,61 @@ fn collection_scripts_are_listed_and_need_trust_to_run() {
 }
 
 #[test]
+fn runs_share_the_cookie_jar_and_cookie_commands_manage_it() {
+    let cli = Cli::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let mut heads = Vec::new();
+
+        for _ in 0..3 {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut received = Vec::new();
+            let mut buffer = [0; 1024];
+            while !received.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                received.extend_from_slice(&buffer[..count]);
+            }
+            heads.push(String::from_utf8(received).unwrap());
+            socket
+                .write_all(b"HTTP/1.1 204 No Content\r\nSet-Cookie: session=abc; Max-Age=3600\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        }
+
+        heads
+    });
+    let collection = cli.collection();
+    let created = cli.create(&collection, json!({"method":"GET","url":url}));
+    let run = json!({"command":"requests.run","path":created["path"],"timeout_ms":5000});
+
+    cli.call(run.clone());
+    cli.call(run.clone());
+    let cookies = cli.call(json!({"command":"cookies.list","domain":"127.0.0.1"}));
+    assert_eq!(cookies.as_array().unwrap().len(), 1);
+    assert_eq!(cookies[0]["name"], "session");
+    assert_eq!(cookies[0]["value"], "abc");
+    assert!(cookies[0]["expires"].is_u64());
+
+    let deleted = cli.call(json!({"command":"cookies.delete","domain":"127.0.0.1"}));
+    assert_eq!(deleted["deleted"][0]["name"], "session");
+    assert_eq!(cli.call(json!({"command":"cookies.list"})), json!([]));
+
+    let settings = cli.call(json!({"command":"settings.request","cookie_jar":false}));
+    assert_eq!(settings["request"]["cookie_jar"], false);
+    cli.call(run);
+    assert_eq!(cli.call(json!({"command":"cookies.list"})), json!([]));
+
+    let heads = server.join().unwrap();
+    assert!(!heads[0].contains("\r\ncookie:"));
+    assert!(heads[1].contains("\r\ncookie: session=abc\r\n"));
+    assert!(!heads[2].contains("\r\ncookie:"));
+}
+
+#[test]
 fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
     let cli = Cli::new();
     cli.call(json!({"command":"settings.request","timeout_ms":1200,"follow_all_redirects":false}));

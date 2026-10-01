@@ -7,16 +7,19 @@ use http_client::{
     },
 };
 
-use crate::ExecutionError;
+use crate::{CookieJar, ExecutionError};
 
 const REDIRECT_LIMIT: u32 = 100;
 
+/// Send the request, following redirects when `follow` is set. Returns the
+/// final response and the URL it came from.
 pub(crate) async fn send(
     client: &reqwest_client::ReqwestClient,
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
-) -> Result<Response<AsyncBody>, ExecutionError> {
+    cookies: Option<&CookieJar>,
+) -> Result<(Response<AsyncBody>, Url), ExecutionError> {
     let (mut parts, mut body) = request.into_parts();
     let mut redirects = 0;
 
@@ -25,20 +28,28 @@ pub(crate) async fn send(
         // its proxy again. Its injected Proxy-Authorization stays in the sent
         // clone, never in the headers we carry to the next destination.
         parts.extensions.insert(RedirectPolicy::NoFollow);
+        let mut hop = Request::from_parts(parts.clone(), body.clone().into());
 
-        let response = client
-            .send(Request::from_parts(parts.clone(), body.clone().into()))
-            .await
-            .map_err(ExecutionError::Transport)?;
+        // Each destination receives the jar's cookies for its own URL,
+        // including those that earlier redirects set.
+        if let Some(cookie) = cookies.and_then(|jar| jar.request_header(&url, hop.headers())) {
+            hop.headers_mut().insert(COOKIE, cookie);
+        }
+
+        let response = client.send(hop).await.map_err(ExecutionError::Transport)?;
+
+        if let Some(jar) = cookies {
+            jar.store(&url, response.headers());
+        }
 
         if !follow {
-            return Ok(response);
+            return Ok((response, url));
         }
 
         let status = response.status().as_u16();
 
         if !matches!(status, 301 | 302 | 303 | 307 | 308) {
-            return Ok(response);
+            return Ok((response, url));
         }
 
         let next = response.headers().get(LOCATION).and_then(|location| {
@@ -46,12 +57,12 @@ pub(crate) async fn send(
                 .ok()
         });
         let Some(mut next) = next else {
-            return Ok(response);
+            return Ok((response, url));
         };
         next.set_fragment(None);
 
         let Ok(uri) = next.as_str().parse() else {
-            return Ok(response);
+            return Ok((response, url));
         };
 
         redirects += 1;

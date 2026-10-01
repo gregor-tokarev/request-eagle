@@ -88,7 +88,7 @@ impl SnippetDraft for GrpcDraft {
         &self.request
     }
 
-    fn command(&self, values: &HashMap<String, String>) -> String {
+    fn command(&self, values: &HashMap<String, String>, _: &App) -> String {
         self.request
             .grpcurl_command(values, self.collection_path().as_deref())
     }

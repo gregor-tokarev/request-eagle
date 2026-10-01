@@ -1,5 +1,6 @@
 mod collections;
 mod commands;
+mod cookies;
 mod execution;
 mod settings;
 
@@ -74,12 +75,16 @@ fn main() {
                         execution::run(
                             &collections,
                             &preferences,
+                            &data.join("cookies.json"),
                             &path,
                             trust_scripts,
                             variables,
                             timeout_ms,
                         )
                         .await
+                    }
+                    command @ (Command::CookiesList { .. } | Command::CookiesDelete { .. }) => {
+                        cookies::dispatch(&data.join("cookies.json"), command)
                     }
                     command @ (Command::SettingsGet {}
                     | Command::SettingsRequest { .. }

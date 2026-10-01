@@ -172,6 +172,7 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
             variables: state.variables.clone(),
             session: None,
             collection_post_response: String::new(),
+            response_url: None,
         };
         let mut result = post_response(
             request.clone(),

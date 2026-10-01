@@ -1,12 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
 use bytes::Bytes;
-use http_client::http::{HeaderMap, header::HOST, uri::Authority};
+use http_client::http::{
+    HeaderMap,
+    header::{COOKIE, HOST},
+    uri::Authority,
+};
 use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
+    CookieJar, EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
     RequestPreferences, event_stream,
 };
 
@@ -17,6 +21,9 @@ pub(crate) struct HttpExecutor {
     http_version: HttpVersion,
     follow_all_redirects: bool,
     max_response_bytes: Option<u64>,
+    /// Whether the preferences let requests use a cookie jar.
+    cookie_jar: bool,
+    cookies: Option<CookieJar>,
 }
 
 impl HttpExecutor {
@@ -28,6 +35,18 @@ impl HttpExecutor {
                 .map_or(limit, |configured| configured.min(limit)),
         );
         executor
+    }
+
+    /// Store the cookies that responses set in `jar`, and send them with later
+    /// requests, unless the preferences turn the cookie jar off.
+    pub(crate) fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.cookies = self.cookie_jar.then_some(jar);
+        self
+    }
+
+    /// The jar requests use, unless the preferences turn it off.
+    pub(crate) fn cookie_jar(&self) -> Option<&CookieJar> {
+        self.cookies.as_ref()
     }
 
     pub(crate) fn new(preferences: &RequestPreferences) -> Result<Self, ExecutionError> {
@@ -53,17 +72,20 @@ impl HttpExecutor {
             http_version: preferences.http_version,
             follow_all_redirects: preferences.follow_all_redirects,
             max_response_bytes,
+            cookie_jar: preferences.cookie_jar,
+            cookies: None,
         })
     }
 
-    /// Read the complete response. With `events`, an event-stream response
-    /// reports its events as they arrive.
+    /// Read the complete response, and the URL it came from after redirects.
+    /// With `events`, an event-stream response reports its events as they
+    /// arrive.
     pub(crate) async fn execute(
         &self,
         request: &HttpRequest,
         body: Option<Bytes>,
         events: Option<&mut EventStream>,
-    ) -> Result<HttpResponse, ExecutionError> {
+    ) -> Result<(HttpResponse, Url), ExecutionError> {
         let started = Instant::now();
         let is_head = request.method.as_str() == "HEAD";
         let mut url = Url::parse(&request.path).map_err(ExecutionError::InvalidUrl)?;
@@ -126,11 +148,28 @@ impl HttpExecutor {
             }
         }
 
-        let request_header_bytes = request
+        let mut request_header_bytes = request
             .headers()
             .iter()
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
-            .sum();
+            .sum::<usize>();
+
+        // The jar's cookies join the request's own Cookie header when it is sent.
+        if let Some(cookie) = self
+            .cookies
+            .as_ref()
+            .and_then(|jar| jar.request_header(&url, request.headers()))
+        {
+            let own = request
+                .headers()
+                .get_all(COOKIE)
+                .iter()
+                .map(|value| COOKIE.as_str().len() + value.as_bytes().len() + 4)
+                .sum::<usize>();
+            // The request's own Cookie headers are counted above and replaced.
+            request_header_bytes =
+                request_header_bytes - own + COOKIE.as_str().len() + cookie.as_bytes().len() + 4;
+        }
 
         if generated_host {
             // Let the transport regenerate Host when a redirect changes the URL.
@@ -141,9 +180,14 @@ impl HttpExecutor {
         if let Some(events) = &events {
             events.dispatch.start();
         }
-        let response =
-            crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
-                .await?;
+        let (response, url) = crate::redirects::send(
+            client.as_ref(),
+            request,
+            url,
+            self.follow_all_redirects,
+            self.cookies.as_ref(),
+        )
+        .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         // HEAD and statuses without a body may describe an encoded representation
@@ -208,7 +252,7 @@ impl HttpExecutor {
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
             .sum();
 
-        Ok(HttpResponse {
+        let response = HttpResponse {
             status: parts.status,
             version: parts.version,
             headers: parts.headers,
@@ -222,7 +266,9 @@ impl HttpExecutor {
                 response_header_bytes,
                 encoded_response_body_bytes,
             },
-        })
+        };
+
+        Ok((response, url))
     }
 }
 

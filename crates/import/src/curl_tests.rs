@@ -282,7 +282,7 @@ fn reads_the_commands_request_eagle_writes() {
     ];
 
     for request in requests {
-        let command = request.curl_command(&HashMap::new());
+        let command = request.curl_command(&HashMap::new(), None);
         assert_eq!(parse_curl(&command).as_ref(), Ok(&request), "{command}");
     }
 }

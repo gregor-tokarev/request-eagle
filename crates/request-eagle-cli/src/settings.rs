@@ -13,6 +13,7 @@ pub async fn dispatch(file: &PreferencesFile, command: Command) -> Result<Value>
             max_response_size_mb,
             ssl_certificate_verification,
             follow_all_redirects,
+            cookie_jar,
         } => file.update(|preferences| {
             let request = &mut preferences.request;
             if let Some(version) = http_version {
@@ -33,6 +34,9 @@ pub async fn dispatch(file: &PreferencesFile, command: Command) -> Result<Value>
             }
             if let Some(value) = follow_all_redirects {
                 request.follow_all_redirects = value;
+            }
+            if let Some(value) = cookie_jar {
+                request.cookie_jar = value;
             }
             Ok(())
         })?,

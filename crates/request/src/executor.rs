@@ -7,8 +7,8 @@ use std::{
 use bytes::Bytes;
 
 use crate::{
-    EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences, RequestVariables,
-    Response, http::HttpExecutor, scripts,
+    CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
+    RequestVariables, Response, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
@@ -26,6 +26,15 @@ impl RequestExecutor {
             timeout: (preferences.timeout_ms != 0)
                 .then(|| Duration::from_millis(preferences.timeout_ms)),
         })
+    }
+
+    /// Store the cookies that responses set in `jar` and send them with later
+    /// requests to the same sites, including script requests. Executors that
+    /// share a jar share its cookies. Ignored when the preferences turn the
+    /// cookie jar off.
+    pub fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.http = self.http.with_cookie_jar(jar);
+        self
     }
 
     /// Run the request's scripts and send it, resolving variables after the
@@ -65,7 +74,7 @@ impl RequestExecutor {
             let cancellation = scripts::Cancellation::new();
             let mut reports = Vec::new();
             let run = async {
-                let (mut request, state, pre_reports) = scripts::pre_request(
+                let (mut request, mut state, pre_reports) = scripts::pre_request(
                     request,
                     variables,
                     executor.clone(),
@@ -83,10 +92,11 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
-                let response = executor
+                let (response, url) = executor
                     .http
                     .execute(&request, body, events.as_mut())
                     .await?;
+                state.response_url = Some(url.into());
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
