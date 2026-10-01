@@ -2,7 +2,7 @@ use rquickjs::{Ctx, Exception, Function};
 use serde_json::json;
 use url::Url;
 
-use crate::CookieJar;
+use crate::{Cookie, CookieJar};
 
 /// Lets `pm.cookies` read the jar's cookies for a URL and `pm.cookies.jar()`
 /// change them. Without a jar, because the preferences turn it off, every
@@ -34,28 +34,15 @@ pub(super) fn binding<'js>(
                 "list" => {
                     let cookies = jar
                         .matching(&url)
-                        .into_iter()
-                        .map(|cookie| {
-                            json!({
-                                "name": cookie.name,
-                                "value": cookie.value,
-                                "domain": cookie.domain,
-                                "path": cookie.path,
-                                "hostOnly": cookie.host_only,
-                                "secure": cookie.secure,
-                                "httpOnly": cookie.http_only,
-                                "expires": cookie.expires.and_then(|time| {
-                                    time.duration_since(std::time::UNIX_EPOCH).ok()
-                                }).map(|elapsed| elapsed.as_millis() as u64),
-                            })
-                        })
+                        .iter()
+                        .map(script_cookie)
                         .collect::<Vec<_>>();
 
                     Ok(json!(cookies).to_string())
                 }
                 "set" => jar
                     .set(&url, &argument)
-                    .map(|()| String::new())
+                    .map(|cookie| json!(cookie.as_ref().map(script_cookie)).to_string())
                     .map_err(|message| Exception::throw_message(&cx, &message)),
                 "unset" => {
                     jar.unset(&url, Some(&argument));
@@ -69,4 +56,22 @@ pub(super) fn binding<'js>(
             }
         },
     )
+}
+
+/// A cookie as scripts see it, with its expiry in milliseconds.
+fn script_cookie(cookie: &Cookie) -> serde_json::Value {
+    json!({
+        "name": cookie.name,
+        "value": cookie.value,
+        "domain": cookie.domain,
+        "path": cookie.path,
+        "hostOnly": cookie.host_only,
+        "secure": cookie.secure,
+        "httpOnly": cookie.http_only,
+        "sameSite": cookie.same_site,
+        "expires": cookie
+            .expires
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|elapsed| elapsed.as_millis() as u64),
+    })
 }

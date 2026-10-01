@@ -160,3 +160,35 @@ fn saving_reports_the_cookies_it_took_from_the_file_as_a_change() {
     app.save().unwrap();
     assert_eq!(app.revision(), revision);
 }
+
+#[test]
+fn a_script_that_sets_a_deleted_cookie_again_keeps_it_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cookies.json");
+    let jar = CookieJar::open(&path).unwrap();
+    let url = Url::parse("https://example.com/").unwrap();
+
+    store(&jar, url.as_str(), &["sid=1; Path=/"]);
+    jar.save().unwrap();
+    store(&jar, url.as_str(), &["sid=; Path=/; Max-Age=0"]);
+    let restored = jar.set(&url, "sid=1; Path=/").unwrap().unwrap();
+    assert_eq!(restored.value, "1");
+    jar.save().unwrap();
+
+    assert_eq!(
+        CookieJar::open(&path)
+            .unwrap()
+            .cookie_header(url.as_str(), &[])
+            .as_deref(),
+        Some("sid=1")
+    );
+    assert_eq!(
+        jar.cookie_header(url.as_str(), &[]).as_deref(),
+        Some("sid=1")
+    );
+
+    // A script's deletion also reaches the file.
+    jar.unset(&url, Some("sid"));
+    jar.save().unwrap();
+    assert!(CookieJar::open(&path).unwrap().is_empty());
+}

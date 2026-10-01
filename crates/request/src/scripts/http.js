@@ -125,25 +125,38 @@
             return cookie;
         })
         .filter(Boolean);
-    // The jar's cookies for a URL, with expiry dates. Throws when the jar is off.
-    const jarCookies = target => JSON.parse(jar("list", String(target), "")).map(cookie => ({
+    // A cookie from the jar, with its expiry date and attributes.
+    const fromJar = cookie => ({
         ...cookie,
         expires: cookie.expires === null ? undefined : new Date(cookie.expires),
-    }));
-    let sentFromJar = [];
+        sameSite: cookie.sameSite ?? undefined,
+    });
+    // The jar's cookies for a URL, in the order a request sends them. Throws
+    // when the jar is off.
+    const jarCookies = target => JSON.parse(jar("list", String(target), "")).map(fromJar);
+    let sentFromJar = null;
     try {
         // Before sending, the URL may still contain {{variables}} and lack a scheme.
         let target = (input.response ? input.url : pm.variables.replaceIn(input.url)).trim();
         if (target && !target.includes("://")) target = "https://" + target;
         sentFromJar = jarCookies(target);
     } catch {}
-    const named = new Set(sentCookies.map(cookie => cookie.name));
-    const cookies = sentCookies.concat(sentFromJar.filter(cookie => !named.has(cookie.name)));
-    for (const cookie of setCookies) {
-        const index = cookies.findIndex(existing => existing.name === cookie.name);
-        if (index >= 0) cookies.splice(index, 1);
-        const expired = cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
-        if (!expired) cookies.push(cookie);
+    let cookies;
+    if (sentFromJar) {
+        // The jar already holds the cookies the response set, and replaces
+        // those of the Cookie header that the response named.
+        const renamed = new Set(setCookies.map(cookie => cookie.name));
+        const own = sentCookies.filter(cookie => !renamed.has(cookie.name));
+        const named = new Set(own.map(cookie => cookie.name));
+        cookies = own.concat(sentFromJar.filter(cookie => !named.has(cookie.name)));
+    } else {
+        cookies = sentCookies.slice();
+        for (const cookie of setCookies) {
+            const index = cookies.findIndex(existing => existing.name === cookie.name);
+            if (index >= 0) cookies.splice(index, 1);
+            const expired = cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
+            if (!expired) cookies.push(cookie);
+        }
     }
 
     pm.request = request;
@@ -180,8 +193,8 @@
                 const cookie = name !== null && typeof name === "object" ? name : {name, value};
                 if (cookie === name) callback = value;
                 call(callback, () => {
-                    jar("set", String(target), header(cookie));
-                    return jarCookies(target).find(stored => stored.name === String(cookie.name ?? cookie.key)) ?? null;
+                    const stored = JSON.parse(jar("set", String(target), header(cookie)));
+                    return stored === null ? null : fromJar(stored);
                 });
             },
             unset(target, name, callback) {

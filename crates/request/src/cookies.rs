@@ -35,6 +35,8 @@ pub struct Cookie {
     /// Sent only over HTTPS, or to the local machine.
     pub secure: bool,
     pub http_only: bool,
+    /// `Strict`, `Lax` or `None`, when the cookie names it.
+    pub same_site: Option<String>,
 }
 
 /// The cookies that responses set, sent with later requests to the same
@@ -201,9 +203,9 @@ impl CookieJar {
         matching.into_iter().filter_map(listed).collect()
     }
 
-    /// Keep a cookie a script set, as if a response from `url` had set it.
-    /// An expired cookie deletes the one it names.
-    pub(crate) fn set(&self, url: &Url, set_cookie: &str) -> Result<(), String> {
+    /// Keep a cookie a script set, as if a response from `url` had set it,
+    /// and return it. An expired cookie deletes the one it names instead.
+    pub(crate) fn set(&self, url: &Url, set_cookie: &str) -> Result<Option<Cookie>, String> {
         let cookie = RawCookie::parse(set_cookie.to_owned())
             .map_err(|error| format!("Invalid cookie: {error}"))?;
         let refused = |error| format!("The cookie cannot be set for {url}: {error}");
@@ -213,13 +215,17 @@ impl CookieJar {
         }
 
         let cookie = StoredCookie::try_from_raw_cookie(&cookie, url).map_err(refused)?;
-        match self.0.cookies.lock().unwrap().insert(cookie, url) {
+        let stored = (!cookie.is_expired()).then(|| listed(&cookie)).flatten();
+        let mut cookies = self.0.cookies.lock().unwrap();
+        self.track(&key(&cookie), cookie.is_expired());
+
+        match cookies.insert(cookie, url) {
             Ok(_) | Err(cookie_store::CookieError::Expired) => {}
             Err(error) => return Err(refused(error)),
         }
 
         self.changed();
-        Ok(())
+        Ok(stored)
     }
 
     /// Delete the cookies a request to `url` sends, or only those named `name`.
@@ -232,8 +238,9 @@ impl CookieJar {
             .map(key)
             .collect::<Vec<_>>();
 
-        for (domain, path, name) in &removed {
-            cookies.remove(domain, path, name);
+        for key in &removed {
+            cookies.remove(&key.0, &key.1, &key.2);
+            self.track(key, true);
         }
 
         if !removed.is_empty() {
@@ -288,17 +295,9 @@ impl CookieJar {
 
         let mut store = self.0.cookies.lock().unwrap();
 
-        if let Some(file) = &self.0.file {
-            let mut deleted = file.deleted.lock().unwrap();
-
-            for cookie in &cookies {
-                if let Ok(cookie) = StoredCookie::try_from_raw_cookie(cookie, url) {
-                    if cookie.is_expired() {
-                        deleted.insert(key(&cookie));
-                    } else {
-                        deleted.remove(&key(&cookie));
-                    }
-                }
+        for cookie in &cookies {
+            if let Ok(cookie) = StoredCookie::try_from_raw_cookie(cookie, url) {
+                self.track(&key(&cookie), cookie.is_expired());
             }
         }
 
@@ -374,6 +373,22 @@ impl CookieJar {
         (!added.is_empty()).then_some(added)
     }
 
+    /// Remember whether the last change to a saved jar's cookie deleted it,
+    /// so saving deletes it from the file even if another process saved it.
+    /// Call while holding the cookies.
+    fn track(&self, key: &Key, deleted: bool) {
+        let Some(file) = &self.0.file else {
+            return;
+        };
+
+        let mut tracked = file.deleted.lock().unwrap();
+        if deleted {
+            tracked.insert(key.clone());
+        } else {
+            tracked.remove(key);
+        }
+    }
+
     fn changed(&self) {
         self.0.revision.fetch_add(1, Ordering::SeqCst);
     }
@@ -414,6 +429,7 @@ fn listed(cookie: &StoredCookie) -> Option<Cookie> {
         },
         secure: cookie.secure().unwrap_or(false),
         http_only: cookie.http_only().unwrap_or(false),
+        same_site: cookie.same_site().map(|same_site| same_site.to_string()),
     })
 }
 

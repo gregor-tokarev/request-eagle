@@ -332,6 +332,54 @@ fn scripts_read_and_change_the_jar() {
 }
 
 #[test]
+fn after_a_response_pm_cookies_keeps_the_jar_order_and_set_returns_the_stored_cookie() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=public; Path=/\r\nSet-Cookie: sid=private; Path=/admin\r\n",
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=renewed; Path=/admin\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+        let executor = executor(true, &jar);
+        get(&executor, format!("{url}/admin/login"), Vec::new()).await;
+
+        let execution = executor
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/admin/users"),
+                    scripts: RequestScripts {
+                        pre_request: String::new(),
+                        post_response: format!(
+                            r#"
+                            pm.test("the more specific cookie", () => pm.expect(pm.cookies.get("sid")).to.equal("renewed"));
+                            pm.cookies.jar().set("{url}/admin/users", {{name: "sid", value: "base", path: "/", sameSite: "Strict"}}, (error, cookie) => {{
+                                pm.test("set returns the stored cookie", () => {{
+                                    pm.expect(error).to.equal(null);
+                                    pm.expect(cookie.value).to.equal("base");
+                                    pm.expect(cookie.path).to.equal("/");
+                                    pm.expect(cookie.sameSite).to.equal("Strict");
+                                }});
+                            }});
+                            "#
+                        ),
+                    },
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::new(), None),
+            )
+            .await
+            .unwrap();
+        server.await;
+
+        let tests = &execution.scripts[0].tests;
+        assert_eq!(tests.len(), 2);
+        for test in tests {
+            assert_eq!(test.error, None, "{}", test.name);
+        }
+    });
+}
+
+#[test]
 fn saved_cookies_reopen_including_session_cookies() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

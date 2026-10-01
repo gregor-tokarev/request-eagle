@@ -69,5 +69,6 @@ fn cookie_json(cookie: &Cookie) -> Value {
             .map(|elapsed| elapsed.as_secs()),
         "secure": cookie.secure,
         "http_only": cookie.http_only,
+        "same_site": cookie.same_site,
     })
 }

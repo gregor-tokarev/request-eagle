@@ -330,10 +330,15 @@ fn cookie_row(
     page: &WeakEntity<CookiePage>,
     cx: &App,
 ) -> impl IntoElement + use<> {
+    let same_site = cookie
+        .same_site
+        .as_ref()
+        .map(|same_site| format!("SameSite={same_site}"));
     let attributes = [
-        (!cookie.host_only).then_some("Subdomains"),
-        cookie.secure.then_some("Secure"),
-        cookie.http_only.then_some("HttpOnly"),
+        (!cookie.host_only).then(|| "Subdomains".to_owned()),
+        cookie.secure.then(|| "Secure".to_owned()),
+        cookie.http_only.then(|| "HttpOnly".to_owned()),
+        same_site,
     ]
     .into_iter()
     .flatten()
