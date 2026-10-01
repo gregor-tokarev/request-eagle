@@ -45,7 +45,8 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
 }
 
 /// The `:name` segments of the URL's path, where each starts and its name.
-/// The scheme, host and port are not part of the path.
+/// The scheme, host and port are not part of the path, and a name cannot
+/// contain a `{{variable}}`.
 pub fn path_variables(url: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
     let path = path_range(url);
     let mut offset = path.start;
@@ -54,7 +55,9 @@ pub fn path_variables(url: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
         let start = offset;
         offset += segment.len() + 1;
 
-        let name = segment.strip_prefix(':').filter(|name| !name.is_empty())?;
+        let name = segment
+            .strip_prefix(':')
+            .filter(|name| !name.is_empty() && !name.contains("{{"))?;
         Some((start..start + segment.len(), name))
     })
 }

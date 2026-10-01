@@ -79,6 +79,7 @@ fn path_variables_are_whole_path_segments_after_the_host() {
         [(":first", "first"), (":first", "first")]
     );
     assert_eq!(names("example.com:8080"), []);
+    assert_eq!(names("https://example.com/users/:{{name}}"), []);
 }
 
 #[test]

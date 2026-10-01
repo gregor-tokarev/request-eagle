@@ -30,8 +30,8 @@ pub(crate) struct RequestFields {
     generated_headers: Vec<(SharedString, SharedString)>,
     focus: FocusHandle,
     scope: Entity<VariableScope>,
-    /// Whether a row with a value but no key is sent, as a query parameter
-    /// `=value` is. Headers and metadata need a name.
+    /// Whether a row without a name is sent, as a query parameter `=value`
+    /// is. Headers and metadata need a name.
     keyless_rows: bool,
 }
 
@@ -71,13 +71,17 @@ impl RequestFields {
         self
     }
 
-    /// Enabled rows with a key are sent, and with `keyless_rows` also those
-    /// with only a value.
+    /// Enabled rows with a name are sent. With `keyless_rows`, any row with a
+    /// key or a value is, as the URL's query keeps them.
     fn is_sent(&self, row: &FieldRow, cx: &App) -> bool {
         let key = row.key.read(cx).value();
-        let keyless = self.keyless_rows && !row.value.read(cx).value().is_empty();
+        let named = if self.keyless_rows {
+            !key.is_empty() || !row.value.read(cx).value().is_empty()
+        } else {
+            !key.trim().is_empty()
+        };
 
-        row.enabled && (!key.trim().is_empty() || keyless)
+        row.enabled && named
     }
 
     pub(crate) fn set_generated_headers(
