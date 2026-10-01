@@ -1,7 +1,7 @@
 use rquickjs::{Ctx, Function, Value, context::EvalOptions};
 
 /// Unmodified browser builds of the libraries Postman scripts commonly
-/// require; see libraries/README.md.
+/// require; see libraries/SOURCES.md.
 const LIBRARIES: &[(&str, &str)] = &[
     ("crypto-js", include_str!("libraries/crypto-js.js")),
     ("lodash", include_str!("libraries/lodash.js")),

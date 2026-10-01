@@ -20,11 +20,12 @@
             catch { return "[Unserializable value]"; }
         }
     };
-    const substitute = (text, values, strict = false, isUrl = false) => {
+    // `lookup` returns a variable's value, or undefined.
+    const substitute = (text, lookup, strict = false, isUrl = false) => {
         const resolve = (match, key) => {
             if (strict && key.startsWith("!")) return "{{" + key.slice(1) + "}}";
             key = key.trim();
-            const value = values[key] ?? generated[key];
+            const value = lookup(key) ?? generated[key];
             if (value !== undefined) return value;
             const fresh = dynamic(key);
             if (fresh == null) {
@@ -85,11 +86,12 @@
             unset(key) { key = String(key); scopes[top][key] = changes[top][key] = null; },
             clear() { for (const key of Object.keys(values())) this.unset(key); },
             toObject: () => ({...values()}),
-            replaceIn: text => substitute(text, values()),
+            replaceIn: text => substitute(text, read),
         };
     }
+    const visibleValue = key => variables[key] ?? scopeValue(key, 2);
     const visibleVariables = () => Object.assign(scopeValues(2), variables);
-    const replaceIn = text => substitute(text, visibleVariables());
+    const replaceIn = text => substitute(text, visibleValue);
 
     function entries(pairs, ignoreCase = false) {
         const normalize = name => ignoreCase ? String(name).toLowerCase() : String(name);
@@ -110,8 +112,8 @@
 
     const pm = {
         variables: {
-            get: key => variables[key] ?? scopeValue(String(key), 2),
-            has: key => Object.hasOwn(variables, key) || scopeValue(String(key), 2) !== undefined,
+            get: key => visibleValue(String(key)),
+            has: key => visibleValue(String(key)) !== undefined,
             set(key, value) { variables[String(key)] = String(value); },
             unset(key) { delete variables[key]; },
             clear() { for (const key of Object.keys(variables)) delete variables[key]; },
@@ -146,7 +148,7 @@
                 if (!config || typeof config.url !== "string") throw new TypeError("sendRequest requires a URL string or an object with a url string");
                 if (callback !== undefined && typeof callback !== "function") throw new TypeError("sendRequest callback must be a function");
                 const method = String(config.method ?? "GET").toUpperCase();
-                const resolve = text => substitute(text, visibleVariables(), true);
+                const resolve = text => substitute(text, visibleValue, true);
                 const rawHeaders = config.headers ?? config.header ?? {};
                 const headers = Array.isArray(rawHeaders)
                     ? rawHeaders.map(item => Array.isArray(item) ? item : [item.key, item.value])
@@ -157,7 +159,7 @@
                     body = body.raw;
                 }
                 const json = await send(stringify({
-                    url: substitute(config.url, visibleVariables(), true, true),
+                    url: substitute(config.url, visibleValue, true, true),
                     method,
                     headers: headers.map(([key, value]) => [resolve(key), resolve(value)]),
                     body: body === null ? null : resolve(body),

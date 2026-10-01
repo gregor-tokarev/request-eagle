@@ -61,17 +61,20 @@ impl Changes {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     }
+}
 
-    /// File values with the session's changes over them.
-    fn over(&self, base: HashMap<String, String>) -> BTreeMap<String, Option<String>> {
-        let mut values: BTreeMap<_, _> = base
-            .into_iter()
-            .map(|(name, value)| (name, Some(value)))
-            .collect();
-        values.extend(self.lock().clone());
+/// File values with the session's changes over them.
+fn over(
+    base: HashMap<String, String>,
+    changes: &BTreeMap<String, Option<String>>,
+) -> BTreeMap<String, Option<String>> {
+    let mut values: BTreeMap<_, _> = base
+        .into_iter()
+        .map(|(name, value)| (name, Some(value)))
+        .collect();
+    values.extend(changes.clone());
 
-        values
-    }
+    values
 }
 
 /// Script changes that remain available for the workspace session without
@@ -101,10 +104,16 @@ impl EnvironmentSession {
         collection: HashMap<String, String>,
         environment: HashMap<String, String>,
     ) -> VariableScopes {
+        // Read every scope under the locks `apply` takes, in the same order,
+        // so a snapshot never mixes changes from before and after an update.
+        let globals = self.globals.lock();
+        let collection_changes = self.collection.lock();
+        let environment_changes = self.environment.lock();
+
         VariableScopes {
-            globals: self.globals.over(HashMap::new()),
-            collection: self.collection.over(collection),
-            environment: self.environment.over(environment),
+            globals: over(HashMap::new(), &globals),
+            collection: over(collection, &collection_changes),
+            environment: over(environment, &environment_changes),
         }
     }
 

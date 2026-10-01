@@ -346,3 +346,31 @@ fn cookies_before_sending_resolve_variables_in_the_cookie_header() {
     assert_eq!(reports[0].logs[0].level, "warn");
     assert!(reports[0].logs[0].message.contains("no cookie jar"));
 }
+
+#[test]
+fn replacements_read_only_the_names_they_reference() {
+    let mut values: HashMap<String, String> = (0..2000)
+        .map(|index| (format!("unused{index}"), "x".to_owned()))
+        .collect();
+    values.insert("id".into(), "7".into());
+    let request = HttpRequest {
+        path: "https://example.com".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                let urls = 0;
+                for (let row = 0; row < 2000; row++) {
+                    urls += pm.environment.replaceIn("/items/{{id}}").length;
+                    urls += pm.variables.replaceIn("/items/{{id}}").length;
+                }
+                pm.test("replaced", () => pm.expect(urls).to.equal(2000 * 2 * "/items/7".length));
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (_, _, reports) = send(request, RequestVariables::new(values, None));
+
+    passed(&reports[0]);
+    assert_eq!(reports[0].tests.len(), 1);
+}

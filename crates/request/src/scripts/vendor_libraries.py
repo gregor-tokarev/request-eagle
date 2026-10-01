@@ -33,7 +33,7 @@ for name, version, archive_sha256, build in PACKAGES:
     )
 
 table = "\n".join(rows)
-(libraries / "README.md").write_text(f"""# Libraries scripts can require
+(libraries / "SOURCES.md").write_text(f"""# Libraries scripts can require
 
 | Library | Version | Source | File SHA-256 |
 | --- | --- | --- | --- |
