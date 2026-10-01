@@ -33,6 +33,10 @@ const PRE_SNIPPETS: &[(&str, &str)] = &[
         "const signature = pm.crypto.hmacSha256(\n    pm.environment.get(\"signing_key\"),\n    pm.variables.replaceIn(pm.request.body.raw || \"\")\n);\npm.request.headers.upsert({key: \"X-Signature\", value: signature});",
     ),
     (
+        "Format a date with Moment",
+        "const moment = require(\"moment\");\npm.variables.set(\"date\", moment().utc().format(\"YYYY-MM-DD\"));",
+    ),
+    (
         "Skip when a variable is missing",
         "if (!pm.environment.get(\"token\")) {\n    pm.execution.skipRequest(\"No access token configured\");\n}",
     ),
@@ -45,6 +49,10 @@ const POST_SNIPPETS: &[(&str, &str)] = &[
     (
         "Save a token for later requests",
         "pm.environment.set(\"token\", pm.response.json().token);",
+    ),
+    (
+        "Save a response cookie",
+        "pm.environment.set(\"session\", pm.cookies.get(\"session\"));",
     ),
     (
         "Status code is 200",

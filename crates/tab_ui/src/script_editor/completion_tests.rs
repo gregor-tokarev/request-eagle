@@ -23,10 +23,12 @@ fn suggests_supported_members_for_the_current_phase() {
     assert!(labels("pm.|", ScriptPhase::PostResponse).contains(&"response".into()));
     assert!(!labels("pm.|", ScriptPhase::PreRequest).contains(&"response".into()));
     assert!(labels("pm.response.|", ScriptPhase::PreRequest).is_empty());
-    assert!(labels("pm.collectionVariables.|", ScriptPhase::PreRequest).is_empty());
+    assert!(labels("pm.collectionVariables.|", ScriptPhase::PreRequest).contains(&"set".into()));
     assert!(labels("pm.|", ScriptPhase::PreRequest).contains(&"execution".into()));
-    assert!(!labels("pm.|", ScriptPhase::PostResponse).contains(&"execution".into()));
-    assert!(labels("pm.execution.|", ScriptPhase::PostResponse).is_empty());
+    assert_eq!(
+        labels("pm.execution.|", ScriptPhase::PostResponse),
+        ["setNextRequest"]
+    );
     assert_eq!(
         labels("pm.response.j|", ScriptPhase::PostResponse),
         ["json"]
@@ -65,7 +67,7 @@ fn suggests_supported_members_for_the_current_phase() {
         ["validate"]
     );
     assert_eq!(
-        labels("pm.execution.s|", ScriptPhase::PreRequest),
+        labels("pm.execution.sk|", ScriptPhase::PreRequest),
         ["skipRequest"]
     );
     assert_eq!(

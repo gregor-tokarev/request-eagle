@@ -1,5 +1,6 @@
 mod engine;
 mod grpc;
+mod libraries;
 mod model;
 mod network;
 mod runtime;
@@ -12,6 +13,8 @@ mod api_tests;
 mod assertion_tests;
 #[cfg(test)]
 mod grpc_tests;
+#[cfg(test)]
+mod postman_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
