@@ -5,7 +5,6 @@ use gpui_kit::component::{
     highlighter::{LanguageConfig, LanguageRegistry},
     input::{Editor, EditorState},
     menu::{DropdownMenu, PopupMenuItem},
-    text::TextView,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -13,6 +12,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{
     content::{Preview, ResponseContent},
     hex::{HEX_LIMIT, hex_dump},
+    html::HtmlPreview,
     image::ImagePreview,
     metadata::size_label,
     pdf::PdfPreview,
@@ -78,8 +78,7 @@ pub(super) enum Body {
         search: Option<BodySearch>,
     },
     Pretty(Entity<ResponseBodyEditor>),
-    /// An HTML page, rendered from the response's text without its images.
-    Html(SharedString),
+    Html(Entity<HtmlPreview>),
     Image(Entity<ImagePreview>),
     Pdf(Entity<PdfPreview>),
 }
@@ -323,16 +322,8 @@ impl ResponseView {
                         Body::Pretty(editor) => AnyView::from(editor.clone())
                             .cached(StyleRefinement::default().size_full())
                             .into_any_element(),
-                        Body::Html(page) => div()
-                            .debug_selector(|| "response-html".into())
-                            .size_full()
-                            .p_4()
-                            .child(
-                                TextView::html("response-html", page.clone())
-                                    .size_full()
-                                    .selectable(true)
-                                    .scrollable(true),
-                            )
+                        Body::Html(preview) => AnyView::from(preview.clone())
+                            .cached(StyleRefinement::default().size_full())
                             .into_any_element(),
                         Body::Image(preview) => AnyView::from(preview.clone())
                             .cached(StyleRefinement::default().size_full())
@@ -362,7 +353,8 @@ impl ResponseView {
 
         self.body = Some(match (mode, &content.preview) {
             (BodyMode::Preview, Some(Preview::Html)) => {
-                Body::Html(without_images(&content.raw).into())
+                let html = content.raw.clone();
+                Body::Html(cx.new(|cx| HtmlPreview::new(html, cx)))
             }
             (BodyMode::Preview, Some(Preview::Image(image))) => {
                 let image = image.clone();
@@ -404,41 +396,6 @@ impl ResponseView {
         self.mode = mode;
         cx.notify();
     }
-}
-
-/// A page without its images, as an HTML parser reads it. A previewed page
-/// loads nothing: GPUI Kit's rich text fetches images while measuring them,
-/// outside the request's proxy settings.
-pub(super) fn without_images(html: &str) -> String {
-    use html5ever::{ParseOpts, local_name, parse_document, serialize, tendril::TendrilSink};
-    use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
-
-    fn remove(node: &Handle) {
-        node.children.borrow_mut().retain(|child| {
-            !matches!(&child.data, NodeData::Element { name, .. } if name.local == local_name!("img"))
-        });
-
-        for child in node.children.borrow().iter() {
-            remove(child);
-        }
-    }
-
-    let document = parse_document(RcDom::default(), ParseOpts::default())
-        .one(html)
-        .document;
-    remove(&document);
-
-    let mut page = Vec::with_capacity(html.len());
-    let serialized = serialize(
-        &mut page,
-        &SerializableHandle::from(document),
-        Default::default(),
-    );
-
-    serialized
-        .ok()
-        .and_then(|()| String::from_utf8(page).ok())
-        .unwrap_or_default()
 }
 
 /// GPUI Kit has no XML grammar of its own.

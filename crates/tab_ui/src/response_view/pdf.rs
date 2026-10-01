@@ -234,9 +234,15 @@ fn render(pdf: &Pdf, index: usize) -> Option<RenderImage> {
 
 impl Render for PdfPreview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Scrolling the list renders this view again.
+        // Scrolling the list renders this view again. A resized list measures
+        // its new view after this render, so check once it has.
         self.kept = self.kept_pages();
         self.release_far_pages(Some(window), cx);
+        cx.on_next_frame(window, |this, _, cx| {
+            if this.kept_pages() != this.kept {
+                cx.notify();
+            }
+        });
 
         let message = |text: SharedString| {
             div()

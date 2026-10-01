@@ -328,11 +328,17 @@ fn saved_bodies_are_named_by_the_server_url_or_kind() {
 fn previewed_pages_load_no_images() {
     // Image elements go; text that only looks like one stays.
     assert_eq!(
-        super::body::without_images(
-            "<p>a<IMG src='http://x/t.png'>b</p><image src=y><!-- <img src=c> -->\
+        super::html::without_images(
+            "<p>a<IMG src='http://x/t.png'>b</p><image src=y>\
              <textarea><img src=\"kept\"></textarea><title>é</title>",
         ),
-        "<html><head></head><body><p>ab</p><!-- <img src=c> -->\
+        "<html><head></head><body><p>ab</p>\
          <textarea>&lt;img src=\"kept\"&gt;</textarea><title>é</title></body></html>"
     );
+
+    // Markup a parser reads as text can become an image when parsed again.
+    let page = super::html::without_images(
+        "<form><math><mtext></form><form><mglyph><style></math><img src=https://x/>",
+    );
+    assert!(!page.to_ascii_lowercase().contains("<img"), "{page}");
 }

@@ -3,6 +3,7 @@ mod content;
 mod events;
 mod headers;
 mod hex;
+mod html;
 mod image;
 mod metadata;
 mod pdf;
