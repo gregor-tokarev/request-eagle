@@ -492,6 +492,55 @@ fn before_sending_pm_cookies_follows_escaped_variables_as_sending_does() {
 }
 
 #[test]
+fn before_sending_pm_cookies_uses_generated_overrides_and_ignores_the_query() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc; Path=/admin\r\n",
+            "HTTP/1.1 200 OK\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+        let executor = executor(true, &jar);
+        get(&executor, format!("{url}/admin/login"), Vec::new()).await;
+
+        let variables = RequestVariables::new(HashMap::new(), None).with_collection_scripts(Ok(
+            RequestScripts {
+                pre_request: r#"pm.variables.set("$guid", "admin");"#.into(),
+                post_response: String::new(),
+            },
+        ));
+        let execution = executor
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/{{{{$guid}}}}/users?q={{{{missing}}}}"),
+                    scripts: RequestScripts {
+                        pre_request: r#"
+                            if (!pm.cookies.has("sid")) throw new Error("no session");
+                            pm.variables.set("missing", "set");
+                        "#
+                        .into(),
+                        post_response: String::new(),
+                    },
+                    ..HttpRequest::default()
+                },
+                variables,
+            )
+            .await
+            .unwrap();
+        let heads = server.await;
+
+        assert!(
+            execution
+                .scripts
+                .iter()
+                .all(|report| report.error.is_none())
+        );
+        assert!(heads[1].starts_with("GET /admin/users?q=set "));
+        assert_eq!(cookie_header(&heads[1]), Some("sid=abc"));
+    });
+}
+
+#[test]
 fn saved_cookies_reopen_including_session_cookies() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

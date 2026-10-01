@@ -213,15 +213,28 @@ fn describe_error(error: VariableError, environment_error: Option<&str>) -> Stri
     error.to_string()
 }
 
-/// The URL a request to `path` is sent to: its `{{variables}}` and `:name`
-/// path variables filled as sending fills them. None when a variable cannot
-/// be resolved.
+/// The URL a request to `path` is sent to, without its query: its
+/// `{{variables}}` and `:name` path variables filled as sending fills them,
+/// with the values scripts `generated` or set for `{{$name}}`. Only the scheme,
+/// host and path decide cookies, so a query variable that is not set yet does
+/// not matter. None when another variable cannot be resolved.
 pub(crate) fn sent_url(
     path: &str,
     path_variables: &[(String, String)],
     values: &HashMap<String, String>,
+    generated: &BTreeMap<String, String>,
 ) -> Option<String> {
     let mut resolver = VariableResolver::new(values);
+    resolver.limit_output(32 * 1024 * 1024);
+
+    let overrides = generated
+        .iter()
+        .chain(values.iter().filter(|(name, _)| name.starts_with('$')));
+    for (name, value) in overrides {
+        resolver.override_generated(name.clone(), value.clone());
+    }
+
+    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
     let url = resolve_url(path, &mut resolver).ok()?;
     let path = crate::request_url::fill_path_variables(&url, path_variables, |value| {
         resolver.resolve(value)

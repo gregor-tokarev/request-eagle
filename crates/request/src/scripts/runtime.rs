@@ -291,7 +291,12 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
         "method": request.method.as_str(),
         "url": request.path,
         // Where the request goes, which decides the jar's cookies for it.
-        "sentUrl": sent_url(&request.path, &request.path_variables, &variables.visible()),
+        "sentUrl": sent_url(
+            &request.path,
+            &request.path_variables,
+            &variables.visible(),
+            &variables.generated,
+        ),
         "query": request.query,
         "headers": request.headers,
         "variables": variables,
