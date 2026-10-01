@@ -141,6 +141,7 @@
         if (target && !target.includes("://")) target = "https://" + target;
         sentFromJar = jarCookies(target);
     } catch {}
+    const expired = cookie => cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
     let cookies;
     if (sentFromJar) {
         // The jar already holds the cookies the response set, and replaces
@@ -149,13 +150,18 @@
         const own = sentCookies.filter(cookie => !renamed.has(cookie.name));
         const named = new Set(own.map(cookie => cookie.name));
         cookies = own.concat(sentFromJar.filter(cookie => !named.has(cookie.name)));
+        // The response's cookies for other paths or hosts are not among
+        // those a request to this URL sends, but are part of the exchange.
+        for (const cookie of setCookies) {
+            const listed = cookies.some(existing => existing.name === cookie.name && existing.value === cookie.value);
+            if (!listed && !expired(cookie)) cookies.push(cookie);
+        }
     } else {
         cookies = sentCookies.slice();
         for (const cookie of setCookies) {
             const index = cookies.findIndex(existing => existing.name === cookie.name);
             if (index >= 0) cookies.splice(index, 1);
-            const expired = cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
-            if (!expired) cookies.push(cookie);
+            if (!expired(cookie)) cookies.push(cookie);
         }
     }
 
