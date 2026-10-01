@@ -83,12 +83,29 @@ fn path_variables_are_whole_path_segments_after_the_host() {
 
 #[test]
 fn path_variables_are_filled_when_they_have_a_value() {
-    let values = pairs(&[("id", "a/b?c#d"), ("empty", ""), ("unused", "x")]);
+    let values = pairs(&[("id", "a/b?c#d{e}"), ("empty", ""), ("unused", "x")]);
+    let filled = fill_path_variables(
+        "https://example.com:8080/:id/:empty/:id?id=:id",
+        &values,
+        |value| Ok::<_, ()>(value.to_owned()),
+    );
 
     assert_eq!(
-        fill_path_variables("https://example.com:8080/:id/:empty/:id?id=:id", &values),
-        "https://example.com:8080/a/b%3Fc%23d/:empty/a/b%3Fc%23d?id=:id"
+        filled.unwrap(),
+        "https://example.com:8080/a/b%3Fc%23d%7Be%7D/:empty/a/b%3Fc%23d%7Be%7D?id=:id"
     );
+}
+
+fn resolve(request: HttpRequest, values: &[(&str, &str)]) -> String {
+    let values = values
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect::<HashMap<_, _>>();
+
+    RequestVariables::new(values, None)
+        .resolve(&request)
+        .unwrap()
+        .path
 }
 
 #[test]
@@ -98,17 +115,63 @@ fn sending_resolves_variables_in_path_variable_values() {
         path_variables: pairs(&[("id", "{{user}}")]),
         ..Default::default()
     };
-    let values = HashMap::from([
-        ("base".to_owned(), "https://example.com".to_owned()),
-        ("user".to_owned(), "42".to_owned()),
-    ]);
+    let values = [("base", "https://example.com"), ("user", "42")];
+    assert_eq!(
+        resolve(request.clone(), &values),
+        "https://example.com/users/42/:missing"
+    );
+
+    // A resolved value stays in its path segment.
+    let request = HttpRequest {
+        path: "https://example.com/files/:id/end?x=1".into(),
+        path_variables: pairs(&[("id", "{{file}}")]),
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve(request, &[("file", "a#b?c{{d}}")]),
+        "https://example.com/files/a%23b%3Fc%7B%7Bd%7D%7D/end?x=1"
+    );
+}
+
+#[test]
+fn variables_in_the_query_stay_within_their_key_or_value() {
+    let request = HttpRequest {
+        path: "https://example.com/{{segment}}?q={{term}}&{{key}}=a b+{{!literal}}#{{ignored}}"
+            .into(),
+        ..Default::default()
+    };
 
     assert_eq!(
-        RequestVariables::new(values, None)
-            .resolve(&request)
-            .unwrap()
-            .path,
-        "https://example.com/users/42/:missing"
+        resolve(
+            request,
+            &[("segment", "a/b"), ("term", "x&y=z #1+2%"), ("key", "k=v")]
+        ),
+        "https://example.com/a/b?q=x%26y%3Dz+%231%2B2%25&k%3Dv=a b+{{literal}}"
+    );
+}
+
+#[test]
+fn a_whole_url_variable_keeps_the_query_written_after_it() {
+    let request = HttpRequest {
+        path: "{{endpoint}}/{{missing}}?q=2".into(),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        resolve(
+            request.clone(),
+            &[("endpoint", "https://example.com/path?old=1#top")]
+        ),
+        "https://example.com/path?old=1&q=2"
+    );
+
+    let request = HttpRequest {
+        path: "{{endpoint}}?q=2".into(),
+        ..request
+    };
+    assert_eq!(
+        resolve(request, &[("endpoint", "https://example.com/path?old=1")]),
+        "https://example.com/path?old=1&q=2"
     );
 }
 
@@ -125,7 +188,41 @@ fn appended_query_params_are_encoded_around_variables() {
         "https://example.com/?q=a+%26+b%2B{{term}}"
     );
     assert_eq!(
-        append_encoded_query("https://example.com", &params[..1]),
-        "https://example.com?q=a+%26+b%2B{{term}}"
+        append_encoded_query(" https://example.com/pets ", &params[..1]),
+        "https://example.com/pets?q=a+%26+b%2B{{term}}"
     );
+}
+
+#[test]
+fn query_params_moved_into_the_url_resolve_as_they_were_sent() {
+    let mut request = HttpRequest {
+        path: "https://example.com/pets ".into(),
+        query: pairs(&[("q", "{{term}} &"), ("{{key}}", "1")]),
+        ..Default::default()
+    };
+    let values = [("term", "a&b+c d%"), ("key", "k=v")];
+    let mut sent = request.clone().prepare_for_send();
+    sent.path = resolve(sent.clone(), &values);
+    let mut separate = url::Url::parse(&sent.path).unwrap();
+    let pairs: Vec<_> = sent
+        .query
+        .iter()
+        .map(|(key, value)| (resolve_text(key, &values), resolve_text(value, &values)))
+        .collect();
+    separate.query_pairs_mut().extend_pairs(&pairs);
+
+    request.inline_query();
+    let inline = resolve(request.prepare_for_send(), &values);
+
+    assert_eq!(inline, separate.as_str());
+    assert_eq!(
+        inline,
+        "https://example.com/pets?q=a%26b%2Bc+d%25+%26&k%3Dv=1"
+    );
+}
+
+fn resolve_text(text: &str, values: &[(&str, &str)]) -> String {
+    values.iter().fold(text.to_owned(), |text, (name, value)| {
+        text.replace(&format!("{{{{{name}}}}}"), value)
+    })
 }

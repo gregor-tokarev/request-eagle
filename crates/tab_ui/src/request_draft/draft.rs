@@ -168,7 +168,8 @@ impl RequestDraft {
 
     /// The query parameters and path variables in the URL.
     pub(super) fn params_count(&self) -> usize {
-        query_params(&self.request.path).len() + path_variable_names(&self.request.path).len()
+        request::query_params(&self.request.path).len()
+            + path_variable_names(&self.request.path).len()
     }
 
     /// Redraw the cached URL bar for a change that did not come from its input.
@@ -304,7 +305,7 @@ impl RequestDraft {
         self.keep_path_values_in_url();
 
         if let Some(params) = &self.params {
-            let values = query_params(&self.request.path);
+            let values = request::query_params(&self.request.path);
             params.update(cx, |params, cx| params.set_values(&values, window, cx));
         }
         if let Some(table) = &self.path_variables {
@@ -396,7 +397,12 @@ impl RequestDraft {
         });
         self._subscriptions.push(
             cx.subscribe(&headers, |this, _, event: &FieldsChanged, cx| {
-                this.request.headers = event.0.clone();
+                this.request.headers = event
+                    .0
+                    .iter()
+                    .filter(|(name, _)| !name.trim().is_empty())
+                    .cloned()
+                    .collect();
                 this.refresh_generated_headers(cx);
                 cx.notify();
             }),
@@ -416,7 +422,7 @@ impl RequestDraft {
         }
 
         let scope = self.variables.clone();
-        let values = query_params(&self.request.path);
+        let values = request::query_params(&self.request.path);
         let params =
             cx.new(|cx| RequestFields::new("params", &values, &[], scope.clone(), window, cx));
         self._subscriptions.push(cx.subscribe_in(
@@ -464,14 +470,6 @@ impl RequestDraft {
             })
             .into_any_element()
     }
-}
-
-/// The URL's query parameters that the Params table shows: those with a key.
-fn query_params(url: &str) -> Vec<(String, String)> {
-    let mut params = request::query_params(url);
-    params.retain(|(key, _)| !key.trim().is_empty());
-
-    params
 }
 
 /// The names of the URL's path variables, each once, in URL order.

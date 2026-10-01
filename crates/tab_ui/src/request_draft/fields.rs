@@ -22,10 +22,12 @@ struct FieldRow {
 
 impl FieldRow {
     fn is_sent(&self, cx: &App) -> bool {
-        self.enabled && !self.key.read(cx).value().trim().is_empty()
+        self.enabled
+            && (!self.key.read(cx).value().is_empty() || !self.value.read(cx).value().is_empty())
     }
 }
 
+/// The enabled rows with a key or a value, in table order.
 pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
 
 /// A request's editable key/value rows, including one trailing empty row.
@@ -90,7 +92,7 @@ impl RequestFields {
     }
 
     /// Show `values` in the rows that are sent, as when the URL's query
-    /// changed. Disabled and keyless rows stay; other rows are updated, added
+    /// changed. Disabled and empty rows stay; other rows are updated, added
     /// before the empty row or removed to match.
     pub(crate) fn set_values(
         &mut self,

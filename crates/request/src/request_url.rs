@@ -60,9 +60,14 @@ pub fn path_variables(url: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
 }
 
 /// Substitute the path variables that have a value. Ones without a value are
-/// sent as written. Values can contain `{{variables}}` and `/`; `?` and `#`
-/// are encoded, so a value stays in the path.
-pub(crate) fn fill_path_variables(url: &str, values: &[(String, String)]) -> String {
+/// sent as written. Each value is resolved with `resolve` first, then the
+/// characters that would end the path or start a `{{variable}}` are encoded,
+/// so the value stays in its place. A `/` in a value is kept.
+pub(crate) fn fill_path_variables<E>(
+    url: &str,
+    values: &[(String, String)],
+    mut resolve: impl FnMut(&str) -> Result<String, E>,
+) -> Result<String, E> {
     let mut filled = String::new();
     let mut written = 0;
 
@@ -75,18 +80,20 @@ pub(crate) fn fill_path_variables(url: &str, values: &[(String, String)]) -> Str
         };
 
         filled.push_str(&url[written..range.start]);
-        filled.push_str(&escape(value, &['?', '#']));
+        filled.push_str(&escape(&resolve(value)?, &['?', '#', '{', '}']));
         written = range.end;
     }
 
     filled.push_str(&url[written..]);
-    filled
+    Ok(filled)
 }
 
 /// Append `params` to the URL's query, encoded as sending appended them
 /// beside the URL, so the same request is sent. `{{variables}}` stay as
 /// written; they resolve when the request is sent.
 pub(crate) fn append_encoded_query(url: &str, params: &[(String, String)]) -> String {
+    // Sending trimmed the URL before appending them.
+    let url = url.trim();
     let query = query_range(url);
     let mut written = url[..query.end].to_owned();
     let mut separator = match url[..query.end].find('?') {

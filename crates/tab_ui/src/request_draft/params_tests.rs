@@ -257,3 +257,30 @@ fn saved_query_params_move_into_the_url_without_changing_the_draft(cx: &mut Test
         ]
     );
 }
+
+#[gpui_kit::test]
+fn params_without_a_key_stay_in_the_url(cx: &mut TestAppContext) {
+    let (draft, cx) = open(
+        HttpRequest {
+            path: "https://example.com/?=keep&x=1".into(),
+            ..Default::default()
+        },
+        cx,
+    );
+    assert_eq!(
+        params(&draft, cx),
+        [
+            row(true, "", "keep"),
+            row(true, "x", "1"),
+            row(true, "", "")
+        ]
+    );
+
+    retype(cx, "params-value-1", "2");
+    assert_eq!(path(&draft, cx), "https://example.com/?=keep&x=2");
+
+    // A header without a name is not sent.
+    click(cx, "request-section-Headers");
+    retype(cx, "headers-value-0", "orphan");
+    cx.read(|cx| assert!(draft.read(cx).request.headers.is_empty()));
+}
