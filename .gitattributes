@@ -1,2 +1,6 @@
 # Unified patches preserve upstream blank context lines and mail signatures.
 patches/**/*.patch -whitespace
+
+# Unmodified upstream builds of the libraries scripts can require.
+crates/request/src/scripts/libraries/*.js linguist-vendored -whitespace
+crates/request/src/scripts/libraries/*.txt -whitespace

@@ -40,13 +40,28 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>,
     #[serde(default)]
     pub body: Option<Vec<u8>>,
+    /// Sent after the URL's own query. The app keeps its parameters in the
+    /// URL; see `inline_query`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query: Vec<(String, String)>,
+    /// Values for the `:name` segments of the URL's path. A variable without
+    /// a value is sent as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_variables: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "crate::RequestScripts::is_empty")]
     pub scripts: crate::RequestScripts,
 }
 
 impl HttpRequest {
+    /// Move `query` into the URL, where the Params table edits it. Sending the
+    /// request is unchanged.
+    pub fn inline_query(&mut self) {
+        if !self.query.is_empty() {
+            self.path = crate::request_url::append_encoded_query(&self.path, &self.query);
+            self.query.clear();
+        }
+    }
+
     /// Apply the request editor's URL and JSON defaults to a resolved snapshot.
     pub fn prepare_for_send(mut self) -> Self {
         self.path = self.path.trim().to_owned();

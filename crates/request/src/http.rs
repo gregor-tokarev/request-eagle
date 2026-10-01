@@ -138,6 +138,9 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
+        if let Some(events) = &events {
+            events.dispatch.start();
+        }
         let response =
             crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
                 .await?;

@@ -15,6 +15,7 @@ use crate::{
 fn variables() -> RequestVariables {
     RequestVariables::with_environment_session(
         HashMap::from([("name".into(), "eagle".into())]),
+        HashMap::new(),
         None,
         EnvironmentSession::default(),
     )
@@ -128,7 +129,7 @@ fn before_invoke_changes_the_call_and_the_variables_it_resolves_with() {
     assert_eq!(id.len(), 36);
     assert_eq!(
         session
-            .values(HashMap::new())
+            .values(HashMap::new(), HashMap::new())
             .get("token")
             .map(String::as_str),
         Some("secret")

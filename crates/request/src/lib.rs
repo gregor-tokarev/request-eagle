@@ -20,6 +20,7 @@ mod model;
 mod preferences;
 mod proxy;
 mod redirects;
+mod request_url;
 mod response;
 mod response_encoding;
 mod scripts;
@@ -28,12 +29,14 @@ mod websocket;
 
 #[cfg(test)]
 mod event_stream_tests;
+#[cfg(test)]
+mod request_url_tests;
 
 pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
 pub use error::ExecutionError;
 pub use event_stream::{
-    EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
+    Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
 };
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;
@@ -46,6 +49,7 @@ pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request, WebSocketRequest};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
+pub use request_url::{path_variables, query_params, with_query_params};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};
 pub use variables::RequestVariables;
 pub use websocket::{

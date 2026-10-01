@@ -248,7 +248,7 @@ impl RequestDraft {
                 .children(sections.into_iter().map(|(label, section)| {
                     let selected = section == Some(self.section);
                     let count = match section {
-                        Some(RequestSection::Params) => self.request.query.len(),
+                        Some(RequestSection::Params) => self.params_count(),
                         Some(RequestSection::Headers) => {
                             self.request.headers.len() + self.generated_headers.len()
                         }

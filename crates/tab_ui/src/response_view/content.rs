@@ -21,6 +21,8 @@ pub struct ResponseContent {
     pub(super) processing: Duration,
     pub(super) headers: Arc<[(SharedString, SharedString)]>,
     pub(super) cookies: Arc<[(SharedString, SharedString)]>,
+    /// The size of a body that history did not keep.
+    pub(super) omitted_body: Option<usize>,
 }
 
 /// HTML up to this many bytes can be previewed.
@@ -151,6 +153,17 @@ impl ResponseContent {
             processing: started.elapsed(),
             headers,
             cookies,
+            omitted_body: None,
+        }
+    }
+
+    /// A response kept in history, to show again.
+    pub fn recorded(response: request_history::Response) -> Self {
+        let omitted_body = response.body.is_none().then_some(response.body_size);
+
+        Self {
+            omitted_body,
+            ..Self::new(response.into_execution())
         }
     }
 

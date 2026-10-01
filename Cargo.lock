@@ -1954,6 +1954,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "rand 0.9.5",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
  "toml 1.1.3+spec-1.1.0",
@@ -3610,6 +3611,18 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "history"
+version = "0.1.0"
+dependencies = [
+ "request",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
 
 [[package]]
 name = "hkdf"
@@ -6663,6 +6676,7 @@ dependencies = [
  "gpui-fps",
  "gpui-kit",
  "gpui-pre-reqwest-client",
+ "history",
  "keybindings_service",
  "objc2-app-kit 0.3.2",
  "preferences",
@@ -7936,6 +7950,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "hayro",
+ "history",
  "html5ever",
  "image",
  "lsp-types",
@@ -10131,10 +10146,13 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workspace"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "collection",
  "collections_panel_ui",
  "environment",
+ "futures",
  "gpui-kit",
+ "history",
  "keybindings_service",
  "preferences",
  "request",
