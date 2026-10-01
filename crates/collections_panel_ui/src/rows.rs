@@ -249,11 +249,15 @@ impl CollectionPanel {
                 }
             }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                // The first press of a double click already handled the branch,
+                // Quick presses after a branch toggle toggle that branch again,
                 // even if collapsing it moved another row under the pointer.
-                if event.click_count() > 1 && this.clicked_branch {
+                let index = match &this.clicked_branch {
+                    Some(path) if event.click_count() > 1 => this.tree.index_of(path),
+                    _ => Some(index),
+                };
+                let Some(index) = index else {
                     return;
-                }
+                };
                 let Ok(row) = this.visible.binary_search(&index) else {
                     return;
                 };
@@ -264,7 +268,7 @@ impl CollectionPanel {
                 // Branches expand or collapse; collections and requests open a tab.
                 if this.tree.items[index].is_branch() {
                     this.toggle(index, cx);
-                    this.clicked_branch = true;
+                    this.clicked_branch = Some(this.tree.items[index].path.clone());
                 }
                 this.open(index, cx);
             }))
