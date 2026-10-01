@@ -105,7 +105,15 @@ impl GrpcClient {
                         let load = async {
                             let channel = transport::connect(&target, client.timeout).await?;
 
-                            reflection::load(channel, metadata).await
+                            // A TLS server resets a plaintext connection.
+                            match reflection::load(channel, metadata).await {
+                                Err(GrpcError::Connect(_))
+                                    if transport::expects_tls(&target).await =>
+                                {
+                                    Err(GrpcError::TlsRequired)
+                                }
+                                result => result,
+                            }
                         };
 
                         tokio::time::timeout(timeout, load)
@@ -178,7 +186,7 @@ impl GrpcClient {
         let task = reqwest_client::runtime().spawn(async move {
             let run = async {
                 let channel = transport::connect(&target, client.timeout).await?;
-                let target = CallTarget {
+                let call_target = CallTarget {
                     channel,
                     path,
                     output,
@@ -187,7 +195,16 @@ impl GrpcClient {
                     include_defaults,
                 };
 
-                Ok(call::run(target, outgoing, &events).await)
+                // A TLS server resets a plaintext call without a status.
+                match call::run(call_target, outgoing, &events).await {
+                    Err(status)
+                        if transport::connection_error(&status).is_some()
+                            && transport::expects_tls(&target).await =>
+                    {
+                        Err(GrpcError::TlsRequired)
+                    }
+                    result => Ok(result),
+                }
             };
 
             // A stream stays open as long as the user keeps it open.

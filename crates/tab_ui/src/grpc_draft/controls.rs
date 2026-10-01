@@ -44,7 +44,7 @@ impl GrpcDraft {
         };
         let empty: SharedString = match &self.definition {
             DefinitionState::Loading => "Loading methods…".into(),
-            DefinitionState::Failed(error) => error.clone(),
+            DefinitionState::Failed(error) => error.to_string().into(),
             DefinitionState::Loaded(_) => "No methods found".into(),
             DefinitionState::Idle => "Enter a URL to load methods with server reflection".into(),
         };
@@ -152,7 +152,7 @@ impl GrpcDraft {
             )
     }
 
-    fn toggle_tls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_tls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.request.url.clone();
         self.request.set_tls(!self.request.uses_tls());
 

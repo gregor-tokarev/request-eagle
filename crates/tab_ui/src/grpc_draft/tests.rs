@@ -4,7 +4,7 @@ use gpui_kit::{
     Entity, InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
     VisualTestContext, point, px,
 };
-use request::{GrpcDefinition, GrpcRequest, MethodKind};
+use request::{GrpcDefinition, GrpcError, GrpcRequest, MethodKind};
 
 use super::GrpcDraft;
 use super::definition::DefinitionState;
@@ -164,7 +164,7 @@ fn a_missing_import_path_is_reported_in_service_definition(cx: &mut TestAppConte
         let DefinitionState::Failed(error) = &draft.definition else {
             panic!("the import should not resolve");
         };
-        assert!(error.contains("common/types.proto"), "{error}");
+        assert!(error.to_string().contains("common/types.proto"), "{error}");
     });
     assert!(element_bounds(cx, "grpc-definition-error-dot").is_some());
 
@@ -216,6 +216,22 @@ fn the_lock_switches_tls_and_the_url_scheme(cx: &mut TestAppContext) {
             "grpcs://localhost:50051"
         );
     });
+}
+
+#[gpui_kit::test]
+fn a_server_that_requires_tls_offers_to_turn_it_on(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(GrpcRequest::default(), cx);
+
+    draft.update(cx, |draft, cx| {
+        draft.definition = DefinitionState::Failed(GrpcError::TlsRequired);
+        draft.redraw(cx);
+    });
+    let tab = element_bounds(cx, "grpc-section-Service definition").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+    let button = element_bounds(cx, "grpc-definition-toggle-tls").unwrap();
+    cx.simulate_click(button.center(), Modifiers::default());
+
+    draft.read_with(cx, |draft, _| assert!(draft.request.uses_tls()));
 }
 
 #[gpui_kit::test]

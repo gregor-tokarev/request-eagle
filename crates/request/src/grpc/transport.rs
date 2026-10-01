@@ -15,13 +15,19 @@ use rustls::{
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
 use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
-use tonic::transport::{Channel, Endpoint};
+use tokio_rustls::{TlsConnector, client::TlsStream};
+use tonic::{
+    Status,
+    transport::{Channel, Endpoint},
+};
 
 use super::GrpcError;
 
 /// Connection setup gives up here unless the request timeout is shorter.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long to wait for the handshake that checks whether a server uses TLS.
+const TLS_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where to connect: the host and port from a request URL, and how to
 /// check the server's certificate.
@@ -107,31 +113,93 @@ pub(crate) async fn connect(
 
     let channel = if target.tls {
         let connector = TlsConnector::from(tls_config(target)?);
-        let host = target.host.clone();
-        let port = target.port;
-        let server_name = ServerName::try_from(host.trim_matches(['[', ']']).to_owned())
-            .map_err(|error| GrpcError::InvalidUrl(error.to_string()))?;
+        let server_name = server_name(target)?;
+        let target = target.clone();
 
         endpoint
             .connect_with_connector(tower::service_fn(move |_: Uri| {
-                let connector = connector.clone();
-                let host = host.clone();
-                let server_name = server_name.clone();
+                let handshake = handshake(connector.clone(), target.clone(), server_name.clone());
 
-                async move {
-                    let tcp = TcpStream::connect((host.trim_matches(['[', ']']), port)).await?;
-                    tcp.set_nodelay(true)?;
-                    let tls = connector.connect(server_name, tcp).await?;
-
-                    Ok::<_, std::io::Error>(TokioIo::new(tls))
-                }
+                async move { Ok::<_, std::io::Error>(TokioIo::new(handshake.await?)) }
             }))
             .await
     } else {
         endpoint.connect().await
     };
 
-    channel.map_err(|error| GrpcError::Connect(error_chain(&error)))
+    channel.map_err(|error| {
+        if answered_without_tls(&error) {
+            GrpcError::TlsUnsupported
+        } else {
+            GrpcError::Connect(error_chain(&error))
+        }
+    })
+}
+
+/// Whether a server reached without TLS completes a TLS handshake. Such a
+/// server resets the connection without saying why, so this explains it.
+pub(crate) async fn expects_tls(target: &Target) -> bool {
+    if target.tls {
+        return false;
+    }
+
+    // Any certificate will do: the handshake only shows the server uses TLS.
+    let target = Target {
+        tls: true,
+        verify_certificates: false,
+        ..target.clone()
+    };
+    let (Ok(config), Ok(server_name)) = (tls_config(&target), server_name(&target)) else {
+        return false;
+    };
+    let handshake = handshake(TlsConnector::from(config), target, server_name);
+
+    matches!(
+        tokio::time::timeout(TLS_CHECK_TIMEOUT, handshake).await,
+        Ok(Ok(_))
+    )
+}
+
+/// The connection error behind a status, when a call failed in the
+/// connection rather than with a status from the server.
+pub(crate) fn connection_error(status: &Status) -> Option<String> {
+    std::error::Error::source(status)?
+        .downcast_ref::<tonic::transport::Error>()
+        .map(|error| error_chain(error))
+}
+
+fn server_name(target: &Target) -> Result<ServerName<'static>, GrpcError> {
+    ServerName::try_from(target.host.trim_matches(['[', ']']).to_owned())
+        .map_err(|error| GrpcError::InvalidUrl(error.to_string()))
+}
+
+/// Connect over TCP and complete the TLS handshake.
+async fn handshake(
+    connector: TlsConnector,
+    target: Target,
+    server_name: ServerName<'static>,
+) -> std::io::Result<TlsStream<TcpStream>> {
+    let tcp = TcpStream::connect((target.host.trim_matches(['[', ']']), target.port)).await?;
+    tcp.set_nodelay(true)?;
+
+    connector.connect(server_name, tcp).await
+}
+
+/// Whether a TLS handshake failed because the server answered without TLS.
+fn answered_without_tls(error: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(error), |error| error.source()).any(|error| {
+        let tls_error = error
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .and_then(|error| error.downcast_ref::<rustls::Error>());
+
+        matches!(
+            tls_error,
+            Some(rustls::Error::InvalidMessage(
+                rustls::InvalidMessage::InvalidContentType
+            ))
+        )
+    })
 }
 
 /// Include each source, since transport errors wrap the useful cause.
