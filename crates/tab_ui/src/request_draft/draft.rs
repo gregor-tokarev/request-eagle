@@ -267,13 +267,19 @@ impl RequestDraft {
             ..request
         };
 
-        // The URL keeps focus, and its Params tables follow it. The other
-        // editors are created again from the new request when they are shown.
+        // The URL keeps focus. Path values given before belong to the replaced
+        // request. The other editors are created again from the new request
+        // when they are shown.
+        self.path_values.clear();
         if let Some(url) = &self.url {
             let path = self.request.path.clone();
             url.update(cx, |url, cx| url.set_value(path, window, cx));
         }
-        self.url_changed(window, cx);
+        if let Some(url) = &self.url_completion {
+            url.update(cx, |url, cx| url.set_path_variables(HashSet::new(), cx));
+        }
+        self.params = None;
+        self.path_variables = None;
         self.headers = None;
         self.body = None;
         self.body_vim = None;
@@ -290,7 +296,11 @@ impl RequestDraft {
             Some(_) => None,
             None => {
                 let entity = cx.entity();
-                Some(cx.new(|cx| CodeSnippet::new(self, &entity, window, cx)))
+                let snippet = cx.new(|cx| CodeSnippet::new(self, &entity, window, cx));
+                // The layout was measured while the snippet was last open.
+                let compact = self.code_snippet_below.is_some();
+                snippet.update(cx, |snippet, _| snippet.compact = compact);
+                Some(snippet)
             }
         };
 

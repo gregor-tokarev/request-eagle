@@ -14,6 +14,11 @@ impl HttpRequest {
     /// and generated ones such as `{{$guid}}`, stay as written.
     pub fn curl_command(&self, values: &HashMap<String, String>) -> String {
         let mut request = self.clone();
+        // Sending leaves these bodies out before it resolves anything.
+        if matches!(request.method, Method::Get | Method::Head) {
+            request.body = None;
+        }
+
         request.path = keep_unknown(&request.path, values);
         for (key, value) in request
             .headers
@@ -29,6 +34,7 @@ impl HttpRequest {
         {
             *body = keep_unknown(text, values).into_bytes();
         }
+        write_unknown_path_variables(&mut request);
 
         // A reference without its closing braces cannot be filled in, so the
         // request is written as it is.
@@ -136,6 +142,35 @@ fn form_encode(text: &str) -> String {
     encoded.extend(byte_serialize(rest.as_bytes()));
 
     encoded
+}
+
+/// Writes the path variables whose values refer to unknown variables into the
+/// path. Filling them in would encode the braces of those references; in the
+/// path they stay readable, so the command can be imported back.
+fn write_unknown_path_variables(request: &mut HttpRequest) {
+    let unknown = |value: &str| value.contains("{{!");
+    let mut path = String::new();
+    let mut written = 0;
+
+    for (range, name) in crate::request_url::path_variables(&request.path) {
+        let Some((_, value)) = request
+            .path_variables
+            .iter()
+            .find(|(key, value)| key == name && !value.is_empty())
+        else {
+            continue;
+        };
+
+        if unknown(value) {
+            path.push_str(&request.path[written..range.start]);
+            path.push_str(value);
+            written = range.end;
+        }
+    }
+
+    path.push_str(&request.path[written..]);
+    request.path = path;
+    request.path_variables.retain(|(_, value)| !unknown(value));
 }
 
 /// Marks the references `values` cannot fill in as literal, `{{!name}}`, so

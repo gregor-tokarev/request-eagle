@@ -131,3 +131,37 @@ fn fills_variables_as_sending_does() {
         "curl --location --globoff 'https://example.com/users/42/posts?q=a%26b+c&page={{page}}'"
     );
 }
+
+#[test]
+fn leaves_out_what_sending_leaves_out_before_filling_variables() {
+    // A GET body is not sent, so an unfinished reference in it does not
+    // keep the URL from being filled in.
+    let request = HttpRequest {
+        method: Method::Get,
+        path: "{{host}}/users".into(),
+        body: Some(b"{{unfinished".to_vec()),
+        ..HttpRequest::default()
+    };
+
+    assert_eq!(
+        request.curl_command(&values(&[("host", "https://example.com")])),
+        "curl --location 'https://example.com/users'"
+    );
+}
+
+#[test]
+fn keeps_unknown_references_of_path_variables_readable() {
+    let request = HttpRequest {
+        path: "https://example.com/users/:id/posts/:post".into(),
+        path_variables: vec![
+            ("id".into(), "{{user}}".into()),
+            ("post".into(), "7".into()),
+        ],
+        ..HttpRequest::default()
+    };
+
+    assert_eq!(
+        request.curl_command(&HashMap::new()),
+        "curl --location --globoff 'https://example.com/users/{{user}}/posts/7'"
+    );
+}
