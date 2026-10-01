@@ -38,3 +38,4 @@ pub use definition::{GrpcMethod, GrpcService, MethodKind, ServiceDefinition};
 pub use error::GrpcError;
 pub use model::{GrpcDefinition, GrpcRequest, GrpcSettings};
 pub use status::GrpcStatus;
+pub(crate) use transport::Target;
