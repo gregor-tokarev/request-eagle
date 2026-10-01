@@ -2662,6 +2662,7 @@ dependencies = [
  "smol",
  "tracing",
  "tree-sitter",
+ "tree-sitter-bash",
  "tree-sitter-html",
  "tree-sitter-javascript",
  "tree-sitter-json",
@@ -7719,6 +7720,7 @@ dependencies = [
  "environment",
  "futures",
  "gpui-kit",
+ "import",
  "lsp-types",
  "preferences",
  "request",
@@ -8291,6 +8293,16 @@ dependencies = [
  "regex-syntax",
  "serde_json",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-bash"
+version = "0.23.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "329a4d48623ac337d42b1df84e81a1c9dbb2946907c102ca72db158c1964a52e"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 

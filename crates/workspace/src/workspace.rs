@@ -143,6 +143,11 @@ impl Workspace {
                         view.prepare_active_tab(window, cx);
                     });
                 }
+                CollectionPanelEvent::OpenUnsavedRequest(request) => {
+                    this.update_tabs(window, cx, |view, cx| {
+                        view.open_unsaved_request(request.clone(), cx)
+                    });
+                }
             });
         window.focus(&sidebar.focus_handle(cx), cx);
 
@@ -750,6 +755,7 @@ impl Render for Workspace {
             .text_base()
             .child(workspace)
             .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
             .into_any_element()
     }
 }

@@ -10,6 +10,7 @@
 //! connection's events through a channel until it closes. `GrpcClient` loads
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
+mod curl;
 mod error;
 mod event_stream;
 mod executor;
@@ -26,6 +27,8 @@ mod scripts;
 mod variables;
 mod websocket;
 
+#[cfg(test)]
+mod curl_tests;
 #[cfg(test)]
 mod event_stream_tests;
 

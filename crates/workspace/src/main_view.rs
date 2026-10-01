@@ -8,7 +8,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest};
+use crate::actions::{CloseTab, CopyAsCurl, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
@@ -352,8 +352,22 @@ impl MainView {
     }
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
+        self.open_unsaved_request(Default::default(), cx);
+    }
+
+    /// Open an HTTP request that is not saved yet, such as an imported cURL
+    /// command. Unless it is empty, closing its tab asks to save it.
+    pub(crate) fn open_unsaved_request(
+        &mut self,
+        request: request::HttpRequest,
+        cx: &mut Context<Self>,
+    ) {
         let title = format!("Untitled {}", self.next_id);
-        self.open_draft(title.into(), Default::default(), None, cx);
+        self.open_draft(title.into(), request, None, cx);
+
+        if let Some(Page::Request(draft)) = self.tabs.last().map(|tab| &tab.page) {
+            draft.update(cx, |draft, cx| draft.mark_saved(Default::default(), cx));
+        }
     }
 
     pub(crate) fn new_websocket_tab(&mut self, cx: &mut Context<Self>) {
@@ -1053,12 +1067,24 @@ impl MainView {
 
 impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Only HTTP requests offer Copy as cURL, so other tabs leave the
+        // command out of the palette.
+        let http_draft = match self.selected.map(|index| &self.tabs[index].page) {
+            Some(Page::Request(draft)) => Some(draft.clone()),
+            _ => None,
+        };
+
         v_flex()
             .debug_selector(|| "main-view".into())
             .size_full()
             .min_w_0()
             .overflow_hidden()
             .track_focus(&self.focus)
+            .when_some(http_draft, |this, draft| {
+                this.on_action(move |_: &CopyAsCurl, window, cx| {
+                    draft.update(cx, |draft, cx| draft.copy_as_curl(window, cx));
+                })
+            })
             .bg(cx.theme().background)
             .child(
                 h_flex()

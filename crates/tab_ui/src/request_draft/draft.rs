@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::code_snippet::CodeSnippet;
 use super::fields::{FieldsChanged, RequestFields};
 use crate::response_view::ResponseView;
 use crate::{
@@ -9,9 +10,10 @@ use crate::{
     variables::VariableScope,
 };
 use environment::EnvironmentSessions;
-use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
+    notification::Notification,
     scroll::ScrollableElement as _,
     *,
 };
@@ -74,6 +76,9 @@ pub struct RequestDraft {
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
+    /// Shown beside the request while open.
+    pub(super) code_snippet: Option<Entity<CodeSnippet>>,
+    code_snippet_split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
@@ -119,6 +124,7 @@ impl RequestDraft {
         let owner = cx.weak_entity();
         let response = cx.new(|cx| ResponseView::new(cx));
         let split = cx.new(|_| ResizableState::default());
+        let code_snippet_split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
 
@@ -142,6 +148,8 @@ impl RequestDraft {
             body_completion: None,
             response,
             split,
+            code_snippet: None,
+            code_snippet_split,
             task: None,
             stop: None,
             streaming: false,
@@ -189,6 +197,61 @@ impl RequestDraft {
             self.section = RequestSection::Headers;
         }
 
+        cx.notify();
+    }
+
+    /// Replace the request with the one a pasted cURL command sends. Its
+    /// scripts stay. A command that cannot be read is explained instead.
+    pub(super) fn paste_curl(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request = match import::parse_curl(command) {
+            Ok(request) => request,
+            Err(error) => {
+                window.push_notification(
+                    Notification::error(error.to_string()).title("Could not import cURL"),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        self.request = HttpRequest {
+            scripts: std::mem::take(&mut self.request.scripts),
+            ..request
+        };
+
+        // The URL keeps focus. The other editors are created again from the
+        // new request when they are shown.
+        if let Some(url) = &self.url {
+            let path = self.request.path.clone();
+            url.update(cx, |url, cx| url.set_value(path, window, cx));
+        }
+        self.params = None;
+        self.headers = None;
+        self.body = None;
+        self.body_vim = None;
+        self.body_completion = None;
+        self.body_task = None;
+
+        self.set_method(self.request.method, cx);
+        self.prepare(window, cx);
+        self.notify_address(cx);
+    }
+
+    pub(super) fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.code_snippet = match self.code_snippet {
+            Some(_) => None,
+            None => {
+                let entity = cx.entity();
+                Some(cx.new(|cx| CodeSnippet::new(self, &entity, window, cx)))
+            }
+        };
+
+        self.notify_address(cx);
         cx.notify();
     }
 
@@ -324,7 +387,7 @@ impl RequestDraft {
 
 impl Render for RequestDraft {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+        let request = v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
             .min_w_0()
@@ -360,7 +423,29 @@ impl Render for RequestDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
+            );
+
+        let Some(code_snippet) = self.code_snippet.clone() else {
+            return request.into_any_element();
+        };
+
+        h_resizable("request-code-snippet-split")
+            .with_state(&self.code_snippet_split)
+            .child(
+                resizable_panel()
+                    .size_range(rems(24.).to_pixels(window.rem_size())..Pixels::MAX)
+                    .child(request),
             )
+            .child(
+                resizable_panel()
+                    .size(rems(24.).to_pixels(window.rem_size()))
+                    .size_range(
+                        rems(16.).to_pixels(window.rem_size())
+                            ..rems(48.).to_pixels(window.rem_size()),
+                    )
+                    .child(code_snippet),
+            )
+            .into_any_element()
     }
 }
 
@@ -376,11 +461,21 @@ impl Render for RequestAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(super::controls::request_header(
-                        "HTTP",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(super::controls::request_header(
+                                        "HTTP",
+                                        draft.location.as_ref(),
+                                        cx,
+                                    )),
+                            )
+                            .child(draft.code_snippet_button(cx)),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())
