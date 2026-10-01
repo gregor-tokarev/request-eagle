@@ -316,6 +316,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             "headers",
             "body",
             "query",
+            "path_variables",
             "scripts",
             "tls",
             "method",

@@ -120,7 +120,8 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     let (name, find) = http(&items[0]);
     assert_eq!(name, "Find pet");
     assert_eq!(find.method, Method::Get);
-    assert_eq!(find.path, "{{base_url}}/pets/7?expand=owner%20name");
+    assert_eq!(find.path, "{{base_url}}/pets/:id?expand=owner%20name");
+    assert_eq!(find.path_variables, [("id".to_owned(), "7".to_owned())]);
     assert_eq!(
         find.headers,
         [
