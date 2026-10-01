@@ -39,23 +39,23 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
 }
 
 /// What a folder passes to the items inside it.
-struct Inherited<'a> {
-    auth: Option<&'a Value>,
+pub(crate) struct Inherited<'a> {
+    pub(crate) auth: Option<&'a Value>,
     /// Request Eagle has no folder scripts, so each request runs its folders'
     /// scripts before its own, in the order Postman runs them.
-    scripts: Scripts,
+    pub(crate) scripts: Scripts,
 }
 
 /// Scripts in the order Postman runs them, each kept separate until they are
 /// joined for a request.
 #[derive(Clone, Default)]
-struct Scripts {
-    pre_request: Vec<String>,
-    post_response: Vec<String>,
+pub(crate) struct Scripts {
+    pub(crate) pre_request: Vec<String>,
+    pub(crate) post_response: Vec<String>,
 }
 
 impl Scripts {
-    fn then(&self, next: Scripts) -> Scripts {
+    pub(crate) fn then(&self, next: Scripts) -> Scripts {
         Scripts {
             pre_request: [self.pre_request.clone(), next.pre_request].concat(),
             post_response: [self.post_response.clone(), next.post_response].concat(),
@@ -100,7 +100,7 @@ fn items(parent: &Value, inherited: &Inherited, skipped: &mut Vec<String>) -> Ve
 }
 
 /// The request, or `None` when Request Eagle cannot send its method.
-fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest> {
+pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest> {
     let request = &item["request"];
     let method = match request["method"]
         .as_str()
@@ -296,13 +296,13 @@ fn body(
 
 /// The item's own authorization, which `noauth` sets to none. Without one,
 /// the item inherits its parent's.
-fn own_auth(item: &Value) -> Option<&Value> {
+pub(crate) fn own_auth(item: &Value) -> Option<&Value> {
     item.get("auth")
         .filter(|auth| !auth.is_null() && auth["type"].as_str() != Some("inherit"))
 }
 
 /// Applies an authorization as the headers or query parameters Postman sends.
-fn authorize(
+pub(crate) fn authorize(
     auth: Option<&Value>,
     headers: &mut Vec<(String, String)>,
     query: &mut Vec<(String, String)>,
@@ -316,7 +316,8 @@ fn authorize(
         .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
 
     match kind {
-        "bearer" if !has_authorization => {
+        // Postman sends no token when it is empty.
+        "bearer" if !has_authorization && !value("token").is_empty() => {
             headers.push(("Authorization".into(), format!("Bearer {}", value("token"))));
         }
         "oauth2" if !has_authorization && !value("accessToken").is_empty() => {
@@ -366,7 +367,7 @@ fn auth_value(auth: &Value, kind: &str, key: &str) -> String {
 }
 
 /// Enabled key–value pairs, such as headers or form fields.
-fn pairs(pairs: &Value) -> Vec<(String, String)> {
+pub(crate) fn pairs(pairs: &Value) -> Vec<(String, String)> {
     pairs
         .as_array()
         .into_iter()
@@ -381,7 +382,7 @@ fn variables(document: &Value) -> HashMap<String, String> {
 }
 
 /// The item's own scripts.
-fn scripts(item: &Value) -> Scripts {
+pub(crate) fn scripts(item: &Value) -> Scripts {
     let mut scripts = Scripts::default();
 
     for event in item["event"].as_array().into_iter().flatten() {
@@ -414,7 +415,7 @@ fn scripts(item: &Value) -> Scripts {
 
 /// Joins scripts that Postman runs one after another. Each keeps its own
 /// block, so declarations with the same name in two of them do not collide.
-fn join_scripts(scripts: &[String]) -> String {
+pub(crate) fn join_scripts(scripts: &[String]) -> String {
     match scripts {
         [script] => script.clone(),
         scripts => scripts

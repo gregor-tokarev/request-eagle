@@ -29,6 +29,13 @@ fn unreadable_and_unknown_files_are_explained() {
             .unwrap(),
         ImportError::PostmanV1
     ));
+    // Postman writes each request of a collection folder to its own file.
+    assert!(matches!(
+        parse("$kind: grpc-request\nurl: localhost:50051\n")
+            .err()
+            .unwrap(),
+        ImportError::PostmanV3File
+    ));
 }
 
 #[test]

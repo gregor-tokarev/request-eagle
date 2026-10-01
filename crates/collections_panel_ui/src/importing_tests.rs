@@ -85,7 +85,7 @@ fn choose(sidebar: &Entity<CollectionPanel>, cx: &mut VisualTestContext, file: &
 
     let file = file.to_path_buf();
     cx.simulate_path_prompt_response(move |options| {
-        assert!(options.files && !options.multiple);
+        assert!(options.files && options.directories && !options.multiple);
         Some(vec![file])
     });
     cx.run_until_parked();
@@ -126,6 +126,31 @@ fn importing_a_file_adds_and_selects_a_collection(cx: &mut TestAppContext) {
         assert_eq!(sidebar.visible.len(), 2);
         assert!(sidebar.focus_handle(cx).is_focused(window));
     });
+}
+
+#[gpui_kit::test]
+fn importing_a_postman_folder_keeps_its_grpc_requests(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let folder = directory.path().join("Shop");
+    fs::create_dir_all(folder.join(".resources")).unwrap();
+    fs::write(
+        folder.join(".resources/definition.yaml"),
+        "$kind: collection\n",
+    )
+    .unwrap();
+    fs::write(
+        folder.join("Get product.request.yaml"),
+        "$kind: grpc-request\nurl: localhost:50051\nmethodPath: shop.ProductService.GetProduct\n",
+    )
+    .unwrap();
+    let collections = directory.path().join("collections");
+    let (sidebar, cx) = sidebar(&collections, cx);
+
+    choose(&sidebar, cx, &folder);
+
+    assert!(cx.debug_bounds("import-dialog").is_none());
+    let saved = fs::read_to_string(collections.join("Shop/Get product.toml")).unwrap();
+    assert!(saved.contains("method = \"shop.ProductService/GetProduct\""));
 }
 
 #[gpui_kit::test]
