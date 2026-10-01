@@ -2,7 +2,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     time::Duration,
 };
 
@@ -125,12 +125,17 @@ fi"#,
     assert!(!installation.work_dir.exists());
 
     let hung = fs::read_to_string(installation.app.with_extension("app.pid")).unwrap();
-    let running = Command::new("kill")
-        .args(["-0", hung.trim()])
-        .stderr(Stdio::null())
-        .status()
+    let state = Command::new("ps")
+        .args(["-o", "stat=", "-p", hung.trim()])
+        .output()
         .unwrap();
-    assert!(!running.success(), "The hung version must be stopped");
+    let state = String::from_utf8_lossy(&state.stdout);
+    // A stopped process stays a zombie where nothing reaps orphans, such as
+    // in a container without an init process.
+    assert!(
+        state.trim().is_empty() || state.trim().starts_with('Z'),
+        "The hung version must be stopped, but it is in state {state}"
+    );
 }
 
 #[test]
