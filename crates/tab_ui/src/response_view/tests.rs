@@ -326,19 +326,35 @@ fn saved_bodies_are_named_by_the_server_url_or_kind() {
 
 #[test]
 fn previewed_pages_load_no_images() {
-    // Image elements go; text that only looks like one stays.
+    // Images, scripts and styles go; text and attributes stay as received,
+    // escaped, with a zero-width space after a `<` that could start a tag.
     assert_eq!(
         super::html::without_images(
-            "<p>a<IMG src='http://x/t.png'>b</p><image src=y>\
-             <textarea><img src=\"kept\"></textarea><title>é</title>",
+            "<!doctype html><p>a<IMG src='http://x/t.png'>b</p><image src=y>\
+             <svg><image href=z /></svg><!-- <img src=c> --><script>x</script>\
+             <a href=\"https://example.test/?q=&lt;img&gt;\">Open</a>\
+             <textarea><img src=\"kept\"></textarea><pre>a < b &amp;</pre><br>",
         ),
-        "<html><head></head><body><p>ab</p>\
-         <textarea>&lt;img src=\"kept\"&gt;</textarea><title>é</title></body></html>"
+        "<html><head></head><body><p>ab</p><svg></svg>\
+         <a href=\"https://example.test/?q=&lt;img&gt;\">Open</a>\
+         <textarea>&lt;\u{200b}img src=\"kept\"&gt;</textarea><pre>a &lt; b &amp;</pre><br>\
+         </body></html>"
     );
 
-    // Markup a parser reads as text can become an image when parsed again.
-    let page = super::html::without_images(
+    // Markup that a later parse, in a different context, could read as an
+    // image never appears as markup.
+    for html in [
         "<form><math><mtext></form><form><mglyph><style></math><img src=https://x/>",
+        "<svg></p><style><a id=\"</style><img src=https://x/>\">",
+        "<math><mtext><table><mglyph><style><img src=https://x/>",
+    ] {
+        let page = super::html::without_images(html).to_ascii_lowercase();
+        assert!(!page.contains("<img") && !page.contains("<image"), "{page}");
+    }
+
+    // GPUI Kit writes `pre` text back unescaped before parsing it again.
+    assert!(
+        super::html::without_images("<pre>&lt;img src=https://x/&gt;</pre>")
+            .contains("<pre>&lt;\u{200b}img src=https://x/&gt;</pre>")
     );
-    assert!(!page.to_ascii_lowercase().contains("<img"), "{page}");
 }
