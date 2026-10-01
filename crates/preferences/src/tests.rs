@@ -1,6 +1,7 @@
 use crate::credentials::CredentialStore;
 use crate::{
-    AppearanceMode, Preferences, ProxyMode, ProxyPreferences, init, load, update, update_proxy,
+    AppearanceMode, Preferences, ProxyMode, ProxyPreferences, UpdateChannel, init, load, update,
+    update_proxy,
 };
 use anyhow::Result;
 use gpui_kit::{App, Task, TestAppContext};
@@ -309,6 +310,40 @@ async fn vim_defaults_off_for_existing_preferences_and_survives_reload(cx: &mut 
         cx.read(|cx| {
             assert_eq!(cx.global::<Preferences>().vim_mode, enabled);
             assert_eq!(cx.global::<Preferences>().appearance.editor_font, "Menlo");
+        });
+    }
+}
+
+#[gpui_kit::test]
+async fn update_channel_defaults_to_stable_and_survives_reload(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    fs::write(&path, r#"{"vim_mode":true}"#).unwrap();
+    cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+    cx.read(|cx| {
+        assert_eq!(
+            cx.global::<Preferences>().update_channel,
+            UpdateChannel::Stable
+        )
+    });
+
+    for (channel, saved) in [
+        (UpdateChannel::Daily, "daily"),
+        (UpdateChannel::Stable, "stable"),
+    ] {
+        cx.update(|cx| {
+            update(cx, |p| p.update_channel = channel).unwrap();
+            cx.set_global(Preferences::default());
+        });
+
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(document["update_channel"], saved);
+
+        cx.update(|cx| load(directory.path(), cx)).await.unwrap();
+        cx.read(|cx| {
+            assert_eq!(cx.global::<Preferences>().update_channel, channel);
+            assert!(cx.global::<Preferences>().vim_mode);
         });
     }
 }

@@ -1,6 +1,6 @@
 use gpui_kit::{App, Menu, MenuItem};
 
-use crate::actions::{CheckForUpdates, Quit};
+use crate::actions::{CheckForUpdates, Quit, ShowLogs};
 
 pub fn use_menus(_: &mut App) -> Vec<Menu> {
     vec![Menu {
@@ -9,6 +9,7 @@ pub fn use_menus(_: &mut App) -> Vec<Menu> {
         items: vec![
             MenuItem::action("About Request Eagle", workspace::OpenGeneralSettings),
             MenuItem::action("Check for Updates…", CheckForUpdates),
+            MenuItem::action("Show Logs", ShowLogs),
             MenuItem::separator(),
             MenuItem::action("Settings…", workspace::OpenSettings),
             MenuItem::separator(),

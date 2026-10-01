@@ -2,18 +2,22 @@
 name = "request-eagle"
 version = "0.1.16"
 edition = "2024"
+license.workspace = true
 
 [features]
 dev-profiler = ["dep:gpui-fps"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
 environment = { path = "../environment" }
 preferences = { path = "../preferences" }
 gpui-fps = { version = "=0.6.2", optional = true }
 gpui-kit = { workspace = true, features = ["component", "assets"] }
 keybindings_service = { path = "../keybindings_service" }
+log = "0.4"
 reqwest_client.workspace = true
+rustix = { version = "1", features = ["fs", "stdio"] }
 updater = { path = "../updater" }
 request-eagle-theme = { package = "theme", path = "../theme" }
 workspace = { package = "workspace", path = "../workspace" }
@@ -23,3 +27,4 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAc
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile = "3"

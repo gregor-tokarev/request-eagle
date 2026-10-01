@@ -2,6 +2,7 @@
 name = "collections_panel_ui"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 collection = { path = "../collection" }

@@ -19,6 +19,9 @@ members = [
 default-members = ["crates/request-eagle"]
 resolver = "3"
 
+[workspace.package]
+license = "MIT OR Apache-2.0"
+
 # Shipped app builds. Whole-program optimization makes the binary a third
 # smaller and launch a little faster, but takes several times longer to build,
 # so development keeps the release profile.

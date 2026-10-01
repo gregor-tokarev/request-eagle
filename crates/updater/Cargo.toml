@@ -2,9 +2,11 @@
 name = "updater"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 gpui-kit.workspace = true
+preferences = { path = "../preferences" }
 rustix = { version = "1", features = ["fs"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }

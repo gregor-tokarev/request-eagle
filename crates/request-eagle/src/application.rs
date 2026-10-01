@@ -96,6 +96,12 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
     })
     .expect("Failed to open the window");
 
+    // After an update, the installer restores the previous version unless
+    // this one confirms that it started.
+    cx.background_executor()
+        .spawn(async { updater::confirm_startup() })
+        .detach();
+
     menu::init(cx);
 }
 
