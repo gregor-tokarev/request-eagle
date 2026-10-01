@@ -1,7 +1,9 @@
 use std::{fs, path::Path};
 
 use collection::ImportedItem;
-use request::{GrpcDefinition, GrpcRequest, HttpRequest, Method, Request, WebSocketRequest};
+use request::{
+    GrpcDefinition, GrpcRequest, GrpcSettings, HttpRequest, Method, Request, WebSocketRequest,
+};
 
 use crate::{ImportError, read};
 
@@ -83,6 +85,10 @@ metadata:
     disabled: true
 settings:
   secureConnection: true
+  strictSSL: false
+  serverNameOverride: shop.internal
+  maxResponseMessageSize: 16
+  includeDefaultFields: false
 schema:
   source: file
   location: /work/shop/api/product.proto
@@ -119,7 +125,12 @@ order: 1000
                 path: "/work/shop/api/product.proto".into(),
                 import_paths: Vec::new(),
             },
-            ..GrpcRequest::default()
+            settings: GrpcSettings {
+                verify_certificates: Some(false),
+                server_name: "shop.internal".into(),
+                include_default_fields: false,
+                max_response_message_mb: Some(16),
+            },
         }
     );
     assert!(import.skipped.is_empty());
@@ -307,6 +318,91 @@ order: 2000
             headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
             ..WebSocketRequest::default()
         }
+    );
+}
+
+#[test]
+fn requests_can_select_one_of_the_listed_authorizations() {
+    let directory = tempfile::tempdir().unwrap();
+    let collection = directory.path().join("shop");
+    write(
+        &collection,
+        ".resources/definition.yaml",
+        r#"$kind: collection
+auth:
+  - id: first
+    type: bearer
+    name: First
+    credentials:
+      token: ONE
+  - id: second
+    type: bearer
+    name: Second
+    credentials:
+      token: TWO
+"#,
+    );
+    write(
+        &collection,
+        "Default.request.yaml",
+        "$kind: grpc-request\nmethodPath: shop.Shop.Get\norder: 1\n",
+    );
+    write(
+        &collection,
+        "Selected.request.yaml",
+        r#"$kind: grpc-request
+methodPath: shop.Shop.Get
+auth:
+  type: inherit
+  credentials:
+    id: second
+order: 2
+"#,
+    );
+    write(
+        &collection,
+        "Admin/.resources/definition.yaml",
+        "$kind: collection\nauth:\n  - id: admin\n    type: bearer\n    name: Admin\n    credentials:\n      token: ADMIN\n",
+    );
+    write(
+        &collection,
+        "Admin/Selected.request.yaml",
+        r#"$kind: http-request
+url: https://shop.test/admin
+auth:
+  type: inherit
+  credentials:
+    - key: id
+      value: second
+"#,
+    );
+
+    let import = read(&collection).unwrap();
+    let items = &import.collection.items;
+    let bearer = |token: &str| vec![("Authorization".to_owned(), format!("Bearer {token}"))];
+
+    assert_eq!(grpc(&items[0]).metadata, bearer("ONE"));
+    assert_eq!(grpc(&items[1]).metadata, bearer("TWO"));
+    let (_, admin) = folder(&items[2]);
+    assert_eq!(http(&admin[0]).headers, bearer("TWO"));
+}
+
+#[test]
+fn collection_folders_without_a_definition_are_named_after_the_folder() {
+    let directory = tempfile::tempdir().unwrap();
+    let collection = directory.path().join("Pet Store");
+    write(
+        &collection,
+        "List pets.request.yaml",
+        "$kind: http-request\nurl: https://pets.test/pets\n",
+    );
+
+    let import = read(&collection).unwrap();
+
+    assert_eq!(import.collection.name, "Pet Store");
+    assert_eq!(
+        http(&import.collection.items[0]).path,
+        "https://pets.test/pets"
     );
 }
 

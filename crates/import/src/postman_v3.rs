@@ -8,7 +8,9 @@
 use std::{ffi::OsStr, fs, path::Path};
 
 use collection::{ImportedCollection, ImportedItem};
-use request::{GrpcDefinition, GrpcRequest, Request, RequestScripts, WebSocketRequest};
+use request::{
+    GrpcDefinition, GrpcRequest, GrpcSettings, Request, RequestScripts, WebSocketRequest,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -22,12 +24,19 @@ use crate::{
 const DEFINITION: &str = ".resources/definition.yaml";
 
 pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
-    let definition = directory.join(DEFINITION);
-    if !definition.is_file() {
+    // A collection's definition is optional, so a folder without one is a
+    // collection when it holds requests.
+    let has_requests = fs::read_dir(directory)
+        .map_err(|source| ImportError::Read {
+            path: directory.to_owned(),
+            source,
+        })?
+        .any(|entry| entry.is_ok_and(|entry| request_name(&entry.path()).is_some()));
+    if !directory.join(DEFINITION).is_file() && !has_requests {
         return Err(ImportError::NotPostmanFolder);
     }
 
-    let definition = yaml(&definition)?;
+    let definition = read_definition(directory)?;
     let group = group(&definition);
     // Collection scripts become the collection's own scripts, so requests
     // inherit only its authorization.
@@ -36,7 +45,12 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
         scripts: Scripts::default(),
     };
     let mut skipped = Vec::new();
-    let items = items(directory, &inherited, &mut skipped)?;
+    let items = items(
+        directory,
+        &inherited,
+        &listed(&definition["auth"]),
+        &mut skipped,
+    )?;
     let scripts = postman::scripts(&group);
 
     Ok(Import {
@@ -68,9 +82,11 @@ struct Entry<'a> {
 }
 
 /// The folders and requests in `directory`, in the order Postman shows them.
+/// `auths` are the authorizations its collection and folders list.
 fn items(
     directory: &Path,
     inherited: &Inherited,
+    auths: &[&Value],
     skipped: &mut Vec<String>,
 ) -> Result<Vec<ImportedItem>, ImportError> {
     let read_error = |source| ImportError::Read {
@@ -92,12 +108,7 @@ fn items(
         }
 
         if path.is_dir() {
-            let definition = path.join(DEFINITION);
-            let document = if definition.is_file() {
-                yaml(&definition)?
-            } else {
-                Value::Null
-            };
+            let document = read_definition(path)?;
 
             entries.push(Entry {
                 name: clean_name(document["name"].as_str().or(Some(file_name)), "Untitled"),
@@ -106,7 +117,7 @@ fn items(
                 document,
                 is_folder: true,
             });
-        } else if let Some(stem) = file_name.strip_suffix(".request.yaml") {
+        } else if let Some(stem) = request_name(path) {
             let document = yaml(path)?;
 
             entries.push(Entry {
@@ -135,13 +146,14 @@ fn items(
                 auth: postman::own_auth(&group).or(inherited.auth),
                 scripts: inherited.scripts.then(postman::scripts(&group)),
             };
+            let auths = [auths, &listed(&entry.document["auth"])].concat();
 
             converted.push(ImportedItem::Folder {
-                items: items(entry.path, &inherited, skipped)?,
+                items: items(entry.path, &inherited, &auths, skipped)?,
                 name: entry.name,
             });
         } else {
-            match request(&entry.document, entry.path, inherited) {
+            match request(&entry.document, entry.path, inherited, auths) {
                 Some(request) => converted.push(ImportedItem::Request {
                     name: entry.name,
                     request,
@@ -156,10 +168,17 @@ fn items(
 
 /// The request, or `None` when Request Eagle cannot send its protocol or
 /// HTTP method.
-fn request(request: &Value, path: &Path, inherited: &Inherited) -> Option<Request> {
+fn request(
+    request: &Value,
+    path: &Path,
+    inherited: &Inherited,
+    auths: &[&Value],
+) -> Option<Request> {
+    let auth = auth(selected_auth(&request["auth"], auths));
+
     match request["$kind"].as_str()? {
-        "http-request" => postman::request(&http_item(request), inherited).map(Request::Http),
-        "grpc-request" => Some(Request::Grpc(grpc(request, path, inherited))),
+        "http-request" => postman::request(&http_item(request, auth), inherited).map(Request::Http),
+        "grpc-request" => Some(Request::Grpc(grpc(request, auth, path, inherited))),
         // Postman keeps a connection's saved messages in separate files.
         "websocket-request" => Some(Request::WebSocket(WebSocketRequest {
             url: text(request.get("url")),
@@ -171,7 +190,7 @@ fn request(request: &Value, path: &Path, inherited: &Inherited) -> Option<Reques
 }
 
 /// An HTTP request as a v2.1 item. Its URL already contains its query.
-fn http_item(request: &Value) -> Value {
+fn http_item(request: &Value, auth: Value) -> Value {
     json!({
         "event": events(&request["scripts"]),
         "request": {
@@ -182,16 +201,16 @@ fn http_item(request: &Value) -> Value {
             },
             "header": entries(&request["headers"]),
             "body": body(&request["body"]),
-            "auth": auth(&request["auth"]),
+            "auth": auth,
         },
     })
 }
 
-fn grpc(request: &Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
+fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
     let mut metadata = postman::pairs(&entries(&request["metadata"]));
     // gRPC calls have no query parameters or scripts, so only authorizations
     // sent as metadata apply.
-    let own = json!({ "auth": auth(&request["auth"]) });
+    let own = json!({ "auth": auth });
     postman::authorize(
         postman::own_auth(&own).or(inherited.auth),
         &mut metadata,
@@ -199,16 +218,23 @@ fn grpc(request: &Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
         &mut Scripts::default(),
     );
 
+    let settings = &request["settings"];
+
     GrpcRequest {
         url: text(request.get("url")),
-        tls: request["settings"]["secureConnection"]
-            .as_bool()
-            .unwrap_or_default(),
+        tls: settings["secureConnection"].as_bool().unwrap_or_default(),
         method: method(request["methodPath"].as_str().unwrap_or_default()),
         message: text(request["message"].get("content")),
         metadata,
-        definition: definition(&request["schema"], path.parent().unwrap_or(path)),
-        ..GrpcRequest::default()
+        definition: service_definition(&request["schema"], path.parent().unwrap_or(path)),
+        settings: GrpcSettings {
+            verify_certificates: settings["strictSSL"].as_bool(),
+            server_name: text(settings.get("serverNameOverride")),
+            // Postman shows them unless this is turned off.
+            include_default_fields: settings["includeDefaultFields"].as_bool().unwrap_or(true),
+            // Postman also counts in MiB and takes zero as any size.
+            max_response_message_mb: settings["maxResponseMessageSize"].as_u64(),
+        },
     }
 }
 
@@ -226,7 +252,7 @@ fn method(path: &str) -> String {
 /// The `.proto` file Postman compiled, with a relative path resolved from the
 /// request's folder so it still resolves after importing. Definitions stored
 /// in Postman's cloud are not available, so the server is asked instead.
-fn definition(schema: &Value, directory: &Path) -> GrpcDefinition {
+fn service_definition(schema: &Value, directory: &Path) -> GrpcDefinition {
     match schema["location"].as_str() {
         Some(location) if schema["source"] == "file" && !location.is_empty() => {
             GrpcDefinition::ProtoFile {
@@ -263,9 +289,38 @@ fn group(definition: &Value) -> Value {
     })
 }
 
+/// The authorizations a collection or folder lists.
+fn listed(auth: &Value) -> Vec<&Value> {
+    auth.as_array().into_iter().flatten().collect()
+}
+
+/// The authorization a request uses. One that inherits can name one of the
+/// authorizations its collection and folders list by its `id`.
+fn selected_auth<'a>(auth: &'a Value, auths: &[&'a Value]) -> &'a Value {
+    // Postman writes credentials as a map and also reads a list of entries.
+    let id = match &auth["credentials"] {
+        Value::Array(credentials) => credentials
+            .iter()
+            .find(|credential| credential["key"] == "id")
+            .map_or(&Value::Null, |credential| &credential["value"]),
+        credentials => &credentials["id"],
+    };
+    if auth["type"] != "inherit" || id.is_null() {
+        return auth;
+    }
+
+    auths
+        .iter()
+        .rev()
+        .find(|listed| listed["id"] == *id)
+        .copied()
+        .unwrap_or(auth)
+}
+
 /// An authorization with its credentials under its type, as in v2.1.
 fn auth(auth: &Value) -> Value {
-    // Collections and folders list their authorizations; the first is used.
+    // Collections and folders list their authorizations; requests that do not
+    // name one use the first.
     let auth = match auth {
         Value::Array(auths) => auths.first().unwrap_or(&Value::Null),
         auth => auth,
@@ -310,6 +365,22 @@ fn entries(pairs: &Value) -> Value {
             .collect(),
         pairs => pairs.clone(),
     }
+}
+
+/// A collection's or folder's definition, which is optional.
+fn read_definition(directory: &Path) -> Result<Value, ImportError> {
+    let path = directory.join(DEFINITION);
+
+    if path.is_file() {
+        yaml(&path)
+    } else {
+        Ok(Value::Null)
+    }
+}
+
+/// A request file's name without its extension.
+fn request_name(path: &Path) -> Option<&str> {
+    file_name(path)?.strip_suffix(".request.yaml")
 }
 
 fn yaml(path: &Path) -> Result<Value, ImportError> {
