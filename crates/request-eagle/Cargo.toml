@@ -2,6 +2,7 @@
 name = "request-eagle"
 version = "0.1.16"
 edition = "2024"
+license.workspace = true
 
 [features]
 dev-profiler = ["dep:gpui-fps"]
