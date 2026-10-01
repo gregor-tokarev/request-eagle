@@ -7,6 +7,7 @@ use request::{EventStream, EventStreamUpdate, RequestExecutor};
 use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
+use crate::cookies::Cookies;
 
 /// The most event-stream updates shown per redraw. A fast stream is drawn in
 /// batches instead of once for every event.
@@ -89,15 +90,51 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     headers
 }
 
+/// The Cookie header that the jar adds to the request, while it is on.
+fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
+    let enabled = cx
+        .try_global::<Preferences>()
+        .is_none_or(|preferences| preferences.request.cookie_jar);
+    if !enabled {
+        return None;
+    }
+
+    let jar = Cookies::jar(cx);
+    let url = request_url(&request.path);
+    let templated = url.contains("{{")
+        || request.headers.iter().any(|(name, value)| {
+            name.contains("{{") || (name.eq_ignore_ascii_case("cookie") && value.contains("{{"))
+        });
+
+    let cookies = if templated {
+        // Which cookies apply depends on the resolved URL and headers.
+        (!jar.is_empty()).then(|| "Resolved on Send".to_owned())
+    } else {
+        jar.cookie_header(&url, &request.headers)
+    };
+
+    cookies.map(|cookies| ("Cookie".to_owned(), cookies))
+}
+
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
-        self.generated_headers = generated_headers(&self.request);
+        let mut headers = generated_headers(&self.request);
+        headers.extend(jar_cookies(&self.request, cx));
+
+        if headers == self.generated_headers {
+            return;
+        }
+
+        self.generated_headers = headers;
 
         if let Some(headers) = &self.headers {
             headers.update(cx, |headers, cx| {
                 headers.set_generated_headers(&self.generated_headers, cx);
             });
         }
+
+        // The Headers section counts them.
+        cx.notify();
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -121,13 +158,13 @@ impl RequestDraft {
             .as_ref()
             .filter(|(settings, _)| settings == &preferences)
             .map(|(_, executor)| executor.clone());
+        let cookies = Cookies::jar(cx);
         let (events, mut updates, stop) = EventStream::new();
         self.stop = Some(stop);
         let task = cx.background_executor().spawn(async move {
-            let executor = match cached
-                .map(Ok)
-                .unwrap_or_else(|| RequestExecutor::new(&preferences))
-            {
+            let executor = match cached.map(Ok).unwrap_or_else(|| {
+                RequestExecutor::new(&preferences).map(|executor| executor.with_cookie_jar(cookies))
+            }) {
                 Ok(executor) => executor,
                 Err(error) => return (None, Err(error)),
             };
@@ -175,6 +212,7 @@ impl RequestDraft {
                 this.task = None;
                 this.stop = None;
                 scope.update(cx, |scope, cx| scope.changed(cx));
+                Cookies::changed(cx);
                 // Scripts may have changed variables that other visible tabs of
                 // the collection share; redraw so their chips recolor.
                 window.refresh();
@@ -234,6 +272,8 @@ impl RequestDraft {
         self.task = None;
         self.stop = None;
         self.streaming = false;
+        // Redirects before the cancellation may have set cookies.
+        Cookies::changed(cx);
 
         self.response.update(cx, |response, cx| response.cancel(cx));
 

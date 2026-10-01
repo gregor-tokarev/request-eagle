@@ -1,12 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
 use bytes::Bytes;
-use http_client::http::{HeaderMap, header::HOST, uri::Authority};
+use http_client::http::{
+    HeaderMap,
+    header::{COOKIE, HOST},
+    uri::Authority,
+};
 use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
+    CookieJar, EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
     RequestPreferences, event_stream,
 };
 
@@ -17,6 +21,9 @@ pub(crate) struct HttpExecutor {
     http_version: HttpVersion,
     follow_all_redirects: bool,
     max_response_bytes: Option<u64>,
+    /// Whether the preferences let requests use a cookie jar.
+    cookie_jar: bool,
+    cookies: Option<CookieJar>,
 }
 
 impl HttpExecutor {
@@ -28,6 +35,13 @@ impl HttpExecutor {
                 .map_or(limit, |configured| configured.min(limit)),
         );
         executor
+    }
+
+    /// Store the cookies that responses set in `jar`, and send them with later
+    /// requests, unless the preferences turn the cookie jar off.
+    pub(crate) fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.cookies = self.cookie_jar.then_some(jar);
+        self
     }
 
     pub(crate) fn new(preferences: &RequestPreferences) -> Result<Self, ExecutionError> {
@@ -53,6 +67,8 @@ impl HttpExecutor {
             http_version: preferences.http_version,
             follow_all_redirects: preferences.follow_all_redirects,
             max_response_bytes,
+            cookie_jar: preferences.cookie_jar,
+            cookies: None,
         })
     }
 
@@ -126,11 +142,28 @@ impl HttpExecutor {
             }
         }
 
-        let request_header_bytes = request
+        let mut request_header_bytes = request
             .headers()
             .iter()
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
-            .sum();
+            .sum::<usize>();
+
+        // The jar's cookies join the request's own Cookie header when it is sent.
+        if let Some(cookie) = self
+            .cookies
+            .as_ref()
+            .and_then(|jar| jar.request_header(&url, request.headers()))
+        {
+            let own = request
+                .headers()
+                .get_all(COOKIE)
+                .iter()
+                .map(|value| COOKIE.as_str().len() + value.as_bytes().len() + 4)
+                .sum::<usize>();
+            // The request's own Cookie headers are counted above and replaced.
+            request_header_bytes =
+                request_header_bytes - own + COOKIE.as_str().len() + cookie.as_bytes().len() + 4;
+        }
 
         if generated_host {
             // Let the transport regenerate Host when a redirect changes the URL.
@@ -138,9 +171,14 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
-        let response =
-            crate::redirects::send(client.as_ref(), request, url, self.follow_all_redirects)
-                .await?;
+        let response = crate::redirects::send(
+            client.as_ref(),
+            request,
+            url,
+            self.follow_all_redirects,
+            self.cookies.as_ref(),
+        )
+        .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         // HEAD and statuses without a body may describe an encoded representation

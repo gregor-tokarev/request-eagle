@@ -550,6 +550,25 @@ impl Workspace {
     }
 }
 
+/// Handled outside the workspace's focus, so the status bar's button opens
+/// the page wherever focus is.
+fn on_open_cookies(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
+    let workspace = workspace.downgrade();
+
+    cx.on_action(move |_: &OpenCookies, cx| {
+        let workspace = workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.close_settings(window, cx);
+                    this.update_tabs(window, cx, MainView::open_cookies);
+                });
+            });
+        });
+    });
+}
+
 fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
     let workspace = workspace.downgrade();
     let general_workspace = workspace.clone();
@@ -754,18 +773,22 @@ impl Render for Workspace {
     }
 }
 
+/// `cookies` is the jar that every request shares.
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
+    cookies: request::CookieJar,
     updater: Entity<Updater>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
     crate::actions::init(cx);
+    tab_ui::Cookies::init(cookies, cx);
 
     let workspace = cx.new(|cx| Workspace::new(collections, environments, updater, window, cx));
     on_toggle_sidebar(&workspace, cx);
     on_open_settings(&workspace, window.window_handle(), cx);
+    on_open_cookies(&workspace, window.window_handle(), cx);
     on_toggle_command_palette(&workspace, window.window_handle(), cx);
 
     workspace.into()

@@ -68,6 +68,8 @@ pm.request.headers.upsert({key: "Authorization", value: "Bearer {{token}}"});
 reject.
 
 Subrequests use the primary request's settings and do not run saved scripts.
+Like the primary request, they store and send cookies in the cookie jar, so a
+login subrequest's session cookie goes with the request that follows.
 Timers, package imports, filesystem access, and `fetch` are not provided.
 
 ## Sign and encode values

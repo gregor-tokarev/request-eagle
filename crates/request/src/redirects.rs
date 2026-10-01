@@ -7,7 +7,7 @@ use http_client::{
     },
 };
 
-use crate::ExecutionError;
+use crate::{CookieJar, ExecutionError};
 
 const REDIRECT_LIMIT: u32 = 100;
 
@@ -16,6 +16,7 @@ pub(crate) async fn send(
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
+    cookies: Option<&CookieJar>,
 ) -> Result<Response<AsyncBody>, ExecutionError> {
     let (mut parts, mut body) = request.into_parts();
     let mut redirects = 0;
@@ -25,11 +26,19 @@ pub(crate) async fn send(
         // its proxy again. Its injected Proxy-Authorization stays in the sent
         // clone, never in the headers we carry to the next destination.
         parts.extensions.insert(RedirectPolicy::NoFollow);
+        let mut hop = Request::from_parts(parts.clone(), body.clone().into());
 
-        let response = client
-            .send(Request::from_parts(parts.clone(), body.clone().into()))
-            .await
-            .map_err(ExecutionError::Transport)?;
+        // Each destination receives the jar's cookies for its own URL,
+        // including those that earlier redirects set.
+        if let Some(cookie) = cookies.and_then(|jar| jar.request_header(&url, hop.headers())) {
+            hop.headers_mut().insert(COOKIE, cookie);
+        }
+
+        let response = client.send(hop).await.map_err(ExecutionError::Transport)?;
+
+        if let Some(jar) = cookies {
+            jar.store(&url, response.headers());
+        }
 
         if !follow {
             return Ok(response);

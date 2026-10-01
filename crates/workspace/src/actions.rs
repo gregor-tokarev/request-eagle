@@ -10,6 +10,7 @@ actions!(
         FocusSidebarSearch,
         OpenSettings,
         OpenGeneralSettings,
+        OpenCookies,
         SaveRequest,
         NewTab,
         NewGrpcTab,
@@ -219,6 +220,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default sidebar search keybinding should be valid");
+
+    keybindings_service::register(
+        OpenCookies,
+        "Open cookies",
+        "Show the cookies that requests store and send, and delete them.",
+        "Requests",
+        None,
+        None,
+        cx,
+    )
+    .expect("the cookies action should register");
 
     keybindings_service::register(
         OpenSettings,

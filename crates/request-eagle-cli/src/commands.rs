@@ -54,7 +54,8 @@ pub enum Command {
     /// Execute a saved request and return the completed response. Script changes
     /// to environment variables last for this invocation and are never persisted.
     /// A gRPC request sends its saved message once, including on client streams,
-    /// and returns every response message with the final status.
+    /// and returns every response message with the final status. Requests store
+    /// and send cookies in the app's cookie jar unless cookie_jar is off.
     #[serde(rename = "requests.run")]
     RequestsRun {
         path: PathBuf,
@@ -73,6 +74,19 @@ pub enum Command {
         max_response_size_mb: Option<u64>,
         ssl_certificate_verification: Option<bool>,
         follow_all_redirects: Option<bool>,
+        /// Keep the cookies that responses set and send them with later requests.
+        cookie_jar: Option<bool>,
+    },
+    /// The cookies in the app's cookie jar, optionally of one domain. Each has
+    /// its domain, path, name, value, attributes and expiry in Unix seconds,
+    /// or null for a session cookie.
+    #[serde(rename = "cookies.list")]
+    CookiesList { domain: Option<String> },
+    /// Delete a domain's cookies, or only the one with this name.
+    #[serde(rename = "cookies.delete")]
+    CookiesDelete {
+        domain: String,
+        name: Option<String>,
     },
     #[serde(rename = "settings.appearance")]
     SettingsAppearance {

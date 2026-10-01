@@ -26,6 +26,9 @@ pub struct RequestPreferences {
     pub ssl_certificate_verification: bool,
     pub proxy: ProxyPreferences,
     pub follow_all_redirects: bool,
+    /// Keep the cookies that responses set and send them with later requests
+    /// to the same sites. Applies to executors given a jar.
+    pub cookie_jar: bool,
 }
 
 impl Default for RequestPreferences {
@@ -37,6 +40,7 @@ impl Default for RequestPreferences {
             ssl_certificate_verification: true,
             proxy: ProxyPreferences::default(),
             follow_all_redirects: true,
+            cookie_jar: true,
         }
     }
 }

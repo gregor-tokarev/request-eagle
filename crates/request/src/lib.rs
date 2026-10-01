@@ -10,6 +10,7 @@
 //! connection's events through a channel until it closes. `GrpcClient` loads
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
+mod cookies;
 mod error;
 mod event_stream;
 mod executor;
@@ -27,10 +28,13 @@ mod variables;
 mod websocket;
 
 #[cfg(test)]
+mod cookies_tests;
+#[cfg(test)]
 mod event_stream_tests;
 
 pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
+pub use cookies::{Cookie, CookieJar};
 pub use error::ExecutionError;
 pub use event_stream::{
     EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,

@@ -7,6 +7,7 @@ use request::{GrpcCall, GrpcClient, GrpcError, GrpcEvent, GrpcEvents, RequestVar
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
+use crate::cookies::Cookies;
 
 /// Events handled in one update, so fast streams do not redraw per message.
 const EVENT_BATCH: usize = 256;
@@ -22,7 +23,7 @@ impl GrpcDraft {
         match &self.client {
             Some((settings, client)) if *settings == preferences => client.clone(),
             _ => {
-                let client = GrpcClient::new(&preferences);
+                let client = GrpcClient::new(&preferences).with_cookie_jar(Cookies::jar(cx));
                 self.client = Some((preferences, client.clone()));
                 client
             }
@@ -198,6 +199,9 @@ impl GrpcDraft {
         cx: &mut AsyncWindowContext,
     ) {
         let opened = this.update_in(cx, |this, window, cx| {
+            // Requests that a Before invoke script sent may have set cookies.
+            Cookies::changed(cx);
+
             let events = match result {
                 Ok((call, events)) => {
                     let kind = call.kind;
@@ -240,6 +244,8 @@ impl GrpcDraft {
             let updated = this.update_in(cx, |this, window, cx| {
                 this.response
                     .update(cx, |response, cx| response.receive(batch, window, cx));
+                // Requests that the call's scripts sent may have set cookies.
+                Cookies::changed(cx);
 
                 // Messages redraw only the response; the draft changes
                 // when the call ends.

@@ -20,7 +20,8 @@ use super::{
     transport::{self, Target},
 };
 use crate::{
-    RequestExecutor, RequestPreferences, RequestVariables, ScriptReport, scripts::CallScripts,
+    CookieJar, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
+    scripts::CallScripts,
 };
 
 /// Server reflection gives up here unless the request timeout is shorter.
@@ -37,6 +38,8 @@ pub struct GrpcClient {
     /// server ends them or the call is cancelled.
     timeout: Option<Duration>,
     preferences: RequestPreferences,
+    /// Holds the cookies of scripts' HTTP requests.
+    cookies: Option<CookieJar>,
     /// Sends the HTTP requests of scripts, created when a script first runs.
     script_executor: Arc<OnceLock<Result<RequestExecutor, String>>>,
 }
@@ -49,8 +52,16 @@ impl GrpcClient {
             timeout: (preferences.timeout_ms != 0)
                 .then(|| Duration::from_millis(preferences.timeout_ms)),
             preferences: preferences.clone(),
+            cookies: None,
             script_executor: Arc::default(),
         }
+    }
+
+    /// Share `jar` with the HTTP requests that scripts send, as
+    /// `RequestExecutor::with_cookie_jar` does.
+    pub fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.cookies = Some(jar);
+        self
     }
 
     /// Where and how to connect, with the request's TLS settings applied.
@@ -201,7 +212,13 @@ impl GrpcClient {
     fn script_executor(&self) -> Result<RequestExecutor, GrpcError> {
         self.script_executor
             .get_or_init(|| {
-                RequestExecutor::new(&self.preferences).map_err(|error| error.to_string())
+                let executor =
+                    RequestExecutor::new(&self.preferences).map_err(|error| error.to_string())?;
+
+                Ok(match &self.cookies {
+                    Some(jar) => executor.with_cookie_jar(jar.clone()),
+                    None => executor,
+                })
             })
             .clone()
             .map_err(GrpcError::ScriptSetup)
