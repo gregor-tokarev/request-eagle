@@ -1,5 +1,4 @@
 use std::{
-    io::Write as _,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -7,7 +6,6 @@ use std::{
     time::SystemTime,
 };
 
-use flate2::write::MultiGzDecoder;
 use futures::{
     SinkExt as _,
     channel::{mpsc, oneshot},
@@ -15,15 +13,14 @@ use futures::{
 };
 use http_client::{
     AsyncBody,
-    http::{
-        HeaderMap, StatusCode, Version,
-        header::{CONTENT_ENCODING, CONTENT_TYPE},
-        response::Parts,
-    },
+    http::{HeaderMap, StatusCode, Version, header::CONTENT_TYPE, response::Parts},
 };
 use smol::io::AsyncReadExt as _;
 
-use crate::ExecutionError;
+use crate::{
+    ExecutionError,
+    response_encoding::{Decoder, codings},
+};
 
 /// Updates wait here until the caller reads them. A full queue stops reading
 /// the response, so a slow reader slows the server down instead of filling memory.
@@ -136,7 +133,6 @@ impl EventStream {
 
         let mut parser = Parser::default();
         let mut buffer = vec![0; READ_BUFFER];
-        let mut decoded = Vec::new();
         let mut parsed = 0;
         let mut events = Vec::new();
         let mut encoded_bytes = 0;
@@ -157,18 +153,18 @@ impl EventStream {
             let read = read.map_err(ExecutionError::ReadBody)?;
 
             if read == 0 {
-                decoder.finish(&mut decoded)?;
+                decoder.finish()?;
             } else {
                 encoded_bytes += read;
-                decoder.decode(&buffer[..read], &mut decoded)?;
+                if let Some(limit_bytes) = limit_bytes
+                    && encoded_bytes as u64 > limit_bytes
+                {
+                    return Err(ExecutionError::ResponseTooLarge { limit_bytes });
+                }
+                decoder.decode(&buffer[..read])?;
             }
 
-            if let Some(limit_bytes) = limit_bytes
-                && (encoded_bytes as u64 > limit_bytes || decoded.len() as u64 > limit_bytes)
-            {
-                return Err(ExecutionError::ResponseTooLarge { limit_bytes });
-            }
-
+            let decoded = decoder.decoded();
             parser.push(&decoded[parsed..], SystemTime::now(), &mut events);
             parsed = decoded.len();
 
@@ -187,8 +183,8 @@ impl EventStream {
         // Updates end with the body, before post-response scripts run.
         self.updates = None;
 
-        let encoded = matches!(decoder, Decoder::Gzip(_)).then_some(encoded_bytes);
-        Ok((decoded, encoded))
+        let encoded = (!decoder.is_identity()).then_some(encoded_bytes);
+        Ok((decoder.into_decoded(), encoded))
     }
 
     /// Returns false when the stream was stopped instead.
@@ -227,8 +223,8 @@ async fn stopped(stop: &mut oneshot::Receiver<()>) {
 }
 
 /// Whether a response is an event stream whose events can be read as they
-/// arrive: one with a supported content encoding.
-pub(crate) fn decoder(headers: &HeaderMap) -> Option<Decoder> {
+/// arrive: one with at most one supported content coding.
+pub(crate) fn decoder(headers: &HeaderMap, limit_bytes: Option<u64>) -> Option<Decoder> {
     let event_stream = headers
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -239,54 +235,11 @@ pub(crate) fn decoder(headers: &HeaderMap) -> Option<Decoder> {
         return None;
     }
 
-    let mut gzip = 0;
-    for value in headers.get_all(CONTENT_ENCODING) {
-        for encoding in value.to_str().ok()?.split(',').map(str::trim) {
-            if encoding.eq_ignore_ascii_case("gzip") {
-                gzip += 1;
-            } else if !encoding.is_empty() && !encoding.eq_ignore_ascii_case("identity") {
-                return None;
-            }
-        }
-    }
-
-    // Other encodings, and stacked gzip, are decoded once the body is complete.
-    match gzip {
-        0 => Some(Decoder::Identity),
-        1 => Some(Decoder::Gzip(Box::new(MultiGzDecoder::new(Vec::new())))),
+    // Unsupported and stacked codings are decoded once the body is complete.
+    match codings(headers)?[..] {
+        [] => Some(Decoder::new(None, limit_bytes)),
+        [coding] => Some(Decoder::new(Some(coding), limit_bytes)),
         _ => None,
-    }
-}
-
-pub(crate) enum Decoder {
-    Identity,
-    Gzip(Box<MultiGzDecoder<Vec<u8>>>),
-}
-
-impl Decoder {
-    fn decode(&mut self, chunk: &[u8], decoded: &mut Vec<u8>) -> Result<(), ExecutionError> {
-        match self {
-            Self::Identity => decoded.extend_from_slice(chunk),
-            Self::Gzip(decoder) => {
-                // Flushing passes on everything that the received bytes encode.
-                decoder
-                    .write_all(chunk)
-                    .and_then(|()| decoder.flush())
-                    .map_err(ExecutionError::DecodeBody)?;
-                decoded.append(decoder.get_mut());
-            }
-        }
-
-        Ok(())
-    }
-
-    fn finish(&mut self, decoded: &mut Vec<u8>) -> Result<(), ExecutionError> {
-        if let Self::Gzip(decoder) = self {
-            decoder.try_finish().map_err(ExecutionError::DecodeBody)?;
-            decoded.append(decoder.get_mut());
-        }
-
-        Ok(())
     }
 }
 

@@ -59,12 +59,15 @@ limit of 100 redirects to stop loops. Explicit `Host` overrides are preserved on
 the same authority and removed when a redirect changes the host or port.
 Set `follow_all_redirects` to `false` to inspect redirect responses directly.
 Final HTTP statuses, including 4xx and 5xx, are returned with their headers and
-body. Headers retain repeated and non-UTF-8 values. Requests advertise gzip unless
-an explicit Accept-Encoding overrides it or the request contains Range. Complete
-gzip responses are decompressed while their original headers and downloaded byte
-counts are retained. Partial byte-range responses and unsupported content encodings
-remain unchanged. Malformed input, transport failures, corrupt
-gzip streams, truncated bodies, timeouts, and oversized responses return typed errors.
+body. Headers retain repeated and non-UTF-8 values. Requests advertise gzip,
+deflate, br and zstd unless an explicit Accept-Encoding overrides it or the request
+contains Range. Complete responses in those codings, including stacked ones, are
+decompressed while their original headers and downloaded byte counts are retained;
+`deflate` accepts both zlib and raw deflate streams. Event streams in one coding
+decode as they arrive. Partial byte-range responses and unsupported content
+encodings remain unchanged. Malformed input, transport failures, corrupt or
+truncated encoded streams, truncated bodies, timeouts, and oversized responses
+return typed errors.
 
 `Request` and `Response` are protocol enums. HTTP details live in `http.rs`, while
 `executor.rs` runs the scripts and sends the request.
