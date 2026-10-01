@@ -168,12 +168,22 @@ impl CertificateSettings {
 
         form.adding = true;
         form.error = None;
+        // The form can be cancelled and another opened while this one saves.
+        let submitted = form.host.entity_id();
         let save = preferences::add_client_certificate(certificate, cx);
 
         cx.spawn(async move |this, cx| {
             let result = save.await;
 
             let _ = this.update(cx, |this, cx| {
+                if this
+                    .form
+                    .as_ref()
+                    .is_none_or(|form| form.host.entity_id() != submitted)
+                {
+                    return;
+                }
+
                 match result {
                     Ok(()) => this.form = None,
                     Err(error) => {

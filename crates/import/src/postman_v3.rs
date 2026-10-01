@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use crate::{
     Import, ImportError,
     document::{clean_name, text},
-    postman::{self, Inherited, Scripts},
+    postman::{self, Behavior, Inherited, Scripts},
 };
 
 /// A collection's or folder's name, order, variables, scripts and
@@ -44,6 +44,7 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
     let inherited = Inherited {
         auth: postman::own_auth(&group),
         scripts: Scripts::default(),
+        behavior: Behavior::default(),
     };
     let mut skipped = Vec::new();
     let items = items(
@@ -146,6 +147,7 @@ fn items(
             let inherited = Inherited {
                 auth: postman::own_auth(&group).or(inherited.auth),
                 scripts: inherited.scripts.then(postman::scripts(&group)),
+                behavior: inherited.behavior,
             };
             let auths = [auths, &listed(&entry.document["auth"])].concat();
 

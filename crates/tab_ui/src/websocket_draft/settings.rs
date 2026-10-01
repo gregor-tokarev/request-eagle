@@ -5,7 +5,9 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::draft::WebSocketDraft;
-use crate::request_settings::{override_switch, preferences, row, timeout_input, timeout_value};
+use crate::request_settings::{
+    follow_preference, override_switch, preferences, row, timeout_input, timeout_value,
+};
 
 impl WebSocketDraft {
     pub(super) fn timeout_state(
@@ -26,6 +28,12 @@ impl WebSocketDraft {
                 }
             }),
         );
+        self._subscriptions.push(follow_preference(
+            &timeout,
+            |preferences| preferences.timeout_ms.to_string(),
+            window,
+            cx,
+        ));
         self.timeout = Some(timeout.clone());
 
         timeout

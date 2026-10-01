@@ -160,7 +160,12 @@ fn postman_request_settings_keep_redirects_and_certificate_checks() {
             "item": [
                 {"name": "Changed", "protocolProfileBehavior": {"followRedirects": false, "strictSSL": false, "disableBodyPruning": true},
                  "request": {"method": "GET", "url": "https://example.test"}},
-                {"name": "Default", "request": {"method": "GET", "url": "https://example.test"}}
+                {"name": "Default", "request": {"method": "GET", "url": "https://example.test"}},
+                {"name": "Internal", "protocolProfileBehavior": {"strictSSL": false}, "item": [
+                    {"name": "Inherits", "request": {"method": "GET", "url": "https://internal.test"}},
+                    {"name": "Overrides", "protocolProfileBehavior": {"strictSSL": true},
+                     "request": {"method": "GET", "url": "https://internal.test"}}
+                ]}
             ]
         }"#,
     )
@@ -173,6 +178,11 @@ fn postman_request_settings_keep_redirects_and_certificate_checks() {
 
     let (_, default) = http(&import.collection.items[1]);
     assert!(default.settings.is_default());
+
+    // Folders set it for the requests inside them, which can change it again.
+    let (_, items) = folder(&import.collection.items[2]);
+    assert_eq!(http(&items[0]).1.settings.verify_certificates, Some(false));
+    assert_eq!(http(&items[1]).1.settings.verify_certificates, Some(true));
 }
 
 #[test]

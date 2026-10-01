@@ -36,7 +36,12 @@ pub async fn dispatch(file: &PreferencesFile, command: Command) -> Result<Value>
                 request.follow_all_redirects = value;
             }
             if let Some(path) = ca_certificates {
-                request.ca_certificates = (!path.as_os_str().is_empty()).then_some(path);
+                // Later commands can run from another working directory.
+                request.ca_certificates = if path.as_os_str().is_empty() {
+                    None
+                } else {
+                    Some(std::path::absolute(path)?)
+                };
             }
             Ok(())
         })?,

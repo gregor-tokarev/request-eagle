@@ -58,7 +58,6 @@ pub(crate) fn override_switch(
                 Button::new(SharedString::from(format!("{id}-reset")))
                     .debug_selector(move || format!("{id}-reset"))
                     .ghost()
-                    .xsmall()
                     .label("Reset")
                     .tooltip("Follow Settings")
                     .on_click(move |_, window, cx| reset(&None, window, cx)),
@@ -87,6 +86,24 @@ pub(crate) fn timeout_input(
                 .unwrap_or_default(),
         )
         .validate(|value, _| value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// Keeps the input's placeholder on the preference that an empty value
+/// follows, as Settings change.
+pub(crate) fn follow_preference<T: 'static>(
+    input: &Entity<InputState>,
+    placeholder: fn(&RequestPreferences) -> String,
+    window: &Window,
+    cx: &mut Context<T>,
+) -> Subscription {
+    let input = input.downgrade();
+
+    cx.observe_global_in::<Preferences>(window, move |_, window, cx| {
+        let placeholder = placeholder(&preferences(cx));
+        let _ = input.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+    })
 }
 
 /// The timeout an input holds; empty or out of range follows the preference.

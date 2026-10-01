@@ -47,6 +47,22 @@ pub enum CertificateFiles {
     Pkcs12 { path: PathBuf },
 }
 
+impl CertificateFiles {
+    /// The same files by absolute paths, which still find them from another
+    /// working directory.
+    pub fn absolute(self) -> std::io::Result<Self> {
+        Ok(match self {
+            Self::Pem { certificate, key } => Self::Pem {
+                certificate: std::path::absolute(certificate)?,
+                key: key.map(std::path::absolute).transpose()?,
+            },
+            Self::Pkcs12 { path } => Self::Pkcs12 {
+                path: std::path::absolute(path)?,
+            },
+        })
+    }
+}
+
 impl fmt::Debug for ClientCertificate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientCertificate")
@@ -101,8 +117,14 @@ impl ClientCertificate {
             return None;
         }
 
-        let pattern = pattern.trim_end_matches('.').to_ascii_lowercase();
-        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        // URLs write IPv6 addresses in brackets, which a host may leave out.
+        let normalize = |host: &str| {
+            host.trim_matches(['[', ']'])
+                .trim_end_matches('.')
+                .to_ascii_lowercase()
+        };
+        let pattern = normalize(pattern);
+        let host = normalize(host);
         let exact = if pattern == host {
             true
         } else if let Some(domain) = pattern.strip_prefix("*.") {

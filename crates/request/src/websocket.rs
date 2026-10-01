@@ -478,22 +478,40 @@ async fn handshake(
         .map(|(_, value)| value.clone())
         .unwrap_or_default();
 
+    // Connect as HTTP requests do. Plain connections check no certificates,
+    // unless their proxy is reached over TLS.
+    let tls_proxy = preferences.proxy.uses_tls(&url);
+    let client_certificate = (scheme == "https")
+        .then(|| {
+            crate::certificates::client_certificate(
+                &preferences.client_certificates,
+                url.host_str()?,
+                url.port_or_known_default()?,
+            )
+        })
+        .flatten();
+
+    if let Some(certificate) = client_certificate
+        && tls_proxy
+    {
+        return Err(ExecutionError::Certificate(format!(
+            "the client certificate for {} is not sent through a proxy reached over HTTPS, which would also be offered it. Use an HTTP proxy, or bypass the proxy for this host",
+            certificate.host
+        )));
+    }
+
+    let verify = request
+        .settings
+        .verify_certificates
+        .unwrap_or(preferences.ssl_certificate_verification);
     let tls = Tls {
-        verify: request
-            .settings
-            .verify_certificates
-            .unwrap_or(preferences.ssl_certificate_verification),
+        verify,
         server_name: None,
-        ca_certificates: preferences.ca_certificates.as_deref(),
-        client_certificate: (scheme == "https")
-            .then(|| {
-                crate::certificates::client_certificate(
-                    &preferences.client_certificates,
-                    url.host_str()?,
-                    url.port_or_known_default()?,
-                )
-            })
-            .flatten(),
+        ca_certificates: preferences
+            .ca_certificates
+            .as_deref()
+            .filter(|_| scheme == "https" || tls_proxy),
+        client_certificate,
     }
     .config(&[b"http/1.1"])
     .map_err(ExecutionError::Certificate)?;

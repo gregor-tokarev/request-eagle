@@ -353,10 +353,12 @@ pub fn add_client_certificate(
 ) -> Task<Result<()>> {
     init(cx);
 
-    if let Err(error) =
-        check_writable(cx).and_then(|()| certificate.validate().map_err(|error| anyhow!(error)))
-    {
-        return Task::ready(Err(error));
+    let checked = check_writable(cx)
+        .and_then(|()| certificate.validate().map_err(|error| anyhow!(error)))
+        .and_then(|()| Ok(certificate.files.clone().absolute()?));
+    match checked {
+        Ok(files) => certificate.files = files,
+        Err(error) => return Task::ready(Err(error)),
     }
 
     certificate.id = Uuid::new_v4().to_string();

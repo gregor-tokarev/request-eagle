@@ -6,7 +6,9 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::draft::GrpcDraft;
-use crate::request_settings::{override_switch, preferences, row, timeout_input, timeout_value};
+use crate::request_settings::{
+    follow_preference, override_switch, preferences, row, timeout_input, timeout_value,
+};
 
 impl GrpcDraft {
     /// Create the settings inputs when the Settings tab is first shown.
@@ -64,6 +66,18 @@ impl GrpcDraft {
                 }
             }),
         );
+        self._subscriptions.push(follow_preference(
+            &max_message,
+            |preferences| preferences.max_response_size_mb.to_string(),
+            window,
+            cx,
+        ));
+        self._subscriptions.push(follow_preference(
+            &timeout,
+            |preferences| preferences.timeout_ms.to_string(),
+            window,
+            cx,
+        ));
         self.server_name = Some(server_name);
         self.max_message = Some(max_message);
         self.timeout = Some(timeout);

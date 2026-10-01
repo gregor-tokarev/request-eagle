@@ -36,6 +36,8 @@ struct Clients {
 struct ClientKey {
     verify: bool,
     version: HttpVersion,
+    /// Whether the certificate authorities from Settings are trusted.
+    ca_certificates: bool,
     /// The ID of the client certificate presented to the server.
     certificate: Option<String>,
 }
@@ -61,19 +63,16 @@ impl HttpExecutor {
             ),
         };
 
-        let clients = Clients {
-            preferences: preferences.clone(),
-            built: Mutex::default(),
-        };
-        // Report invalid proxy and certificate authority settings before sending.
-        clients.get(ClientKey {
-            verify: preferences.ssl_certificate_verification,
-            version: preferences.http_version,
-            certificate: None,
-        })?;
+        // Report invalid proxy settings before sending. Certificate files are
+        // read when a connection needs them, so one that is missing only
+        // fails the requests that use it.
+        let _ = preferences.proxy.apply(reqwest::Client::builder())?;
 
         Ok(Self {
-            clients: Arc::new(clients),
+            clients: Arc::new(Clients {
+                preferences: preferences.clone(),
+                built: Mutex::default(),
+            }),
             http_version: preferences.http_version,
             follow_all_redirects: preferences.follow_all_redirects,
             verify_certificates: preferences.ssl_certificate_verification,
@@ -175,22 +174,7 @@ impl HttpExecutor {
             events.dispatch.start();
         }
         // Each hop connects with the client certificate for its host.
-        let client = |url: &Url| {
-            self.clients.get(ClientKey {
-                verify,
-                version,
-                certificate: (url.scheme() == "https")
-                    .then(|| {
-                        crate::certificates::client_certificate(
-                            &self.clients.preferences.client_certificates,
-                            url.host_str()?,
-                            url.port_or_known_default()?,
-                        )
-                    })
-                    .flatten()
-                    .map(|certificate| certificate.id.clone()),
-            })
-        };
+        let client = |url: &Url| self.clients.get(url, verify, version);
         let response = crate::redirects::send(client, request, url, follow).await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
@@ -275,18 +259,41 @@ impl HttpExecutor {
 }
 
 impl Clients {
-    fn get(&self, key: ClientKey) -> Result<Client, ExecutionError> {
+    /// The client for a connection to `url`. Plain HTTP checks no
+    /// certificates, unless its proxy is reached over TLS.
+    fn get(&self, url: &Url, verify: bool, version: HttpVersion) -> Result<Client, ExecutionError> {
+        let preferences = &self.preferences;
+        let secure = url.scheme() == "https";
+        let tls_proxy = preferences.proxy.uses_tls(url);
+        let client_certificate = secure
+            .then(|| {
+                crate::certificates::client_certificate(
+                    &preferences.client_certificates,
+                    url.host_str()?,
+                    url.port_or_known_default()?,
+                )
+            })
+            .flatten();
+
+        if let Some(certificate) = client_certificate
+            && tls_proxy
+        {
+            return Err(ExecutionError::Certificate(format!(
+                "the client certificate for {} is not sent through a proxy reached over HTTPS, which would also be offered it. Use an HTTP proxy, or bypass the proxy for this host",
+                certificate.host
+            )));
+        }
+
+        let key = ClientKey {
+            verify,
+            version,
+            ca_certificates: verify && (secure || tls_proxy),
+            certificate: client_certificate.map(|certificate| certificate.id.clone()),
+        };
         if let Some(client) = self.built.lock().unwrap().get(&key) {
             return Ok(client.clone());
         }
 
-        let preferences = &self.preferences;
-        let client_certificate = key.certificate.as_ref().and_then(|id| {
-            preferences
-                .client_certificates
-                .iter()
-                .find(|certificate| &certificate.id == id)
-        });
         let alpn: &[&[u8]] = match key.version {
             HttpVersion::Auto => &[b"h2", b"http/1.1"],
             HttpVersion::Http1_1 => &[b"http/1.1"],
@@ -295,7 +302,10 @@ impl Clients {
         let tls = Tls {
             verify: key.verify,
             server_name: None,
-            ca_certificates: preferences.ca_certificates.as_deref(),
+            ca_certificates: preferences
+                .ca_certificates
+                .as_deref()
+                .filter(|_| key.ca_certificates),
             client_certificate,
         }
         .config(alpn)

@@ -10,7 +10,7 @@ use rcgen::{
 };
 use request::{
     CertificateFiles, ClientCertificate, ExecutionError, GrpcClient, GrpcRequest, HttpRequest,
-    ProxyMode, RequestExecutor, RequestPreferences, RequestVariables, Response,
+    HttpSettings, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables, Response,
     WebSocketConnection, WebSocketEventKind, WebSocketRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -205,6 +205,101 @@ fn trusts_a_custom_certificate_authority_in_addition_to_the_system() {
                 .starts_with("CA certificates: could not read"),
             "{error}"
         );
+
+        // Connections that check no certificates do not need the file.
+        let executor = RequestExecutor::new(&missing).unwrap();
+        let unchecked = HttpRequest {
+            path: format!("https://localhost:{port}/"),
+            settings: HttpSettings {
+                verify_certificates: Some(false),
+                ..HttpSettings::default()
+            },
+            ..HttpRequest::default()
+        };
+        executor
+            .execute(unchecked, RequestVariables::new(HashMap::new(), None))
+            .await
+            .unwrap();
+
+        let plain = serve_http();
+        executor
+            .execute(
+                HttpRequest {
+                    path: plain,
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::new(), None),
+            )
+            .await
+            .unwrap();
+    });
+}
+
+/// Answer one plain HTTP request.
+fn serve_http() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+
+    std::thread::spawn(move || {
+        use std::io::{Read as _, Write as _};
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).unwrap();
+            head.push(byte[0]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+    });
+
+    url
+}
+
+#[test]
+fn client_certificates_are_never_offered_to_a_proxy_reached_over_https() {
+    let directory = tempfile::tempdir().unwrap();
+    let ca = authority("Request Eagle Test CA");
+    let ca_path = directory.path().join("ca.pem");
+    std::fs::write(&ca_path, &ca.pem).unwrap();
+    let clients = authority("Request Eagle Client CA");
+    let (certificate, key) = issue(&clients, ExtendedKeyUsagePurpose::ClientAuth);
+    let certificate_path = directory.path().join("client.pem");
+    std::fs::write(
+        &certificate_path,
+        pem("CERTIFICATE", &certificate) + &key.serialize_pem(),
+    )
+    .unwrap();
+    let port = serve_https(acceptor(&ca, Some(&clients)));
+
+    let mut preferences = preferences(&ca_path);
+    preferences.client_certificates = vec![client_certificate(
+        "localhost",
+        CertificateFiles::Pem {
+            certificate: certificate_path,
+            key: None,
+        },
+        "",
+    )];
+    // Nothing listens there: the request must fail before connecting.
+    preferences.proxy.mode = ProxyMode::Custom;
+    preferences.proxy.protocol = request::ProxyProtocol::Https;
+    preferences.proxy.host = "127.0.0.1".into();
+    preferences.proxy.port = 9;
+
+    smol::block_on(async {
+        let error = send(&preferences, port).await.unwrap_err();
+        assert!(matches!(error, ExecutionError::Certificate(_)), "{error}");
+        assert!(
+            error.to_string().contains("proxy reached over HTTPS"),
+            "{error}"
+        );
+
+        // A host that bypasses the proxy connects directly with its certificate.
+        preferences.proxy.bypass = "localhost".into();
+        assert_eq!(send(&preferences, port).await.unwrap(), "1 certificates");
     });
 }
 

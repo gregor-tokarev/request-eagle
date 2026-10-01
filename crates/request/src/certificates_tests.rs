@@ -53,7 +53,8 @@ fn certificates_match_their_host_wildcard_subdomains_and_port() {
         chosen(&["[::1]:8443"], "[::1]", 8443).as_deref(),
         Some("[::1]:8443")
     );
-    assert_eq!(chosen(&["::1"], "::1", 8443).as_deref(), Some("::1"));
+    assert_eq!(chosen(&["::1"], "[::1]", 8443).as_deref(), Some("::1"));
+    assert_eq!(chosen(&["[::1]"], "[::1]", 8443).as_deref(), Some("[::1]"));
 }
 
 #[test]

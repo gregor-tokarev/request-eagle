@@ -20,6 +20,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
     let inherited = Inherited {
         auth: own_auth(document),
         scripts: Scripts::default(),
+        behavior: Behavior::default().then(document),
     };
     let items = items(document, &inherited, &mut skipped);
     let scripts = scripts(document);
@@ -44,6 +45,28 @@ pub(crate) struct Inherited<'a> {
     /// Request Eagle has no folder scripts, so each request runs its folders'
     /// scripts before its own, in the order Postman runs them.
     pub(crate) scripts: Scripts,
+    pub(crate) behavior: Behavior,
+}
+
+/// The parts of Postman's protocol profile behavior that request settings
+/// keep. Collections and folders set it for the requests inside them, and
+/// the closest explicit value wins.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Behavior {
+    follow_redirects: Option<bool>,
+    verify_certificates: Option<bool>,
+}
+
+impl Behavior {
+    /// This behavior with the item's own values applied over it.
+    pub(crate) fn then(self, item: &Value) -> Self {
+        let own = &item["protocolProfileBehavior"];
+
+        Self {
+            follow_redirects: own["followRedirects"].as_bool().or(self.follow_redirects),
+            verify_certificates: own["strictSSL"].as_bool().or(self.verify_certificates),
+        }
+    }
 }
 
 /// Scripts in the order Postman runs them, each kept separate until they are
@@ -77,6 +100,7 @@ fn items(parent: &Value, inherited: &Inherited, skipped: &mut Vec<String>) -> Ve
                 let inherited = Inherited {
                     auth: own_auth(item).or(inherited.auth),
                     scripts: inherited.scripts.then(scripts(item)),
+                    behavior: inherited.behavior.then(item),
                 };
 
                 return Some(ImportedItem::Folder {
@@ -138,7 +162,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     );
 
     // The request's Settings tab in Postman.
-    let behavior = &item["protocolProfileBehavior"];
+    let behavior = inherited.behavior.then(item);
 
     Some(HttpRequest {
         method,
@@ -153,8 +177,8 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         },
         settings: HttpSettings {
             timeout_ms: None,
-            follow_redirects: behavior["followRedirects"].as_bool(),
-            verify_certificates: behavior["strictSSL"].as_bool(),
+            follow_redirects: behavior.follow_redirects,
+            verify_certificates: behavior.verify_certificates,
         },
     })
 }

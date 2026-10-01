@@ -122,6 +122,7 @@ impl PreferencesFile {
         let mut preferences = read_document(&self.path)?;
         check_no_legacy_credentials(&preferences)?;
         certificate.validate().map_err(anyhow::Error::msg)?;
+        certificate.files = certificate.files.absolute()?;
         certificate.check().map_err(anyhow::Error::msg)?;
 
         certificate.id = Uuid::new_v4().to_string();
