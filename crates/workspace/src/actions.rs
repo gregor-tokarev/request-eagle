@@ -12,6 +12,7 @@ actions!(
         OpenGeneralSettings,
         SaveRequest,
         CopyAsCurl,
+        CopyAsGrpcurl,
         NewTab,
         NewGrpcTab,
         NewWebSocketTab,
@@ -84,6 +85,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("the copy as cURL action should register");
+
+    keybindings_service::register(
+        CopyAsGrpcurl,
+        "Copy as grpcurl",
+        "Copy the gRPC request in the active tab as a grpcurl command.",
+        "Requests",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("the copy as grpcurl action should register");
 
     register_tab_action(
         NewTab,
