@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 base64 = "0.22"
+brotli-decompressor = "5"
 bytes = "1"
 # RFC 6265 storage and matching for the cookie jar.
 cookie_store = { version = "0.22.1", default-features = false, features = ["serde_json", "preserve_order"] }
@@ -42,8 +43,10 @@ tower = { version = "0.5", features = ["util"] }
 # WebSocket framing over the connection upgraded by the HTTP client.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
+zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
+brotli = "8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 h2 = "0.4"

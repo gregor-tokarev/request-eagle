@@ -10,12 +10,13 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
+use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
 use request_eagle_theme::method_color;
 use tab_ui::{
     CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft,
-    RequestDraft, RequestLocation, SaveCollection, WebSocketDraft,
+    RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -101,6 +102,30 @@ impl Page {
         }
     }
 
+    /// Keep the requests a request tab sends in history.
+    fn record_history(
+        &self,
+        history: Entity<HistoryPanel>,
+        cx: &mut Context<MainView>,
+    ) -> Option<Subscription> {
+        fn record<T: EventEmitter<RequestSent>>(
+            page: &Entity<T>,
+            history: Entity<HistoryPanel>,
+            cx: &mut Context<MainView>,
+        ) -> Subscription {
+            cx.subscribe(page, move |_, _, sent: &RequestSent, cx| {
+                history.update(cx, |history, cx| history.record(sent, cx));
+            })
+        }
+
+        match self {
+            Page::Request(draft) => Some(record(draft, history, cx)),
+            Page::Grpc(draft) => Some(record(draft, history, cx)),
+            Page::WebSocket(draft) => Some(record(draft, history, cx)),
+            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+        }
+    }
+
     fn prepare(&self, window: &mut Window, cx: &mut App) {
         match self {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
@@ -142,6 +167,8 @@ pub(crate) struct PageTab {
     pub(crate) label: Option<&'static str>,
     dirty: bool,
     pub(crate) page: Page,
+    /// The history entry the tab was opened from.
+    history: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -159,6 +186,8 @@ pub(crate) struct MainView {
     environment_picker: Entity<EnvironmentPicker>,
     /// Stores saved requests and collections.
     sidebar: Entity<CollectionPanel>,
+    /// Keeps the requests that tabs send.
+    history: Entity<HistoryPanel>,
     _environment_subscriptions: [Subscription; 2],
 }
 
@@ -166,6 +195,7 @@ impl MainView {
     pub(crate) fn new(
         environments: Entity<Environments>,
         sidebar: Entity<CollectionPanel>,
+        history: Entity<HistoryPanel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -193,6 +223,7 @@ impl MainView {
             environments,
             environment_picker,
             sidebar,
+            history,
             _environment_subscriptions: [picker_subscription, environments_subscription],
         };
 
@@ -208,7 +239,8 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> usize {
         let id = self.next_id;
-        let subscription = page.observe(id, cx);
+        let mut subscriptions = vec![page.observe(id, cx)];
+        subscriptions.extend(page.record_history(self.history.clone(), cx));
 
         self.tabs.push(PageTab {
             id,
@@ -216,7 +248,8 @@ impl MainView {
             label: page.label(cx),
             dirty: page.is_dirty(cx),
             page,
-            _subscriptions: vec![subscription],
+            history: None,
+            _subscriptions: subscriptions,
         });
         self.next_id += 1;
 
@@ -241,13 +274,13 @@ impl MainView {
 
         match request {
             request::Request::Http(request) => {
-                self.open_draft(location.name.clone(), request.clone(), Some(location), cx)
+                self.open_draft(location.name.clone(), request.clone(), Some(location), cx);
             }
             request::Request::Grpc(request) => {
-                self.open_grpc_draft(location.name.clone(), request.clone(), Some(location), cx)
+                self.open_grpc_draft(location.name.clone(), request.clone(), Some(location), cx);
             }
             request::Request::WebSocket(request) => {
-                self.open_websocket(location.name.clone(), request.clone(), Some(location), cx)
+                self.open_websocket(location.name.clone(), request.clone(), Some(location), cx);
             }
         }
     }
@@ -376,13 +409,13 @@ impl MainView {
         request: request::WebSocketRequest,
         location: Option<RequestLocation>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let draft =
             cx.new(|cx| WebSocketDraft::new(request, location, sessions, Some(environments), cx));
 
-        self.open_tab(title, Page::WebSocket(draft), cx);
+        self.open_tab(title, Page::WebSocket(draft), cx)
     }
 
     fn open_draft(
@@ -391,13 +424,13 @@ impl MainView {
         request: request::HttpRequest,
         location: Option<RequestLocation>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let draft =
             cx.new(|cx| RequestDraft::new(request, location, sessions, Some(environments), cx));
 
-        self.open_tab(title, Page::Request(draft), cx);
+        self.open_tab(title, Page::Request(draft), cx)
     }
 
     pub(crate) fn new_grpc_tab(&mut self, cx: &mut Context<Self>) {
@@ -411,13 +444,50 @@ impl MainView {
         request: request::GrpcRequest,
         location: Option<RequestLocation>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let draft =
             cx.new(|cx| GrpcDraft::new(request, location, sessions, Some(environments), cx));
 
-        self.open_tab(title, Page::Grpc(draft), cx);
+        self.open_tab(title, Page::Grpc(draft), cx)
+    }
+
+    /// Show a request from history as a new unsaved tab, with the response
+    /// it received. Its tab is reused while it is open.
+    pub(crate) fn open_history(
+        &mut self,
+        entry: &request_history::Entry,
+        record: request_history::Record,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.history.as_ref() == Some(&entry.id))
+        {
+            self.select_tab(index, cx);
+            return;
+        }
+
+        let title: SharedString = match short_address(&entry.address) {
+            "" => format!("Untitled {}", self.next_id).into(),
+            address => address.to_owned().into(),
+        };
+        let index = match record.request {
+            request::Request::Http(request) => self.open_draft(title, request, None, cx),
+            request::Request::Grpc(request) => self.open_grpc_draft(title, request, None, cx),
+            request::Request::WebSocket(request) => self.open_websocket(title, request, None, cx),
+        };
+
+        if let Page::Request(draft) = &self.tabs[index].page {
+            draft.update(cx, |draft, cx| {
+                draft.show_recorded(record.response, record.error, window, cx)
+            });
+        }
+
+        self.tabs[index].history = Some(entry.id.clone());
     }
 
     fn environment_tab(&self, name: &str, cx: &App) -> Option<(usize, Entity<EnvironmentEditor>)> {

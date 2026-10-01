@@ -309,7 +309,8 @@ order: 2000
     );
 
     let find = http(&pets[1]);
-    assert_eq!(find.path, "{{base_url}}/pets/7?expand=owner");
+    assert_eq!(find.path, "{{base_url}}/pets/:id?expand=owner");
+    assert_eq!(find.path_variables, [("id".to_owned(), "7".to_owned())]);
     assert_eq!(
         find.headers,
         [("Accept".to_owned(), "application/json".to_owned())]

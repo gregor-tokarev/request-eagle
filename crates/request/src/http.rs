@@ -177,6 +177,9 @@ impl HttpExecutor {
         }
 
         let prepared = Instant::now();
+        if let Some(events) = &events {
+            events.dispatch.start();
+        }
         let (response, url) = crate::redirects::send(
             client.as_ref(),
             request,
@@ -188,13 +191,16 @@ impl HttpExecutor {
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         // HEAD and statuses without a body may describe an encoded representation
-        // in their headers, but there are no bytes to pass to a gzip decoder.
+        // in their headers, but there are no bytes to pass to a decoder.
         // A 206 body contains a range of the encoded representation, which need
-        // not be a complete gzip stream. Keep those bytes and headers intact.
+        // not be a complete encoded stream. Keep those bytes and headers intact.
         let has_body = !is_head && !matches!(parts.status.as_u16(), 204 | 205 | 206 | 304);
-        let event_stream = events
-            .filter(|_| has_body)
-            .and_then(|events| Some((events, event_stream::decoder(&parts.headers)?)));
+        let event_stream = events.filter(|_| has_body).and_then(|events| {
+            Some((
+                events,
+                event_stream::decoder(&parts.headers, self.max_response_bytes)?,
+            ))
+        });
 
         let (body, encoded_response_body_bytes) = match event_stream {
             Some((events, decoder)) => {

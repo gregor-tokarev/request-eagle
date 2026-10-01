@@ -2,11 +2,20 @@ use std::time::Duration;
 
 use request::{Execution, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
-use super::ResponseContent;
+use super::{ResponseContent, body::BodyMode};
 
 fn response(body: &[u8], content_type: &str) -> ResponseContent {
+    with_headers(body, &[("content-type", content_type)])
+}
+
+fn with_headers(body: &[u8], pairs: &[(&str, &str)]) -> ResponseContent {
     let mut headers = HeaderMap::new();
-    headers.insert("content-type", content_type.parse().unwrap());
+    for (name, value) in pairs {
+        headers.append(
+            name.parse::<request::HeaderName>().unwrap(),
+            value.parse().unwrap(),
+        );
+    }
 
     ResponseContent::new(Execution {
         scripts: Vec::new(),
@@ -55,4 +64,297 @@ fn response_size_limits_lock_raw_for_long_lines_and_pretty_expansion() {
     assert!(!response(&vec![b'a'; 32 * 1024], "text/plain").raw_only);
     let at_limit = "1234567\n".repeat(32 * 1024);
     assert!(!response(at_limit.as_bytes(), "text/plain").raw_only);
+}
+
+/// A 24-bit bitmap with every pixel grey.
+fn bmp(width: u32, height: u32) -> Vec<u8> {
+    let row = (width * 3).div_ceil(4) * 4;
+    let size = 54 + row * height;
+    let mut bmp = b"BM".to_vec();
+    bmp.extend(size.to_le_bytes());
+    bmp.extend([0; 4]);
+    bmp.extend(54u32.to_le_bytes());
+    bmp.extend(40u32.to_le_bytes());
+    bmp.extend(width.to_le_bytes());
+    bmp.extend(height.to_le_bytes());
+    bmp.extend(1u16.to_le_bytes());
+    bmp.extend(24u16.to_le_bytes());
+    bmp.extend([0; 4]);
+    bmp.extend((row * height).to_le_bytes());
+    bmp.extend([0; 16]);
+    bmp.resize(size as usize, 0x80);
+    bmp
+}
+
+/// A document of blank pages, each 200 by 100 points.
+fn pdf(pages: usize) -> Vec<u8> {
+    let kids: Vec<_> = (0..pages).map(|page| format!("{} 0 R", page + 3)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            kids.join(" ")
+        ),
+    ];
+    objects.extend(
+        (0..pages).map(|_| "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>".to_owned()),
+    );
+
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
+    for offset in offsets {
+        pdf.extend(format!("{offset:010} 00000 n \n").bytes());
+    }
+    pdf.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .bytes(),
+    );
+    pdf
+}
+
+#[test]
+fn bodies_are_recognized_by_media_type_and_signature() {
+    use BodyMode::*;
+
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+    let zip = b"PK\x03\x04\x14\0\0\0\x08\0\xff\xfe";
+    let cases: [(ResponseContent, &str, &[BodyMode], BodyMode); 13] = [
+        (
+            response(b"{\"a\":1}", "application/json"),
+            "JSON",
+            &[Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"<!doctype html><p>Hi</p>", "text/html"),
+            "HTML",
+            &[Preview, Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"<!DOCTYPE html><p>Hi</p>", "text/plain"),
+            "HTML",
+            &[Preview, Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"<a><b>1</b></a>", "application/soap+xml"),
+            "XML",
+            &[Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"let a = 1;", "text/javascript"),
+            "JavaScript",
+            &[Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"a { color: red }", "text/css"),
+            "CSS",
+            &[Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"a: 1", "application/yaml"),
+            "YAML",
+            &[Pretty, Raw, Hex],
+            Pretty,
+        ),
+        (
+            response(b"caf\xe9", "text/plain; charset=iso-8859-1"),
+            "Text",
+            &[Raw, Hex],
+            Raw,
+        ),
+        (
+            response(png, "application/octet-stream"),
+            "PNG",
+            &[Preview, Hex],
+            Preview,
+        ),
+        (
+            response(
+                b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+                "image/svg+xml",
+            ),
+            "SVG",
+            &[Preview, Pretty, Raw, Hex],
+            Preview,
+        ),
+        (
+            response(&pdf(1), "application/pdf"),
+            "PDF",
+            &[Preview, Hex],
+            Preview,
+        ),
+        (
+            response(
+                zip,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            "Binary",
+            &[Hex],
+            Hex,
+        ),
+        (with_headers(&[0, 1, 2, 255], &[]), "Binary", &[Hex], Hex),
+    ];
+
+    for (content, label, modes, default) in cases {
+        assert_eq!(content.label(), label);
+        assert_eq!(content.modes(), modes, "{label}");
+        assert_eq!(content.default_mode(), default, "{label}");
+        assert_eq!(content.binary, content.raw.is_empty(), "{label}");
+    }
+
+    // Undeclared text stays text, even when it is cut inside a character.
+    let text = "é".repeat(5_000);
+    assert!(!with_headers(text.as_bytes(), &[]).binary);
+    assert_eq!(response(b"caf\xe9", "text/plain").raw, "caf\u{fffd}");
+    // A named charset decodes the text.
+    assert_eq!(
+        response(b"caf\xe9", "text/plain; charset=\"ISO-8859-1\"").raw,
+        "café"
+    );
+    assert_eq!(
+        response(
+            b"\xcf\xf0\xe8\xe2\xe5\xf2",
+            "text/html;charset=windows-1251"
+        )
+        .raw,
+        "Привет"
+    );
+    assert_eq!(
+        response(b"<a><b x=\"1\">text</b><c/></a>", "text/xml")
+            .pretty
+            .as_deref(),
+        Some("<a>\n  <b x=\"1\">text</b>\n  <c/>\n</a>")
+    );
+    // Indenting keeps the whitespace of text, and leaves XML whose
+    // whitespace may matter as it was received.
+    for (xml, pretty) in [
+        ("<r>\n <v>  a  </v>\n</r>", "<r>\n  <v>  a  </v>\n</r>"),
+        (
+            "<r><v>  a  </v><w/></r>",
+            "<r>\n  <v>  a  </v>\n  <w/>\n</r>",
+        ),
+        ("<p>Hello <b>world</b> !</p>", "<p>Hello <b>world</b> !</p>"),
+        (
+            "<r xml:space=\"preserve\">  a  </r>",
+            "<r xml:space=\"preserve\">  a  </r>",
+        ),
+        ("<a>x &amp; y</a>", "<a>x &amp; y</a>"),
+        // Malformed XML is still highlighted as it was received.
+        ("<a><b></a>", "<a><b></a>"),
+    ] {
+        assert_eq!(
+            response(xml.as_bytes(), "application/xml")
+                .pretty
+                .as_deref(),
+            Some(pretty)
+        );
+    }
+
+    // Rendering a large page would stall the view.
+    let page = format!("<!doctype html>{}", "<p>paragraph</p>".repeat(40_000));
+    assert!(
+        !response(page.as_bytes(), "text/html")
+            .modes()
+            .contains(&BodyMode::Preview)
+    );
+}
+
+#[test]
+fn saved_bodies_are_named_by_the_server_url_or_kind() {
+    let named = |headers: &[(&str, &str)], url: &str| {
+        with_headers(b"{}", headers).named_after(url).file_name()
+    };
+    let json = [("content-type", "application/json")];
+
+    assert_eq!(
+        named(
+            &[(
+                "content-disposition",
+                "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf; filename=\"resume.pdf\""
+            )],
+            "https://example.com/download",
+        ),
+        "résumé.pdf"
+    );
+    assert_eq!(
+        named(
+            &[(
+                "content-disposition",
+                "attachment; filename=\"../../report 1.csv\""
+            )],
+            "https://example.com/download",
+        ),
+        "report 1.csv"
+    );
+    assert_eq!(
+        named(
+            &[(
+                "content-disposition",
+                "attachment; filename=\"report;Q1 \\\"final\\\".csv\"; size=10"
+            )],
+            "https://example.com/download",
+        ),
+        "report;Q1 \"final\".csv"
+    );
+    assert_eq!(
+        named(&json, "https://example.com/files/data?page=2"),
+        "data.json"
+    );
+    assert_eq!(named(&json, "{{base}}/users/{{id}}"), "response.json");
+    assert_eq!(named(&json, "https://example.com/"), "response.json");
+    assert_eq!(named(&json, "https://example.com/a%20b.txt"), "a b.txt");
+    assert_eq!(
+        response(&bmp(1, 1), "image/bmp").file_name(),
+        "response.bmp"
+    );
+    assert_eq!(with_headers(&[0, 1], &[]).file_name(), "response.bin");
+}
+
+#[test]
+fn previewed_pages_load_no_images() {
+    // Images, scripts and styles go; text and attributes stay as received,
+    // escaped, with a zero-width space after a `<` that could start a tag.
+    assert_eq!(
+        super::html::without_images(
+            "<!doctype html><p>a<IMG src='http://x/t.png'>b</p><image src=y>\
+             <svg><image href=z /></svg><!-- <img src=c> --><script>x</script>\
+             <a href=\"https://example.test/?q=&lt;img&gt;\">Open</a>\
+             <textarea><img src=\"kept\"></textarea><pre>a < b &amp;</pre><br>",
+        ),
+        "<html><head></head><body><p>ab</p><svg></svg>\
+         <a href=\"https://example.test/?q=&lt;img&gt;\">Open</a>\
+         <textarea>&lt;\u{200b}img src=\"kept\"&gt;</textarea><pre>a &lt; b &amp;</pre><br>\
+         </body></html>"
+    );
+
+    // Markup that a later parse, in a different context, could read as an
+    // image never appears as markup.
+    for html in [
+        "<form><math><mtext></form><form><mglyph><style></math><img src=https://x/>",
+        "<svg></p><style><a id=\"</style><img src=https://x/>\">",
+        "<math><mtext><table><mglyph><style><img src=https://x/>",
+    ] {
+        let page = super::html::without_images(html).to_ascii_lowercase();
+        assert!(!page.contains("<img") && !page.contains("<image"), "{page}");
+    }
+
+    // GPUI Kit writes `pre` text back unescaped before parsing it again.
+    assert!(
+        super::html::without_images("<pre>&lt;img src=https://x/&gt;</pre>")
+            .contains("<pre>&lt;\u{200b}img src=https://x/&gt;</pre>")
+    );
 }

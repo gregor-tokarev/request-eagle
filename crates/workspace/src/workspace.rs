@@ -5,6 +5,7 @@ use crate::{
     bottom_panel::BottomPanel,
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
+    history_panel::{HistoryPanel, HistoryPanelEvent},
     main_view::MainView,
     top_panel::TopPanel,
 };
@@ -19,6 +20,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request_history::History;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use tab_ui::{Environments, RequestLocation};
 use updater::Updater;
@@ -27,16 +29,20 @@ use updater::Updater;
 pub(crate) enum SidebarSection {
     Collections,
     Environments,
+    History,
 }
 
 pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
     pub(crate) sidebar: Entity<CollectionPanel>,
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
+    history: Entity<HistoryPanel>,
     collections_open: bool,
     environments_open: bool,
+    history_open: bool,
     pub(crate) collections_header: FocusHandle,
     environments_header: FocusHandle,
+    history_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -53,6 +59,7 @@ pub(crate) struct Workspace {
 
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
+    _history_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
@@ -60,6 +67,7 @@ impl Workspace {
     pub(crate) fn new(
         collections: CollectionRegistry,
         environments: GlobalEnvironments,
+        history: History,
         updater: Entity<Updater>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -166,17 +174,35 @@ impl Workspace {
             },
         );
 
-        let main_view = cx.new(|cx| MainView::new(environments, sidebar.clone(), window, cx));
+        let history = cx.new(|cx| HistoryPanel::new(history, window, cx));
+        let history_subscription = cx.subscribe_in(
+            &history,
+            window,
+            |this, _, event: &HistoryPanelEvent, window, cx| match event {
+                HistoryPanelEvent::Open { entry, record } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_history(entry, record.clone(), window, cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+            },
+        );
+
+        let main_view =
+            cx.new(|cx| MainView::new(environments, sidebar.clone(), history.clone(), window, cx));
         main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
 
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
+            history,
             collections_open: true,
             environments_open: true,
+            history_open: true,
             collections_header: cx.focus_handle(),
             environments_header: cx.focus_handle(),
+            history_header: cx.focus_handle(),
             main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -188,6 +214,7 @@ impl Workspace {
             command_palette: None,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
+            _history_subscription: history_subscription,
             _settings_subscription: None,
         }
     }
@@ -306,6 +333,7 @@ impl Workspace {
         match section {
             SidebarSection::Collections => self.collections_open = !self.collections_open,
             SidebarSection::Environments => self.environments_open = !self.environments_open,
+            SidebarSection::History => self.history_open = !self.history_open,
         }
 
         self.release_section_focus(section, window, cx);
@@ -328,6 +356,11 @@ impl Workspace {
                     .focus_handle(cx)
                     .contains_focused(window, cx),
                 &self.environments_header,
+            ),
+            SidebarSection::History => (
+                self.history_open,
+                self.history.read(cx).contains_focus(window, cx),
+                &self.history_header,
             ),
         };
 
@@ -362,11 +395,21 @@ impl Workspace {
             .update(cx, |view, cx| view.create_environment(window, cx));
     }
 
+    fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The confirmation shows in the section, so it must be visible.
+        self.history_open = true;
+        cx.notify();
+
+        self.history
+            .update(cx, |history, cx| history.request_clear(window, cx));
+    }
+
     /// How far a section is open, from 0 when folded to 1 when open.
     fn section_progress(&self, section: SidebarSection, window: &mut Window, cx: &mut App) -> f32 {
         let (id, open) = match section {
             SidebarSection::Collections => ("collections-section", self.collections_open),
             SidebarSection::Environments => ("environments-section", self.environments_open),
+            SidebarSection::History => ("history-section", self.history_open),
         };
 
         motion::transition(
@@ -400,6 +443,12 @@ impl Workspace {
                 "Environments",
                 self.environments_open,
                 &self.environments_header,
+            ),
+            SidebarSection::History => (
+                "history-section",
+                "History",
+                self.history_open,
+                &self.history_header,
             ),
         };
         let focus_visible = focus.is_focused(window) && window.last_input_was_keyboard();
@@ -456,13 +505,16 @@ impl Workspace {
     fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+        let history_count = self.history.read(cx).count();
         let collections_progress = self.section_progress(SidebarSection::Collections, window, cx);
         let environments_progress = self.section_progress(SidebarSection::Environments, window, cx);
+        let history_progress = self.section_progress(SidebarSection::History, window, cx);
 
         // A folding section's rows stay on screen, where a click can still
         // focus them.
         self.release_section_focus(SidebarSection::Collections, window, cx);
         self.release_section_focus(SidebarSection::Environments, window, cx);
+        self.release_section_focus(SidebarSection::History, window, cx);
 
         let new_collection = Button::new("new-collection")
             .debug_selector(|| "new-collection".into())
@@ -479,6 +531,15 @@ impl Workspace {
             .icon(IconName::Plus)
             .tooltip("New Environment")
             .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
+        let clear_history = Button::new("clear-history")
+            .debug_selector(|| "clear-history".into())
+            .icon(Icon::default().path("icons/trash.svg"))
+            .tooltip("Clear History")
+            .disabled(history_count == 0)
+            .on_click(cx.listener(|this, _, window, cx| this.clear_history(window, cx)));
+
+        let border = cx.theme().sidebar_border;
+        let divider = move || div().flex_none().mx_2().h(px(1.)).bg(border);
 
         // Open sections share the height, like the sections of an editor sidebar.
         // A folding section gives its share away and clips its rows. An open
@@ -514,13 +575,7 @@ impl Workspace {
                     self.sidebar.clone().into(),
                 ))
             })
-            .child(
-                div()
-                    .flex_none()
-                    .mx_2()
-                    .h(px(1.))
-                    .bg(cx.theme().sidebar_border),
-            )
+            .child(divider())
             .child(self.section_header(
                 SidebarSection::Environments,
                 environments_progress,
@@ -534,6 +589,18 @@ impl Workspace {
                     environments_progress,
                     self.environment_panel.clone().into(),
                 ))
+            })
+            .child(divider())
+            .child(self.section_header(
+                SidebarSection::History,
+                history_progress,
+                history_count,
+                vec![clear_history],
+                window,
+                cx,
+            ))
+            .when(history_progress > 0.0, |this| {
+                this.child(section_body(history_progress, self.history.clone().into()))
             })
     }
 
@@ -779,6 +846,7 @@ pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
     cookies: Result<request::CookieJar, String>,
+    history: History,
     updater: Entity<Updater>,
     window: &mut Window,
     cx: &mut App,
@@ -786,7 +854,8 @@ pub fn init(
     crate::actions::init(cx);
     tab_ui::Cookies::init(cookies, cx);
 
-    let workspace = cx.new(|cx| Workspace::new(collections, environments, updater, window, cx));
+    let workspace =
+        cx.new(|cx| Workspace::new(collections, environments, history, updater, window, cx));
     on_toggle_sidebar(&workspace, cx);
     on_open_settings(&workspace, window.window_handle(), cx);
     on_open_cookies(&workspace, window.window_handle(), cx);

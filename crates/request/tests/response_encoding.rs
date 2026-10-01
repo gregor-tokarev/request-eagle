@@ -1,6 +1,9 @@
 use std::{io::Write, time::Duration};
 
-use flate2::{Compression, write::GzEncoder};
+use flate2::{
+    Compression,
+    write::{DeflateEncoder, GzEncoder, ZlibEncoder},
+};
 use request::{
     Execution, ExecutionError, HttpRequest, HttpVersion, Method, ProxyMode, RequestExecutor,
     RequestPreferences, RequestVariables, Response,
@@ -20,6 +23,39 @@ fn gzip(body: &[u8]) -> Vec<u8> {
     encoder.write_all(body).unwrap();
     encoder.finish().unwrap()
 }
+
+fn zlib(body: &[u8]) -> Vec<u8> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(body).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn raw_deflate(body: &[u8]) -> Vec<u8> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(body).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn brotli(body: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::new();
+    brotli::BrotliCompress(&mut &body[..], &mut encoded, &Default::default()).unwrap();
+    encoded
+}
+
+fn zstd(body: &[u8]) -> Vec<u8> {
+    zstd::encode_all(body, 3).unwrap()
+}
+
+type Encode = fn(&[u8]) -> Vec<u8>;
+
+/// Each supported coding with an encoder for it.
+const CODINGS: [(&str, Encode); 5] = [
+    ("gzip", gzip),
+    ("deflate", zlib),
+    ("deflate", raw_deflate),
+    ("br", brotli),
+    ("zstd", zstd),
+];
 
 async fn execute_response(
     status: u16,
@@ -91,8 +127,110 @@ fn decodes_gzip_json_and_preserves_received_headers_and_download_size() {
         );
         assert!(
             head.to_ascii_lowercase()
-                .contains("accept-encoding: gzip\r\n")
+                .contains("accept-encoding: gzip, deflate, br, zstd\r\n")
         );
+    });
+}
+
+#[test]
+fn decodes_deflate_brotli_and_zstd_like_gzip() {
+    smol::block_on(async {
+        let json = br#"{"message":"readable JSON"}"#;
+
+        for (encoding, encode) in CODINGS {
+            let encoded = encode(json);
+            let (result, _) = execute_response(200, encoding, &encoded, Method::Get, 1).await;
+            let Response::Http(response) = result.unwrap().response;
+
+            assert_eq!(response.body, json, "{encoding}");
+            assert_eq!(response.headers["content-encoding"], encoding);
+            assert_eq!(
+                response.metrics.encoded_response_body_bytes,
+                Some(encoded.len()),
+                "{encoding}"
+            );
+        }
+    });
+}
+
+#[test]
+fn decodes_raw_deflate_that_starts_like_a_zlib_header() {
+    smol::block_on(async {
+        // A raw deflate stream of "A" whose first two bytes are a valid zlib header.
+        let payload = [
+            0x78, 0x01, 0x00, 0xfe, 0xff, 0x41, 0x01, 0x00, 0x00, 0xff, 0xff,
+        ];
+        let (result, _) = execute_response(200, "deflate", &payload, Method::Get, 1).await;
+        let Response::Http(response) = result.unwrap().response;
+
+        assert_eq!(response.body, b"A");
+    });
+}
+
+#[test]
+fn decodes_stacked_codings_in_reverse_order() {
+    smol::block_on(async {
+        let json = b"{\"ok\":true}";
+
+        for (encoding, payload) in [
+            ("deflate, br", brotli(&zlib(json))),
+            ("br, zstd", zstd(&brotli(json))),
+            ("zstd\r\nContent-Encoding: x-gzip", gzip(&zstd(json))),
+        ] {
+            let (result, _) = execute_response(200, encoding, &payload, Method::Get, 1).await;
+            let Response::Http(response) = result.unwrap().response;
+            assert_eq!(response.body, json, "{encoding}");
+        }
+    });
+}
+
+#[test]
+fn rejects_truncated_and_empty_bodies_in_every_coding() {
+    smol::block_on(async {
+        let body = "readable JSON ".repeat(64);
+
+        for (encoding, encode) in CODINGS {
+            let mut truncated = encode(body.as_bytes());
+            truncated.truncate(truncated.len() / 2);
+
+            for payload in [truncated, Vec::new()] {
+                let (result, _) = execute_response(200, encoding, &payload, Method::Get, 1).await;
+                assert!(
+                    matches!(result, Err(ExecutionError::DecodeBody(_))),
+                    "{encoding}: {result:?}"
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn limits_the_decoded_size_in_every_coding() {
+    smol::block_on(async {
+        let limit = 1_048_576;
+
+        for (encoding, encode) in CODINGS {
+            for size in [limit, limit + 1] {
+                let encoded = encode(&vec![b'x'; size]);
+                assert!(encoded.len() < limit);
+                let (result, _) = execute_response(200, encoding, &encoded, Method::Get, 1).await;
+
+                if size == limit {
+                    let Response::Http(response) = result.unwrap().response;
+                    assert_eq!(response.body.len(), limit, "{encoding}");
+                } else {
+                    assert!(
+                        matches!(
+                            result,
+                            Err(ExecutionError::ResponseTooLarge {
+                                limit_bytes: 1_048_576
+                            })
+                        ),
+                        "{encoding}: {result:?}"
+                    );
+                }
+            }
+        }
     });
 }
 
@@ -174,7 +312,7 @@ fn decodes_concatenated_members_and_stacked_gzip_encodings() {
 #[test]
 fn leaves_unsupported_encodings_and_unencoded_bytes_unchanged() {
     smol::block_on(async {
-        for encoding in ["identity", "br", "gzip, br"] {
+        for encoding in ["identity", "compress", "gzip, bzip2"] {
             let payload = b"opaque body bytes";
             let (result, _) = execute_response(200, encoding, payload, Method::Get, 1).await;
             let Response::Http(response) = result.unwrap().response;

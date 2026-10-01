@@ -18,7 +18,7 @@ use request::{
 
 use super::draft::ConnectionState;
 use crate::actions::SendRequest;
-use crate::response_view::{ResponseBodyEditor, VirtualBody, exceeds_editor_limit};
+use crate::response_view::{ResponseBodyEditor, VirtualBody, exceeds_editor_limit, hex_dump};
 
 /// A stream can run for hours. Keep the newest messages within both limits.
 pub(super) const MAX_ENTRIES: usize = 50_000;
@@ -830,33 +830,6 @@ fn pretty_json(text: &str) -> Option<String> {
 }
 
 /// Offsets, hexadecimal bytes and printable ASCII, 16 bytes per line.
-fn hex_dump(bytes: &[u8]) -> String {
-    let mut dump = String::with_capacity(bytes.len() * 4 + bytes.len() / 16 * 12);
-
-    for (line, chunk) in bytes.chunks(16).enumerate() {
-        let _ = write!(dump, "{:08x}  ", line * 16);
-        for index in 0..16 {
-            match chunk.get(index) {
-                Some(byte) => {
-                    let _ = write!(dump, "{byte:02x} ");
-                }
-                None => dump.push_str("   "),
-            }
-        }
-        dump.push(' ');
-        dump.extend(chunk.iter().map(|&byte| {
-            if byte.is_ascii_graphic() || byte == b' ' {
-                byte as char
-            } else {
-                '.'
-            }
-        }));
-        dump.push('\n');
-    }
-
-    dump
-}
-
 fn handshake_details(handshake: &WebSocketHandshake) -> String {
     let mut details = format!("GET {}\n\nRequest headers\n", handshake.url);
 

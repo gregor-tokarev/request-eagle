@@ -87,6 +87,7 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
             cookies_path.display()
         )
     });
+    let history = request_history::History::new(home.join(".request-eagle/history"));
 
     let window_options = crate::window_options::use_window_options(cx);
     cx.open_window(window_options, move |window, cx| {
@@ -96,7 +97,15 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
             })
             .detach();
 
-        let workspace = workspace::init(collections, environments, cookies, updater, window, cx);
+        let workspace = workspace::init(
+            collections,
+            environments,
+            cookies,
+            history,
+            updater,
+            window,
+            cx,
+        );
         let view = cx.new(|_| ApplicationView { workspace });
 
         cx.new(|cx| Root::new(view, window, cx))

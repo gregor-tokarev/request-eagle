@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
+use url::form_urlencoded;
 
 use crate::{GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
@@ -264,7 +265,13 @@ impl HttpRequest {
         body_changed: bool,
     ) -> Result<Self, VariableError> {
         let mut request = self;
-        request.path = resolve_url(&request.path, resolver)?;
+        // Fill path variables only where the resolved URL is sent, so a value
+        // after a fragment is not resolved either.
+        let path = resolve_url(&request.path, resolver)?;
+        request.path =
+            crate::request_url::fill_path_variables(&path, &request.path_variables, |value| {
+                resolver.resolve(value)
+            })?;
 
         for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = resolver.resolve(key)?;
@@ -282,26 +289,54 @@ impl HttpRequest {
     }
 }
 
+/// Resolve a URL's `{{variables}}`. In the query, a variable's value is
+/// encoded so it stays within its key or value; the text around it is sent as
+/// written. A fragment is not sent, including one a variable introduces: the
+/// rest of the path after that variable is dropped, its query is not.
 fn resolve_url(text: &str, resolver: &mut VariableResolver<'_>) -> Result<String, VariableError> {
     let mut remaining = text.split('#').next().unwrap_or_default();
     let mut resolved = String::new();
+    let mut in_query = false;
 
-    while let Some(start) = remaining.find("{{") {
-        resolved.push_str(&resolver.resolve(&remaining[..start])?);
-        let end = remaining[start + 2..]
-            .find("}}")
-            .map(|end| start + 2 + end + 2)
-            .ok_or(VariableError::Unclosed)?;
-        let value = resolver.resolve(&remaining[start..end])?;
-        // A whole-URL variable can introduce a fragment too. No later reference
-        // in this URL is transmitted, so do not resolve or validate it.
-        if let Some((before_fragment, _)) = value.split_once('#') {
-            resolved.push_str(before_fragment);
+    loop {
+        let start = remaining.find("{{").unwrap_or(remaining.len());
+        let (literal, rest) = remaining.split_at(start);
+
+        match literal.split_once('?') {
+            Some((path, query)) if !in_query => {
+                resolved.push_str(&resolver.resolve(path)?);
+                // A whole-URL variable may have started the query already.
+                resolved.push(if resolved.contains('?') { '&' } else { '?' });
+                resolved.push_str(&resolver.resolve(query)?);
+                in_query = true;
+            }
+            _ => resolved.push_str(&resolver.resolve(literal)?),
+        }
+
+        if rest.is_empty() {
             return Ok(resolved);
         }
-        resolved.push_str(&value);
-        remaining = &remaining[end..];
+
+        let end = rest[2..]
+            .find("}}")
+            .map(|end| end + 4)
+            .ok_or(VariableError::Unclosed)?;
+        let reference = &rest[..end];
+        let value = resolver.resolve(reference)?;
+        remaining = &rest[end..];
+
+        if in_query && !reference.starts_with("{{!") {
+            resolved.extend(form_urlencoded::byte_serialize(value.as_bytes()));
+        } else if let Some((before_fragment, _)) = value.split_once('#') {
+            resolved.push_str(before_fragment);
+
+            // Unsent references are not resolved or validated.
+            match remaining.find('?') {
+                Some(query) if !in_query => remaining = &remaining[query..],
+                _ => return Ok(resolved),
+            }
+        } else {
+            resolved.push_str(&value);
+        }
     }
-    resolved.push_str(&resolver.resolve(remaining)?);
-    Ok(resolved)
 }
