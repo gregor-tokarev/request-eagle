@@ -123,21 +123,40 @@ pm.request.headers.upsert({key: "X-Signature", value: CryptoJS.enc.Base64.string
 
 Other names throw an error.
 
-## Read cookies
+## Read and change cookies
 
 ```js
 pm.environment.set("session", pm.cookies.get("session"));
 ```
 
-Request Eagle has no cookie jar. `pm.cookies` lists the cookies of the
-current exchange: before sending, those in the request's `Cookie` header;
-after the response, those the request sent with the response's `Set-Cookie`
-headers applied. `pm.response.cookies` lists only the cookies the response
-set, with their attributes. Both have `get(name)`, `has(name)`, `one(name)`,
-`all()`, `count()` and `toObject()`.
+`pm.cookies` lists the cookies of the current exchange: those the request
+sends, from its `Cookie` header and the cookie jar, and after the response,
+with the response's `Set-Cookie` headers applied. `pm.response.cookies` lists
+only the cookies the response set, with their attributes. Both have
+`get(name)`, `has(name)`, `one(name)`, `all()`, `count()` and `toObject()`.
 
-`pm.cookies.jar()` exists for compatibility, but each of its methods calls
-back with an error, since there is no jar to read or change.
+`pm.cookies.jar()` reads and changes the cookie jar. As in Postman, its
+methods report through a callback:
+
+```js
+const jar = pm.cookies.jar();
+jar.set("https://api.example.com", "session", "abc", error => {
+    if (error) throw error;
+});
+jar.get("https://api.example.com", "session", (error, value) => console.log(value));
+```
+
+| Method | Behavior |
+| --- | --- |
+| `get(url, name, callback)` | The value of the cookie named `name` that a request to `url` sends. |
+| `getAll(url, callback)` | Every cookie a request to `url` sends, with its attributes. |
+| `set(url, name, value, callback)` | Keep a cookie as if a response from `url` set it. Instead of `name` and `value`, an object can also give `path`, `domain`, `expires`, `maxAge`, `secure`, `httpOnly` and `sameSite`. |
+| `unset(url, name, callback)` | Delete the cookies named `name` that a request to `url` sends. |
+| `clear(url, callback)` | Delete every cookie a request to `url` sends. |
+
+Changes made before sending apply to the request. When the cookie jar is
+off in Settings, `pm.cookies` lists only the cookies of the exchange and each
+jar method reports an error; without a callback, the error is logged.
 
 ## Validate response structure
 

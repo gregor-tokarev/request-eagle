@@ -175,13 +175,15 @@ pub(super) fn run<R: DeserializeOwned>(
                 let send = network.binding(cx.clone(), executor)?;
                 let utilities = super::utilities::bindings(cx.clone())?;
                 let library = super::libraries::binding(cx.clone())?;
+                let cookies =
+                    super::cookies::binding(cx.clone(), executor.http.cookie_jar().cloned())?;
                 let protocol: Function = cx.eval(if phase.is_grpc() {
                     include_str!("grpc.js")
                 } else {
                     include_str!("http.js")
                 })?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
-                let mut args = Args::new(cx.clone(), 10);
+                let mut args = Args::new(cx.clone(), 11);
                 args.push_arg(input.to_string())?;
                 args.push_arg(log)?;
                 args.push_arg(test)?;
@@ -191,6 +193,7 @@ pub(super) fn run<R: DeserializeOwned>(
                 args.push_arg(send)?;
                 args.push_arg(utilities)?;
                 args.push_arg(library)?;
+                args.push_arg(cookies)?;
                 args.push_arg(protocol)?;
                 let state: Object = setup.call_arg(args)?;
                 let export: Function = state.get("export")?;

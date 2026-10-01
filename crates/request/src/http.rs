@@ -44,6 +44,11 @@ impl HttpExecutor {
         self
     }
 
+    /// The jar requests use, unless the preferences turn it off.
+    pub(crate) fn cookie_jar(&self) -> Option<&CookieJar> {
+        self.cookies.as_ref()
+    }
+
     pub(crate) fn new(preferences: &RequestPreferences) -> Result<Self, ExecutionError> {
         let max_response_bytes = match preferences.max_response_size_mb {
             0 => None,

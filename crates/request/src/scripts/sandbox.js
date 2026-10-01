@@ -1,4 +1,4 @@
-(function (source, log, test, expect, dynamic, readBody, send, utilities, library, protocol) {
+(function (source, log, test, expect, dynamic, readBody, send, utilities, library, cookies, protocol) {
     "use strict";
     const input = JSON.parse(source);
     const stringify = JSON.stringify;
@@ -309,7 +309,7 @@
     // The protocol adds pm.request, pm.response and pm.execution, and
     // reports the request changes to send.
     const warn = message => log("warn", message);
-    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip, warn});
+    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip, warn, cookies});
     globalThis.pm = pm;
     globalThis.console = Object.fromEntries(["log", "info", "warn", "error", "debug"].map(level => [level, (...values) => log(level, values.map(format).join(" "))]));
     globalThis.require = require;

@@ -266,6 +266,72 @@ fn script_requests_share_the_jar_with_the_request() {
 }
 
 #[test]
+fn scripts_read_and_change_the_jar() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 200 OK\r\nSet-Cookie: session=abc\r\n",
+            "HTTP/1.1 200 OK\r\nSet-Cookie: late=2\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+        let executor = executor(true, &jar);
+        get(&executor, format!("{url}/login"), Vec::new()).await;
+
+        let execution = executor
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/data"),
+                    scripts: RequestScripts {
+                        pre_request: format!(
+                            r#"
+                            const url = "{url}/data";
+                            pm.test("pm.cookies lists the jar", () => pm.expect(pm.cookies.get("session")).to.equal("abc"));
+                            const jar = pm.cookies.jar();
+                            jar.set(url, "added", "1", error => {{ if (error) throw error; }});
+                            jar.set(url, {{name: "scoped", value: "2", path: "/other"}}, error => {{ if (error) throw error; }});
+                            jar.unset(url, "session", error => {{ if (error) throw error; }});
+                            let all;
+                            jar.getAll(url, (error, cookies) => {{ all = cookies; }});
+                            pm.test("getAll", () => pm.expect(all.map(cookie => cookie.name)).to.eql(["added"]));
+                            jar.get(url, "added", (error, value) => pm.test("get", () => pm.expect(value).to.equal("1")));
+                            jar.set("not a url", "x", "1", error => pm.test("invalid URL", () => pm.expect(error).to.be.an("error")));
+                            "#
+                        ),
+                        post_response: r#"
+                            pm.test("pm.cookies after the response", () => {
+                                pm.expect(pm.cookies.toObject()).to.eql({added: "1", late: "2"});
+                                pm.expect(pm.response.cookies.count()).to.equal(1);
+                            });
+                        "#
+                        .into(),
+                    },
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::new(), None),
+            )
+            .await
+            .unwrap();
+        let heads = server.await;
+
+        for report in &execution.scripts {
+            assert_eq!(report.error, None);
+            for test in &report.tests {
+                assert_eq!(test.error, None, "{}", test.name);
+            }
+        }
+        assert_eq!(execution.scripts[0].tests.len(), 4);
+        assert_eq!(cookie_header(&heads[1]), Some("added=1"));
+
+        let names = jar
+            .cookies()
+            .into_iter()
+            .map(|cookie| cookie.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["added", "late", "scoped"]);
+    });
+}
+
+#[test]
 fn saved_cookies_reopen_including_session_cookies() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

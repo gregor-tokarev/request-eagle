@@ -178,35 +178,60 @@ impl CookieJar {
             .lock()
             .unwrap()
             .iter_unexpired()
-            .filter_map(|cookie| {
-                let (domain, host_only) = match &cookie.domain {
-                    CookieDomain::HostOnly(domain) => (domain.clone(), true),
-                    CookieDomain::Suffix(domain) => (domain.clone(), false),
-                    CookieDomain::NotPresent | CookieDomain::Empty => return None,
-                };
-
-                Some(Cookie {
-                    name: cookie.name().to_owned(),
-                    value: cookie.value().to_owned(),
-                    domain,
-                    host_only,
-                    path: String::from(&cookie.path),
-                    // Whole seconds, as the jar's file keeps them.
-                    expires: match cookie.expires {
-                        CookieExpiration::AtUtc(time) => Some(
-                            SystemTime::UNIX_EPOCH
-                                + Duration::from_secs(time.unix_timestamp().max(0) as u64),
-                        ),
-                        CookieExpiration::SessionEnd => None,
-                    },
-                    secure: cookie.secure().unwrap_or(false),
-                    http_only: cookie.http_only().unwrap_or(false),
-                })
-            })
+            .filter_map(listed)
             .collect::<Vec<_>>();
 
         cookies.sort_by(|a, b| (&a.domain, &a.path, &a.name).cmp(&(&b.domain, &b.path, &b.name)));
         cookies
+    }
+
+    /// The cookies a request to `url` sends, in the order it sends them.
+    pub(crate) fn matching(&self, url: &Url) -> Vec<Cookie> {
+        let cookies = self.0.cookies.lock().unwrap();
+        let mut matching = cookies.matches(url);
+        matching.sort_by_key(|cookie| std::cmp::Reverse(cookie.path.len()));
+
+        matching.into_iter().filter_map(listed).collect()
+    }
+
+    /// Keep a cookie a script set, as if a response from `url` had set it.
+    /// An expired cookie deletes the one it names.
+    pub(crate) fn set(&self, url: &Url, set_cookie: &str) -> Result<(), String> {
+        let cookie = RawCookie::parse(set_cookie.to_owned())
+            .map_err(|error| format!("Invalid cookie: {error}"))?;
+        let refused = |error| format!("The cookie cannot be set for {url}: {error}");
+
+        if !allowed(&cookie, url) {
+            return Err(refused(cookie_store::CookieError::DomainMismatch));
+        }
+
+        let cookie = StoredCookie::try_from_raw_cookie(&cookie, url).map_err(refused)?;
+        match self.0.cookies.lock().unwrap().insert(cookie, url) {
+            Ok(_) | Err(cookie_store::CookieError::Expired) => {}
+            Err(error) => return Err(refused(error)),
+        }
+
+        self.changed();
+        Ok(())
+    }
+
+    /// Delete the cookies a request to `url` sends, or only those named `name`.
+    pub(crate) fn unset(&self, url: &Url, name: Option<&str>) {
+        let mut cookies = self.0.cookies.lock().unwrap();
+        let removed = cookies
+            .matches(url)
+            .into_iter()
+            .filter(|cookie| name.is_none_or(|name| cookie.name() == name))
+            .map(key)
+            .collect::<Vec<_>>();
+
+        for (domain, path, name) in &removed {
+            cookies.remove(domain, path, name);
+        }
+
+        if !removed.is_empty() {
+            self.changed();
+        }
     }
 
     /// Whether every cookie has expired or been deleted.
@@ -247,17 +272,7 @@ impl CookieJar {
             .iter()
             .filter_map(|value| std::str::from_utf8(value.as_bytes()).ok())
             .filter_map(|value| RawCookie::parse(value.to_owned()).ok())
-            // Without a public suffix list, at least refuse a cookie for a
-            // whole top-level domain, such as Domain=com, which every site
-            // under it would receive.
-            .filter(|cookie| {
-                cookie.domain().is_none_or(|domain| {
-                    domain.contains('.')
-                        || url
-                            .host_str()
-                            .is_some_and(|host| host.eq_ignore_ascii_case(domain))
-                })
-            })
+            .filter(|cookie| allowed(cookie, url))
             .collect::<Vec<_>>();
 
         if cookies.is_empty() {
@@ -355,6 +370,44 @@ impl CookieJar {
     fn changed(&self) {
         self.0.revision.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+/// Without a public suffix list, at least refuse a cookie for a whole
+/// top-level domain, such as Domain=com, which every site under it would
+/// receive.
+fn allowed(cookie: &RawCookie, url: &Url) -> bool {
+    cookie.domain().is_none_or(|domain| {
+        domain.contains('.')
+            || url
+                .host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case(domain))
+    })
+}
+
+/// A cookie as the jar lists it.
+fn listed(cookie: &StoredCookie) -> Option<Cookie> {
+    let (domain, host_only) = match &cookie.domain {
+        CookieDomain::HostOnly(domain) => (domain.clone(), true),
+        CookieDomain::Suffix(domain) => (domain.clone(), false),
+        CookieDomain::NotPresent | CookieDomain::Empty => return None,
+    };
+
+    Some(Cookie {
+        name: cookie.name().to_owned(),
+        value: cookie.value().to_owned(),
+        domain,
+        host_only,
+        path: String::from(&cookie.path),
+        // Whole seconds, as the jar's file keeps them.
+        expires: match cookie.expires {
+            CookieExpiration::AtUtc(time) => Some(
+                SystemTime::UNIX_EPOCH + Duration::from_secs(time.unix_timestamp().max(0) as u64),
+            ),
+            CookieExpiration::SessionEnd => None,
+        },
+        secure: cookie.secure().unwrap_or(false),
+        http_only: cookie.http_only().unwrap_or(false),
+    })
 }
 
 /// The unexpired cookies saved at `path`. A missing file has none.

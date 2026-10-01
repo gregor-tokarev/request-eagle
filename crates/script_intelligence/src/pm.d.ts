@@ -182,7 +182,7 @@ declare namespace RequestEagle {
     interface Cookie {
         readonly name: string;
         readonly value: string;
-        /** Attributes the response's Set-Cookie header sent. */
+        /** Attributes the response's Set-Cookie header sent, or the cookie jar keeps. */
         readonly domain?: string;
         readonly path?: string;
         readonly expires?: Date;
@@ -191,17 +191,43 @@ declare namespace RequestEagle {
         readonly httpOnly?: boolean;
         readonly secure?: boolean;
         readonly sameSite?: string;
+        /** Whether only the cookie's domain receives it, and not its subdomains. */
+        readonly hostOnly?: boolean;
     }
 
-    type CookieCallback = (error: Error | null, result?: unknown) => unknown;
+    /** A cookie to keep in the jar. */
+    interface CookieInit {
+        name: string;
+        value: string;
+        domain?: string;
+        path?: string;
+        expires?: Date | string;
+        /** Seconds until it expires. */
+        maxAge?: number;
+        secure?: boolean;
+        httpOnly?: boolean;
+        sameSite?: string;
+    }
 
-    /** Request Eagle has no cookie jar. Each method calls back with an error saying so. */
+    type CookieCallback<T = unknown> = (error: Error | null, result?: T) => unknown;
+
+    /**
+     * The cookie jar that requests share. Methods report through the callback;
+     * without one, an error is logged. When the jar is off in Settings, each
+     * method reports an error.
+     */
     interface CookieJar {
-        get(url: string, name: string, callback?: CookieCallback): void;
-        getAll(url: string, callback?: CookieCallback): void;
-        set(url: string, name: string, value: string, callback?: CookieCallback): void;
-        unset(url: string, name: string, callback?: CookieCallback): void;
-        clear(url: string, callback?: CookieCallback): void;
+        /** The value of the cookie named `name` that a request to `url` sends. */
+        get(url: string, name: string, callback?: CookieCallback<string>): void;
+        /** Every cookie a request to `url` sends. */
+        getAll(url: string, callback?: CookieCallback<Cookie[]>): void;
+        /** Keep a cookie as if a response from `url` set it. */
+        set(url: string, name: string, value: string, callback?: CookieCallback<Cookie | null>): void;
+        set(url: string, cookie: CookieInit, callback?: CookieCallback<Cookie | null>): void;
+        /** Delete the cookies named `name` that a request to `url` sends. */
+        unset(url: string, name: string, callback?: CookieCallback<void>): void;
+        /** Delete every cookie a request to `url` sends. */
+        clear(url: string, callback?: CookieCallback<void>): void;
     }
 
     interface CookieList {
@@ -719,7 +745,7 @@ declare namespace RequestEagle {
 
     interface PreRequestAPI extends CommonAPI {
         readonly request: Request;
-        /** Cookies in the request's Cookie header. */
+        /** Cookies the request sends: those in its Cookie header and the cookie jar's for its URL. */
         readonly cookies: ExchangeCookies;
         readonly execution: {
             /** Stop the pre-request script and skip sending the primary request with a visible reason. */
@@ -737,7 +763,7 @@ declare namespace RequestEagle {
     interface PostResponseAPI extends CommonAPI {
         readonly request: Request;
         readonly response: PrimaryResponse;
-        /** Cookies the request sent, replaced or deleted by those the response set. */
+        /** Cookies the request sent, from its Cookie header and the cookie jar, replaced or deleted by those the response set. */
         readonly cookies: ExchangeCookies;
         readonly execution: {
             /** Has no effect: Request Eagle sends one request at a time. */
