@@ -153,6 +153,29 @@ fn postman_requests_with_unsupported_methods_are_reported() {
 }
 
 #[test]
+fn postman_request_settings_keep_redirects_and_certificate_checks() {
+    let import = parse(
+        r#"{
+            "info": {"name": "Settings", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+            "item": [
+                {"name": "Changed", "protocolProfileBehavior": {"followRedirects": false, "strictSSL": false, "disableBodyPruning": true},
+                 "request": {"method": "GET", "url": "https://example.test"}},
+                {"name": "Default", "request": {"method": "GET", "url": "https://example.test"}}
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let (_, changed) = http(&import.collection.items[0]);
+    assert_eq!(changed.settings.follow_redirects, Some(false));
+    assert_eq!(changed.settings.verify_certificates, Some(false));
+    assert_eq!(changed.settings.timeout_ms, None);
+
+    let (_, default) = http(&import.collection.items[1]);
+    assert!(default.settings.is_default());
+}
+
+#[test]
 fn postman_forms_and_basic_auth_are_encoded() {
     let import = parse(COLLECTION).unwrap();
     let (name, login) = http(&import.collection.items[1]);

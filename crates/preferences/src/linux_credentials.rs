@@ -1,12 +1,12 @@
 use anyhow::Result;
 
-use crate::credentials::unavailable;
+use crate::credentials::{Secret, unavailable};
 
-pub(crate) async fn read(id: &str) -> Result<Option<Vec<u8>>> {
+pub(crate) async fn read(secret: Secret, id: &str) -> Result<Option<Vec<u8>>> {
     let result: Result<_> = async {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
-        let items = keyring.search_items(&attributes(id)).await?;
+        let items = keyring.search_items(&attributes(secret, id)).await?;
 
         match items.first() {
             Some(item) => {
@@ -21,12 +21,12 @@ pub(crate) async fn read(id: &str) -> Result<Option<Vec<u8>>> {
     result.map_err(|_| unavailable())
 }
 
-pub(crate) async fn write(id: &str, secret: &[u8]) -> Result<()> {
+pub(crate) async fn write(secret: Secret, id: &str, value: &[u8]) -> Result<()> {
     let result: Result<()> = async {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
         keyring
-            .create_item("Request Eagle proxy", &attributes(id), secret, true)
+            .create_item(label(secret), &attributes(secret, id), value, true)
             .await?;
         Ok(())
     }
@@ -35,11 +35,11 @@ pub(crate) async fn write(id: &str, secret: &[u8]) -> Result<()> {
     result.map_err(|_| unavailable())
 }
 
-pub(crate) async fn delete(id: &str) -> Result<()> {
+pub(crate) async fn delete(secret: Secret, id: &str) -> Result<()> {
     let result: Result<()> = async {
         let keyring = oo7::Keyring::new().await?;
         keyring.unlock().await?;
-        keyring.delete(&attributes(id)).await?;
+        keyring.delete(&attributes(secret, id)).await?;
         Ok(())
     }
     .await;
@@ -47,9 +47,18 @@ pub(crate) async fn delete(id: &str) -> Result<()> {
     result.map_err(|_| unavailable())
 }
 
-fn attributes(id: &str) -> [(&str, &str); 2] {
-    [
-        ("application", "request-eagle"),
-        ("proxy-credentials-id", id),
-    ]
+fn label(secret: Secret) -> &'static str {
+    match secret {
+        Secret::ProxyCredentials => "Request Eagle proxy",
+        Secret::CertificatePassphrase => "Request Eagle certificate passphrase",
+    }
+}
+
+fn attributes(secret: Secret, id: &str) -> [(&str, &str); 2] {
+    let key = match secret {
+        Secret::ProxyCredentials => "proxy-credentials-id",
+        Secret::CertificatePassphrase => "certificate-passphrase-id",
+    };
+
+    [("application", "request-eagle"), (key, id)]
 }

@@ -1,5 +1,6 @@
 mod actions;
 mod appearance;
+mod certificates;
 mod general;
 mod keybindings;
 mod layout;

@@ -84,7 +84,9 @@ fn main() {
                     command @ (Command::SettingsGet {}
                     | Command::SettingsRequest { .. }
                     | Command::SettingsAppearance { .. }
-                    | Command::SettingsProxy { .. }) => {
+                    | Command::SettingsProxy { .. }
+                    | Command::SettingsClientCertificatesAdd { .. }
+                    | Command::SettingsClientCertificatesRemove { .. }) => {
                         settings::dispatch(&preferences, command).await
                     }
                     command => collections::dispatch(&collections, command),

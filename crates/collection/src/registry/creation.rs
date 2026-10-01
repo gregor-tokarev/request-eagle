@@ -66,6 +66,7 @@ impl CollectionRegistry {
                 query: Vec::new(),
                 path_variables: Vec::new(),
                 scripts: Default::default(),
+                settings: Default::default(),
             }),
         )
     }

@@ -32,3 +32,7 @@ security-framework = "3"
 security-framework-sys = "2"
 core-foundation = "0.10"
 smol = "2"
+
+[dev-dependencies]
+p12-keystore = "0.3"
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }

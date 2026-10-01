@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use http_client::{
     AsyncBody, HttpClient, Method, RedirectPolicy, Request, Response, Url,
@@ -11,8 +13,10 @@ use crate::ExecutionError;
 
 const REDIRECT_LIMIT: u32 = 100;
 
+/// Send the request, following redirects when `follow` is set. Each hop is
+/// sent with the client for its URL.
 pub(crate) async fn send(
-    client: &reqwest_client::ReqwestClient,
+    client: impl Fn(&Url) -> Result<Arc<reqwest_client::ReqwestClient>, ExecutionError>,
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
@@ -26,7 +30,7 @@ pub(crate) async fn send(
         // clone, never in the headers we carry to the next destination.
         parts.extensions.insert(RedirectPolicy::NoFollow);
 
-        let response = client
+        let response = client(&url)?
             .send(Request::from_parts(parts.clone(), body.clone().into()))
             .await
             .map_err(ExecutionError::Transport)?;

@@ -238,6 +238,7 @@ impl<'a> Spec<'a> {
                 pre_request: pre_request.unwrap_or_default(),
                 post_response: String::new(),
             },
+            settings: Default::default(),
         }
     }
 

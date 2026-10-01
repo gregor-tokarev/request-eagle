@@ -12,11 +12,18 @@ pub(crate) struct ProxyCredentials {
     pub password: String,
 }
 
+/// What a secret in the OS credential store is for, which names its entry.
+#[derive(Clone, Copy)]
+pub(crate) enum Secret {
+    ProxyCredentials,
+    CertificatePassphrase,
+}
+
 #[cfg(feature = "ui")]
 pub(crate) trait CredentialStore {
-    fn read(&self, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>>;
-    fn write(&self, id: &str, secret: &[u8], cx: &App) -> Task<Result<()>>;
-    fn delete(&self, id: &str, cx: &App) -> Task<Result<()>>;
+    fn read(&self, secret: Secret, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>>;
+    fn write(&self, secret: Secret, id: &str, value: &[u8], cx: &App) -> Task<Result<()>>;
+    fn delete(&self, secret: Secret, id: &str, cx: &App) -> Task<Result<()>>;
 }
 
 #[cfg(feature = "ui")]
@@ -24,23 +31,23 @@ pub(crate) struct NativeCredentialStore;
 
 #[cfg(feature = "ui")]
 impl CredentialStore for NativeCredentialStore {
-    fn read(&self, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>> {
+    fn read(&self, secret: Secret, id: &str, cx: &App) -> Task<Result<Option<Vec<u8>>>> {
         let id = id.to_owned();
         cx.background_executor()
-            .spawn(async move { read(&id).await })
+            .spawn(async move { read(secret, &id).await })
     }
 
-    fn write(&self, id: &str, secret: &[u8], cx: &App) -> Task<Result<()>> {
+    fn write(&self, secret: Secret, id: &str, value: &[u8], cx: &App) -> Task<Result<()>> {
         let id = id.to_owned();
-        let secret = secret.to_vec();
+        let value = value.to_vec();
         cx.background_executor()
-            .spawn(async move { write(&id, &secret).await })
+            .spawn(async move { write(secret, &id, &value).await })
     }
 
-    fn delete(&self, id: &str, cx: &App) -> Task<Result<()>> {
+    fn delete(&self, secret: Secret, id: &str, cx: &App) -> Task<Result<()>> {
         let id = id.to_owned();
         cx.background_executor()
-            .spawn(async move { delete(&id).await })
+            .spawn(async move { delete(secret, &id).await })
     }
 }
 

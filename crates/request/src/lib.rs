@@ -10,6 +10,7 @@
 //! connection's events through a channel until it closes. `GrpcClient` loads
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
+mod certificates;
 mod error;
 mod event_stream;
 mod executor;
@@ -24,9 +25,12 @@ mod request_url;
 mod response;
 mod response_encoding;
 mod scripts;
+mod tls;
 mod variables;
 mod websocket;
 
+#[cfg(test)]
+mod certificates_tests;
 #[cfg(test)]
 mod event_stream_tests;
 #[cfg(test)]
@@ -34,6 +38,7 @@ mod request_url_tests;
 
 pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
+pub use certificates::{CertificateFiles, ClientCertificate};
 pub use error::ExecutionError;
 pub use event_stream::{
     Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
@@ -46,7 +51,7 @@ pub use grpc::{
     ServiceDefinition,
 };
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
-pub use model::{HttpRequest, Method, Request, WebSocketRequest};
+pub use model::{HttpRequest, HttpSettings, Method, Request, WebSocketRequest, WebSocketSettings};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use request_url::{path_variables, query_params, with_query_params};

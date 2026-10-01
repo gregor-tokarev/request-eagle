@@ -43,6 +43,10 @@ pub struct GrpcSettings {
     /// response size preference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_response_message_mb: Option<u64>,
+    /// Deadline for unary calls and server reflection, zero for none. Unset
+    /// follows the timeout preference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 impl Default for GrpcSettings {
@@ -52,6 +56,7 @@ impl Default for GrpcSettings {
             server_name: String::new(),
             include_default_fields: true,
             max_response_message_mb: None,
+            timeout_ms: None,
         }
     }
 }

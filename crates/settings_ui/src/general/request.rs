@@ -154,7 +154,7 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "Request timeout",
-                "Set how long a request should wait for a response before timing out. To never time out, set to 0.",
+                "Set how long a request should wait for a response before timing out. To never time out, set to 0. A request can change this in its Settings tab.",
                 div().w_40().flex_shrink_0().child(
                     Input::new(&self.timeout)
                         .suffix(div().text_color(cx.theme().muted_foreground).child("ms"))
@@ -174,7 +174,7 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "SSL certificate verification",
-                "Verify the server certificate before sending requests. Disabling this allows untrusted certificates.",
+                "Verify the server certificate before sending requests. Disabling this allows untrusted certificates. A request can change this in its Settings tab.",
                 h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("ssl-certificate-verification")
                         .accessibility_label("SSL certificate verification")
@@ -187,7 +187,7 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "Follow all redirects",
-                "Automatically follow HTTP redirects to the final response.",
+                "Automatically follow HTTP redirects to the final response. A request can change this in its Settings tab.",
                 h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("follow-all-redirects")
                         .accessibility_label("Follow all redirects")

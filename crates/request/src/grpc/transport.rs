@@ -1,19 +1,8 @@
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use http_client::http::Uri;
 use hyper_util::rt::TokioIo;
-use rustls::{
-    ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme,
-    client::{
-        WebPkiServerVerifier,
-        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    },
-    crypto::CryptoProvider,
-    pki_types::{CertificateDer, ServerName, UnixTime},
-};
+use rustls::{ClientConfig, pki_types::ServerName};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use tonic::{
@@ -22,6 +11,7 @@ use tonic::{
 };
 
 use super::GrpcError;
+use crate::{ClientCertificate, tls::Tls};
 
 /// Connection setup gives up here unless the request timeout is shorter.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -40,6 +30,9 @@ pub(crate) struct Target {
     /// The certificate name to expect instead of the host. The handshake
     /// still sends the host, so servers choose their usual certificate.
     pub(crate) server_name: Option<String>,
+    /// Certificate authorities trusted in addition to the system's.
+    pub(crate) ca_certificates: Option<PathBuf>,
+    pub(crate) client_certificate: Option<ClientCertificate>,
 }
 
 impl Target {
@@ -91,6 +84,8 @@ impl Target {
             tls,
             verify_certificates: true,
             server_name: None,
+            ca_certificates: None,
+            client_certificate: None,
         })
     }
 
@@ -147,6 +142,7 @@ pub(crate) async fn expects_tls(target: &Target) -> bool {
     let target = Target {
         tls: true,
         verify_certificates: false,
+        client_certificate: None,
         ..target.clone()
     };
     let (Ok(config), Ok(server_name)) = (tls_config(&target), server_name(&target)) else {
@@ -222,143 +218,14 @@ pub(crate) fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 }
 
 fn tls_config(target: &Target) -> Result<Arc<ClientConfig>, GrpcError> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let builder = ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|error| GrpcError::Connect(error.to_string()))?;
-    let mut config = match (&target.server_name, target.verify_certificates) {
-        (_, false) => builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AcceptAnyCertificate(provider)))
-            .with_no_client_auth(),
-        (None, true) => builder
-            .with_root_certificates(native_roots().clone())
-            .with_no_client_auth(),
-        // The handshake still names the host; only the check uses the override.
-        (Some(name), true) => {
-            let name = ServerName::try_from(name.clone())
-                .map_err(|error| GrpcError::InvalidUrl(format!("invalid server name: {error}")))?;
-            let verifier = WebPkiServerVerifier::builder_with_provider(
-                Arc::new(native_roots().clone()),
-                provider,
-            )
-            .build()
-            .map_err(|error| GrpcError::Connect(error.to_string()))?;
-
-            builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(VerifyAs { name, verifier }))
-                .with_no_client_auth()
-        }
-    };
-    config.alpn_protocols = vec![b"h2".to_vec()];
+    let config = Tls {
+        verify: target.verify_certificates,
+        server_name: target.server_name.as_deref(),
+        ca_certificates: target.ca_certificates.as_deref(),
+        client_certificate: target.client_certificate.as_ref(),
+    }
+    .config(&[b"h2"])
+    .map_err(GrpcError::Certificate)?;
 
     Ok(Arc::new(config))
-}
-
-/// The platform's trusted roots, read once per process.
-fn native_roots() -> &'static RootCertStore {
-    static ROOTS: OnceLock<RootCertStore> = OnceLock::new();
-
-    ROOTS.get_or_init(|| {
-        let mut roots = RootCertStore::empty();
-        roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
-
-        roots
-    })
-}
-
-/// Checks the certificate against another name than the one connected to.
-#[derive(Debug)]
-struct VerifyAs {
-    name: ServerName<'static>,
-    verifier: Arc<WebPkiServerVerifier>,
-}
-
-impl ServerCertVerifier for VerifyAs {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        _: &ServerName<'_>,
-        ocsp_response: &[u8],
-        now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        self.verifier
-            .verify_server_cert(end_entity, intermediates, &self.name, ocsp_response, now)
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.verifier
-            .verify_tls12_signature(message, certificate, signature)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.verifier
-            .verify_tls13_signature(message, certificate, signature)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.verifier.supported_verify_schemes()
-    }
-}
-
-/// Skips certificate checks when verification is turned off in settings.
-/// Handshake signatures are still checked, so the connection is encrypted.
-#[derive(Debug)]
-struct AcceptAnyCertificate(Arc<CryptoProvider>);
-
-impl ServerCertVerifier for AcceptAnyCertificate {
-    fn verify_server_cert(
-        &self,
-        _: &CertificateDer<'_>,
-        _: &[CertificateDer<'_>],
-        _: &ServerName<'_>,
-        _: &[u8],
-        _: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            certificate,
-            signature,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            certificate,
-            signature,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
 }

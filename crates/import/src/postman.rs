@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use collection::{ImportedCollection, ImportedItem};
-use request::{HttpRequest, Method, Request, RequestScripts};
+use request::{HttpRequest, HttpSettings, Method, Request, RequestScripts};
 use serde_json::Value;
 
 use crate::{
@@ -137,6 +137,9 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         &mut scripts,
     );
 
+    // The request's Settings tab in Postman.
+    let behavior = &item["protocolProfileBehavior"];
+
     Some(HttpRequest {
         method,
         path,
@@ -147,6 +150,11 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         scripts: RequestScripts {
             pre_request: join_scripts(&scripts.pre_request),
             post_response: join_scripts(&scripts.post_response),
+        },
+        settings: HttpSettings {
+            timeout_ms: None,
+            follow_redirects: behavior["followRedirects"].as_bool(),
+            verify_certificates: behavior["strictSSL"].as_bool(),
         },
     })
 }

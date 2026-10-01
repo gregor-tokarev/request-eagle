@@ -63,8 +63,29 @@ impl GrpcClient {
             .verify_certificates
             .unwrap_or(self.verify_certificates);
         target.server_name = (!server_name.is_empty()).then(|| server_name.to_owned());
+        target.ca_certificates = self.preferences.ca_certificates.clone();
+        target.client_certificate = target
+            .tls
+            .then(|| {
+                crate::certificates::client_certificate(
+                    &self.preferences.client_certificates,
+                    &target.host,
+                    target.port,
+                )
+            })
+            .flatten()
+            .cloned();
 
         Ok(target)
+    }
+
+    /// The request's timeout, or the preference's when it has none.
+    fn timeout(&self, request: &GrpcRequest) -> Option<Duration> {
+        match request.settings.timeout_ms {
+            Some(0) => None,
+            Some(timeout) => Some(Duration::from_millis(timeout)),
+            None => self.timeout,
+        }
     }
 
     /// Load the request's services, from its `.proto` file or the server.
@@ -75,7 +96,7 @@ impl GrpcClient {
         variables: &RequestVariables,
         collection: Option<&Path>,
     ) -> impl Future<Output = Result<ServiceDefinition, GrpcError>> + Send + 'static + use<> {
-        let client = self.clone();
+        let request_timeout = self.timeout(request);
         let prepared = match &request.definition {
             GrpcDefinition::ProtoFile { path, import_paths } => {
                 let resolve = |path: &Path| resolve_path(path, collection);
@@ -106,13 +127,13 @@ impl GrpcClient {
                     ServiceDefinition::from_proto_file(&path, &import_paths)
                 }
                 Definition::Reflection(target, metadata) => {
-                    let timeout = client.timeout.map_or(REFLECTION_TIMEOUT, |timeout| {
+                    let timeout = request_timeout.map_or(REFLECTION_TIMEOUT, |timeout| {
                         timeout.min(REFLECTION_TIMEOUT)
                     });
 
                     on_runtime(async move {
                         let load = async {
-                            let channel = transport::connect(&target, client.timeout).await?;
+                            let channel = transport::connect(&target, request_timeout).await?;
 
                             // A TLS server resets a plaintext connection.
                             match reflection::load(channel, metadata).await {
@@ -289,7 +310,7 @@ impl GrpcClient {
             call.tasks.push(task.abort_handle());
         }
 
-        let client = self.clone();
+        let timeout = self.timeout(request);
         let output = method.output();
         let max_message_bytes = match request.settings.max_response_message_mb {
             Some(megabytes) => message_limit(megabytes),
@@ -298,7 +319,7 @@ impl GrpcClient {
         let started = Instant::now();
         let task = reqwest_client::runtime().spawn(async move {
             let run = async {
-                let channel = transport::connect(&target, client.timeout).await?;
+                let channel = transport::connect(&target, timeout).await?;
                 let call_target = CallTarget {
                     channel,
                     path,
@@ -321,7 +342,7 @@ impl GrpcClient {
             };
 
             // A stream stays open as long as the user keeps it open.
-            let result = match client.timeout {
+            let result = match timeout {
                 Some(timeout) if !kind.streams_requests() && !kind.streams_responses() => {
                     tokio::time::timeout(timeout, run)
                         .await

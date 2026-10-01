@@ -52,6 +52,7 @@ pub struct GrpcDraft {
     pub(super) import_paths: Vec<Entity<InputState>>,
     pub(super) server_name: Option<Entity<InputState>>,
     pub(super) max_message: Option<Entity<InputState>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     pub(crate) definition: DefinitionState,
     /// The settings the current definition was loaded or is loading for.
     pub(super) definition_source: Option<super::definition::DefinitionSource>,
@@ -131,6 +132,7 @@ impl GrpcDraft {
             import_paths: Vec::new(),
             server_name: None,
             max_message: None,
+            timeout: None,
             definition: DefinitionState::Idle,
             definition_source: None,
             reflected_target: None,

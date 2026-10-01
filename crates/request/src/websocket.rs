@@ -24,7 +24,9 @@ use tokio_tungstenite::{
     },
 };
 
-use crate::{ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest};
+use crate::{
+    ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest, tls::Tls,
+};
 
 /// Events wait in a queue until the tab reads them. When it holds this many
 /// events, or this many bytes of received messages, the connection stops
@@ -262,10 +264,12 @@ impl Connection {
 
             handshake(request, &preferences).await
         };
+        let timeout = request
+            .settings
+            .timeout_ms
+            .unwrap_or(preferences.timeout_ms);
         let connecting = pin!(async {
-            match (preferences.timeout_ms != 0)
-                .then(|| Duration::from_millis(preferences.timeout_ms))
-            {
+            match (timeout != 0).then(|| Duration::from_millis(timeout)) {
                 Some(timeout) => {
                     smol::future::or(connecting, async {
                         smol::Timer::after(timeout).await;
@@ -474,9 +478,29 @@ async fn handshake(
         .map(|(_, value)| value.clone())
         .unwrap_or_default();
 
+    let tls = Tls {
+        verify: request
+            .settings
+            .verify_certificates
+            .unwrap_or(preferences.ssl_certificate_verification),
+        server_name: None,
+        ca_certificates: preferences.ca_certificates.as_deref(),
+        client_certificate: (scheme == "https")
+            .then(|| {
+                crate::certificates::client_certificate(
+                    &preferences.client_certificates,
+                    url.host_str()?,
+                    url.port_or_known_default()?,
+                )
+            })
+            .flatten(),
+    }
+    .config(&[b"http/1.1"])
+    .map_err(ExecutionError::Certificate)?;
+
     // WebSockets upgrade HTTP/1.1 connections. Browsers do not follow
     // redirects for them, so a redirect is reported as a rejection.
-    let client = crate::http::client_builder(preferences)?
+    let client = crate::http::client_builder(preferences, tls)?
         .http1_only()
         .redirect_policy(reqwest::redirect::Policy::none())
         .build()

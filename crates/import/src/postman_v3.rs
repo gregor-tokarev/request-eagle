@@ -235,6 +235,7 @@ fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> Grp
             include_default_fields: settings["includeDefaultFields"].as_bool().unwrap_or(true),
             // Postman also counts in MiB and takes zero as any size.
             max_response_message_mb: settings["maxResponseMessageSize"].as_u64(),
+            timeout_ms: None,
         },
         scripts: grpc_scripts(&request["scripts"]),
     }

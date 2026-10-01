@@ -60,6 +60,14 @@ script results.
 - Saved scripts run only with `trust_scripts: true`. Read them first, including
   the collection's scripts from `collections.get`, which run before the request's.
 - Response bodies and raw header values are Base64.
+- HTTP requests can set their own `timeout_ms`, `follow_redirects` and
+  `verify_certificates`. Fields left out follow `settings.request`, and the
+  `timeout_ms` of `requests.run` replaces both for that run.
+- `settings.request` takes `ca_certificates`, a PEM file of certificate
+  authorities trusted in addition to the system's.
+  `settings.client_certificates.add` checks a client certificate's files and
+  saves it for mutual TLS with one host; its passphrase goes to the OS
+  credential store, so pass it through stdin.
 - Saved gRPC requests have `"protocol": "grpc"`, a `url`, a `method` such as
   `package.Service/Method` and a JSON `message`. Without `proto_file` their
   services come from server reflection. `requests.run` sends the message once,

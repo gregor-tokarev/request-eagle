@@ -1,8 +1,10 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
-use crate::ProxyPreferences;
+use crate::{ClientCertificate, ProxyPreferences};
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersion {
     /// Negotiate the version; a Host override differing from the URL uses HTTP/1.1.
@@ -26,6 +28,12 @@ pub struct RequestPreferences {
     pub ssl_certificate_verification: bool,
     pub proxy: ProxyPreferences,
     pub follow_all_redirects: bool,
+    /// A PEM file of certificate authorities trusted in addition to the system's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_certificates: Option<PathBuf>,
+    /// Presented to the servers of their hosts when they ask for a certificate.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub client_certificates: Vec<ClientCertificate>,
 }
 
 impl Default for RequestPreferences {
@@ -37,6 +45,8 @@ impl Default for RequestPreferences {
             ssl_certificate_verification: true,
             proxy: ProxyPreferences::default(),
             follow_all_redirects: true,
+            ca_certificates: None,
+            client_certificates: Vec::new(),
         }
     }
 }
