@@ -11,7 +11,7 @@ use serde_json::json;
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
 use crate::{
     Execution, ExecutionError, HttpRequest, Method, RequestExecutor, RequestVariables, Response,
-    variables::resolve_request,
+    variables::{resolve_request, sent_url},
 };
 
 /// A dropped request future also interrupts a script on the blocking pool.
@@ -290,7 +290,8 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
-        "pathVariables": request.path_variables,
+        // Where the request goes, which decides the jar's cookies for it.
+        "sentUrl": sent_url(&request.path, &request.path_variables, &variables.visible()),
         "query": request.query,
         "headers": request.headers,
         "variables": variables,

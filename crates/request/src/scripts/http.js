@@ -134,28 +134,9 @@
     // The jar's cookies for a URL, in the order a request sends them. Throws
     // when the jar is off.
     const jarCookies = target => JSON.parse(jar("list", String(target), "")).map(fromJar);
-    // Fill the URL's :name path segments as sending does. Each value
-    // resolves its {{variables}} and stays in its segment.
-    const fillPath = url => {
-        const values = new Map();
-        for (const [name, value] of input.pathVariables ?? []) {
-            if (value !== "" && !values.has(name)) values.set(name, value);
-        }
-        const end = url.search(/[?#]/) < 0 ? url.length : url.search(/[?#]/);
-        const host = url.indexOf("://") < 0 ? 0 : url.indexOf("://") + 3;
-        const slash = url.indexOf("/", host);
-        const start = slash < 0 || slash > end ? end : slash;
-        const path = url.slice(start, end).split("/").map(segment => {
-            const name = segment.startsWith(":") ? segment.slice(1) : "";
-            if (!values.has(name) || name.includes("{{")) return segment;
-            return pm.variables.replaceIn(values.get(name))
-                .replace(/[?#{}]/g, ch => "%" + ch.charCodeAt(0).toString(16).toUpperCase());
-        });
-        return url.slice(0, start) + path.join("/") + url.slice(end);
-    };
-    // Before sending, the URL may still contain {{variables}}, :path
-    // variables and lack a scheme.
-    let target = (input.response ? input.url : fillPath(pm.variables.replaceIn(input.url))).trim();
+    // Before sending, the URL the request goes to, with its {{variables}}
+    // and :path variables filled as sending fills them.
+    let target = (input.response ? input.url : input.sentUrl ?? input.url).trim();
     if (target && !target.includes("://")) target = "https://" + target;
     let sentFromJar = null, setInJar = [];
     try {

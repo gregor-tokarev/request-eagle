@@ -457,6 +457,41 @@ fn before_sending_pm_cookies_uses_the_filled_path_variables() {
 }
 
 #[test]
+fn before_sending_pm_cookies_follows_escaped_variables_as_sending_does() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc; Path=/admin\r\n",
+            "HTTP/1.1 200 OK\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+        let executor = executor(true, &jar);
+        get(&executor, format!("{url}/admin/login"), Vec::new()).await;
+
+        let execution = executor
+            .execute(
+                HttpRequest {
+                    // Sent as a literal {{area}} segment, not /admin.
+                    path: format!("{url}/{{{{!area}}}}/users/:"),
+                    path_variables: vec![(String::new(), "admin".into())],
+                    scripts: RequestScripts {
+                        pre_request: r#"pm.test("no session", () => pm.expect(pm.cookies.has("sid")).to.equal(false));"#.into(),
+                        post_response: String::new(),
+                    },
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::from([("area".into(), "admin".into())]), None),
+            )
+            .await
+            .unwrap();
+        let heads = server.await;
+
+        assert_eq!(execution.scripts[0].tests[0].error, None);
+        assert_eq!(cookie_header(&heads[1]), None);
+    });
+}
+
+#[test]
 fn saved_cookies_reopen_including_session_cookies() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();
