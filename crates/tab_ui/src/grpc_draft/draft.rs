@@ -57,9 +57,6 @@ pub struct GrpcDraft {
     pub(super) definition_source: Option<super::definition::DefinitionSource>,
     /// What the URL and metadata resolved to when reflection loaded.
     pub(super) reflected_target: Option<Vec<String>>,
-    /// Whether the lock decided TLS when the definition loaded, rather than
-    /// a URL scheme from a variable.
-    pub(super) lock_decides_tls: bool,
     pub(super) definition_task: Option<Task<()>>,
     /// Invoke once the definition finishes loading.
     pub(super) invoke_when_loaded: bool,
@@ -135,7 +132,6 @@ impl GrpcDraft {
             definition: DefinitionState::Idle,
             definition_source: None,
             reflected_target: None,
-            lock_decides_tls: true,
             definition_task: None,
             invoke_when_loaded: false,
             variables,

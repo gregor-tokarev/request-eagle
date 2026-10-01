@@ -4,7 +4,7 @@ use gpui_kit::{
     Entity, InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
     VisualTestContext, point, px,
 };
-use request::{GrpcDefinition, GrpcError, GrpcRequest, MethodKind, RequestVariables};
+use request::{GrpcDefinition, GrpcError, GrpcRequest, MethodKind};
 
 use super::GrpcDraft;
 use super::definition::{DefinitionState, lock_decides_tls};
@@ -236,27 +236,23 @@ fn a_server_that_requires_tls_offers_to_turn_it_on(cx: &mut TestAppContext) {
 
 #[test]
 fn the_lock_does_not_decide_a_scheme_from_a_variable() {
-    let request = GrpcRequest {
-        url: "{{server}}".into(),
-        ..GrpcRequest::default()
-    };
-    let variables =
-        |server: &str| RequestVariables::new([("server".into(), server.into())].into(), None);
-
-    assert!(lock_decides_tls(&request, &variables("localhost:1")));
-    assert!(!lock_decides_tls(
-        &request,
-        &variables("grpcs://localhost:1")
-    ));
+    assert!(lock_decides_tls("grpcb.in:443"));
+    assert!(lock_decides_tls("grpcs://{{host}}"));
+    assert!(lock_decides_tls("localhost:{{port}}"));
+    // The variable may hold a scheme.
+    assert!(!lock_decides_tls("{{server}}"));
 }
 
 #[gpui_kit::test]
 fn a_tls_mismatch_the_lock_cannot_fix_shows_only_the_error(cx: &mut TestAppContext) {
-    let (draft, cx) = draft(GrpcRequest::default(), cx);
+    let request = GrpcRequest {
+        url: "{{server}}".into(),
+        ..GrpcRequest::default()
+    };
+    let (draft, cx) = draft(request, cx);
 
     draft.update(cx, |draft, cx| {
         draft.definition = DefinitionState::Failed(GrpcError::TlsUnsupported);
-        draft.lock_decides_tls = false;
         draft.redraw(cx);
     });
     let tab = element_bounds(cx, "grpc-section-Service definition").unwrap();

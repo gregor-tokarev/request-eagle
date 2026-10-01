@@ -681,7 +681,10 @@ async fn tls_servers_reached_without_tls_ask_for_tls() {
     let definition =
         ServiceDefinition::from_proto_file(&protos.echo, std::slice::from_ref(&protos.shared))
             .unwrap();
-    let (_call, events) = client().invoke(&request, variables(), &definition).unwrap();
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
 
     assert!(matches!(
         collect(events).await.last(),

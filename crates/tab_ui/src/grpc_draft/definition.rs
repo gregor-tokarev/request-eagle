@@ -128,7 +128,6 @@ impl GrpcDraft {
         let collection = self.collection_path();
         let load = client.load_definition(&self.request, &variables, collection.as_deref());
         self.reflected_target = reflected_target(&self.request, &variables);
-        self.lock_decides_tls = lock_decides_tls(&self.request, &variables);
         let task = cx.background_executor().spawn(load);
 
         self.definition = DefinitionState::Loading;
@@ -707,7 +706,7 @@ impl GrpcDraft {
             DefinitionState::Failed(GrpcError::TlsUnsupported) => Some(false),
             _ => None,
         }
-        .filter(|_| self.lock_decides_tls);
+        .filter(|_| lock_decides_tls(&self.request.url));
 
         // The detail and actions line up with the title, past the 1 rem icon.
         v_flex()
@@ -786,18 +785,14 @@ pub(super) fn reflected_target(
     variables.grpc_target_key(request)
 }
 
-/// Whether the lock decides how the request connects. A URL scheme that a
-/// variable supplies decides TLS instead.
-pub(super) fn lock_decides_tls(
-    request: &request::GrpcRequest,
-    variables: &request::RequestVariables,
-) -> bool {
-    [true, false].into_iter().all(|tls| {
-        let mut request = request.clone();
-        request.set_tls(tls);
+/// Whether the lock decides how the request connects. A URL that starts
+/// with a variable may supply its own scheme, which decides TLS instead.
+pub(super) fn lock_decides_tls(url: &str) -> bool {
+    let url = url.trim();
+    // The lock rewrites a scheme written in the URL.
+    let written_scheme = url
+        .split_once("://")
+        .is_some_and(|(scheme, _)| matches!(scheme, "grpc" | "grpcs" | "http" | "https"));
 
-        variables
-            .resolve_grpc_target(&request)
-            .is_ok_and(|request| request.uses_tls() == tls)
-    })
+    written_scheme || !url.starts_with("{{")
 }
