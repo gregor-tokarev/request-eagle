@@ -78,6 +78,9 @@ pub struct RequestDraft {
     split: Entity<ResizableState>,
     /// Shown beside the request while open.
     pub(super) code_snippet: Option<Entity<CodeSnippet>>,
+    /// Whether the last frame was too narrow for the snippet beside the
+    /// request, which puts it below instead.
+    code_snippet_below: bool,
     pub(super) task: Option<Task<()>>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
@@ -147,6 +150,7 @@ impl RequestDraft {
             response,
             split,
             code_snippet: None,
+            code_snippet_below: false,
             task: None,
             stop: None,
             streaming: false,
@@ -426,22 +430,60 @@ impl Render for RequestDraft {
             return request.into_any_element();
         };
 
-        // The snippet takes at most half the width, so that both stay usable
-        // in a narrow window.
-        h_flex()
-            .size_full()
-            .child(div().flex_1().min_w_0().h_full().child(request))
-            .child(
-                div()
-                    .flex_none()
-                    .w(rems(24.))
-                    .max_w(relative(0.5))
-                    .h_full()
-                    .border_l_1()
-                    .border_color(cx.theme().border)
-                    .child(code_snippet),
-            )
-            .into_any_element()
+        // The snippet sits beside the request when both fit, and below it in a
+        // narrow window, so the URL stays editable. The width is measured
+        // while drawing, so a change applies from the next frame.
+        let draft = cx.entity().downgrade();
+        let measure = canvas(
+            move |bounds, window, cx| {
+                let below = bounds.size.width < rems(40.).to_pixels(window.rem_size());
+                let _ = draft.update(cx, |draft, cx| {
+                    if draft.code_snippet_below != below {
+                        draft.code_snippet_below = below;
+                        cx.notify();
+                    }
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+
+        if self.code_snippet_below {
+            v_flex()
+                .relative()
+                .size_full()
+                .child(measure)
+                .child(div().flex_1().min_h_0().w_full().child(request))
+                .child(
+                    div()
+                        .flex_none()
+                        .h(rems(16.))
+                        .w_full()
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .child(code_snippet),
+                )
+                .into_any_element()
+        } else {
+            h_flex()
+                .relative()
+                .size_full()
+                .child(measure)
+                .child(div().flex_1().min_w_0().h_full().child(request))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(rems(24.))
+                        .max_w(relative(0.4))
+                        .h_full()
+                        .border_l_1()
+                        .border_color(cx.theme().border)
+                        .child(code_snippet),
+                )
+                .into_any_element()
+        }
     }
 }
 

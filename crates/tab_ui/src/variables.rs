@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use collection::Collection;
 
@@ -46,17 +47,37 @@ impl VariableScope {
         names
     }
 
-    /// Reload file values so external edits appear on the next send or
-    /// completion. The active global environment overrides the collection's.
-    fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
-        let mut values = HashMap::new();
+    /// The collection's environment file and the active global one, which
+    /// overrides it.
+    fn files(&self, cx: &App) -> Vec<PathBuf> {
         let active = self
             .environments
             .as_ref()
             .and_then(|environments| environments.read(cx).active_path());
 
-        for path in self.path.iter().chain(active.iter()) {
-            values.extend(read_entries(path)?);
+        self.path.iter().cloned().chain(active).collect()
+    }
+
+    /// When each environment file was last changed. A change made outside the
+    /// app changes these without notifying the scope.
+    pub fn file_versions(&self, cx: &App) -> Vec<Option<SystemTime>> {
+        self.files(cx)
+            .iter()
+            .map(|path| {
+                std::fs::metadata(path)
+                    .and_then(|file| file.modified())
+                    .ok()
+            })
+            .collect()
+    }
+
+    /// Reload file values so external edits appear on the next send or
+    /// completion. The active global environment overrides the collection's.
+    fn file_values(&self, cx: &App) -> Result<HashMap<String, String>, String> {
+        let mut values = HashMap::new();
+
+        for path in self.files(cx) {
+            values.extend(read_entries(&path)?);
         }
 
         Ok(values)

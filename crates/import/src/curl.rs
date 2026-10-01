@@ -482,17 +482,19 @@ fn method_named(method: &str) -> Result<Method, CurlError> {
 
 /// The text of a `--form` field. cURL ends an unquoted value at `;`, where
 /// attributes such as `;type=text/plain` follow. A quoted value can contain
-/// `;`, and `\"` and `\\` in it stand for `"` and `\`.
+/// `;`, and `\"` and `\\` in it stand for `"` and `\`. Without its closing
+/// quote, the value is taken as it is written.
 fn form_value(content: &str) -> String {
+    let unquoted = || content.split(';').next().unwrap_or_default().to_owned();
     let Some(quoted) = content.strip_prefix('"') else {
-        return content.split(';').next().unwrap_or_default().to_owned();
+        return unquoted();
     };
 
     let mut value = String::new();
     let mut chars = quoted.chars().peekable();
     while let Some(char) = chars.next() {
         match char {
-            '"' => break,
+            '"' => return value,
             '\\' => value.push(
                 chars
                     .next_if(|next| matches!(next, '"' | '\\'))
@@ -502,7 +504,7 @@ fn form_value(content: &str) -> String {
         }
     }
 
-    value
+    unquoted()
 }
 
 /// `--data-urlencode` encodes `content`, the content of `=content`, or the

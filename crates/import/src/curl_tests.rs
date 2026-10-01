@@ -240,6 +240,11 @@ fn reads_form_fields_and_their_content_type() {
         "{body}"
     );
     assert!(body.contains("name=\"raw\"\r\n\r\nx;y\r\n"), "{body}");
+
+    // Without its closing quote, cURL sends the value as it is written.
+    let request = parse_curl("curl -F 'name=\"Rex' https://example.com").unwrap();
+    let body = String::from_utf8(request.body.unwrap()).unwrap();
+    assert!(body.contains("name=\"name\"\r\n\r\n\"Rex\r\n"), "{body}");
 }
 
 #[test]

@@ -6,7 +6,7 @@ use std::{
 use collection::Collection;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
-    input::{Input, InputState},
+    input::{Textarea, TextareaState},
     spinner::Spinner,
     *,
 };
@@ -82,12 +82,16 @@ impl CollectionPanel {
     }
 }
 
+/// The longest pasted cURL command that stays in the import field. Longer
+/// ones, such as commands with large bodies, would be slow to lay out.
+const RETAINED_COMMAND_LIMIT: usize = 16 * 1024;
+
 /// Imports a Postman collection or an OpenAPI specification from a file or
 /// pasted text, or a Postman collection folder, as a new collection.
 struct ImportDialog {
     panel: WeakEntity<CollectionPanel>,
     /// Takes a cURL command or a collection's text, like Postman's import field.
-    text: Entity<InputState>,
+    text: Entity<TextareaState>,
     importing: bool,
     error: Option<String>,
     /// The imported collection's name and the requests it left out, shown
@@ -102,8 +106,14 @@ impl ImportDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Pasting imports at once. Typed text imports with Enter.
-        let text = cx.new(|cx| InputState::new(window, cx).placeholder("Paste cURL or raw text"));
+        // Pasting imports at once. Typed text imports with Enter, and
+        // Shift-Enter starts a new line.
+        let text = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 8)
+                .submit_on_enter(true)
+                .placeholder("Paste cURL or raw text")
+        });
 
         Self {
             panel,
@@ -122,18 +132,6 @@ impl ImportDialog {
             return;
         }
 
-        // Pasted text stays in the field, so a failed import can be corrected
-        // and tried again with Enter. The field holds one line, so a command's
-        // line continuations become spaces.
-        let line = source
-            .replace("\\\r\n", " ")
-            .replace("\\\n", " ")
-            .replace(['\r', '\n'], " ");
-        if self.text.read(cx).value() != line {
-            self.text
-                .update(cx, |text, cx| text.set_value(line, window, cx));
-        }
-
         if !import::is_curl(&source) {
             let read = move || {
                 import::parse(&source).map_err(|error| match error {
@@ -148,6 +146,15 @@ impl ImportDialog {
             };
             self.import(read, window, cx);
             return;
+        }
+
+        // A pasted command stays in the field as it is, so a failed import can
+        // be corrected and tried again with Enter. A collection is left out:
+        // laying out a whole document would stall the window.
+        if source.len() <= RETAINED_COMMAND_LIMIT && self.text.read(cx).value() != source {
+            let text = source.clone();
+            self.text
+                .update(cx, |field, cx| field.set_value(text, window, cx));
         }
 
         match import::parse_curl(&source) {
@@ -331,11 +338,10 @@ impl Render for ImportDialog {
             .gap_3()
             .child(
                 div().debug_selector(|| "import-text".into()).child(
-                    Input::new(&self.text)
+                    Textarea::new(&self.text)
                         .aria_label("cURL command or raw text to import")
                         .disabled(self.importing)
-                        // The pasted text is imported rather than inserted, so
-                        // a command written over several lines stays intact.
+                        // The pasted text replaces the field and is imported at once.
                         .on_paste(move |clipboard, window, cx| {
                             let Some(source) = clipboard.text() else {
                                 return false;

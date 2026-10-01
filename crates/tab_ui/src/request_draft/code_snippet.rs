@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 use gpui_kit::component::{
     button::*,
@@ -20,10 +21,10 @@ pub(crate) struct CodeSnippet {
     editor: Entity<EditorState>,
     /// The request the command was written for.
     request: HttpRequest,
-    /// Variable values and the session revision they were read at. Reading
-    /// the environment files on every edit would slow typing, so they are
-    /// read again only when the variables change.
-    values: (HashMap<String, String>, u64),
+    /// Variable values and the version of their sources they were read at.
+    /// Reading the environment files on every edit would slow typing, so
+    /// they are read again only when the variables change.
+    values: (HashMap<String, String>, VariablesVersion),
     command: SharedString,
     _subscriptions: [Subscription; 2],
 }
@@ -74,8 +75,9 @@ impl CodeSnippet {
         };
         let draft = draft.read(cx);
 
-        // Scripts in other tabs of the collection can change session values.
-        if variables_changed || draft.variables.read(cx).session.revision() != self.values.1 {
+        // Scripts in other tabs of the collection change session values, and
+        // the environment files can change outside the app.
+        if variables_changed || draft.variables_version(cx) != self.values.1 {
             self.values = draft.variable_values(cx);
         }
 
@@ -91,18 +93,26 @@ impl CodeSnippet {
     }
 }
 
+/// The session revision and the environment files' modification times.
+type VariablesVersion = (u64, Vec<Option<SystemTime>>);
+
 impl RequestDraft {
-    /// The values of the variables that resolve, and the session revision
-    /// they were read at.
-    fn variable_values(&self, cx: &App) -> (HashMap<String, String>, u64) {
+    fn variables_version(&self, cx: &App) -> VariablesVersion {
         let scope = self.variables.read(cx);
-        let revision = scope.session.revision();
+        (scope.session.revision(), scope.file_versions(cx))
+    }
+
+    /// The values of the variables that resolve, and the version of their
+    /// sources they were read at.
+    fn variable_values(&self, cx: &App) -> (HashMap<String, String>, VariablesVersion) {
+        let version = self.variables_version(cx);
+        let scope = self.variables.read(cx);
         // Without the environment files, session values still resolve.
         let values = scope
             .values(cx)
             .unwrap_or_else(|_| scope.session.values(HashMap::new()));
 
-        (values, revision)
+        (values, version)
     }
 
     /// Copies the request as a cURL command, with the variables that resolve
