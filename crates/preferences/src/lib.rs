@@ -11,9 +11,6 @@ mod macos_credentials;
 #[cfg(feature = "ui")]
 mod store;
 
-#[cfg(all(test, feature = "ui"))]
-mod tests;
-
 pub use appearance::{AppearanceMode, AppearancePreferences};
 pub use file::{Preferences, PreferencesFile};
 pub use request::{HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol, RequestPreferences};

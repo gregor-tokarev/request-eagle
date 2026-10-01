@@ -130,16 +130,6 @@ impl PathVariables {
     }
 }
 
-#[cfg(test)]
-impl PathVariables {
-    pub(crate) fn rows_for_test(&self, cx: &App) -> Vec<(String, String)> {
-        self.rows
-            .iter()
-            .map(|row| (row.name.to_string(), row.value.read(cx).value().to_string()))
-            .collect()
-    }
-}
-
 impl Render for PathVariables {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()

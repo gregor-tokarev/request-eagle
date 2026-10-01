@@ -301,9 +301,3 @@ fn decode_credentials(result: Result<Option<Vec<u8>>>) -> Result<ProxyCredential
         )
     })
 }
-
-#[cfg(test)]
-pub(crate) fn set_credential_store(store: Rc<dyn CredentialStore>, cx: &mut App) {
-    init(cx);
-    cx.global_mut::<Storage>().credentials = store;
-}

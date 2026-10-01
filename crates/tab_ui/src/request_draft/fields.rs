@@ -211,23 +211,6 @@ impl RequestFields {
     }
 }
 
-#[cfg(test)]
-impl RequestFields {
-    /// Each row's enabled state, key and value, including the empty row.
-    pub(crate) fn rows_for_test(&self, cx: &App) -> Vec<(bool, String, String)> {
-        self.rows
-            .iter()
-            .map(|row| {
-                (
-                    row.enabled,
-                    row.key.read(cx).value().to_string(),
-                    row.value.read(cx).value().to_string(),
-                )
-            })
-            .collect()
-    }
-}
-
 impl Render for RequestFields {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.id;
