@@ -35,14 +35,21 @@ pub async fn run(
                 );
             }
 
-            let mut values = collection.local_env().entries.clone();
-            values.extend(variables);
+            let collection_values = collection.local_env().entries.clone();
             let mut settings = preferences.request_preferences().await?;
             if let Some(timeout) = timeout_ms {
                 settings.timeout_ms = timeout;
             }
 
-            return run_grpc(path, &collection.path, request, values, &settings).await;
+            return run_grpc(
+                path,
+                &collection.path,
+                request,
+                collection_values,
+                variables,
+                &settings,
+            )
+            .await;
         }
         request::Request::WebSocket(_) => {
             bail!(
@@ -56,10 +63,15 @@ pub async fn run(
         );
     }
 
-    let mut values = collection.local_env().entries.clone();
-    values.extend(variables);
-    let variables = RequestVariables::with_environment_session(values, None, Default::default())
-        .with_collection_scripts(Ok(collection.scripts().clone()));
+    // Variables passed to the command override the collection's, like an
+    // active environment.
+    let variables = RequestVariables::with_environment_session(
+        collection.local_env().entries.clone(),
+        variables,
+        None,
+        Default::default(),
+    )
+    .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
@@ -90,11 +102,17 @@ async fn run_grpc(
     path: &Path,
     collection: &Path,
     request: GrpcRequest,
+    collection_values: HashMap<String, String>,
     values: HashMap<String, String>,
     settings: &RequestPreferences,
 ) -> Result<Value> {
     let client = GrpcClient::new(settings);
-    let variables = RequestVariables::with_environment_session(values, None, Default::default());
+    let variables = RequestVariables::with_environment_session(
+        collection_values,
+        values,
+        None,
+        Default::default(),
+    );
     // Before invoke runs first, as it can set variables reflection needs.
     let prepared = client.prepare(&request, variables).await?;
     let definition = client

@@ -291,7 +291,7 @@ impl VariableInput {
                 let scope = self.scope.read(cx);
                 self.environment_names = scope
                     .values(cx)
-                    .unwrap_or_else(|_| scope.session.values(HashMap::new()))
+                    .unwrap_or_else(|_| scope.session.values(HashMap::new(), HashMap::new()))
                     .into_keys()
                     .filter(|name| environment::valid_variable_name(name))
                     .collect();
