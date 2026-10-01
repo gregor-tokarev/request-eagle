@@ -326,10 +326,13 @@ fn saved_bodies_are_named_by_the_server_url_or_kind() {
 
 #[test]
 fn previewed_pages_load_no_images() {
+    // Image elements go; text that only looks like one stays.
     assert_eq!(
         super::body::without_images(
-            "<p>a</p><IMG src='http://x/t.png'><image src=y/><imgx>b<img>é<img\nsrc=z>"
+            "<p>a<IMG src='http://x/t.png'>b</p><image src=y><!-- <img src=c> -->\
+             <textarea><img src=\"kept\"></textarea><title>é</title>",
         ),
-        "<p>a</p><wbr src='http://x/t.png'><wbr src=y/><imgx>b<wbr>é<wbr\nsrc=z>"
+        "<html><head></head><body><p>ab</p><!-- <img src=c> -->\
+         <textarea>&lt;img src=\"kept\"&gt;</textarea><title>é</title></body></html>"
     );
 }

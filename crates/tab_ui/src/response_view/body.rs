@@ -406,32 +406,39 @@ impl ResponseView {
     }
 }
 
-/// A page whose images are void elements that load nothing. Their requests
-/// would reach the page's servers outside the request's proxy settings, and
-/// GPUI Kit's rich text fetches images while measuring them.
+/// A page without its images, as an HTML parser reads it. A previewed page
+/// loads nothing: GPUI Kit's rich text fetches images while measuring them,
+/// outside the request's proxy settings.
 pub(super) fn without_images(html: &str) -> String {
-    let lower = html.to_ascii_lowercase();
-    let mut page = String::with_capacity(html.len());
-    let mut copied = 0;
+    use html5ever::{ParseOpts, local_name, parse_document, serialize, tendril::TendrilSink};
+    use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 
-    for (start, _) in lower.match_indices('<') {
-        // HTML parsers read an `image` tag as `img`.
-        let Some(name) = ["img", "image"].into_iter().find(|name| {
-            lower[start + 1..].starts_with(name)
-                && lower[start + 1 + name.len()..].starts_with(|next: char| {
-                    next.is_ascii_whitespace() || next == '/' || next == '>'
-                })
-        }) else {
-            continue;
-        };
+    fn remove(node: &Handle) {
+        node.children.borrow_mut().retain(|child| {
+            !matches!(&child.data, NodeData::Element { name, .. } if name.local == local_name!("img"))
+        });
 
-        page.push_str(&html[copied..start]);
-        page.push_str("<wbr");
-        copied = start + 1 + name.len();
+        for child in node.children.borrow().iter() {
+            remove(child);
+        }
     }
 
-    page.push_str(&html[copied..]);
-    page
+    let document = parse_document(RcDom::default(), ParseOpts::default())
+        .one(html)
+        .document;
+    remove(&document);
+
+    let mut page = Vec::with_capacity(html.len());
+    let serialized = serialize(
+        &mut page,
+        &SerializableHandle::from(document),
+        Default::default(),
+    );
+
+    serialized
+        .ok()
+        .and_then(|()| String::from_utf8(page).ok())
+        .unwrap_or_default()
 }
 
 /// GPUI Kit has no XML grammar of its own.

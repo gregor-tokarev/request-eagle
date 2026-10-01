@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -11,8 +11,8 @@ use hayro::{
 const SCALE: f32 = 2.;
 /// The longer side of a page bitmap is at most this many pixels.
 const MAX_SIDE: f32 = 4096.;
-/// Rendered pages kept around the one last shown; farther pages render again.
-const KEPT_PAGES: usize = 8;
+/// Pages kept rendered on each side of those in view; farther pages render again.
+const KEPT_PAGES: usize = 4;
 /// The list measures, and so renders, pages this far past the view. The page
 /// after the view must be measured before the list can scroll to it.
 const OVERDRAW: Pixels = px(800.);
@@ -22,8 +22,9 @@ const OVERDRAW: Pixels = px(800.);
 pub(super) struct PdfPreview {
     document: Option<Result<Arc<Pdf>, SharedString>>,
     pages: Vec<Page>,
-    /// The page laid out last, around which bitmaps are kept.
-    shown: usize,
+    /// The pages in view and a few on each side, as of the last render. Only
+    /// these render and keep their bitmaps.
+    kept: RangeInclusive<usize>,
     list: ListState,
     _load: Task<()>,
 }
@@ -92,7 +93,7 @@ impl PdfPreview {
         Self {
             document: None,
             pages: Vec::new(),
-            shown: 0,
+            kept: 0..=KEPT_PAGES,
             list: ListState::new(0, ListAlignment::Top, OVERDRAW),
             _load: load,
         }
@@ -103,8 +104,10 @@ impl PdfPreview {
     }
 
     fn page(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        self.shown = index;
-        self.render_page(index, window, cx);
+        // Pages far past the view are laid out to be measured, but not rendered.
+        if self.kept.contains(&index) {
+            self.render_page(index, cx);
+        }
         let page = &self.pages[index];
         let rem = window.rem_size() / 16.;
 
@@ -139,9 +142,8 @@ impl PdfPreview {
             .into_any_element()
     }
 
-    /// Start rendering a page that is about to show, and release the bitmaps
-    /// of pages far from it.
-    fn render_page(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Start rendering a page that is about to show.
+    fn render_page(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(Ok(pdf)) = &self.document else {
             return;
         };
@@ -163,34 +165,36 @@ impl PdfPreview {
                 page.rendering = None;
                 page.failed = image.is_none();
                 page.image = image.map(Arc::new);
+                // Scrolling may have moved on while the page rendered.
                 this.release_far_pages(None, cx);
                 cx.notify();
             });
         }));
-
-        self.release_far_pages(Some(window), cx);
     }
 
-    /// Keep the bitmaps of the pages nearest the one last shown, and stop
-    /// rendering pages that scrolled far away from it.
+    /// The pages in view and a few on each side, by the list's last layout.
+    /// The list's state is borrowed while it lays out pages, so this must be
+    /// read before.
+    fn kept_pages(&self) -> RangeInclusive<usize> {
+        let first = self.list.logical_scroll_top().item_ix;
+        let last = (first..self.pages.len())
+            .take_while(|&page| self.list.item_is_below_viewport(page) == Some(false))
+            .last()
+            .unwrap_or(first);
+
+        first.saturating_sub(KEPT_PAGES)..=last + KEPT_PAGES
+    }
+
+    /// Release the bitmaps of pages far from the view, and stop rendering them.
     fn release_far_pages(&mut self, mut window: Option<&mut Window>, cx: &mut App) {
-        let shown = self.shown;
-
         for (index, page) in self.pages.iter_mut().enumerate() {
-            if index.abs_diff(shown) > KEPT_PAGES {
-                page.rendering = None;
+            if self.kept.contains(&index) {
+                continue;
             }
-        }
 
-        let mut rendered: Vec<usize> = (0..self.pages.len())
-            .filter(|&page| self.pages[page].image.is_some())
-            .collect();
-        if rendered.len() > KEPT_PAGES {
-            rendered.sort_by_key(|&page| std::cmp::Reverse(page.abs_diff(shown)));
-            for page in rendered.drain(..rendered.len() - KEPT_PAGES) {
-                if let Some(image) = self.pages[page].image.take() {
-                    cx.drop_image(image, window.as_deref_mut());
-                }
+            page.rendering = None;
+            if let Some(image) = page.image.take() {
+                cx.drop_image(image, window.as_deref_mut());
             }
         }
     }
@@ -229,7 +233,11 @@ fn render(pdf: &Pdf, index: usize) -> Option<RenderImage> {
 }
 
 impl Render for PdfPreview {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Scrolling the list renders this view again.
+        self.kept = self.kept_pages();
+        self.release_far_pages(Some(window), cx);
+
         let message = |text: SharedString| {
             div()
                 .size_full()
