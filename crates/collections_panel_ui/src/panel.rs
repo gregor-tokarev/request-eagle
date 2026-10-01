@@ -65,10 +65,10 @@ pub struct CollectionPanel {
     pub(super) unfiltered_rows: Option<Arc<Vec<usize>>>,
     pub(super) collapsed: HashSet<usize>,
     pub(super) selected: Option<usize>,
-    /// Whether the last click expanded or collapsed a branch. That can scroll
-    /// another row under the pointer, so the second press of a double click
-    /// is ignored unless the list is scrolled in between.
-    pub(super) clicked_branch: bool,
+    /// The branch the last click expanded or collapsed. That can scroll
+    /// another row under the pointer, so quick follow-up presses toggle this
+    /// branch again unless the list is scrolled in between.
+    pub(super) clicked_branch: Option<PathBuf>,
     pub(super) search: Entity<InputState>,
     pub(super) query: String,
     pub(super) scroll_handle: UniformListScrollHandle,
@@ -118,7 +118,7 @@ impl CollectionPanel {
             visible,
             collapsed: HashSet::new(),
             selected: None,
-            clicked_branch: false,
+            clicked_branch: None,
             search,
             query: String::new(),
             scroll_handle: UniformListScrollHandle::new(),
@@ -431,11 +431,11 @@ impl Render for CollectionPanel {
                     .on_key_down(cx.listener(Self::on_key_down))
                     .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
                         if event.click_count == 1 {
-                            this.clicked_branch = false;
+                            this.clicked_branch = None;
                         }
                     }))
                     .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, _| {
-                        this.clicked_branch = false;
+                        this.clicked_branch = None;
                     }))
                     .child(if self.visible.is_empty() {
                         v_flex()

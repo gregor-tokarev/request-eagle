@@ -14,8 +14,8 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{panel::CollectionPanel, tree::path_name};
 
 impl CollectionPanel {
-    /// Opens a dialog that imports a Postman collection or an OpenAPI
-    /// specification as a new collection.
+    /// Opens a dialog that imports a Postman collection, from a file or a
+    /// folder, or an OpenAPI specification as a new collection.
     pub fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = cx.entity().downgrade();
         let dialog = cx.new(|_| ImportDialog {
@@ -67,8 +67,8 @@ impl CollectionPanel {
     }
 }
 
-/// Imports a Postman collection or an OpenAPI specification from a file as a
-/// new collection.
+/// Imports a Postman collection or an OpenAPI specification from a file, or a
+/// Postman collection folder, as a new collection.
 struct ImportDialog {
     panel: WeakEntity<CollectionPanel>,
     importing: bool,
@@ -83,7 +83,7 @@ impl ImportDialog {
     fn choose_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
-            directories: false,
+            directories: true,
             multiple: false,
             prompt: Some("Import".into()),
         });
@@ -128,9 +128,7 @@ impl ImportDialog {
         // Writing a large collection takes a while, so it happens here too.
         let imported = cx.background_executor().spawn(async move {
             let directory = directory.ok_or("No collections directory is configured.")?;
-            let source = std::fs::read_to_string(&path)
-                .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-            let import = import::parse(&source).map_err(|error| error.to_string())?;
+            let import = import::read(&path).map_err(|error| error.to_string())?;
             let collection = import
                 .collection
                 .write(&directory)
@@ -181,10 +179,12 @@ impl ImportDialog {
 
     fn render_summary(&self, name: &str, skipped: &[String], cx: &mut Context<Self>) -> Div {
         let explanation = match skipped.len() {
-            1 => "1 request uses an HTTP method Request Eagle cannot send, so it was left out:"
+            1 => "1 request uses a protocol or HTTP method Request Eagle cannot send, so it was \
+                  left out:"
                 .to_owned(),
             count => format!(
-                "{count} requests use HTTP methods Request Eagle cannot send, so they were left out:"
+                "{count} requests use protocols or HTTP methods Request Eagle cannot send, so \
+                 they were left out:"
             ),
         };
 
@@ -273,7 +273,7 @@ impl Render for ImportDialog {
                                         if self.importing {
                                             "Importing…"
                                         } else {
-                                            "Drop a file to import"
+                                            "Drop a file or folder to import"
                                         },
                                     ))
                                     .child(
@@ -287,7 +287,7 @@ impl Render for ImportDialog {
                                                     .link()
                                                     // Colored like a link, it needs no underline.
                                                     .text_decoration_0()
-                                                    .label("a file")
+                                                    .label("a file or folder")
                                                     .disabled(self.importing)
                                                     .on_click(cx.listener(
                                                         |this, _, window, cx| {
@@ -319,6 +319,7 @@ impl Render for ImportDialog {
                     .text_sm()
                     .text_color(theme.muted_foreground)
                     .child("Postman Collection v2.0 and v2.1")
+                    .child("Postman collection folders, with gRPC requests")
                     .child("OpenAPI 3 and Swagger 2.0, in JSON or YAML"),
             )
     }
