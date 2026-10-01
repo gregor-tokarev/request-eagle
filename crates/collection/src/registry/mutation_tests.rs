@@ -709,6 +709,35 @@ headers = [
     };
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
+
+    // Switching a row back on, or clearing its description, removes what
+    // the saved table row still says.
+    request.headers[1].enabled = true;
+    request.query[0].description = "Page number".into();
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+    request.query[0].description.clear();
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains(
+            "{ key = \"X-Trace\", value = \"one\", description = \"Only while debugging\" }"
+        ),
+        "{content}"
+    );
+    assert!(
+        content.contains("query = [{ key = \"page\", value = \"2\", disabled = true }]"),
+        "{content}"
+    );
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded.headers, request.headers);
+    assert_eq!(reloaded.query, request.query);
 }
 
 #[test]

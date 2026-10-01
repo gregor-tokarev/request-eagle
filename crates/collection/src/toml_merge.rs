@@ -143,6 +143,17 @@ fn merge_key_value_rows(target: &mut Array, update: &Array) {
         let (mut current, following_comment) = matched
             .take()
             .unwrap_or_else(|| (value.clone(), String::new()));
+        // Serialization omits a row's flag and description when they are
+        // unset, so drop the ones the row had before.
+        if let (Some(current), Some(value)) =
+            (current.as_inline_table_mut(), value.as_inline_table())
+        {
+            for key in ["disabled", "description"] {
+                if !value.contains_key(key) {
+                    current.remove(key);
+                }
+            }
+        }
         merge_value(&mut current, value);
         let prefix = current
             .decor()

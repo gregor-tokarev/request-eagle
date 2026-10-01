@@ -148,17 +148,24 @@ fn files_that_could_not_be_loaded_are_listed(cx: &mut TestAppContext) {
     });
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir_all(directory.path().join("API")).unwrap();
-    fs::write(directory.path().join("API/Broken.toml"), "id = ").unwrap();
+    for index in 0..40 {
+        fs::write(
+            directory.path().join(format!("API/Broken {index:02}.toml")),
+            "id = ",
+        )
+        .unwrap();
+    }
     let collections = CollectionRegistry::from_path(directory.path());
 
     let (_, cx) = cx.add_window_view(|window, cx| CollectionPanel::new(collections, window, cx));
+    cx.simulate_resize(size(px(300.), px(600.)));
     cx.run_until_parked();
 
-    assert!(cx.debug_bounds("collections-skipped").is_some());
     assert!(cx.debug_bounds("skipped-file-0").is_some());
-    assert!(cx.debug_bounds("skipped-file-1").is_none());
-    // The collection itself still loads.
-    assert!(cx.debug_bounds("collection-row-0").is_some());
+    assert!(cx.debug_bounds("skipped-file-39").is_some());
+    // The list scrolls rather than pushing the collection out of view.
+    assert!(cx.debug_bounds("collections-skipped").unwrap().size.height < px(300.));
+    assert!(cx.debug_bounds("collection-row-0").unwrap().top() < px(600.));
 }
 
 #[gpui_kit::test]

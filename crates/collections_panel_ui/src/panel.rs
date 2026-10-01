@@ -7,9 +7,9 @@ use std::{
 use collection::{CollectionRegistry, MovePlacement};
 
 use gpui_kit::component::{
+    button::*,
     input::{Input, InputEvent, InputState},
     scroll::Scrollbar,
-    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -382,20 +382,21 @@ impl CollectionPanel {
         cx.stop_propagation();
     }
 
-    /// Lists the files that loading left out. Hovering one explains why, and
-    /// clicking it shows it in the file manager.
+    /// Lists the files that loading left out, each with why. Activating one
+    /// shows it in the file manager.
     fn skipped_notice(&self, cx: &App) -> impl IntoElement + use<> {
         let skipped = self.collections.skipped();
         let directory = self.collections.directory();
 
         v_flex()
             .debug_selector(|| "collections-skipped".into())
-            .px_3()
-            .py_2()
+            .px_2()
+            .pb_2()
             .gap_1()
             .text_xs()
             .child(
                 h_flex()
+                    .px_1()
                     .gap_1()
                     .text_color(cx.theme().danger)
                     .child(Icon::new(IconName::TriangleAlert).xsmall())
@@ -404,28 +405,58 @@ impl CollectionPanel {
                         count => format!("Couldn't load {count} files"),
                     }),
             )
-            .children(skipped.iter().enumerate().map(|(index, skipped)| {
-                let path = skipped.path.clone();
-                let error = SharedString::from(skipped.error.clone());
-                let shown = directory
-                    .and_then(|directory| path.strip_prefix(directory).ok())
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string();
+            .child(
+                v_flex()
+                    .id("skipped-files")
+                    // Many broken files must not push the collections out of view.
+                    .max_h(rems(10.))
+                    .overflow_y_scroll()
+                    .children(skipped.iter().enumerate().map(|(index, skipped)| {
+                        let path = skipped.path.clone();
+                        let shown = SharedString::from(
+                            directory
+                                .and_then(|directory| path.strip_prefix(directory).ok())
+                                .unwrap_or(&path)
+                                .display()
+                                .to_string(),
+                        );
+                        // TOML errors give the position first and the reason
+                        // last, around a quote of the line.
+                        let lines: Vec<_> = skipped
+                            .error
+                            .lines()
+                            .filter(|line| !line.trim().is_empty())
+                            .collect();
+                        let summary = match lines.as_slice() {
+                            [first, .., last] => format!("{first}: {last}"),
+                            lines => lines.concat(),
+                        };
 
-                div()
-                    .id(("skipped-file", index))
-                    .debug_selector(move || format!("skipped-file-{index}"))
-                    .truncate()
-                    .text_color(cx.theme().muted_foreground)
-                    .cursor_pointer()
-                    .hover(|row| row.text_color(cx.theme().foreground))
-                    .child(shown)
-                    .tooltip(move |window, cx| Tooltip::new(error.clone()).build(window, cx))
-                    .on_click(move |_, _, cx| cx.reveal_path(&path))
-            }))
+                        v_flex()
+                            .child(
+                                Button::new(("skipped-file", index))
+                                    .debug_selector(move || format!("skipped-file-{index}"))
+                                    .ghost()
+                                    .xsmall()
+                                    .w_full()
+                                    .tooltip(skipped.error.clone())
+                                    .accessibility_label(format!(
+                                        "Show {shown} in the file manager"
+                                    ))
+                                    .child(div().w_full().truncate().child(shown))
+                                    .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                            )
+                            .child(
+                                div()
+                                    .px_1()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(summary),
+                            )
+                    })),
+            )
             .child(
                 div()
+                    .px_1()
                     .text_color(cx.theme().muted_foreground)
                     .child("Fix them, then reopen Request Eagle."),
             )

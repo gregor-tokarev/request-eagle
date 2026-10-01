@@ -53,11 +53,13 @@ fn unreadable_files_are_left_out_and_untouched() {
     let root = test_directory();
     let api = root.join("API");
     let billing = root.join("Billing");
+    let shipping = root.join("Shipping");
     let request = "id = 'one'\nname = 'Health'\nschema_version = 1\n[request]\ntype = 'http'\nmethod = 'GET'\npath = '/health'\n";
     let conflicted = "<<<<<<< HEAD\nid = 'two'\n=======\nid = 'three'\n>>>>>>> branch\n";
 
     fs::create_dir_all(api.join("Users")).unwrap();
     fs::create_dir_all(&billing).unwrap();
+    fs::create_dir_all(&shipping).unwrap();
     fs::write(api.join("Health.toml"), request).unwrap();
     fs::write(api.join("Users/Broken.toml"), conflicted).unwrap();
     fs::write(api.join(".request-eagle-order.json"), "[\"Health.toml\",").unwrap();
@@ -65,6 +67,7 @@ fn unreadable_files_are_left_out_and_untouched() {
     // A collection whose variables cannot be read is left out whole, so
     // saving them cannot replace the file.
     fs::write(billing.join("environment.toml"), conflicted).unwrap();
+    fs::write(shipping.join(".request-eagle-collection.toml"), conflicted).unwrap();
 
     let mut registry = CollectionRegistry::from_path(&root);
 
@@ -84,6 +87,7 @@ fn unreadable_files_are_left_out_and_untouched() {
             api.join("Users/Broken.toml"),
             api.join(".request-eagle-order.json"),
             billing.join("environment.toml"),
+            shipping.join(".request-eagle-collection.toml"),
         ]
     );
     assert!(registry.skipped()[0].error.contains("line 1"));
@@ -104,6 +108,27 @@ fn unreadable_files_are_left_out_and_untouched() {
     assert_eq!(
         fs::read_to_string(billing.join("environment.toml")).unwrap(),
         conflicted
+    );
+
+    // Nor does saving the order of a new item replace an unreadable order.
+    registry
+        .create_request_with(&api, "Status", request::HttpRequest::default().into())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(api.join(".request-eagle-order.json")).unwrap(),
+        "[\"Health.toml\","
+    );
+
+    // Skipped files follow renamed folders and go with deleted ones.
+    let service = registry.rename(&api, "Service").unwrap();
+    assert_eq!(
+        registry.skipped()[0].path,
+        service.join("Users/Broken.toml")
+    );
+    registry.delete(&service.join("Users")).unwrap();
+    assert_eq!(
+        registry.skipped()[0].path,
+        service.join(".request-eagle-order.json")
     );
 
     fs::remove_dir_all(root).unwrap();

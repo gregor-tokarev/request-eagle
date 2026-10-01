@@ -446,6 +446,17 @@ fn file_name(path: &Path) -> String {
         .into_owned()
 }
 
+impl CollectionLoadError {
+    /// The file or folder that could not be loaded.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Read { path, .. } | Self::Parse { path, .. } | Self::UnsupportedPath { path } => {
+                path
+            }
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CollectionLoadError {
     #[error("failed to read {}: {source}", .path.display())]

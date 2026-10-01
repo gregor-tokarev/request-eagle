@@ -31,6 +31,12 @@ pub(crate) fn apply(parent: &Path, entries: &mut [Entry]) -> io::Result<()> {
 }
 
 pub(crate) fn save(parent: &Path, paths: &[PathBuf]) -> io::Result<()> {
+    // Loading left out an order that cannot be read. Keep it as it is, so
+    // that it can still be repaired.
+    if read(parent)?.is_some_and(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).is_err()) {
+        return Ok(());
+    }
+
     let names: Vec<_> = paths
         .iter()
         .map(|path| path.file_name().unwrap().to_string_lossy())
@@ -69,10 +75,12 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
     let parent = old
         .parent()
         .ok_or_else(|| io::Error::other("Cannot rename the filesystem root."))?;
-    let Some(bytes) = read(parent)? else {
+    // Without a readable order, there are no names to update.
+    let Some(names) =
+        read(parent)?.and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+    else {
         return fs::rename(old, new);
     };
-    let names: Vec<String> = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
     let paths = names
         .iter()
         .map(|name| {

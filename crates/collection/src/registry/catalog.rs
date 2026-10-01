@@ -93,7 +93,7 @@ impl CollectionRegistry {
                 Ok(collection) => registry.collections.push(collection),
                 Err(error) => registry
                     .skipped
-                    .push(SkippedPath::new(&collection_path, &error)),
+                    .push(SkippedPath::new(error.path(), &error)),
             }
         }
 
