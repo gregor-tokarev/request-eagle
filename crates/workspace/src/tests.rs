@@ -76,7 +76,7 @@ pub(crate) fn collections(request_count: usize) -> CollectionRegistry {
         )).unwrap();
     }
 
-    CollectionRegistry::from_path(directory.path()).unwrap()
+    CollectionRegistry::from_path(directory.path())
 }
 
 /// Click an element, found in a fresh layout.

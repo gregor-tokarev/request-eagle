@@ -9,6 +9,7 @@ use collection::{CollectionRegistry, MovePlacement};
 use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     scroll::Scrollbar,
+    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -378,6 +379,55 @@ impl CollectionPanel {
         window.focus(&self.focus, cx);
         cx.stop_propagation();
     }
+
+    /// Lists the files that loading left out. Hovering one explains why, and
+    /// clicking it shows it in the file manager.
+    fn skipped_notice(&self, cx: &App) -> impl IntoElement + use<> {
+        let skipped = self.collections.skipped();
+        let directory = self.collections.directory();
+
+        v_flex()
+            .debug_selector(|| "collections-skipped".into())
+            .px_3()
+            .py_2()
+            .gap_1()
+            .text_xs()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .text_color(cx.theme().danger)
+                    .child(Icon::new(IconName::TriangleAlert).xsmall())
+                    .child(match skipped.len() {
+                        1 => "Couldn't load 1 file".to_owned(),
+                        count => format!("Couldn't load {count} files"),
+                    }),
+            )
+            .children(skipped.iter().enumerate().map(|(index, skipped)| {
+                let path = skipped.path.clone();
+                let error = SharedString::from(skipped.error.clone());
+                let shown = directory
+                    .and_then(|directory| path.strip_prefix(directory).ok())
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+
+                div()
+                    .id(("skipped-file", index))
+                    .debug_selector(move || format!("skipped-file-{index}"))
+                    .truncate()
+                    .text_color(cx.theme().muted_foreground)
+                    .cursor_pointer()
+                    .hover(|row| row.text_color(cx.theme().foreground))
+                    .child(shown)
+                    .tooltip(move |window, cx| Tooltip::new(error.clone()).build(window, cx))
+                    .on_click(move |_, _, cx| cx.reveal_path(&path))
+            }))
+            .child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Fix them, then reopen Request Eagle."),
+            )
+    }
 }
 
 impl Focusable for CollectionPanel {
@@ -415,6 +465,9 @@ impl Render for CollectionPanel {
                         .text_color(cx.theme().danger)
                         .child(error),
                 )
+            })
+            .when(!self.collections.skipped().is_empty(), |this| {
+                this.child(self.skipped_notice(cx))
             })
             .child(
                 div()

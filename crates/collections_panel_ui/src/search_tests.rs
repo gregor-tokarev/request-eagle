@@ -188,7 +188,7 @@ fn benchmark_collections(request_count: usize) -> CollectionRegistry {
         )).unwrap();
     }
 
-    CollectionRegistry::from_path(directory).unwrap()
+    CollectionRegistry::from_path(directory)
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn grpc_requests_are_found_by_service_and_method() {
     )
     .unwrap();
 
-    let tree = CollectionTree::new(&CollectionRegistry::from_path(directory.path()).unwrap());
+    let tree = CollectionTree::new(&CollectionRegistry::from_path(directory.path()));
 
     for query in ["SayHello", "greeter", "localhost:50051", "gRPC"] {
         assert_eq!(tree.search.matching_rows(query).len(), 1, "{query}");

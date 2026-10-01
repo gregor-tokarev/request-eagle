@@ -33,7 +33,7 @@ fn paths(registry: &mut CollectionRegistry, parent: &Path) -> Vec<PathBuf> {
 #[test]
 fn reordered_requests_and_folders_survive_reload_rename_creation_and_deletion() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let first = registry.create_request(&collection).unwrap();
     let folder = registry.create_folder(&collection).unwrap();
@@ -48,7 +48,7 @@ fn reordered_requests_and_folders_survive_reload_rename_creation_and_deletion() 
         paths(&mut registry, &collection),
         [last.clone(), folder.clone(), first.clone()]
     );
-    registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    registry = CollectionRegistry::from_path(&fixture.0);
     assert_eq!(
         paths(&mut registry, &collection),
         [last.clone(), folder.clone(), first.clone()]
@@ -57,14 +57,14 @@ fn reordered_requests_and_folders_survive_reload_rename_creation_and_deletion() 
     let renamed = registry.rename(&folder, "Renamed").unwrap();
     let added = registry.create_request(&collection).unwrap();
     registry.delete(&first).unwrap();
-    registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    registry = CollectionRegistry::from_path(&fixture.0);
     assert_eq!(paths(&mut registry, &collection), [last, renamed, added]);
 }
 
 #[test]
 fn moves_requests_between_folders_and_collections_without_changing_their_contents() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let first = registry.create_collection().unwrap();
     let second = registry.create_collection().unwrap();
     let folder = registry.create_folder(&first).unwrap();
@@ -80,7 +80,7 @@ fn moves_requests_between_folders_and_collections_without_changing_their_content
         .move_entry(&moved, &folder, MovePlacement::Inside)
         .unwrap();
     assert_eq!(back, request);
-    registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    registry = CollectionRegistry::from_path(&fixture.0);
     assert!(paths(&mut registry, &second).is_empty());
     assert_eq!(paths(&mut registry, &folder), [request]);
 }
@@ -88,7 +88,7 @@ fn moves_requests_between_folders_and_collections_without_changing_their_content
 #[test]
 fn moving_a_folder_rebases_descendants_and_preserves_their_order() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let first = registry.create_collection().unwrap();
     let second = registry.create_collection().unwrap();
     let folder = registry.create_folder(&first).unwrap();
@@ -114,7 +114,7 @@ fn moving_a_folder_rebases_descendants_and_preserves_their_order() {
         panic!()
     };
     assert_eq!(file.path, new_request);
-    registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    registry = CollectionRegistry::from_path(&fixture.0);
     assert_eq!(paths(&mut registry, &new_nested), [new_next, new_request]);
     assert!(paths(&mut registry, &first).is_empty());
 }
@@ -122,7 +122,7 @@ fn moving_a_folder_rebases_descendants_and_preserves_their_order() {
 #[test]
 fn invalid_moves_and_order_write_errors_leave_files_and_model_unchanged() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let first = registry.create_collection().unwrap();
     let second = registry.create_collection().unwrap();
     let folder = registry.create_folder(&first).unwrap();

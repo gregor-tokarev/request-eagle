@@ -46,7 +46,7 @@ impl Drop for Fixture {
 fn rename_preserves_request_content_and_rebases_nested_paths_and_environment() {
     let fixture = Fixture::new();
     let root = &fixture.0;
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let request = root.join("API/Users/list.toml");
     // Changes made after loading must survive the rename too.
     let source = fs::read_to_string(&request)
@@ -83,20 +83,14 @@ fn rename_preserves_request_content_and_rebases_nested_paths_and_environment() {
         .rename(&root.join("Renamed API"), "RENAMED API")
         .unwrap();
     assert_eq!(registry.collections()[0].path, root.join("RENAMED API"));
-    assert_eq!(
-        CollectionRegistry::from_path(root)
-            .unwrap()
-            .collections()
-            .len(),
-        2
-    );
+    assert_eq!(CollectionRegistry::from_path(root).collections().len(), 2);
 }
 
 #[test]
 fn invalid_colliding_and_failed_edits_leave_the_model_unchanged() {
     let fixture = Fixture::new();
     let root = &fixture.0;
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     for name in ["", "..", "../Outside", "Other", "bad\nname"] {
         assert!(registry.rename(&root.join("API"), name).is_err());
         assert_eq!(registry.collections()[0].path, root.join("API"));
@@ -119,7 +113,7 @@ fn invalid_colliding_and_failed_edits_leave_the_model_unchanged() {
 fn delete_persists_for_requests_folders_and_collections() {
     let fixture = Fixture::new();
     let root = &fixture.0;
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     registry.delete(&root.join("API/Users/list.toml")).unwrap();
     assert!(!root.join("API/Users/list.toml").exists());
     let Entry::Directory(folder) = &registry.collections()[0].entries[0] else {
@@ -130,7 +124,7 @@ fn delete_persists_for_requests_folders_and_collections() {
     assert!(registry.collections()[0].entries.is_empty());
     registry.delete(&root.join("API")).unwrap();
     assert!(!root.join("API").exists());
-    let reloaded = CollectionRegistry::from_path(root).unwrap();
+    let reloaded = CollectionRegistry::from_path(root);
     assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(reloaded.collections()[0].path, root.join("Other"));
 }
@@ -140,7 +134,7 @@ fn saving_request_preserves_latest_metadata_comments_and_unknown_fields() {
     let fixture = Fixture::new();
     let root = &fixture.0;
     let path = root.join("API/Users/list.toml");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     fs::write(
         &path,
         r#"# externally edited request
@@ -221,7 +215,7 @@ fn failed_request_save_keeps_file_and_registry_unchanged() {
     let root = &fixture.0;
     let path = root.join("API/Users/list.toml");
     let original = fs::read_to_string(&path).unwrap();
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let original_permissions = fs::metadata(&path).unwrap().permissions();
     let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
@@ -252,7 +246,7 @@ fn failed_request_save_keeps_file_and_registry_unchanged() {
 fn stale_save_cannot_overwrite_a_request_recreated_at_the_same_path() {
     let fixture = Fixture::new();
     let root = &fixture.0;
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let path = registry.create_request(&root.join("API/Users")).unwrap();
     let original_id = registry.file(&path).unwrap().id.clone();
 
@@ -289,7 +283,7 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
     let fixture = Fixture::new();
     let root = &fixture.0;
     let path = root.join("API/Users/list.toml");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let original_content = fs::read_to_string(&path).unwrap();
     let replacement_id = uuid::Uuid::new_v4().to_string();
     let replacement_content = original_content
@@ -328,7 +322,7 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
         "id = 'list'\nname = 'List users'\nschema_version = 1\nrequest = { type = 'http', method = 'GET', path = '/users', body = [65], custom = 'keep' } # request comment\n",
     )
     .unwrap();
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
 
     registry
         .update_request(
@@ -377,7 +371,7 @@ query = [
         ),
     )
     .unwrap();
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
         panic!("expected an HTTP request");
     };
@@ -443,7 +437,7 @@ query = [
         ),
     )
     .unwrap();
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
         panic!("expected an HTTP request");
     };
@@ -505,7 +499,7 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
     let fixture = Fixture::new();
     let root = &fixture.0;
     let collection = root.join("API");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let scripts = request::RequestScripts {
         pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
         post_response: String::new(),
@@ -520,7 +514,7 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
         .unwrap();
     registry.rename(&collection, "Renamed API").unwrap();
 
-    let reloaded = CollectionRegistry::from_path(root).unwrap();
+    let reloaded = CollectionRegistry::from_path(root);
     let collection = reloaded
         .collections()
         .iter()
@@ -541,7 +535,7 @@ fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables(
     let root = &fixture.0;
     let collection = root.join("API");
     let environment = collection.join("environment.toml");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let variables = registry.collections()[0].local_env().entries.clone();
     let scripts = request::RequestScripts {
         pre_request: String::new(),
@@ -586,7 +580,7 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
     let collection = root.join("API");
     let environment = collection.join("environment.toml");
     let settings = collection.join(".request-eagle-collection.toml");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let variables = registry
         .collections()
         .iter()
@@ -629,7 +623,7 @@ fn collection_settings_files_cannot_be_replaced_by_entries() {
     let root = &fixture.0;
     let collection = root.join("API");
     let folder = collection.join("Users");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let request = Request::Http(HttpRequest::default());
 
     for (name, file) in [
@@ -683,7 +677,7 @@ headers = [
 "#,
     )
     .unwrap();
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let Request::Http(mut request) = registry.file(&path).unwrap().request.clone() else {
         panic!("expected an HTTP request");
     };
@@ -722,7 +716,7 @@ fn bodies_are_saved_as_text_unless_they_are_not_utf8() {
     let fixture = Fixture::new();
     let root = &fixture.0;
     let path = root.join("API/Users/list.toml");
-    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
     let mut request = HttpRequest {
         method: Method::Post,
         path: "https://example.com/users".into(),

@@ -49,7 +49,7 @@ async fn saved_request_opens_with_all_fields_sends_and_keeps_its_tab_state(
         b"{\"hello\":true}".as_slice(),
     );
     fs::write(&file, &original).unwrap();
-    let collections = CollectionRegistry::from_path(directory.path()).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
 
     init(cx);
     let (layout, cx) = workspace(collections, no_environments(), cx);
@@ -219,7 +219,7 @@ path = "https://example.com/original"
         &'a mut gpui_kit::VisualTestContext,
     ) {
         init(cx);
-        let registry = CollectionRegistry::from_path(self.directory.path()).unwrap();
+        let registry = CollectionRegistry::from_path(self.directory.path());
         let (layout, cx) = workspace(registry, no_environments(), cx);
         let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
         click(cx, "collection-row-1");
@@ -332,7 +332,7 @@ fn reverting_an_edit_clears_dirty_state_and_closes_without_prompt(cx: &mut TestA
 fn enter_opens_the_selected_request_and_f2_renames_it(cx: &mut TestAppContext) {
     let fixture = SavedRequestFixture::new();
     init(cx);
-    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let registry = CollectionRegistry::from_path(fixture.directory.path());
     let (layout, cx) = workspace(registry, no_environments(), cx);
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());
     cx.update(|window, _| window.activate_window());
@@ -574,7 +574,7 @@ fn breadcrumbs_include_nested_folders_and_follow_folder_renames(cx: &mut TestApp
     fs::create_dir_all(nested.parent().unwrap()).unwrap();
     fs::rename(&fixture.file, &nested).unwrap();
     init(cx);
-    let registry = CollectionRegistry::from_path(fixture.directory.path()).unwrap();
+    let registry = CollectionRegistry::from_path(fixture.directory.path());
     let (layout, cx) = workspace(registry, no_environments(), cx);
     click(cx, "collection-row-3");
     let tabs = cx.read(|cx| layout.read(cx).main_view.clone());

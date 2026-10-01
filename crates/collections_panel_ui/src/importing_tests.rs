@@ -43,7 +43,7 @@ fn sidebar<'a>(
         cx.set_reduce_motion(true);
     });
 
-    let collections = CollectionRegistry::from_path(directory).unwrap();
+    let collections = CollectionRegistry::from_path(directory);
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| CollectionPanel::new(collections, window, cx));

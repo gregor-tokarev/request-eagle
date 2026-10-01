@@ -44,7 +44,7 @@ fn names(entries: &[Entry]) -> Vec<String> {
 #[test]
 fn imported_collections_keep_their_order_settings_and_survive_reload() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
 
     let collection = ImportedCollection {
         name: "Pet Store".into(),
@@ -74,7 +74,7 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
         ["Pets", "Health"]
     );
 
-    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let reloaded = CollectionRegistry::from_path(&fixture.0);
     let collection = &reloaded.collections()[0];
 
     assert_eq!(
@@ -153,5 +153,9 @@ fn imported_names_become_safe_unique_file_names() {
         names(&collection.entries)[..2],
         ["Get /pets/{id}", "Get /pets/{id}"]
     );
-    assert!(CollectionRegistry::from_path(&fixture.0).is_ok());
+    assert!(
+        CollectionRegistry::from_path(&fixture.0)
+            .skipped()
+            .is_empty()
+    );
 }

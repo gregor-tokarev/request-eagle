@@ -11,7 +11,7 @@ fn setup<'a>(
     cx: &'a mut TestAppContext,
 ) -> (Entity<MainView>, &'a mut VisualTestContext) {
     init(cx);
-    let registry = collection::CollectionRegistry::from_path(directory.path()).unwrap();
+    let registry = collection::CollectionRegistry::from_path(directory.path());
     let (workspace, cx) = workspace(registry, no_environments(), cx);
     let main = cx.read(|cx| workspace.read(cx).main_view.clone());
 
@@ -110,9 +110,7 @@ fn save_and_close_can_create_a_collection_and_does_not_close_on_failure(cx: &mut
     assert!(cx.debug_bounds("save-request-dialog").is_none());
     cx.read(|cx| assert!(main.read(cx).tabs.is_empty()));
     assert_eq!(
-        collection::CollectionRegistry::from_path(directory.path())
-            .unwrap()
-            .collections()[0]
+        collection::CollectionRegistry::from_path(directory.path()).collections()[0]
             .entries
             .len(),
         1

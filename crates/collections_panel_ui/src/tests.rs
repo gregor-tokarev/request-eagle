@@ -59,7 +59,7 @@ pub(super) fn collections() -> CollectionRegistry {
         )).unwrap();
     }
 
-    CollectionRegistry::from_path(directory).unwrap()
+    CollectionRegistry::from_path(directory)
 }
 
 #[test]
@@ -137,6 +137,28 @@ fn tree_preserves_hierarchy_and_filters_collapsed_collections() {
 
     collapsed.clear();
     assert_eq!(tree.visible_rows(&collapsed, "").len(), tree.items.len());
+}
+
+#[gpui_kit::test]
+fn files_that_could_not_be_loaded_are_listed(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        request_eagle_theme::init(cx);
+        crate::init(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    fs::create_dir_all(directory.path().join("API")).unwrap();
+    fs::write(directory.path().join("API/Broken.toml"), "id = ").unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
+
+    let (_, cx) = cx.add_window_view(|window, cx| CollectionPanel::new(collections, window, cx));
+    cx.run_until_parked();
+
+    assert!(cx.debug_bounds("collections-skipped").is_some());
+    assert!(cx.debug_bounds("skipped-file-0").is_some());
+    assert!(cx.debug_bounds("skipped-file-1").is_none());
+    // The collection itself still loads.
+    assert!(cx.debug_bounds("collection-row-0").is_some());
 }
 
 #[gpui_kit::test]

@@ -7,7 +7,16 @@ use std::{fs, path::Path};
 use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedRequest};
 
 pub fn load(root: &Path) -> Result<CollectionRegistry> {
-    let registry = CollectionRegistry::from_path(root)?;
+    let registry = CollectionRegistry::from_path(root);
+    // The app leaves unreadable files out, but commands must not act on an
+    // incomplete view of the collections.
+    if let Some(skipped) = registry.skipped().first() {
+        bail!(
+            "Could not load {}: {}",
+            skipped.path.display(),
+            skipped.error
+        );
+    }
     validate_paths(&registry)?;
     Ok(registry)
 }

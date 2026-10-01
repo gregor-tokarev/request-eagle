@@ -86,8 +86,17 @@ fn write_collection(
 
     write_items(path, &imported.items, &collection.reserved_paths())?;
 
-    // Loading what was written keeps the registry identical to a restart.
-    Ok(Collection::from_path(path, collection.local_env)?)
+    // Loading what was written keeps the registry identical to a restart,
+    // and all of it must load.
+    let mut skipped = Vec::new();
+    let collection = Collection::from_path(path, collection.local_env, &mut skipped)?;
+    if let Some(skipped) = skipped.first() {
+        return Err(
+            io::Error::other(format!("{}: {}", skipped.path.display(), skipped.error)).into(),
+        );
+    }
+
+    Ok(collection)
 }
 
 fn write_items(

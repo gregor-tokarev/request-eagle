@@ -53,10 +53,10 @@ pub fn run() {
         let preferences = preferences::load(home.join(".request-eagle"), cx);
 
         cx.spawn(async move |cx| {
+            // The app opens with defaults, and Settings explains why changes
+            // cannot be saved until the file is fixed.
             if let Err(error) = preferences.await {
                 eprintln!("Failed to load preferences: {error:#}");
-                cx.update(|cx| cx.quit());
-                return;
             }
 
             cx.update(|cx| open_workspace(&home, cx));
@@ -74,8 +74,10 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
     let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".request-eagle/collections"));
-    let collections = collection::CollectionRegistry::from_path(collections_directory)
-        .expect("Failed to load collections");
+    let collections = collection::CollectionRegistry::from_path(collections_directory);
+    for skipped in collections.skipped() {
+        eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
+    }
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
 

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::Entry;
 
-const FILE_NAME: &str = ".request-eagle-order.json";
+pub(crate) const FILE_NAME: &str = ".request-eagle-order.json";
 
 pub(crate) fn apply(parent: &Path, entries: &mut [Entry]) -> io::Result<()> {
     let Some(bytes) = read(parent)? else {

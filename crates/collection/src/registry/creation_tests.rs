@@ -23,7 +23,7 @@ impl Drop for Fixture {
 #[test]
 fn creates_collections_folders_and_requests_that_survive_reload() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let folder = registry.create_folder(&collection).unwrap();
     let nested = registry.create_folder(&folder).unwrap();
@@ -32,7 +32,7 @@ fn creates_collections_folders_and_requests_that_survive_reload() {
 
     assert!(request.is_file());
     assert!(root_request.is_file());
-    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let reloaded = CollectionRegistry::from_path(&fixture.0);
     assert_eq!(reloaded.collections().len(), 1);
     assert_eq!(
         reloaded.collections()[0].local_env().path,
@@ -64,7 +64,7 @@ fn creates_collections_folders_and_requests_that_survive_reload() {
 #[test]
 fn creation_avoids_existing_files_and_directories() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let second = registry.create_collection().unwrap();
     assert_eq!(second.file_name().unwrap(), "New Collection 2");
@@ -85,7 +85,7 @@ fn creation_avoids_existing_files_and_directories() {
 #[test]
 fn missing_or_invalid_parents_do_not_change_the_registry() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     assert!(registry.create_folder(&fixture.0.join("outside")).is_err());
     assert!(registry.create_request(&fixture.0.join("outside")).is_err());
@@ -100,7 +100,7 @@ fn missing_or_invalid_parents_do_not_change_the_registry() {
 #[test]
 fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let parent = registry.create_collection().unwrap();
     let request = request::HttpRequest {
         method: Method::Post,
@@ -130,7 +130,7 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
 #[test]
 fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let path = registry.create_request(&collection).unwrap();
     let original = crate::FileEntry::from_path(&path).unwrap();
@@ -177,7 +177,7 @@ fn saves_reloads_and_clears_request_scripts_without_losing_metadata() {
 #[test]
 fn websocket_requests_save_and_reload_without_stale_fields() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let mut request = WebSocketRequest {
         url: "wss://{{host}}/feed".into(),

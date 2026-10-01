@@ -17,7 +17,7 @@ fn saved_websocket_opens_from_the_sidebar_and_saves_its_edits(cx: &mut TestAppCo
         "id = \"prices\"\nname = \"Prices\"\nschema_version = 1\n[request]\ntype = \"websocket\"\nurl = \"wss://example.test/prices\"\nmessage = \"{\\\"subscribe\\\":true}\"\n",
     )
     .unwrap();
-    let collections = CollectionRegistry::from_path(directory.path()).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
 
     init(cx);
     let (layout, cx) = workspace(collections, no_environments(), cx);
@@ -73,7 +73,7 @@ fn saved_websocket_opens_from_the_sidebar_and_saves_its_edits(cx: &mut TestAppCo
 fn a_new_websocket_tab_is_saved_through_the_dialog(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir_all(directory.path().join("Streams")).unwrap();
-    let collections = CollectionRegistry::from_path(directory.path()).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
 
     init(cx);
     let (layout, cx) = workspace(collections, no_environments(), cx);

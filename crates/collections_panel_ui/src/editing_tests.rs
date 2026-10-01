@@ -32,11 +32,7 @@ pub(super) fn sidebar<'a>(
     let mut sidebar = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| {
-            CollectionPanel::new(
-                CollectionRegistry::from_path(fixture.path()).unwrap(),
-                window,
-                cx,
-            )
+            CollectionPanel::new(CollectionRegistry::from_path(fixture.path()), window, cx)
         });
         sidebar = Some(view.clone());
         Root::new(view, window, cx)
