@@ -192,3 +192,24 @@ fn a_script_that_sets_a_deleted_cookie_again_keeps_it_saved() {
     jar.save().unwrap();
     assert!(CookieJar::open(&path).unwrap().is_empty());
 }
+
+#[test]
+fn the_cookie_url_ends_at_the_query_outside_variable_names() {
+    let values = std::collections::HashMap::from([
+        ("host?name".to_owned(), "example.com".to_owned()),
+        ("section".to_owned(), "admin".to_owned()),
+    ]);
+    let sent = |path: &str| {
+        crate::variables::sent_url(path, &[], &values, &std::collections::BTreeMap::new())
+    };
+
+    assert_eq!(
+        sent("https://{{host?name}}/{{section}}?q={{unset}}").as_deref(),
+        Some("https://example.com/admin")
+    );
+    assert_eq!(
+        sent("{{host?name}}/{{section}}#{{unset}}").as_deref(),
+        Some("https://example.com/admin")
+    );
+    assert_eq!(sent("https://{{unset}}/admin"), None);
+}

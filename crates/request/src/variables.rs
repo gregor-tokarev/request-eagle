@@ -234,7 +234,7 @@ pub(crate) fn sent_url(
         resolver.override_generated(name.clone(), value.clone());
     }
 
-    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    let path = &path[..query_start(path)];
     let url = resolve_url(path, &mut resolver).ok()?;
     let path = crate::request_url::fill_path_variables(&url, path_variables, |value| {
         resolver.resolve(value)
@@ -249,6 +249,28 @@ pub(crate) fn sent_url(
         .prepare_for_send()
         .path,
     )
+}
+
+/// Where the URL's query or fragment starts, outside its `{{variables}}`.
+fn query_start(url: &str) -> usize {
+    let mut index = 0;
+
+    while let Some(offset) = url[index..].find(['?', '#', '{']) {
+        let at = index + offset;
+
+        if url[at..].starts_with("{{") {
+            let Some(end) = url[at + 2..].find("}}") else {
+                return url.len();
+            };
+            index = at + 2 + end + 2;
+        } else if url[at..].starts_with('{') {
+            index = at + 1;
+        } else {
+            return at;
+        }
+    }
+
+    url.len()
 }
 
 /// `scripted` reports whether a collection or request pre-request script ran.
