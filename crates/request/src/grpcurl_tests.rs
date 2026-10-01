@@ -68,6 +68,22 @@ fn connects_as_invoking_does() {
         }),
         "grpcurl '[::1]:50051' helloworld.Greeter/SayHello"
     );
+    // Invoking finds a method with a leading slash too.
+    assert_eq!(
+        command(GrpcRequest {
+            method: "/helloworld.Greeter/SayHello".into(),
+            ..unary("localhost:50051")
+        }),
+        "grpcurl -plaintext localhost:50051 helloworld.Greeter/SayHello"
+    );
+    // An address cannot become an option, such as one that writes a file.
+    assert_eq!(
+        command(GrpcRequest {
+            method: String::new(),
+            ..unary("-protoset-out=/tmp/x")
+        }),
+        "grpcurl -plaintext -- -protoset-out=/tmp/x list"
+    );
     // An empty message is sent as an empty message; without a method, the
     // command lists the services.
     assert_eq!(

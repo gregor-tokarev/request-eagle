@@ -115,7 +115,8 @@ impl GrpcRequest {
             options.push(("-H", format!("{name}: {value}").trim_end().to_owned()));
         }
 
-        let method = request.method.trim();
+        // Invoking finds the method with or without a leading slash.
+        let method = request.method.trim().trim_start_matches('/');
         let message = fill(&request.message);
         // Without data, grpcurl sends an empty message, as invoking does.
         if !method.is_empty() && !message.trim().is_empty() {
@@ -130,6 +131,10 @@ impl GrpcRequest {
         }
 
         command.push_str(if options.is_empty() { " " } else { " \\\n" });
+        // grpcurl would read an address that starts with `-` as an option.
+        if address.starts_with('-') {
+            command.push_str("-- ");
+        }
         command.push_str(&shell_word(&address));
         command.push(' ');
         if method.is_empty() {
