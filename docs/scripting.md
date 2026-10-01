@@ -115,6 +115,75 @@ if (!pm.environment.get("token")) {
 
 The primary request and post-response script do not run.
 
+## gRPC scripts
+
+A gRPC request's **Scripts** section has three scripts:
+
+- **Before invoke** runs before the method is invoked. It can change the
+  server URL, metadata and message of that call, and
+  `pm.execution.skipRequest(reason)` cancels it. It runs before server
+  reflection loads the call's methods, so it can also set the metadata that
+  reflection needs.
+- **On message** runs for each message the server sends, in order.
+- **After response** runs once the server ends the call, including with an
+  error status. It does not run when the call fails without a status, such as
+  when the server is unreachable, or when you cancel it.
+
+The three scripts share `pm.variables` during the call. A `{{$guid}}` or other
+generated value that Before invoke creates or sets keeps that value for the
+whole call, including stream messages. Collection scripts run only for HTTP
+requests.
+
+```js
+// Before invoke
+const auth = await pm.sendRequest({url: "{{base_url}}/login", method: "POST"});
+pm.request.metadata.upsert({key: "authorization", value: "Bearer " + auth.json().token});
+```
+
+```js
+// On message
+pm.test("Every update has an ID", () => {
+    pm.expect(pm.message.data).to.have.property("id");
+});
+```
+
+```js
+// After response
+pm.test("Status is OK", () => pm.response.to.have.status("OK"));
+pm.test("An update reports success", () => {
+    pm.response.messages.to.include({status: "success"});
+});
+pm.environment.set("orderId", pm.response.messages.idx(0).data.id);
+```
+
+Messages appear as JSON, with lowerCamelCase field names and 64-bit integers
+as strings.
+
+| API | Behavior |
+| --- | --- |
+| `pm.request.url` / `.message` | The server and the composed message as text. Before invoke can assign them; an object assigned to `message` becomes JSON. Unary and server streaming methods send the message when invoked. |
+| `pm.request.methodPath` | The method as `package.Service/Method`. |
+| `pm.request.metadata` | `get`, `has`, `add`, `remove`, `upsert`, `clear` and `toJSON`, like headers. Keys are case-insensitive. |
+| `pm.message.data` / `.timestamp` | In On message, the received message and when it arrived. |
+| `pm.response.code` / `.status` / `.statusMessage` | In After response, the status code (0 is OK), its name such as `NOT_FOUND`, and the server's message. |
+| `pm.response.responseTime` | Milliseconds from invoking until the status arrived. |
+| `pm.response.metadata` / `.trailers` | The metadata and trailers the server sent. |
+| `pm.response.messages` / `pm.request.messages` | In After response, the received and sent messages, each with `data` and `timestamp`. |
+| `pm.response.to.have.statusCode(code)` / `.status(codeOrName)` | Assert the status. `pm.response.to.be.ok` asserts OK, and `.error` any other status. |
+| `pm.response.to.have.metadata(key, value?)` / `.trailer(key, value?)` | Assert that the server sent a key, and optionally its value. |
+| `pm.response.to.have.message(object)` | Assert that a received message equals the object. |
+
+Message lists are arrays with `idx(index)`, `count()`, `all()` and
+`each(callback)`. Their `filter` also accepts the fields to match, such as
+`filter({data: {type: "ping"}})`.
+
+| Assertion | Passes when |
+| --- | --- |
+| `messages.to.include(fields)` | A message has these fields. Nested objects match the fields they name. |
+| `messages.to.not.include(fields)` | No message has these fields. |
+| `messages.to.have.property(path, value?)` | Every message has the property, such as `user.id`, optionally with this value. There must be a message. |
+| `messages.to.have.jsonSchema(schema)` | Every message matches the schema. There must be a message. |
+
 ## Limits
 
 Each phase is limited to:
@@ -123,3 +192,7 @@ Each phase is limited to:
 - 32 HTTP calls with 4 in flight, 8 MiB per response and 16 MiB in total.
 - 500 tests and 500 console entries.
 - 1 MiB for crypto, Base64, and schema data, and 64 KiB for a schema.
+
+On message runs once for each received message, with these limits for each
+run. A call shows up to 500 tests and 500 console entries from all of them.
+After response sees the latest 8 MiB of messages in each direction.

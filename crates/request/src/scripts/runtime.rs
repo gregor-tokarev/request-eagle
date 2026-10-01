@@ -5,6 +5,7 @@ use std::sync::{
 
 use bytes::Bytes;
 use environment::EnvironmentSession;
+use serde::Deserialize;
 use serde_json::json;
 
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
@@ -28,6 +29,17 @@ impl Drop for Cancellation {
     }
 }
 
+/// The HTTP request after a pre-request script changed it.
+#[derive(Deserialize)]
+struct HttpChanges {
+    method: Method,
+    url: String,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+    body_changed: bool,
+}
+
 /// State the pre-request phase hands to the post-response phase.
 #[derive(Debug)]
 pub(crate) struct ScriptState {
@@ -48,6 +60,7 @@ pub(crate) async fn pre_request(
         session,
         collection_scripts,
         environment_error,
+        ..
     } = variables;
 
     let collection = match collection_scripts {
@@ -56,6 +69,7 @@ pub(crate) async fn pre_request(
             let report = ScriptReport {
                 phase: ScriptPhase::PreRequest,
                 collection: true,
+                message: None,
                 tests: Vec::new(),
                 logs: Vec::new(),
                 error: Some(message.clone()),
@@ -93,7 +107,7 @@ pub(crate) async fn pre_request(
         for (collection, source) in scripts {
             let input = input(&request, &state.variables);
             let mut body = request.body.take().map(Bytes::from);
-            let (output, mut report) = run(
+            let (output, mut report) = run::<HttpChanges>(
                 &source,
                 ScriptPhase::PreRequest,
                 input,
@@ -140,15 +154,16 @@ pub(crate) async fn pre_request(
                     },
                 ));
             }
-            request.method = output.method;
-            request.path = output.url;
-            request.query = output.query;
-            request.headers = output.headers;
+            let changes = output.request;
+            request.method = changes.method;
+            request.path = changes.url;
+            request.query = changes.query;
+            request.headers = changes.headers;
             state.variables = output.variables;
 
-            if output.body_changed {
+            if changes.body_changed {
                 body_changed = true;
-                request.body = output.body.map(String::into_bytes);
+                request.body = changes.body.map(String::into_bytes);
             }
             reports.push(report);
         }
@@ -242,7 +257,7 @@ pub(crate) async fn post_response(
                     (key.as_str(), String::from_utf8_lossy(value.as_bytes()).into_owned())
                 }).collect::<Vec<_>>(),
             });
-            let (output, mut report) = run(
+            let (output, mut report) = run::<serde::de::IgnoredAny>(
                 &source,
                 ScriptPhase::PostResponse,
                 input,

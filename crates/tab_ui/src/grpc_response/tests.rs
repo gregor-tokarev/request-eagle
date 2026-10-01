@@ -1,7 +1,10 @@
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
-use request::{GrpcEvent, GrpcMessage, GrpcStatus, MethodKind};
+use request::{
+    GrpcError, GrpcEvent, GrpcMessage, GrpcStatus, MethodKind, ScriptLog, ScriptPhase,
+    ScriptReport, ScriptTest,
+};
 
 use super::GrpcResponse;
 use super::view::{CallState, Filter};
@@ -143,4 +146,110 @@ fn error_statuses_explain_the_failure(cx: &mut TestAppContext) {
         };
         assert_eq!(status.name(), "UNAVAILABLE");
     });
+}
+
+fn report(phase: ScriptPhase, message: Option<usize>, failure: Option<&str>) -> ScriptReport {
+    ScriptReport {
+        phase,
+        collection: false,
+        message,
+        tests: vec![ScriptTest {
+            name: "has text".into(),
+            error: failure.map(str::to_owned),
+        }],
+        logs: vec![ScriptLog {
+            level: "log".into(),
+            message: "checked".into(),
+        }],
+        error: None,
+    }
+}
+
+#[gpui_kit::test]
+fn failed_script_tests_show_once_the_call_ends(cx: &mut TestAppContext) {
+    let (response, cx) = response(cx);
+
+    response.update_in(cx, |response, window, cx| {
+        response.start(MethodKind::Unary, "localhost:50051".into(), window, cx);
+        let mut events = stream_events();
+        events.insert(
+            3,
+            GrpcEvent::Script(report(ScriptPhase::OnMessage, Some(1), None)),
+        );
+        events.insert(
+            4,
+            GrpcEvent::Script(report(
+                ScriptPhase::AfterResponse,
+                None,
+                Some("expected 1 to equal 2"),
+            )),
+        );
+        response.receive(events, window, cx);
+    });
+
+    assert!(element_bounds(cx, "script-test-results").is_some());
+    response.read_with(cx, |response, _| {
+        assert_eq!(response.scripts.len(), 2);
+        assert_eq!(response.scripts[0].label(), "On message 1");
+    });
+
+    let console = element_bounds(cx, "grpc-response-section-Console").unwrap();
+    cx.simulate_click(console.center(), Modifiers::default());
+    assert!(element_bounds(cx, "script-console").is_some());
+}
+
+#[gpui_kit::test]
+fn calls_stopped_by_before_invoke_show_why(cx: &mut TestAppContext) {
+    let (response, cx) = response(cx);
+
+    response.update_in(cx, |response, _, cx| {
+        response.fail_invoke(
+            GrpcError::Skipped {
+                reason: "No token yet".into(),
+                report: Box::new(report(ScriptPhase::BeforeInvoke, None, None)),
+            },
+            cx,
+        );
+    });
+    assert!(element_bounds(cx, "grpc-skipped").is_some());
+    assert!(element_bounds(cx, "grpc-response-section-Tests").is_some());
+
+    response.update_in(cx, |response, _, cx| {
+        let mut failed = report(ScriptPhase::BeforeInvoke, None, None);
+        failed.error = Some("Error: no token".into());
+        response.fail_invoke(
+            GrpcError::Script {
+                message: "Error: no token".into(),
+                report: Box::new(failed),
+            },
+            cx,
+        );
+    });
+    assert!(element_bounds(cx, "script-test-results").is_some());
+    response.read_with(cx, |response, _| {
+        assert!(matches!(response.state, CallState::Failed(_)));
+    });
+}
+
+#[gpui_kit::test]
+fn failed_tests_show_when_the_call_fails_without_a_status(cx: &mut TestAppContext) {
+    let (response, cx) = response(cx);
+
+    response.update_in(cx, |response, window, cx| {
+        response.start(MethodKind::Unary, "localhost:1".into(), window, cx);
+        response.receive(
+            vec![
+                GrpcEvent::Script(report(
+                    ScriptPhase::BeforeInvoke,
+                    None,
+                    Some("expected 1 to equal 2"),
+                )),
+                GrpcEvent::Failed(GrpcError::Connect("refused".into())),
+            ],
+            window,
+            cx,
+        );
+    });
+
+    assert!(element_bounds(cx, "script-test-results").is_some());
 }

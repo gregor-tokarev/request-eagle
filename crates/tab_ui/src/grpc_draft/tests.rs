@@ -304,7 +304,9 @@ fn clearing_the_source_drops_a_waiting_invoke(cx: &mut TestAppContext) {
     // An Invoke waiting for reflection, whose URL is then cleared.
     draft.update_in(cx, |draft, window, cx| {
         draft.invoke_when_loaded = true;
-        draft.response.update(cx, |response, cx| response.wait(cx));
+        draft
+            .response
+            .update(cx, |response, cx| response.wait("Loading".into(), cx));
         draft.load_definition(false, window, cx);
     });
 
@@ -313,4 +315,93 @@ fn clearing_the_source_drops_a_waiting_invoke(cx: &mut TestAppContext) {
     cx.simulate_click(invoke.center(), Modifiers::default());
     // Invoke runs again and explains what is missing.
     assert!(element_bounds(cx, "grpc-error").is_some());
+}
+
+#[gpui_kit::test]
+fn scripts_are_edited_for_each_hook(cx: &mut TestAppContext) {
+    // Script assistance uses the shared TypeScript worker outside GPUI's test executor.
+    cx.executor().allow_parking();
+    let (draft, cx) = draft(GrpcRequest::default(), cx);
+
+    let tab = element_bounds(cx, "grpc-section-Scripts").unwrap();
+    cx.simulate_click(tab.center(), Modifiers::default());
+    assert!(element_bounds(cx, "request-scripts").is_some());
+
+    for (phase, selector) in [
+        ("Before invoke", "script-phase-Before invoke"),
+        ("On message", "script-phase-On message"),
+        ("After response", "script-phase-After response"),
+    ] {
+        let phase_tab = element_bounds(cx, selector).unwrap();
+        cx.simulate_click(phase_tab.center(), Modifiers::default());
+        let editor = element_bounds(cx, "script-editor").unwrap();
+        cx.simulate_click(editor.center(), Modifiers::default());
+        cx.simulate_input(&format!("// {phase}"));
+    }
+
+    draft.read_with(cx, |draft, _| {
+        let scripts = &draft.request.scripts;
+        assert_eq!(scripts.before_invoke, "// Before invoke");
+        assert_eq!(scripts.on_message, "// On message");
+        assert_eq!(scripts.after_response, "// After response");
+        assert_eq!(draft.script_count(), 3);
+        assert!(draft.is_dirty());
+    });
+}
+
+#[gpui_kit::test]
+fn a_before_invoke_script_can_skip_the_call(cx: &mut TestAppContext) {
+    // The script runs on a thread outside GPUI's test executor.
+    cx.executor().allow_parking();
+    let (_directory, echo, shared) = protos();
+    let mut request = proto_request(echo, shared, "Say");
+    request.scripts.before_invoke = "pm.execution.skipRequest('No token yet');".into();
+    let (draft, cx) = draft(request, cx);
+
+    let invoke = element_bounds(cx, "grpc-invoke").unwrap();
+    cx.simulate_click(invoke.center(), Modifiers::default());
+
+    for _ in 0..500 {
+        cx.run_until_parked();
+        if draft.read_with(cx, |draft, _| draft.call_task.is_none()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    draft.read_with(cx, |draft, _| {
+        assert!(draft.call.is_none());
+        assert!(draft.call_task.is_none());
+    });
+    assert!(element_bounds(cx, "grpc-skipped").is_some());
+}
+
+#[gpui_kit::test]
+fn before_invoke_results_stay_when_the_server_is_unreachable(cx: &mut TestAppContext) {
+    // The script and the connection run outside GPUI's test executor.
+    cx.executor().allow_parking();
+    let (_directory, echo, shared) = protos();
+    let mut request = proto_request(echo, shared, "Say");
+    request.message = "{}".into();
+    request.scripts.before_invoke = "console.log('prepared');".into();
+    let (draft, cx) = draft(request, cx);
+
+    let invoke = element_bounds(cx, "grpc-invoke").unwrap();
+    cx.simulate_click(invoke.center(), Modifiers::default());
+
+    for _ in 0..500 {
+        cx.run_until_parked();
+        if draft.read_with(cx, |draft, _| draft.call_task.is_none()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    draft.read_with(cx, |draft, cx| {
+        assert!(draft.call.is_none());
+        let scripts = &draft.response.read(cx).scripts;
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].logs[0].message, "prepared");
+    });
+    assert!(element_bounds(cx, "grpc-response-section-Console").is_some());
 }

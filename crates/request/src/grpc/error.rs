@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::ScriptReport;
+
 /// A gRPC call that could not start or finish with a status.
 #[derive(Debug, Error)]
 pub enum GrpcError {
@@ -40,4 +42,27 @@ pub enum GrpcError {
 
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
+
+    #[error("Before invoke script failed: {message}")]
+    Script {
+        message: String,
+        report: Box<ScriptReport>,
+    },
+
+    #[error("Call skipped: {reason}")]
+    Skipped {
+        reason: String,
+        report: Box<ScriptReport>,
+    },
+
+    #[error("scripts could not start: {0}")]
+    ScriptSetup(String),
+
+    /// The call did not start after its Before invoke script ran, whose
+    /// results it keeps.
+    #[error("{source}")]
+    ScriptedCall {
+        source: Box<GrpcError>,
+        report: Box<ScriptReport>,
+    },
 }

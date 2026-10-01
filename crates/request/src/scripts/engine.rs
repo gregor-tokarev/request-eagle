@@ -14,28 +14,24 @@ use rquickjs::{
     Context, Exception, Function, Object, Promise, Runtime, Value,
     function::{Args, This},
 };
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
 
 use super::{
     ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
     network::Network,
     variables::{Variables, dynamic_variable},
 };
-use crate::{Method, RequestExecutor};
+use crate::RequestExecutor;
 
 const TIME_LIMIT: Duration = Duration::from_secs(2);
 const WALL_LIMIT: Duration = Duration::from_secs(30);
 const MEMORY_LIMIT: usize = 32 * 1024 * 1024;
 const OUTPUT_LIMIT: usize = 500;
 
+/// `R` is the protocol's request after the script changed it.
 #[derive(Deserialize)]
-pub(super) struct ScriptOutput {
-    pub method: Method,
-    pub url: String,
-    pub query: Vec<(String, String)>,
-    pub headers: Vec<(String, String)>,
-    pub body: Option<String>,
-    pub body_changed: bool,
+pub(super) struct ScriptOutput<R> {
+    pub request: R,
     pub variables: Variables,
     pub environment_changes: BTreeMap<String, Option<String>>,
     pub skip_reason: Option<String>,
@@ -92,7 +88,7 @@ fn body_text(bytes: &[u8]) -> Result<Cow<'_, str>, ()> {
     Ok(Cow::Owned(text))
 }
 
-pub(super) fn run(
+pub(super) fn run<R: DeserializeOwned>(
     source: &str,
     phase: ScriptPhase,
     input: serde_json::Value,
@@ -100,7 +96,7 @@ pub(super) fn run(
     mut response_body: Option<&mut Vec<u8>>,
     cancelled: Arc<AtomicBool>,
     executor: &RequestExecutor,
-) -> (Option<ScriptOutput>, ScriptReport) {
+) -> (Option<ScriptOutput<R>>, ScriptReport) {
     // Callbacks own the buffers while QuickJS runs. Restore them after the
     // runtime is dropped, including on script errors, without copying bytes.
     let bodies = Rc::new(Bodies {
@@ -110,13 +106,14 @@ pub(super) fn run(
     let report = Arc::new(Mutex::new(ScriptReport {
         phase,
         collection: false,
+        message: None,
         tests: Vec::new(),
         logs: Vec::new(),
         error: None,
     }));
     let started = Instant::now();
     let waiting = Arc::new(AtomicU64::new(0));
-    let result = (|| -> Result<ScriptOutput, String> {
+    let result = (|| -> Result<ScriptOutput<R>, String> {
         let runtime = Runtime::new().map_err(|error| error.to_string())?;
         runtime.set_memory_limit(MEMORY_LIMIT);
         runtime.set_max_stack_size(512 * 1024);
@@ -176,8 +173,13 @@ pub(super) fn run(
                 let read_body = body_reader(cx.clone(), bodies.clone())?;
                 let send = network.binding(cx.clone(), executor)?;
                 let utilities = super::utilities::bindings(cx.clone())?;
+                let protocol: Function = cx.eval(if phase.is_grpc() {
+                    include_str!("grpc.js")
+                } else {
+                    include_str!("http.js")
+                })?;
                 let setup: Function = cx.eval(include_str!("sandbox.js"))?;
-                let mut args = Args::new(cx.clone(), 8);
+                let mut args = Args::new(cx.clone(), 9);
                 args.push_arg(input.to_string())?;
                 args.push_arg(log)?;
                 args.push_arg(test)?;
@@ -186,6 +188,7 @@ pub(super) fn run(
                 args.push_arg(read_body)?;
                 args.push_arg(send)?;
                 args.push_arg(utilities)?;
+                args.push_arg(protocol)?;
                 let state: Object = setup.call_arg(args)?;
                 let export: Function = state.get("export")?;
                 let skipped: Function = state.get("isSkipped")?;
