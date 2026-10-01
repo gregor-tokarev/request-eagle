@@ -94,26 +94,6 @@ pub(crate) fn request_header(
 }
 
 impl RequestDraft {
-    /// Opens the request as a cURL command, like Postman's `</>` button.
-    pub(super) fn code_snippet_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let open = self.code_snippet.is_some();
-
-        Button::new("code-snippet")
-            .debug_selector(|| "code-snippet-toggle".into())
-            .ghost()
-            .small()
-            .flex_none()
-            .icon(Icon::default().path("icons/code-xml.svg"))
-            .selected(open)
-            .accessibility_label(if open {
-                "Hide code snippet"
-            } else {
-                "Show code snippet"
-            })
-            .tooltip("Code snippet")
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_code_snippet(window, cx)))
-    }
-
     pub(super) fn url_bar(
         &mut self,
         window: &mut Window,

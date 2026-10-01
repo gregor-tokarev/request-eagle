@@ -17,6 +17,7 @@ mod event_stream;
 mod executor;
 mod generated_headers;
 mod grpc;
+mod grpcurl;
 mod http;
 mod model;
 mod preferences;
@@ -35,6 +36,8 @@ mod cookies_tests;
 mod curl_tests;
 #[cfg(test)]
 mod event_stream_tests;
+#[cfg(test)]
+mod grpcurl_tests;
 #[cfg(test)]
 mod request_url_tests;
 

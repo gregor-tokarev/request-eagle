@@ -179,7 +179,7 @@ fn form_encode(text: &str) -> String {
 
 /// Marks the references `values` cannot fill in as literal, `{{!name}}`, so
 /// resolving the request leaves them as written.
-fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
+pub(crate) fn keep_unknown(text: &str, values: &HashMap<String, String>) -> String {
     replace_unknown(text, values, |reference| format!("{{{{!{reference}}}}}"))
 }
 
@@ -216,6 +216,6 @@ fn replace_unknown(
 }
 
 /// Quotes text for a POSIX shell.
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }

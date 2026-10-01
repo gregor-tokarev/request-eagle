@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::code_snippet::CodeSnippet;
 use super::fields::{FieldsChanged, RequestFields};
 use super::path_variables::{PathVariableChanged, PathVariables};
+use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
     Environments, RequestSent,
@@ -83,11 +83,8 @@ pub struct RequestDraft {
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
-    /// Shown beside the request while open.
-    pub(super) code_snippet: Option<Entity<CodeSnippet>>,
-    /// The snippet's height below the request, when the last frame was too
-    /// narrow for it beside the request.
-    code_snippet_below: Option<Pixels>,
+    /// The request as a cURL command, beside it while open.
+    pub(super) code_snippet: SnippetPanel<Self>,
     pub(super) task: Option<Task<()>>,
     /// The request being sent, which history keeps if it is cancelled after
     /// it went out.
@@ -103,6 +100,34 @@ pub struct RequestDraft {
 }
 
 impl EventEmitter<RequestSent> for RequestDraft {}
+
+impl SnippetDraft for RequestDraft {
+    type Request = HttpRequest;
+    const PROGRAM: &'static str = "cURL";
+
+    fn request(&self) -> &HttpRequest {
+        &self.request
+    }
+
+    fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
+        self.request
+            .curl_command(values, super::execution::active_jar(cx).as_ref())
+    }
+
+    fn variables(&self) -> &Entity<VariableScope> {
+        &self.variables
+    }
+
+    fn snippet_panel(&mut self) -> &mut SnippetPanel<Self> {
+        &mut self.code_snippet
+    }
+
+    fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        code_snippet::toggle(self, window, cx);
+        self.notify_address(cx);
+        cx.notify();
+    }
+}
 
 impl RequestDraft {
     /// Variables resolve from the request's collection environment, its
@@ -169,8 +194,7 @@ impl RequestDraft {
             body_completion: None,
             response,
             split,
-            code_snippet: None,
-            code_snippet_below: None,
+            code_snippet: SnippetPanel::default(),
             task: None,
             sending: None,
             stop: None,
@@ -296,21 +320,10 @@ impl RequestDraft {
         self.notify_address(cx);
     }
 
-    pub(super) fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.code_snippet = match self.code_snippet {
-            Some(_) => None,
-            None => {
-                let entity = cx.entity();
-                let snippet = cx.new(|cx| CodeSnippet::new(self, &entity, window, cx));
-                // The layout was measured while the snippet was last open.
-                let compact = self.code_snippet_below.is_some();
-                snippet.update(cx, |snippet, _| snippet.compact = compact);
-                Some(snippet)
-            }
-        };
-
-        self.notify_address(cx);
-        cx.notify();
+    /// Copies the request as a cURL command, with the variables that resolve
+    /// filled in.
+    pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
+        code_snippet::copy(self, window, cx);
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -637,83 +650,7 @@ impl Render for RequestDraft {
                 ),
             );
 
-        let Some(code_snippet) = self.code_snippet.clone() else {
-            return request.into_any_element();
-        };
-
-        // The snippet sits beside the request when both fit, and below it in a
-        // narrow window, so the URL stays editable. Below, it leaves the
-        // request the height its configuration and response need, down to a
-        // few lines of its own. The size is measured while drawing, so a
-        // change applies from the next frame.
-        let draft = cx.entity().downgrade();
-        let measure = canvas(
-            move |bounds, window, cx| {
-                let rem = |size: f32| rems(size).to_pixels(window.rem_size());
-                let below = (bounds.size.width < rem(40.))
-                    .then(|| (bounds.size.height - rem(32.)).max(rem(7.)).min(rem(16.)));
-
-                let _ = draft.update(cx, |draft, cx| {
-                    if draft.code_snippet_below != below {
-                        draft.code_snippet_below = below;
-                        // Notifying while drawing would not schedule the next
-                        // frame, so it waits until drawing is done.
-                        let draft = cx.entity();
-                        window.defer(cx, move |_, cx| {
-                            draft.update(cx, |draft, cx| {
-                                if let Some(snippet) = &draft.code_snippet {
-                                    let compact = draft.code_snippet_below.is_some();
-                                    snippet.update(cx, |snippet, cx| {
-                                        snippet.compact = compact;
-                                        cx.notify();
-                                    });
-                                }
-                                cx.notify();
-                            })
-                        });
-                    }
-                });
-            },
-            |_, _, _, _| {},
-        )
-        .absolute()
-        .size_full();
-
-        if let Some(height) = self.code_snippet_below {
-            v_flex()
-                .relative()
-                .size_full()
-                .child(measure)
-                .child(div().flex_1().min_h_0().w_full().child(request))
-                .child(
-                    div()
-                        .flex_none()
-                        .h(height)
-                        .w_full()
-                        .pt_2()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .child(code_snippet),
-                )
-                .into_any_element()
-        } else {
-            h_flex()
-                .relative()
-                .size_full()
-                .child(measure)
-                .child(div().flex_1().min_w_0().h_full().child(request))
-                .child(
-                    div()
-                        .flex_none()
-                        .w(rems(24.))
-                        .max_w(relative(0.4))
-                        .h_full()
-                        .border_l_1()
-                        .border_color(cx.theme().border)
-                        .child(code_snippet),
-                )
-                .into_any_element()
-        }
+        code_snippet::with_snippet(self, request.into_any_element(), cx)
     }
 }
 
@@ -742,7 +679,10 @@ impl Render for RequestAddress {
                                         cx,
                                     )),
                             )
-                            .child(draft.code_snippet_button(cx)),
+                            .child(code_snippet::toggle_button(
+                                draft.code_snippet.snippet.is_some(),
+                                cx,
+                            )),
                     )
                     .child(draft.url_bar(window, cx))
             })

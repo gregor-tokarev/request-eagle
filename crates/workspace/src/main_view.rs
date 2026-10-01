@@ -8,7 +8,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{CloseTab, CopyAsCurl, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest};
+use crate::actions::{
+    CloseTab, CopyAsCurl, CopyAsGrpcurl, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest,
+};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
@@ -1164,11 +1166,12 @@ impl MainView {
 
 impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Only HTTP requests offer Copy as cURL, so other tabs leave the
-        // command out of the palette.
-        let http_draft = match self.selected.map(|index| &self.tabs[index].page) {
-            Some(Page::Request(draft)) => Some(draft.clone()),
-            _ => None,
+        // Only HTTP requests offer Copy as cURL and gRPC requests Copy as
+        // grpcurl, so other tabs leave the commands out of the palette.
+        let (http_draft, grpc_draft) = match self.selected.map(|index| &self.tabs[index].page) {
+            Some(Page::Request(draft)) => (Some(draft.clone()), None),
+            Some(Page::Grpc(draft)) => (None, Some(draft.clone())),
+            _ => (None, None),
         };
 
         v_flex()
@@ -1180,6 +1183,11 @@ impl Render for MainView {
             .when_some(http_draft, |this, draft| {
                 this.on_action(move |_: &CopyAsCurl, window, cx| {
                     draft.update(cx, |draft, cx| draft.copy_as_curl(window, cx));
+                })
+            })
+            .when_some(grpc_draft, |this, draft| {
+                this.on_action(move |_: &CopyAsGrpcurl, window, cx| {
+                    draft.update(cx, |draft, cx| draft.copy_as_grpcurl(window, cx));
                 })
             })
             .bg(cx.theme().background)
