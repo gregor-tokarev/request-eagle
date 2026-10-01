@@ -290,6 +290,7 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
+        "pathVariables": request.path_variables,
         "query": request.query,
         "headers": request.headers,
         "variables": variables,

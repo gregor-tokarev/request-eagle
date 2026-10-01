@@ -1,4 +1,7 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    convert::Infallible,
+    time::{Duration, SystemTime},
+};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
@@ -103,6 +106,10 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
     let jar = Cookies::jar(cx);
     let url = request_url(&request.path);
     let templated = url.contains("{{")
+        || request
+            .path_variables
+            .iter()
+            .any(|(_, value)| value.contains("{{"))
         || request.headers.iter().any(|(name, value)| {
             name.contains("{{") || (name.eq_ignore_ascii_case("cookie") && value.contains("{{"))
         });
@@ -111,6 +118,10 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
         // Which cookies apply depends on the resolved URL and headers.
         (!jar.is_empty()).then(|| "Resolved on Send".to_owned())
     } else {
+        // Their path decides which cookies are sent.
+        let Ok(url) = request::fill_path_variables(&url, &request.path_variables, |value| {
+            Ok::<_, Infallible>(value.to_owned())
+        });
         jar.cookie_header(&url, &request.headers)
     };
 

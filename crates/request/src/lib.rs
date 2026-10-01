@@ -53,7 +53,7 @@ pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{HttpRequest, Method, Request, WebSocketRequest};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
-pub use request_url::{path_variables, query_params, with_query_params};
+pub use request_url::{fill_path_variables, path_variables, query_params, with_query_params};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};
 pub use variables::RequestVariables;
 pub use websocket::{

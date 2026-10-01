@@ -397,6 +397,8 @@ impl RequestDraft {
         }
 
         self.keep_path_values_in_url();
+        // The filled path decides which cookies the jar sends.
+        self.refresh_generated_headers(cx);
 
         let filled = filled_path_variables(&self.path_values);
         if let Some(url) = &self.url_completion {
