@@ -45,6 +45,9 @@ pub struct ResponseView {
     background_selection_scope: TextSelectionScopeId,
     /// Where the body was last saved, or why it could not be.
     pub(super) saved: Option<Result<std::path::PathBuf, SharedString>>,
+    /// Counts the responses shown, so a save finishing late reports only on
+    /// the response it saved.
+    pub(super) responses: u64,
     pub(super) save_task: Option<Task<()>>,
 }
 
@@ -67,6 +70,7 @@ impl ResponseView {
             detail_open: [false; 3],
             background_selection_scope: TextSelectionScopeId::new(),
             saved: None,
+            responses: 0,
             save_task: None,
         }
     }
@@ -75,6 +79,7 @@ impl ResponseView {
         self.content = None;
         self.body = None;
         self.saved = None;
+        self.responses += 1;
         self.events = None;
         self.scripts.clear();
         self.loading = true;
@@ -164,6 +169,7 @@ impl ResponseView {
                 self.content = Some(content);
                 self.show(mode, window, cx);
                 self.saved = None;
+                self.responses += 1;
                 self.error = false;
 
                 if let Some(log) = &self.events {

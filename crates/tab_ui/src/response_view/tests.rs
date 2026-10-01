@@ -239,10 +239,37 @@ fn bodies_are_recognized_by_media_type_and_signature() {
             .as_deref(),
         Some("<a>\n  <b x=\"1\">text</b>\n  <c/>\n</a>")
     );
-    // Malformed XML is still highlighted as it was received.
-    assert_eq!(
-        response(b"<a><b></a>", "application/xml").pretty.as_deref(),
-        Some("<a><b></a>")
+    // Indenting keeps the whitespace of text, and leaves XML whose
+    // whitespace may matter as it was received.
+    for (xml, pretty) in [
+        ("<r>\n <v>  a  </v>\n</r>", "<r>\n  <v>  a  </v>\n</r>"),
+        (
+            "<r><v>  a  </v><w/></r>",
+            "<r>\n  <v>  a  </v>\n  <w/>\n</r>",
+        ),
+        ("<p>Hello <b>world</b> !</p>", "<p>Hello <b>world</b> !</p>"),
+        (
+            "<r xml:space=\"preserve\">  a  </r>",
+            "<r xml:space=\"preserve\">  a  </r>",
+        ),
+        ("<a>x &amp; y</a>", "<a>x &amp; y</a>"),
+        // Malformed XML is still highlighted as it was received.
+        ("<a><b></a>", "<a><b></a>"),
+    ] {
+        assert_eq!(
+            response(xml.as_bytes(), "application/xml")
+                .pretty
+                .as_deref(),
+            Some(pretty)
+        );
+    }
+
+    // Rendering a large page would stall the view.
+    let page = format!("<!doctype html>{}", "<p>paragraph</p>".repeat(40_000));
+    assert!(
+        !response(page.as_bytes(), "text/html")
+            .modes()
+            .contains(&BodyMode::Preview)
     );
 }
 
@@ -274,6 +301,16 @@ fn saved_bodies_are_named_by_the_server_url_or_kind() {
         "report 1.csv"
     );
     assert_eq!(
+        named(
+            &[(
+                "content-disposition",
+                "attachment; filename=\"report;Q1 \\\"final\\\".csv\"; size=10"
+            )],
+            "https://example.com/download",
+        ),
+        "report;Q1 \"final\".csv"
+    );
+    assert_eq!(
         named(&json, "https://example.com/files/data?page=2"),
         "data.json"
     );
@@ -285,4 +322,14 @@ fn saved_bodies_are_named_by_the_server_url_or_kind() {
         "response.bmp"
     );
     assert_eq!(with_headers(&[0, 1], &[]).file_name(), "response.bin");
+}
+
+#[test]
+fn previewed_pages_load_no_images() {
+    assert_eq!(
+        super::body::without_images(
+            "<p>a</p><IMG src='http://x/t.png'><image src=y/><imgx>b<img>é<img\nsrc=z>"
+        ),
+        "<p>a</p><wbr src='http://x/t.png'><wbr src=y/><imgx>b<wbr>é<wbr\nsrc=z>"
+    );
 }

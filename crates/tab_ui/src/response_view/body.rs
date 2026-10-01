@@ -78,8 +78,8 @@ pub(super) enum Body {
         search: Option<BodySearch>,
     },
     Pretty(Entity<ResponseBodyEditor>),
-    /// An HTML page, rendered from the response's text.
-    Html,
+    /// An HTML page, rendered from the response's text without its images.
+    Html(SharedString),
     Image(Entity<ImagePreview>),
     Pdf(Entity<PdfPreview>),
 }
@@ -203,17 +203,17 @@ impl ResponseView {
                             Ok(path) => {
                                 let path = path.clone();
 
-                                div()
-                                    .id("response-saved")
+                                Button::new("response-saved")
                                     .debug_selector(|| "response-saved".into())
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .cursor_pointer()
-                                    .hover(|label| label.text_color(cx.theme().foreground))
-                                    .child(format!(
+                                    .ghost()
+                                    .small()
+                                    .min_w_0()
+                                    .max_w(rems(16.))
+                                    .label(format!(
                                         "Saved {}",
                                         path.file_name().unwrap_or_default().to_string_lossy()
                                     ))
+                                    .tooltip("Show in folder")
                                     .on_click(move |_, _, cx| cx.reveal_path(&path))
                                     .into_any_element()
                             }
@@ -323,12 +323,12 @@ impl ResponseView {
                         Body::Pretty(editor) => AnyView::from(editor.clone())
                             .cached(StyleRefinement::default().size_full())
                             .into_any_element(),
-                        Body::Html => div()
+                        Body::Html(page) => div()
                             .debug_selector(|| "response-html".into())
                             .size_full()
                             .p_4()
                             .child(
-                                TextView::html("response-html", content.raw.clone())
+                                TextView::html("response-html", page.clone())
                                     .size_full()
                                     .selectable(true)
                                     .scrollable(true),
@@ -361,7 +361,9 @@ impl ResponseView {
         let wrap = self.wrap;
 
         self.body = Some(match (mode, &content.preview) {
-            (BodyMode::Preview, Some(Preview::Html)) => Body::Html,
+            (BodyMode::Preview, Some(Preview::Html)) => {
+                Body::Html(without_images(&content.raw).into())
+            }
             (BodyMode::Preview, Some(Preview::Image(image))) => {
                 let image = image.clone();
                 Body::Image(cx.new(|cx| ImagePreview::new(image, cx)))
@@ -402,6 +404,34 @@ impl ResponseView {
         self.mode = mode;
         cx.notify();
     }
+}
+
+/// A page whose images are void elements that load nothing. Their requests
+/// would reach the page's servers outside the request's proxy settings, and
+/// GPUI Kit's rich text fetches images while measuring them.
+pub(super) fn without_images(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let mut page = String::with_capacity(html.len());
+    let mut copied = 0;
+
+    for (start, _) in lower.match_indices('<') {
+        // HTML parsers read an `image` tag as `img`.
+        let Some(name) = ["img", "image"].into_iter().find(|name| {
+            lower[start + 1..].starts_with(name)
+                && lower[start + 1 + name.len()..].starts_with(|next: char| {
+                    next.is_ascii_whitespace() || next == '/' || next == '>'
+                })
+        }) else {
+            continue;
+        };
+
+        page.push_str(&html[copied..start]);
+        page.push_str("<wbr");
+        copied = start + 1 + name.len();
+    }
+
+    page.push_str(&html[copied..]);
+    page
 }
 
 /// GPUI Kit has no XML grammar of its own.

@@ -102,6 +102,7 @@ impl Decoder {
             Some(Coding::Deflate) => Layer::Deflate(Box::new(Inflate {
                 decompress: None,
                 start: Vec::new(),
+                unconfirmed: None,
                 ended: false,
                 output,
             })),
@@ -138,16 +139,7 @@ impl Decoder {
         let result = match &mut self.0 {
             Layer::Identity(_) => Ok(()),
             Layer::Gzip(decoder) => decoder.try_finish(),
-            Layer::Deflate(inflate) => {
-                if inflate.ended {
-                    Ok(())
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "the deflate stream ended early",
-                    ))
-                }
-            }
+            Layer::Deflate(inflate) => inflate.finish(),
             Layer::Brotli(decoder) => decoder.close(),
             Layer::Zstd(decoder) => decoder.finish(),
         };
@@ -222,11 +214,15 @@ impl Write for Output {
 }
 
 /// The `deflate` coding. It names a zlib stream, but some servers send a raw
-/// deflate stream, which the first two bytes tell apart.
+/// deflate stream, which the first two bytes usually tell apart.
 struct Inflate {
     decompress: Option<Decompress>,
     /// The first byte, while the second has not arrived.
     start: Vec<u8>,
+    /// What a stream that looks like zlib received before decoding anything.
+    /// A raw stream can begin like a zlib header, so a stream that fails
+    /// before then decodes again as raw deflate.
+    unconfirmed: Option<Vec<u8>>,
     ended: bool,
     output: Output,
 }
@@ -238,8 +234,6 @@ impl Inflate {
             return Ok(());
         }
 
-        let start;
-        let mut input = chunk;
         if self.decompress.is_none() {
             self.start.extend_from_slice(chunk);
             let [first, second, ..] = self.start[..] else {
@@ -252,10 +246,50 @@ impl Inflate {
                 && first >> 4 <= 7
                 && (u16::from(first) << 8 | u16::from(second)) % 31 == 0;
             self.decompress = Some(Decompress::new(zlib));
-            start = std::mem::take(&mut self.start);
-            input = &start;
+            self.unconfirmed = zlib.then(Vec::new);
+
+            let start = std::mem::take(&mut self.start);
+            return self.write(&start);
         }
 
+        if let Some(unconfirmed) = &mut self.unconfirmed {
+            unconfirmed.extend_from_slice(chunk);
+        }
+        let result = self.inflate(chunk);
+        let decoded = self.decompress.as_ref().unwrap().total_out() > 0;
+
+        match self.unconfirmed.take() {
+            Some(received) if result.is_err() && !decoded => {
+                self.decompress = Some(Decompress::new(false));
+                self.inflate(&received)
+            }
+            Some(received) if !decoded && !self.ended => {
+                self.unconfirmed = Some(received);
+                result
+            }
+            _ => result,
+        }
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        if !self.ended
+            && let Some(received) = self.unconfirmed.take()
+        {
+            self.decompress = Some(Decompress::new(false));
+            self.inflate(&received)?;
+        }
+
+        if self.ended {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "the deflate stream ended early",
+            ))
+        }
+    }
+
+    fn inflate(&mut self, mut input: &[u8]) -> io::Result<()> {
         let decompress = self.decompress.as_mut().unwrap();
         let mut buffer = vec![0; CHUNK];
 

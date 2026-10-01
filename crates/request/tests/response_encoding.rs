@@ -154,6 +154,20 @@ fn decodes_deflate_brotli_and_zstd_like_gzip() {
 }
 
 #[test]
+fn decodes_raw_deflate_that_starts_like_a_zlib_header() {
+    smol::block_on(async {
+        // A raw deflate stream of "A" whose first two bytes are a valid zlib header.
+        let payload = [
+            0x78, 0x01, 0x00, 0xfe, 0xff, 0x41, 0x01, 0x00, 0x00, 0xff, 0xff,
+        ];
+        let (result, _) = execute_response(200, "deflate", &payload, Method::Get, 1).await;
+        let Response::Http(response) = result.unwrap().response;
+
+        assert_eq!(response.body, b"A");
+    });
+}
+
+#[test]
 fn decodes_stacked_codings_in_reverse_order() {
     smol::block_on(async {
         let json = b"{\"ok\":true}";

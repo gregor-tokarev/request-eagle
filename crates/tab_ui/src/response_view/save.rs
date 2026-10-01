@@ -13,6 +13,7 @@ impl ResponseView {
         };
 
         let body = content.http().body.clone();
+        let response = self.responses;
         let directory = std::env::home_dir()
             .map(|home| home.join("Downloads"))
             .filter(|downloads| downloads.is_dir())
@@ -25,10 +26,11 @@ impl ResponseView {
                 Ok(Ok(Some(path))) => path,
                 Ok(Err(error)) => {
                     let _ = this.update(cx, |this, cx| {
-                        this.saved = Some(Err(
-                            format!("Could not open the save dialog: {error}").into()
-                        ));
-                        cx.notify();
+                        this.show_saved(
+                            response,
+                            Err(format!("Could not open the save dialog: {error}").into()),
+                            cx,
+                        );
                     });
                     return;
                 }
@@ -41,11 +43,21 @@ impl ResponseView {
                 .spawn(async move { std::fs::write(&path, body).map(|()| path) })
                 .await
                 .map_err(|error| format!("Could not save the response: {error}").into());
-            let _ = this.update(cx, |this, cx| {
-                this.saved = Some(written);
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.show_saved(response, written, cx));
         }));
+    }
+
+    /// Report a save next to the response it saved, not a later one.
+    fn show_saved(
+        &mut self,
+        response: u64,
+        saved: Result<std::path::PathBuf, SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.responses == response {
+            self.saved = Some(saved);
+            cx.notify();
+        }
     }
 }
 
@@ -108,11 +120,7 @@ pub(super) fn url_file_name(url: &str) -> Option<String> {
 /// The file name in a Content-Disposition header, preferring the encoded
 /// `filename*` form.
 fn disposition_file_name(value: &str) -> Option<String> {
-    let parameters: Vec<_> = value
-        .split(';')
-        .filter_map(|parameter| parameter.split_once('='))
-        .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim()))
-        .collect();
+    let parameters = disposition_parameters(value);
 
     let encoded = parameters
         .iter()
@@ -129,10 +137,59 @@ fn disposition_file_name(value: &str) -> Option<String> {
         parameters
             .iter()
             .find(|(name, _)| name == "filename")
-            .map(|(_, value)| value.trim_matches('"').to_owned())
+            .map(|(_, value)| value.clone())
     };
 
     encoded.or_else(plain).as_deref().and_then(file_name)
+}
+
+/// A header's `name=value` parameters, with quoted values unquoted. Quoted
+/// values may contain semicolons and backslash-escaped characters.
+fn disposition_parameters(value: &str) -> Vec<(String, String)> {
+    let mut parameters = vec![String::new()];
+    let (mut quoted, mut escaped) = (false, false);
+
+    for character in value.chars() {
+        match character {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                parameters.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        parameters.last_mut().unwrap().push(character);
+    }
+
+    parameters
+        .iter()
+        .filter_map(|parameter| parameter.split_once('='))
+        .map(|(name, value)| (name.trim().to_ascii_lowercase(), unquote(value.trim())))
+        .collect()
+}
+
+fn unquote(value: &str) -> String {
+    let Some(quoted) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return value.to_owned();
+    };
+
+    let mut text = String::with_capacity(quoted.len());
+    let mut escaped = false;
+    for character in quoted.chars() {
+        if character == '\\' && !escaped {
+            escaped = true;
+        } else {
+            escaped = false;
+            text.push(character);
+        }
+    }
+
+    text
 }
 
 /// The final component of a suggested name, without control characters.

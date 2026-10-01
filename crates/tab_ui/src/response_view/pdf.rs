@@ -22,6 +22,8 @@ const OVERDRAW: Pixels = px(800.);
 pub(super) struct PdfPreview {
     document: Option<Result<Arc<Pdf>, SharedString>>,
     pages: Vec<Page>,
+    /// The page laid out last, around which bitmaps are kept.
+    shown: usize,
     list: ListState,
     _load: Task<()>,
 }
@@ -90,6 +92,7 @@ impl PdfPreview {
         Self {
             document: None,
             pages: Vec::new(),
+            shown: 0,
             list: ListState::new(0, ListAlignment::Top, OVERDRAW),
             _load: load,
         }
@@ -100,6 +103,7 @@ impl PdfPreview {
     }
 
     fn page(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.shown = index;
         self.render_page(index, window, cx);
         let page = &self.pages[index];
         let rem = window.rem_size() / 16.;
@@ -159,18 +163,33 @@ impl PdfPreview {
                 page.rendering = None;
                 page.failed = image.is_none();
                 page.image = image.map(Arc::new);
+                this.release_far_pages(None, cx);
                 cx.notify();
             });
         }));
+
+        self.release_far_pages(Some(window), cx);
+    }
+
+    /// Keep the bitmaps of the pages nearest the one last shown, and stop
+    /// rendering pages that scrolled far away from it.
+    fn release_far_pages(&mut self, mut window: Option<&mut Window>, cx: &mut App) {
+        let shown = self.shown;
+
+        for (index, page) in self.pages.iter_mut().enumerate() {
+            if index.abs_diff(shown) > KEPT_PAGES {
+                page.rendering = None;
+            }
+        }
 
         let mut rendered: Vec<usize> = (0..self.pages.len())
             .filter(|&page| self.pages[page].image.is_some())
             .collect();
         if rendered.len() > KEPT_PAGES {
-            rendered.sort_by_key(|&page| std::cmp::Reverse(page.abs_diff(index)));
+            rendered.sort_by_key(|&page| std::cmp::Reverse(page.abs_diff(shown)));
             for page in rendered.drain(..rendered.len() - KEPT_PAGES) {
                 if let Some(image) = self.pages[page].image.take() {
-                    cx.drop_image(image, Some(window));
+                    cx.drop_image(image, window.as_deref_mut());
                 }
             }
         }

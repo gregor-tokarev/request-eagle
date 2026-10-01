@@ -23,6 +23,9 @@ pub struct ResponseContent {
     pub(super) cookies: Arc<[(SharedString, SharedString)]>,
 }
 
+/// HTML up to this many bytes can be previewed.
+const HTML_PREVIEW_LIMIT: usize = 512 * 1024;
+
 /// A body that can be shown as what it represents, besides its text or bytes.
 #[derive(Clone)]
 pub(super) enum Preview {
@@ -103,7 +106,13 @@ impl ResponseContent {
                 body.clone(),
             )))),
             None if pdf => Some(Preview::Pdf),
-            None if language == "html" && !raw.trim().is_empty() => Some(Preview::Html),
+            // A rendered page lays out all of its text at once.
+            None if language == "html"
+                && !raw.trim().is_empty()
+                && raw.len() <= HTML_PREVIEW_LIMIT =>
+            {
+                Some(Preview::Html)
+            }
             None => None,
         };
 
@@ -282,18 +291,63 @@ fn language(media_type: &str, text: &str) -> &'static str {
     }
 }
 
-/// Indent XML elements, or `None` when the text is not well-formed XML.
+/// Indent XML elements, or `None` when the text is not well-formed XML or
+/// indenting could change its text. Whitespace between elements is layout;
+/// text keeps its whitespace, so mixed content and `xml:space` stay as received.
 fn pretty_xml(text: &str) -> Option<String> {
     use quick_xml::{Reader, Writer, events::Event};
 
+    let blank = |event: &Event| matches!(event, Event::Text(text) if text.iter().all(u8::is_ascii_whitespace));
     let mut reader = Reader::from_str(text);
-    reader.config_mut().trim_text(true);
-    let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
+    // Each event, with the index of its parent element's start.
+    let mut events = Vec::new();
+    // The open elements' starts, and whether each contains elements and text.
+    let mut open: Vec<(usize, bool, bool)> = Vec::new();
+    let mut parents = std::collections::HashSet::new();
 
     loop {
-        match reader.read_event().ok()? {
+        let event = reader.read_event().ok()?.into_owned();
+        match &event {
             Event::Eof => break,
-            event => writer.write_event(event).ok()?,
+            Event::Start(element) | Event::Empty(element) => {
+                if element.attributes().any(|attribute| {
+                    attribute.is_ok_and(|attribute| attribute.key.as_ref() == b"xml:space")
+                }) {
+                    return None;
+                }
+                if let Some(parent) = open.last_mut() {
+                    parent.1 = true;
+                }
+            }
+            Event::End(_) => {
+                let (start, elements, text) = open.pop()?;
+                if elements && text {
+                    return None;
+                }
+                if elements {
+                    parents.insert(start);
+                }
+            }
+            Event::Text(_) | Event::CData(_) | Event::GeneralRef(_) if !blank(&event) => {
+                if let Some(parent) = open.last_mut() {
+                    parent.2 = true;
+                }
+            }
+            _ => {}
+        }
+
+        let parent = open.last().map(|(start, ..)| *start);
+        if matches!(event, Event::Start(_)) {
+            open.push((events.len(), false, false));
+        }
+        events.push((event, parent));
+    }
+
+    let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
+    for (event, parent) in events {
+        let layout = blank(&event) && parent.is_none_or(|parent| parents.contains(&parent));
+        if !layout {
+            writer.write_event(event).ok()?;
         }
     }
 
