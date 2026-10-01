@@ -8,7 +8,7 @@ use gpui_kit::component::{
     notification::Notification,
     *,
 };
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::HttpRequest;
 
 use super::draft::RequestDraft;
@@ -26,6 +26,9 @@ pub(crate) struct CodeSnippet {
     /// they are read again only when the variables change.
     values: (HashMap<String, String>, VariablesVersion),
     command: SharedString,
+    /// Below the request in a narrow window, the snippet keeps its controls
+    /// in one row to leave room for the response.
+    pub(super) compact: bool,
     _subscriptions: [Subscription; 2],
 }
 
@@ -65,6 +68,7 @@ impl CodeSnippet {
             request: draft.request.clone(),
             values,
             command: command.into(),
+            compact: false,
             _subscriptions: subscriptions,
         }
     }
@@ -126,8 +130,24 @@ impl RequestDraft {
 
 impl Render for CodeSnippet {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let command = self.command.clone();
         let draft = self.draft.clone();
+        let close = Button::new("close-code-snippet")
+            .debug_selector(|| "close-code-snippet".into())
+            .ghost()
+            .small()
+            .icon(IconName::Close)
+            .accessibility_label("Close code snippet")
+            .tooltip("Close")
+            .on_click(move |_, window, cx| {
+                let _ = draft.update(cx, |draft, cx| draft.toggle_code_snippet(window, cx));
+            });
+        let copy = div().debug_selector(|| "copy-code-snippet".into()).child(
+            Clipboard::new("copy-code-snippet")
+                .small()
+                .tooltip("Copy snippet")
+                .value(self.command.clone()),
+        );
+        let language = div().flex_1().font_weight(FontWeight::MEDIUM).child("cURL");
 
         v_flex()
             .debug_selector(|| "code-snippet".into())
@@ -137,48 +157,43 @@ impl Render for CodeSnippet {
             .pb_2()
             .gap_2()
             .text_sm()
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h_10()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Code snippet"),
+            .map(|this| {
+                if self.compact {
+                    this.child(
+                        h_flex()
+                            .flex_none()
+                            .h_8()
+                            .gap_2()
+                            .child(language)
+                            .child(copy)
+                            .child(close),
+                    )
+                } else {
+                    this.child(
+                        h_flex()
+                            .flex_none()
+                            .h_10()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_base()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Code snippet"),
+                            )
+                            .child(close),
                     )
                     .child(
-                        Button::new("close-code-snippet")
-                            .debug_selector(|| "close-code-snippet".into())
-                            .ghost()
-                            .small()
-                            .icon(IconName::Close)
-                            .accessibility_label("Close code snippet")
-                            .tooltip("Close")
-                            .on_click(move |_, window, cx| {
-                                let _ = draft
-                                    .update(cx, |draft, cx| draft.toggle_code_snippet(window, cx));
-                            }),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h_8()
-                    .gap_2()
-                    .child(div().flex_1().font_weight(FontWeight::MEDIUM).child("cURL"))
-                    .child(
-                        div().debug_selector(|| "copy-code-snippet".into()).child(
-                            Clipboard::new("copy-code-snippet")
-                                .small()
-                                .tooltip("Copy snippet")
-                                .value(command),
-                        ),
-                    ),
-            )
+                        h_flex()
+                            .flex_none()
+                            .h_8()
+                            .gap_2()
+                            .child(language)
+                            .child(copy),
+                    )
+                }
+            })
             .child(
                 div()
                     .debug_selector(|| "code-snippet-command".into())

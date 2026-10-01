@@ -78,9 +78,9 @@ pub struct RequestDraft {
     split: Entity<ResizableState>,
     /// Shown beside the request while open.
     pub(super) code_snippet: Option<Entity<CodeSnippet>>,
-    /// Whether the last frame was too narrow for the snippet beside the
-    /// request, which puts it below instead.
-    code_snippet_below: bool,
+    /// The snippet's height below the request, when the last frame was too
+    /// narrow for it beside the request.
+    code_snippet_below: Option<Pixels>,
     pub(super) task: Option<Task<()>>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
@@ -150,7 +150,7 @@ impl RequestDraft {
             response,
             split,
             code_snippet: None,
-            code_snippet_below: false,
+            code_snippet_below: None,
             task: None,
             stop: None,
             streaming: false,
@@ -431,16 +431,35 @@ impl Render for RequestDraft {
         };
 
         // The snippet sits beside the request when both fit, and below it in a
-        // narrow window, so the URL stays editable. The width is measured
-        // while drawing, so a change applies from the next frame.
+        // narrow window, so the URL stays editable. Below, it leaves the
+        // request the height its configuration and response need, down to a
+        // few lines of its own. The size is measured while drawing, so a
+        // change applies from the next frame.
         let draft = cx.entity().downgrade();
         let measure = canvas(
             move |bounds, window, cx| {
-                let below = bounds.size.width < rems(40.).to_pixels(window.rem_size());
+                let rem = |size: f32| rems(size).to_pixels(window.rem_size());
+                let below = (bounds.size.width < rem(40.))
+                    .then(|| (bounds.size.height - rem(32.)).max(rem(7.)).min(rem(16.)));
+
                 let _ = draft.update(cx, |draft, cx| {
                     if draft.code_snippet_below != below {
                         draft.code_snippet_below = below;
-                        cx.notify();
+                        // Notifying while drawing would not schedule the next
+                        // frame, so it waits until drawing is done.
+                        let draft = cx.entity();
+                        window.defer(cx, move |_, cx| {
+                            draft.update(cx, |draft, cx| {
+                                if let Some(snippet) = &draft.code_snippet {
+                                    let compact = draft.code_snippet_below.is_some();
+                                    snippet.update(cx, |snippet, cx| {
+                                        snippet.compact = compact;
+                                        cx.notify();
+                                    });
+                                }
+                                cx.notify();
+                            })
+                        });
                     }
                 });
             },
@@ -449,7 +468,7 @@ impl Render for RequestDraft {
         .absolute()
         .size_full();
 
-        if self.code_snippet_below {
+        if let Some(height) = self.code_snippet_below {
             v_flex()
                 .relative()
                 .size_full()
@@ -458,7 +477,7 @@ impl Render for RequestDraft {
                 .child(
                     div()
                         .flex_none()
-                        .h(rems(16.))
+                        .h(height)
                         .w_full()
                         .pt_2()
                         .border_t_1()
