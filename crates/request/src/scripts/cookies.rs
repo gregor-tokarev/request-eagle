@@ -40,6 +40,17 @@ pub(super) fn binding<'js>(
 
                     Ok(json!(cookies).to_string())
                 }
+                "stored" => {
+                    let headers: Vec<String> = serde_json::from_str(&argument)
+                        .map_err(|_| Exception::throw_type(&cx, "Expected Set-Cookie headers"))?;
+                    let cookies = jar
+                        .stored(&url, &headers)
+                        .iter()
+                        .map(script_cookie)
+                        .collect::<Vec<_>>();
+
+                    Ok(json!(cookies).to_string())
+                }
                 "set" => jar
                     .set(&url, &argument)
                     .map(|cookie| json!(cookie.as_ref().map(script_cookie)).to_string())

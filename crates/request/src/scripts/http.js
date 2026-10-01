@@ -134,12 +134,19 @@
     // The jar's cookies for a URL, in the order a request sends them. Throws
     // when the jar is off.
     const jarCookies = target => JSON.parse(jar("list", String(target), "")).map(fromJar);
-    let sentFromJar = null;
+    // Before sending, the URL may still contain {{variables}} and lack a scheme.
+    let target = (input.response ? input.url : pm.variables.replaceIn(input.url)).trim();
+    if (target && !target.includes("://")) target = "https://" + target;
+    let sentFromJar = null, setInJar = [];
     try {
-        // Before sending, the URL may still contain {{variables}} and lack a scheme.
-        let target = (input.response ? input.url : pm.variables.replaceIn(input.url)).trim();
-        if (target && !target.includes("://")) target = "https://" + target;
         sentFromJar = jarCookies(target);
+        // The response's cookies the jar still holds, after their later
+        // replacements, deletions and expiry, including those for other
+        // paths or hosts that a request to this URL does not send.
+        const headers = (input.response?.headers ?? [])
+            .filter(([key]) => key.toLowerCase() === "set-cookie")
+            .map(([, header]) => header);
+        if (headers.length) setInJar = JSON.parse(jar("stored", target, JSON.stringify(headers))).map(fromJar);
     } catch {}
     const expired = cookie => cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
     let cookies;
@@ -150,11 +157,9 @@
         const own = sentCookies.filter(cookie => !renamed.has(cookie.name));
         const named = new Set(own.map(cookie => cookie.name));
         cookies = own.concat(sentFromJar.filter(cookie => !named.has(cookie.name)));
-        // The response's cookies for other paths or hosts are not among
-        // those a request to this URL sends, but are part of the exchange.
-        for (const cookie of setCookies) {
-            const listed = cookies.some(existing => existing.name === cookie.name && existing.value === cookie.value);
-            if (!listed && !expired(cookie)) cookies.push(cookie);
+        const same = (a, b) => a.name === b.name && a.domain === b.domain && a.path === b.path;
+        for (const cookie of setInJar) {
+            if (!cookies.some(existing => same(existing, cookie))) cookies.push(cookie);
         }
     } else {
         cookies = sentCookies.slice();

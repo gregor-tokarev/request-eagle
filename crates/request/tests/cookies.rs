@@ -336,7 +336,7 @@ fn after_a_response_pm_cookies_keeps_the_jar_order_and_set_returns_the_stored_co
     smol::block_on(async {
         let (url, server) = serve(vec![
             "HTTP/1.1 200 OK\r\nSet-Cookie: sid=public; Path=/\r\nSet-Cookie: sid=private; Path=/admin\r\n",
-            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=renewed; Path=/admin\r\nSet-Cookie: elsewhere=1; Path=/api\r\n",
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=renewed; Path=/admin\r\nSet-Cookie: elsewhere=1; Path=/api\r\nSet-Cookie: gone=1; Path=/api\r\nSet-Cookie: gone=; Path=/api; Max-Age=0\r\nSet-Cookie: twice=first; Path=/api\r\nSet-Cookie: twice=second; Path=/api\r\n",
         ])
         .await;
         let jar = CookieJar::new();
@@ -353,6 +353,10 @@ fn after_a_response_pm_cookies_keeps_the_jar_order_and_set_returns_the_stored_co
                             r#"
                             pm.test("the more specific cookie", () => pm.expect(pm.cookies.get("sid")).to.equal("renewed"));
                             pm.test("cookies for other paths", () => pm.expect(pm.cookies.get("elsewhere")).to.equal("1"));
+                            pm.test("as the jar holds them", () => {{
+                                pm.expect(pm.cookies.has("gone")).to.equal(false);
+                                pm.expect(pm.cookies.get("twice")).to.equal("second");
+                            }});
                             pm.cookies.jar().set("{url}/admin/users", {{name: "sid", value: "base", path: "/", sameSite: "Strict"}}, (error, cookie) => {{
                                 pm.test("set returns the stored cookie", () => {{
                                     pm.expect(error).to.equal(null);
@@ -373,7 +377,7 @@ fn after_a_response_pm_cookies_keeps_the_jar_order_and_set_returns_the_stored_co
         server.await;
 
         let tests = &execution.scripts[0].tests;
-        assert_eq!(tests.len(), 3);
+        assert_eq!(tests.len(), 4);
         for test in tests {
             assert_eq!(test.error, None, "{}", test.name);
         }

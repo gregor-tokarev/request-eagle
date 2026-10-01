@@ -203,6 +203,22 @@ impl CookieJar {
         matching.into_iter().filter_map(listed).collect()
     }
 
+    /// The cookies that these Set-Cookie headers from `url` named and that
+    /// the jar still holds, once each.
+    pub(crate) fn stored(&self, url: &Url, set_cookies: &[String]) -> Vec<Cookie> {
+        let cookies = self.0.cookies.lock().unwrap();
+        let mut named = HashSet::new();
+
+        set_cookies
+            .iter()
+            .filter_map(|header| RawCookie::parse(header.as_str()).ok())
+            .filter_map(|cookie| StoredCookie::try_from_raw_cookie(&cookie, url).ok())
+            .map(|cookie| key(&cookie))
+            .filter(|key| named.insert(key.clone()))
+            .filter_map(|(domain, path, name)| cookies.get(&domain, &path, &name).and_then(listed))
+            .collect()
+    }
+
     /// Keep a cookie a script set, as if a response from `url` had set it,
     /// and return it. An expired cookie deletes the one it names instead.
     pub(crate) fn set(&self, url: &Url, set_cookie: &str) -> Result<Option<Cookie>, String> {
