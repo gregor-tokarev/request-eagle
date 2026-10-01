@@ -1,11 +1,13 @@
-use std::time::SystemTime;
+use std::{
+    rc::Rc,
+    time::{Duration, SystemTime},
+};
 
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
     button::*,
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Input, InputEvent, InputState},
-    scroll::ScrollableElement as _,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -14,12 +16,24 @@ use request::Cookie;
 
 use crate::cookies::Cookies;
 
+/// A row of the cookie table: a domain's heading, or one of its cookies.
+enum Row {
+    Domain { domain: SharedString, count: usize },
+    Cookie(Cookie),
+}
+
 /// Lists the cookies in the jar that requests share, by domain, and deletes
 /// them.
 pub struct CookiePage {
     cookies: Vec<Cookie>,
+    /// The cookies that match the filter, under their domains. Only the rows
+    /// in view are drawn.
+    rows: Rc<[Row]>,
+    list: ListState,
     search: Option<Entity<InputState>>,
     query: String,
+    /// Reloads the cookies when the next one expires.
+    expiry: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -31,15 +45,26 @@ impl CookiePage {
             cx.observe_global::<Preferences>(|_, cx| cx.notify()),
         ];
 
-        Self {
-            cookies: Cookies::jar(cx).cookies(),
+        let mut page = Self {
+            cookies: Vec::new(),
+            rows: Rc::new([]),
+            // Rows below the view are measured ahead, so scrolling can reach
+            // them; without it, scrolling stops at the first screen.
+            list: ListState::new(0, ListAlignment::Top, px(400.)),
             search: None,
             query: String::new(),
+            expiry: None,
             _subscriptions: subscriptions,
-        }
+        };
+        page.reload(cx);
+
+        page
     }
 
+    /// Opening the tab again shows the cookies that have not expired since.
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reload(cx);
+
         if self.search.is_some() {
             return;
         }
@@ -49,6 +74,7 @@ impl CookiePage {
         let subscription = cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 this.query = input.read(cx).value().trim().to_lowercase();
+                this.filter();
                 cx.notify();
             }
         });
@@ -58,8 +84,59 @@ impl CookiePage {
     }
 
     fn reload(&mut self, cx: &mut Context<Self>) {
-        self.cookies = Cookies::jar(cx).cookies();
-        cx.notify();
+        let cookies = Cookies::jar(cx).cookies();
+        self.watch_expiry(&cookies, cx);
+
+        // Keep the scroll position unless the cookies changed.
+        if cookies != self.cookies {
+            self.cookies = cookies;
+            self.filter();
+            cx.notify();
+        }
+    }
+
+    /// Expired cookies leave the jar without changing it, so check again
+    /// once the next one has expired.
+    fn watch_expiry(&mut self, cookies: &[Cookie], cx: &mut Context<Self>) {
+        let now = SystemTime::now();
+        let next = cookies
+            .iter()
+            .filter_map(|cookie| cookie.expires?.duration_since(now).ok())
+            .min();
+
+        self.expiry = next.map(|wait| {
+            cx.spawn(async move |this, cx| {
+                // Listed expiry times are whole seconds; wait past the
+                // fraction. Look again daily rather than sleeping for years.
+                let wait = (wait + Duration::from_secs(1)).min(Duration::from_secs(24 * 60 * 60));
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |this, cx| this.reload(cx));
+            })
+        });
+    }
+
+    fn filter(&mut self) {
+        let matching = self
+            .cookies
+            .iter()
+            .filter(|cookie| {
+                self.query.is_empty()
+                    || cookie.domain.to_lowercase().contains(&self.query)
+                    || cookie.name.to_lowercase().contains(&self.query)
+            })
+            .collect::<Vec<_>>();
+
+        let mut rows = Vec::new();
+        for group in matching.chunk_by(|a, b| a.domain == b.domain) {
+            rows.push(Row::Domain {
+                domain: group[0].domain.clone().into(),
+                count: group.len(),
+            });
+            rows.extend(group.iter().map(|cookie| Row::Cookie((*cookie).clone())));
+        }
+
+        self.list.reset(rows.len());
+        self.rows = rows.into();
     }
 
     fn remove(&mut self, matches: impl Fn(&Cookie) -> bool, cx: &mut Context<Self>) {
@@ -121,15 +198,15 @@ impl CookiePage {
             )
     }
 
-    fn table(&self, cookies: &[&Cookie], cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let mut table = v_flex()
+    fn table(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let rows = self.rows.clone();
+        let page = cx.entity().downgrade();
+
+        v_flex()
             .id("cookie-table")
             .debug_selector(|| "cookie-table".into())
-            .flex_none()
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(cx.theme().radius_tokens().md)
-            .overflow_hidden()
+            .flex_1()
+            .min_h_0()
             // Selectable text updates without redrawing this cached page.
             // Paint the changing highlight while dragging.
             .on_mouse_move(cx.listener(|_, event: &MouseMoveEvent, _, cx| {
@@ -140,6 +217,9 @@ impl CookiePage {
             .child(
                 h_flex()
                     .h_8()
+                    .flex_none()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(name_column().child("Name"))
@@ -148,123 +228,16 @@ impl CookiePage {
                     .child(expires_column().child("Expires"))
                     .child(attributes_column().child("Attributes"))
                     .child(div().w_8().flex_none()),
-            );
-
-        let mut index = 0;
-        for group in cookies.chunk_by(|a, b| a.domain == b.domain) {
-            let domain = group[0].domain.clone();
-
-            table = table.child(
-                h_flex()
-                    .debug_selector({
-                        let domain = domain.clone();
-                        move || format!("cookie-domain-{domain}")
-                    })
-                    .h_8()
-                    .px_2()
-                    .gap_2()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().muted)
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(domain.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(match group.len() {
-                                1 => "1 cookie".to_owned(),
-                                count => format!("{count} cookies"),
-                            }),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new(SharedString::from(format!("delete-domain-{domain}")))
-                            .ghost()
-                            .xsmall()
-                            .icon(Icon::default().path("icons/trash.svg"))
-                            .accessibility_label(format!("Delete cookies for {domain}"))
-                            .tooltip(format!("Delete cookies for {domain}"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove(|cookie| cookie.domain == domain, cx)
-                            })),
-                    ),
-            );
-
-            for cookie in group {
-                table = table.child(self.row(index, cookie, cx));
-                index += 1;
-            }
-        }
-
-        table
-    }
-
-    fn row(
-        &self,
-        index: usize,
-        cookie: &Cookie,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let attributes = [
-            (!cookie.host_only).then_some("Subdomains"),
-            cookie.secure.then_some("Secure"),
-            cookie.http_only.then_some("HttpOnly"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(", ");
-        let selectable = |column: &'static str, text: SharedString, order: usize| {
-            SelectableText::new((column, index), text).document_order((index * 2 + order) as u64)
-        };
-        let removed = cookie.clone();
-
-        h_flex()
-            .id(("cookie", index))
-            .debug_selector(move || format!("cookie-row-{index}"))
-            .items_start()
-            .min_h_8()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .hover(|row| row.bg(cx.theme().table_hover))
-            .child(
-                name_column()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .cursor_text()
-                    .child(selectable("cookie-name", cookie.name.clone().into(), 0)),
             )
             .child(
-                value_column()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .cursor_text()
-                    .child(selectable("cookie-value", cookie.value.clone().into(), 1)),
-            )
-            .child(path_column().child(cookie.path.clone()))
-            .child(expires_column().child(expires(cookie.expires)))
-            .child(
-                attributes_column()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(attributes),
-            )
-            .child(
-                h_flex().w_8().flex_none().h_8().justify_center().child(
-                    Button::new(("delete-cookie", index))
-                        .debug_selector(move || format!("delete-cookie-{index}"))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Close)
-                        .accessibility_label(format!("Delete cookie {}", cookie.name))
-                        .tooltip("Delete cookie")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.remove(|cookie| *cookie == removed, cx)
-                        })),
-                ),
+                list(self.list.clone(), move |index, _, cx| match &rows[index] {
+                    Row::Domain { domain, count } => {
+                        domain_row(index, domain, *count, &page, cx).into_any_element()
+                    }
+                    Row::Cookie(cookie) => cookie_row(index, cookie, &page, cx).into_any_element(),
+                })
+                .flex_1()
+                .min_h_0(),
             )
     }
 
@@ -294,6 +267,123 @@ impl CookiePage {
             ),
         )
     }
+}
+
+fn domain_row(
+    index: usize,
+    domain: &SharedString,
+    count: usize,
+    page: &WeakEntity<CookiePage>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let removed = domain.clone();
+    let page = page.clone();
+
+    h_flex()
+        .debug_selector(move || format!("cookie-domain-{index}"))
+        .w_full()
+        .h_8()
+        .px_2()
+        .gap_2()
+        .when(index > 0, |row| row.border_t_1())
+        .border_color(cx.theme().border)
+        .bg(cx.theme().muted)
+        .child(
+            div()
+                .min_w_0()
+                .text_ellipsis()
+                .font_weight(FontWeight::MEDIUM)
+                .child(domain.clone()),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(match count {
+                    1 => "1 cookie".to_owned(),
+                    count => format!("{count} cookies"),
+                }),
+        )
+        .child(div().flex_1())
+        .child(
+            Button::new(("delete-domain", index))
+                .ghost()
+                .xsmall()
+                .icon(Icon::default().path("icons/trash.svg"))
+                .accessibility_label(format!("Delete cookies for {domain}"))
+                .tooltip(format!("Delete cookies for {domain}"))
+                .on_click(move |_, _, cx| {
+                    let _ = page.update(cx, |page, cx| {
+                        page.remove(|cookie| cookie.domain == removed.as_ref(), cx)
+                    });
+                }),
+        )
+}
+
+fn cookie_row(
+    index: usize,
+    cookie: &Cookie,
+    page: &WeakEntity<CookiePage>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let attributes = [
+        (!cookie.host_only).then_some("Subdomains"),
+        cookie.secure.then_some("Secure"),
+        cookie.http_only.then_some("HttpOnly"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ");
+    let selectable = |column: &'static str, text: SharedString, order: usize| {
+        SelectableText::new((column, index), text).document_order((index * 2 + order) as u64)
+    };
+    let removed = cookie.clone();
+    let page = page.clone();
+
+    h_flex()
+        .id(("cookie", index))
+        .debug_selector(move || format!("cookie-row-{index}"))
+        .w_full()
+        .items_start()
+        .min_h_8()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .hover(|row| row.bg(cx.theme().table_hover))
+        .child(
+            name_column()
+                .font_family(cx.theme().mono_font_family.clone())
+                .cursor_text()
+                .child(selectable("cookie-name", cookie.name.clone().into(), 0)),
+        )
+        .child(
+            value_column()
+                .font_family(cx.theme().mono_font_family.clone())
+                .cursor_text()
+                .child(selectable("cookie-value", cookie.value.clone().into(), 1)),
+        )
+        .child(path_column().child(cookie.path.clone()))
+        .child(expires_column().child(expires(cookie.expires)))
+        .child(
+            attributes_column()
+                .text_color(cx.theme().muted_foreground)
+                .child(attributes),
+        )
+        .child(
+            h_flex().w_8().flex_none().h_8().justify_center().child(
+                Button::new(("delete-cookie", index))
+                    .debug_selector(move || format!("delete-cookie-{index}"))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Close)
+                    .accessibility_label(format!("Delete cookie {}", cookie.name))
+                    .tooltip("Delete cookie")
+                    .on_click(move |_, _, cx| {
+                        let _ = page
+                            .update(cx, |page, cx| page.remove(|cookie| *cookie == removed, cx));
+                    }),
+            ),
+        )
 }
 
 /// Columns share the table's width in proportion, so each keeps room at
@@ -342,15 +432,6 @@ impl Render for CookiePage {
         let enabled = cx
             .try_global::<Preferences>()
             .is_none_or(|preferences| preferences.request.cookie_jar);
-        let cookies = self
-            .cookies
-            .iter()
-            .filter(|cookie| {
-                self.query.is_empty()
-                    || cookie.domain.to_lowercase().contains(&self.query)
-                    || cookie.name.to_lowercase().contains(&self.query)
-            })
-            .collect::<Vec<_>>();
 
         v_flex()
             .id("cookie-page")
@@ -361,7 +442,6 @@ impl Render for CookiePage {
             .pb_4()
             .gap_2()
             .text_sm()
-            .overflow_y_scrollbar()
             .child(self.header(cx))
             .child(
                 div()
@@ -404,10 +484,10 @@ impl Render for CookiePage {
                         .child(error),
                 )
             })
-            .child(if cookies.is_empty() {
+            .child(if self.rows.is_empty() {
                 self.empty_state().into_any_element()
             } else {
-                self.table(&cookies, cx).into_any_element()
+                self.table(cx).into_any_element()
             })
     }
 }

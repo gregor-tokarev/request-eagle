@@ -1,7 +1,9 @@
 use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
     fs,
     io::{self, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -9,7 +11,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use cookie_store::{CookieDomain, CookieExpiration, CookieStore, RawCookie};
+use cookie_store::{
+    Cookie as StoredCookie, CookieDomain, CookieExpiration, CookieStore, RawCookie,
+};
 use http_client::http::{
     HeaderMap, HeaderValue,
     header::{COOKIE, SET_COOKIE},
@@ -48,9 +52,25 @@ struct Jar {
 
 struct JarFile {
     path: PathBuf,
-    /// The revision written last. Held while writing, so the newest cookies
-    /// are written last when saves overlap.
-    saved: Mutex<u64>,
+    /// What the jar last read from or wrote to the file. Held while saving,
+    /// so saves in this process do not interleave.
+    saved: Mutex<Saved>,
+}
+
+struct Saved {
+    revision: u64,
+    cookies: Vec<StoredCookie<'static>>,
+}
+
+/// A cookie's identity in a jar: its domain, path and name.
+type Key = (String, String, String);
+
+fn key(cookie: &StoredCookie) -> Key {
+    (
+        String::from(&cookie.domain),
+        String::from(&cookie.path),
+        cookie.name().to_owned(),
+    )
 }
 
 impl CookieJar {
@@ -63,46 +83,36 @@ impl CookieJar {
     /// is an empty jar.
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
-        let cookies = match fs::File::open(&path) {
-            Ok(file) => cookie_store::serde::json::load(io::BufReader::new(file))
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => CookieStore::default(),
-            Err(error) => return Err(error),
-        };
+        let cookies = read(&path)?;
 
         Ok(Self(Arc::new(Jar {
-            cookies: Mutex::new(cookies),
+            cookies: Mutex::new(store(&cookies)),
             revision: AtomicU64::new(0),
             file: Some(JarFile {
                 path,
-                saved: Mutex::new(0),
+                saved: Mutex::new(Saved {
+                    revision: 0,
+                    cookies,
+                }),
             }),
         })))
     }
 
     /// Write the cookies to the jar's file if they changed since it was
     /// opened or saved. Session cookies are saved too.
+    ///
+    /// Another process, such as a second CLI command, may have saved the file
+    /// in the meantime. Only this jar's own changes replace what the file
+    /// holds, and the jar takes the other process's cookies.
     pub fn save(&self) -> io::Result<()> {
         let Some(file) = &self.0.file else {
             return Ok(());
         };
 
         let mut saved = file.saved.lock().unwrap();
-        let revision = self.revision();
-
-        if *saved == revision {
+        if saved.revision == self.revision() {
             return Ok(());
         }
-
-        let cookies = self
-            .0
-            .cookies
-            .lock()
-            .unwrap()
-            .iter_unexpired()
-            .cloned()
-            .collect::<Vec<_>>();
-        let json = serde_json::to_vec_pretty(&cookies)?;
 
         let directory = file
             .path
@@ -110,14 +120,32 @@ impl CookieJar {
             .ok_or_else(|| io::Error::other("the cookie file has no directory"))?;
         fs::create_dir_all(directory)?;
 
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file.path.with_extension("lock"))?;
+        lock.lock()?;
+
+        let current = read(&file.path)?;
+        let (revision, merged) = {
+            let mut cookies = self.0.cookies.lock().unwrap();
+            let merged = merge(&saved.cookies, &cookies, current);
+            *cookies = store(&merged);
+
+            (self.revision(), merged)
+        };
+
         // Only the user can read the temporary file, and renaming it replaces
         // the saved cookies at once.
         let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-        temporary.write_all(&json)?;
+        temporary.write_all(&serde_json::to_vec_pretty(&merged)?)?;
         temporary.as_file().sync_all()?;
         temporary.persist(&file.path).map_err(|error| error.error)?;
 
-        *saved = revision;
+        *saved = Saved {
+            revision,
+            cookies: merged,
+        };
         Ok(())
     }
 
@@ -299,4 +327,74 @@ impl CookieJar {
     fn changed(&self) {
         self.0.revision.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+/// The unexpired cookies saved at `path`. A missing file has none.
+fn read(path: &Path) -> io::Result<Vec<StoredCookie<'static>>> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let cookies: Vec<StoredCookie<'static>> = serde_json::from_reader(io::BufReader::new(file))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+    Ok(cookies
+        .into_iter()
+        .filter(|cookie| !cookie.is_expired())
+        .collect())
+}
+
+/// Apply the changes from `saved` to `ours` to the `current` file contents:
+/// cookies that `ours` added or changed replace the file's, and those it
+/// deleted or let expire leave it. The file's other cookies stay.
+fn merge(
+    saved: &[StoredCookie<'static>],
+    ours: &CookieStore,
+    mut current: Vec<StoredCookie<'static>>,
+) -> Vec<StoredCookie<'static>> {
+    let saved = saved
+        .iter()
+        .map(|cookie| (key(cookie), cookie))
+        .collect::<HashMap<_, _>>();
+    // In the jar's order, which decides the order of equally specific
+    // cookies in a request.
+    let ours = ours
+        .iter_unexpired()
+        .map(|cookie| (key(cookie), cookie))
+        .collect::<Vec<_>>();
+    let kept = ours.iter().map(|(key, _)| key).collect::<HashSet<_>>();
+
+    current.retain(|cookie| {
+        let key = key(cookie);
+        !saved.contains_key(&key) || kept.contains(&key)
+    });
+
+    let mut positions = current
+        .iter()
+        .enumerate()
+        .map(|(position, cookie)| (key(cookie), position))
+        .collect::<HashMap<_, _>>();
+
+    for (key, cookie) in ours {
+        if saved.get(&key) == Some(&cookie) {
+            continue;
+        }
+
+        match positions.get(&key) {
+            Some(&position) => current[position] = cookie.clone(),
+            None => {
+                positions.insert(key, current.len());
+                current.push(cookie.clone());
+            }
+        }
+    }
+
+    current
+}
+
+fn store(cookies: &[StoredCookie<'static>]) -> CookieStore {
+    let Ok(store) =
+        CookieStore::from_cookies(cookies.iter().cloned().map(Ok::<_, Infallible>), false);
+    store
 }

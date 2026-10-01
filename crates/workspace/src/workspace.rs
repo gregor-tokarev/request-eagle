@@ -773,11 +773,12 @@ impl Render for Workspace {
     }
 }
 
-/// `cookies` is the jar that every request shares.
+/// `cookies` is the jar that every request shares, or why it could not be
+/// read.
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
-    cookies: request::CookieJar,
+    cookies: Result<request::CookieJar, String>,
     updater: Entity<Updater>,
     window: &mut Window,
     cx: &mut App,

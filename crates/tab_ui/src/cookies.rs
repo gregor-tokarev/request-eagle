@@ -9,12 +9,21 @@ pub struct Cookies {
     revision: u64,
     /// Why the jar could not be saved the last time it changed.
     error: Option<String>,
+    /// Why the saved cookies could not be read when the app started.
+    load_error: Option<String>,
 }
 
 impl Global for Cookies {}
 
 impl Cookies {
-    pub fn init(jar: CookieJar, cx: &mut App) {
+    /// `jar` is the saved jar, or why it could not be read. Without it,
+    /// requests share a jar that is not saved.
+    pub fn init(jar: Result<CookieJar, String>, cx: &mut App) {
+        let (jar, load_error) = match jar {
+            Ok(jar) => (jar, None),
+            Err(error) => (CookieJar::new(), Some(error)),
+        };
+
         // A change made just before quitting may still be waiting to be
         // written. Saving blocks the quit until it is done.
         let saved = jar.clone();
@@ -33,6 +42,7 @@ impl Cookies {
             revision: jar.revision(),
             jar,
             error: None,
+            load_error,
         });
     }
 
@@ -43,8 +53,10 @@ impl Cookies {
             .unwrap_or_default()
     }
 
+    /// Why the cookies are not saved.
     pub(crate) fn error(cx: &App) -> Option<&str> {
-        cx.try_global::<Self>()?.error.as_deref()
+        let cookies = cx.try_global::<Self>()?;
+        cookies.error.as_deref().or(cookies.load_error.as_deref())
     }
 
     /// Notify observers and save the jar in the background, if it changed
@@ -70,7 +82,7 @@ impl Cookies {
                 .map(|error| format!("Could not save cookies: {error}"));
 
             cx.update(|cx| {
-                if Self::error(cx) != error.as_deref() {
+                if cx.global::<Self>().error != error {
                     cx.update_global::<Self, _>(|cookies, _| cookies.error = error);
                 }
             });

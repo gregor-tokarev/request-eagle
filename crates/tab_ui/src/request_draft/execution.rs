@@ -238,6 +238,8 @@ impl RequestDraft {
                     version,
                     headers,
                 } => {
+                    // The jar stored the stream's cookies with its head.
+                    Cookies::changed(cx);
                     self.streaming = true;
                     self.response.update(cx, |response, cx| {
                         response.open_stream(status, version, headers, window, cx)

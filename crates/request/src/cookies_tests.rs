@@ -64,3 +64,44 @@ fn secure_cookies_are_sent_only_over_https() {
         Some("token=1")
     );
 }
+
+#[test]
+fn saving_keeps_the_cookies_another_process_saved_meanwhile() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cookies.json");
+    let names = |jar: &CookieJar| {
+        jar.cookies()
+            .into_iter()
+            .map(|cookie| cookie.name)
+            .collect::<Vec<_>>()
+    };
+
+    let first = CookieJar::open(&path).unwrap();
+    let second = CookieJar::open(&path).unwrap();
+    store(&first, "https://example.com/", &["fast=1", "shared=first"]);
+    first.save().unwrap();
+    store(
+        &second,
+        "https://example.com/",
+        &["slow=1", "shared=second"],
+    );
+    second.save().unwrap();
+
+    assert_eq!(
+        names(&CookieJar::open(&path).unwrap()),
+        ["fast", "shared", "slow"]
+    );
+    assert_eq!(names(&second), ["fast", "shared", "slow"]);
+    assert_eq!(
+        CookieJar::open(&path)
+            .unwrap()
+            .cookie_header("https://example.com/", &[])
+            .as_deref(),
+        Some("fast=1; shared=second; slow=1")
+    );
+
+    // A deletion leaves the file, but the cookies this jar never had stay.
+    first.remove(&first.cookies()[0]);
+    first.save().unwrap();
+    assert_eq!(names(&CookieJar::open(&path).unwrap()), ["shared", "slow"]);
+}
