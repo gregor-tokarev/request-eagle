@@ -16,7 +16,7 @@ impl ResponseView {
         let response = content.http();
         let status = response.status;
         let metrics = response.metrics;
-        let body_bytes = response.body.len();
+        let body_bytes = content.omitted_body.unwrap_or(response.body.len());
         let downloaded_body_bytes = metrics.encoded_response_body_bytes.unwrap_or(body_bytes);
         let processing = content.processing;
         let elapsed = content.execution.elapsed + processing;
@@ -208,7 +208,7 @@ fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) 
         )
 }
 
-fn size_label(bytes: usize) -> String {
+pub(super) fn size_label(bytes: usize) -> String {
     match bytes {
         0..1024 => format!("{bytes} B"),
         1024..1_048_576 => format!("{:.1} KB", bytes as f64 / 1024.),

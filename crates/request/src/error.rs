@@ -87,3 +87,34 @@ pub enum ExecutionError {
     #[error("could not decode the gzip response body: {0}")]
     DecodeBody(#[source] io::Error),
 }
+
+impl ExecutionError {
+    /// Whether the request went out before it failed. Scripts, variables,
+    /// settings or an invalid address can stop a request before it is sent.
+    pub fn was_sent(&self) -> bool {
+        match self {
+            Self::ScriptedRequest { source, .. } => source.was_sent(),
+            Self::Timeout { .. }
+            | Self::ResponseTooLarge { .. }
+            | Self::WebSocketRejected { .. }
+            | Self::WebSocketAccept
+            | Self::WebSocket(_)
+            | Self::Transport(_)
+            | Self::ReadBody(_)
+            | Self::DecodeBody(_) => true,
+            Self::Skipped { .. }
+            | Self::Script { .. }
+            | Self::Variables(_)
+            | Self::InvalidResponseLimit
+            | Self::InvalidProxy(_)
+            | Self::Client(_)
+            | Self::InvalidUrl(_)
+            | Self::UnsupportedScheme(_)
+            | Self::UnsupportedWebSocketScheme(_)
+            | Self::InvalidRequest(_)
+            | Self::InvalidHost
+            | Self::MultipleHosts
+            | Self::Http2HostOverride => false,
+        }
+    }
+}

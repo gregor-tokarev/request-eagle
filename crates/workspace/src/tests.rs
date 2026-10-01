@@ -37,6 +37,7 @@ pub(crate) fn workspace(
             Workspace::new(
                 collections,
                 environments,
+                request_history::History::new("/nonexistent/request-eagle/history"),
                 updater::init("1.2.3", cx),
                 window,
                 cx,

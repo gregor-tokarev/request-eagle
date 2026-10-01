@@ -9,6 +9,7 @@ dev-profiler = ["dep:gpui-fps"]
 [dependencies]
 collection = { path = "../collection" }
 environment = { path = "../environment" }
+request_history = { package = "history", path = "../history" }
 preferences = { path = "../preferences" }
 gpui-fps = { version = "=0.6.2", optional = true }
 gpui-kit = { workspace = true, features = ["component", "assets"] }

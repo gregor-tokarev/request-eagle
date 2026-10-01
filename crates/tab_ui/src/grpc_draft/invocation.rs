@@ -1,4 +1,5 @@
 use std::task::Poll;
+use std::time::SystemTime;
 
 use futures::StreamExt as _;
 use gpui_kit::*;
@@ -7,6 +8,7 @@ use request::{GrpcCall, GrpcClient, GrpcError, GrpcEvent, GrpcEvents, RequestVar
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
+use crate::RequestSent;
 
 /// Events handled in one update, so fast streams do not redraw per message.
 const EVENT_BATCH: usize = 256;
@@ -102,6 +104,7 @@ impl GrpcDraft {
         let definition = definition.clone();
         let client = self.client(cx);
         let server: SharedString = self.request.url.trim().to_owned().into();
+        let sent = self.sent();
         // The HTTP client scripts use starts off the main thread. Dropping
         // the task cancels the call.
         let invoke =
@@ -110,7 +113,7 @@ impl GrpcDraft {
 
         self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = invoke.await;
-            Self::follow(this, result, server, cx).await;
+            Self::follow(this, result, server, sent, cx).await;
         }));
         self.redraw(cx);
     }
@@ -127,6 +130,7 @@ impl GrpcDraft {
         let client = self.client(cx);
         let collection = self.collection_path();
         let source = self.current_source();
+        let sent = self.sent();
         let loaded = match &self.definition {
             DefinitionState::Loaded(definition) if self.definition_is_current() => {
                 Some((definition.clone(), self.reflected_target.clone()))
@@ -144,7 +148,7 @@ impl GrpcDraft {
         self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
             let prepared = match prepare.await {
                 Ok(prepared) => prepared,
-                Err(error) => return Self::follow(this, Err(error), "".into(), cx).await,
+                Err(error) => return Self::follow(this, Err(error), "".into(), sent, cx).await,
             };
             let server: SharedString = prepared.request().url.trim().to_owned().into();
             let target = reflected_target(prepared.request(), prepared.variables());
@@ -184,9 +188,17 @@ impl GrpcDraft {
                 Err(error) => Err(prepared.fail(error)),
             };
 
-            Self::follow(this, result, server, cx).await;
+            Self::follow(this, result, server, sent, cx).await;
         }));
         self.redraw(cx);
+    }
+
+    /// The call history keeps once it starts: the request as it is now.
+    fn sent(&self) -> RequestSent {
+        RequestSent {
+            record: request_history::Record::sent(self.request.clone()),
+            sent_at: SystemTime::now(),
+        }
     }
 
     /// Show the call that `result` started, or why it did not, then its
@@ -195,11 +207,13 @@ impl GrpcDraft {
         this: WeakEntity<Self>,
         result: Result<(GrpcCall, GrpcEvents), GrpcError>,
         server: SharedString,
+        sent: RequestSent,
         cx: &mut AsyncWindowContext,
     ) {
         let opened = this.update_in(cx, |this, window, cx| {
             let events = match result {
                 Ok((call, events)) => {
+                    cx.emit(sent);
                     let kind = call.kind;
                     this.response
                         .update(cx, |response, cx| response.start(kind, server, window, cx));

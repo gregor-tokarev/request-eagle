@@ -5,6 +5,7 @@ mod bottom_panel;
 mod command_palette;
 mod environment_panel;
 mod environment_picker;
+mod history_panel;
 mod main_view;
 mod save_request;
 mod top_panel;
@@ -16,6 +17,8 @@ mod collection_tab_tests;
 mod command_palette_tests;
 #[cfg(test)]
 mod environment_tests;
+#[cfg(test)]
+mod history_panel_tests;
 #[cfg(test)]
 mod main_view_tests;
 #[cfg(test)]

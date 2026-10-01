@@ -92,6 +92,7 @@ fn pages_render_benchmark(cx: &mut TestAppContext) {
             Workspace::new(
                 collections,
                 no_environments(),
+                request_history::History::new("/nonexistent/request-eagle/history"),
                 updater::init("1.2.3", cx),
                 window,
                 cx,

@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields};
-use crate::response_view::ResponseView;
+use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
-    Environments,
+    Environments, RequestSent,
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
@@ -84,6 +84,8 @@ pub struct RequestDraft {
     configuration: Entity<RequestConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<RequestSent> for RequestDraft {}
 
 impl RequestDraft {
     /// Variables resolve from the request's collection environment, its
@@ -174,6 +176,25 @@ impl RequestDraft {
 
         self.location = Some(location);
         cx.notify();
+    }
+
+    /// Show the response, or the failure, that history kept for this request.
+    pub fn show_recorded(
+        &mut self,
+        response: Option<request_history::Response>,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.response
+            .update(cx, |view, cx| match (response, error) {
+                (Some(response), _) => {
+                    let content = ResponseContent::recorded(response);
+                    view.finish(Ok(content), window, cx);
+                }
+                (None, Some(error)) => view.fail(error.into(), cx),
+                (None, None) => {}
+            });
     }
 
     pub fn mark_saved(&mut self, request: HttpRequest, cx: &mut Context<Self>) {

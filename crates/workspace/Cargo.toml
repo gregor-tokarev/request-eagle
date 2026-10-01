@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 environment = { path = "../environment" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
 request = { path = "../request" }
+request_history = { package = "history", path = "../history" }
 request_eagle_theme = { package = "theme", path = "../theme" }
 settings_ui = { path = "../settings_ui" }
 tab_ui = { path = "../tab_ui" }

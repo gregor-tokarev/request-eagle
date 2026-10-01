@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
@@ -7,6 +7,7 @@ use request::{EventStream, EventStreamUpdate, RequestExecutor};
 use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
+use crate::RequestSent;
 
 /// The most event-stream updates shown per redraw. A fast stream is drawn in
 /// batches instead of once for every event.
@@ -123,20 +124,36 @@ impl RequestDraft {
             .map(|(_, executor)| executor.clone());
         let (events, mut updates, stop) = EventStream::new();
         self.stop = Some(stop);
+        let sent_at = SystemTime::now();
         let task = cx.background_executor().spawn(async move {
             let executor = match cached
                 .map(Ok)
                 .unwrap_or_else(|| RequestExecutor::new(&preferences))
             {
                 Ok(executor) => executor,
-                Err(error) => return (None, Err(error)),
+                Err(error) => return (None, Err(error), None),
             };
             let result = executor
-                .execute_streaming(request, variables, events)
-                .await
-                .map(crate::response_view::ResponseContent::new);
+                .execute_streaming(request.clone(), variables, events)
+                .await;
+            // History keeps the request as written, with what came back.
+            let record = match &result {
+                Ok(execution) => Some(request_history::Record {
+                    response: Some(request_history::Response::new(execution)),
+                    ..request_history::Record::sent(request)
+                }),
+                Err(error) if error.was_sent() => Some(request_history::Record {
+                    error: Some(error.to_string()),
+                    ..request_history::Record::sent(request)
+                }),
+                Err(_) => None,
+            };
 
-            (Some((preferences, executor)), result)
+            (
+                Some((preferences, executor)),
+                result.map(crate::response_view::ResponseContent::new),
+                record,
+            )
         });
 
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -169,8 +186,12 @@ impl RequestDraft {
                 }
             });
 
-            let (executor, result) = task.await;
+            let (executor, result, record) = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                if let Some(record) = record {
+                    cx.emit(RequestSent { record, sent_at });
+                }
+
                 this.executor = executor;
                 this.task = None;
                 this.stop = None;

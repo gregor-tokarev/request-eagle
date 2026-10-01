@@ -3443,6 +3443,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "history"
+version = "0.1.0"
+dependencies = [
+ "request",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6458,6 +6470,7 @@ dependencies = [
  "gpui-fps",
  "gpui-kit",
  "gpui-pre-reqwest-client",
+ "history",
  "keybindings_service",
  "objc2-app-kit 0.3.2",
  "preferences",
@@ -7723,6 +7736,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "gpui-pre-reqwest-client",
+ "history",
  "lsp-types",
  "preferences",
  "request",
@@ -9838,10 +9852,12 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workspace"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "collection",
  "collections_panel_ui",
  "environment",
  "gpui-kit",
+ "history",
  "keybindings_service",
  "preferences",
  "request",

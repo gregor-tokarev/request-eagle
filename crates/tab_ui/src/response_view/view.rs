@@ -137,6 +137,18 @@ impl ResponseView {
         cx.notify();
     }
 
+    /// Show why a request from history failed after it was sent.
+    pub(crate) fn fail(&mut self, message: SharedString, cx: &mut Context<Self>) {
+        self.content = None;
+        self.body = None;
+        self.events = None;
+        self.scripts.clear();
+        self.loading = false;
+        self.error = true;
+        self.message = message;
+        cx.notify();
+    }
+
     pub fn finish(
         &mut self,
         result: Result<ResponseContent, ExecutionError>,
@@ -353,7 +365,14 @@ impl Render for ResponseView {
             }
             Section::Body if has_response => match &self.events {
                 Some(events) => events.clone().into_any_element(),
-                None => self.body(cx),
+                None => match self
+                    .content
+                    .as_ref()
+                    .and_then(|content| content.omitted_body)
+                {
+                    Some(size) => omitted_body(size),
+                    None => self.body(cx),
+                },
             },
             Section::Headers if has_response => self.headers(false, cx),
             Section::Cookies if has_response => self.headers(true, cx),
@@ -407,4 +426,29 @@ impl Render for ResponseView {
                 TextSelectionScopeId::default()
             })
     }
+}
+
+fn omitted_body(size: usize) -> AnyElement {
+    div()
+        .debug_selector(|| "response-body-omitted".into())
+        .flex()
+        .flex_1()
+        .min_h_0()
+        .child(
+            Empty::new().header(
+                EmptyHeader::new()
+                    .media(
+                        EmptyMedia::new()
+                            .with_variant(EmptyMediaVariant::Icon)
+                            .child(Icon::new(IconName::Inbox)),
+                    )
+                    .title(EmptyTitle::new().child("Body not kept in history"))
+                    .description(EmptyDescription::new().child(format!(
+                        "History keeps bodies up to {}. This one is {}. Send the request again to see it.",
+                        super::metadata::size_label(request_history::BODY_LIMIT),
+                        super::metadata::size_label(size),
+                    ))),
+            ),
+        )
+        .into_any_element()
 }
