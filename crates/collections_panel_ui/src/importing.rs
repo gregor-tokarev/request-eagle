@@ -122,6 +122,18 @@ impl ImportDialog {
             return;
         }
 
+        // Pasted text stays in the field, so a failed import can be corrected
+        // and tried again with Enter. The field holds one line, so a command's
+        // line continuations become spaces.
+        let line = source
+            .replace("\\\r\n", " ")
+            .replace("\\\n", " ")
+            .replace(['\r', '\n'], " ");
+        if self.text.read(cx).value() != line {
+            self.text
+                .update(cx, |text, cx| text.set_value(line, window, cx));
+        }
+
         if !import::is_curl(&source) {
             let read = move || {
                 import::parse(&source).map_err(|error| match error {

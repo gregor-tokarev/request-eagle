@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use url::form_urlencoded::byte_serialize;
+use url::{Url, form_urlencoded::byte_serialize};
 
 use crate::{HttpRequest, Method};
 
@@ -23,8 +23,14 @@ impl HttpRequest {
             .map(|body| fill_variables(&String::from_utf8_lossy(&body), values).into_bytes());
 
         let request = request.prepare_for_send();
+        let url = url(&request.path, &request.query);
         let body = request.body.as_deref().filter(|body| !body.is_empty());
+
         let mut command = String::from("curl --location");
+        // cURL would read brackets and braces as patterns of several URLs.
+        if url.contains(['[', ']', '{', '}']) {
+            command.push_str(" --globoff");
+        }
         match request.method {
             Method::Head => command.push_str(" --head"),
             // cURL sends a body with POST unless told otherwise.
@@ -36,7 +42,7 @@ impl HttpRequest {
             }
         }
         command.push(' ');
-        command.push_str(&quote(&url(&request.path, &request.query)));
+        command.push_str(&quote(&url));
 
         for (name, value) in &request.headers {
             // cURL leaves out a header written with an empty value after `:`.
@@ -67,6 +73,20 @@ impl HttpRequest {
 /// The URL without its fragment, with the editor's query parameters encoded
 /// after its own, as sending does. Unfilled variables stay readable.
 fn url(path: &str, query: &[(String, String)]) -> String {
+    let unfilled = path.contains("{{")
+        || query
+            .iter()
+            .any(|(name, value)| name.contains("{{") || value.contains("{{"));
+
+    // Sending parses the URL, which encodes characters such as spaces.
+    if !unfilled && let Ok(mut url) = Url::parse(path) {
+        url.set_fragment(None);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        return url.into();
+    }
+
     let mut url = path.split('#').next().unwrap_or_default().to_owned();
     if query.is_empty() {
         return url;

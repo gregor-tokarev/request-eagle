@@ -192,6 +192,64 @@ fn explains_what_it_cannot_import() {
         parse_curl("curl -d a=1 -F b=2 https://example.com"),
         Err(CurlError::FormAndData)
     );
+    // Request Eagle leaves out GET bodies, so importing would change the request.
+    assert_eq!(
+        parse_curl("curl -X GET -d '{\"query\":{}}' https://example.com/_search"),
+        Err(CurlError::BodyWithoutMethod("GET"))
+    );
+}
+
+#[test]
+fn reads_values_attached_to_long_options() {
+    let request = parse_curl("curl --request=PATCH --data-raw=x=1 https://example.com").unwrap();
+
+    assert_eq!(request.method, Method::Patch);
+    assert_eq!(request.body.as_deref(), Some(&b"x=1"[..]));
+}
+
+#[test]
+fn joins_data_as_curl_does() {
+    // `--json` continues the previous data, while `--data` adds a field.
+    let request = parse_curl("curl --json '{\"a\":' --json '1}' https://example.com").unwrap();
+    assert_eq!(request.body.as_deref(), Some(&b"{\"a\":1}"[..]));
+
+    // `--get` adds the query before the fragment, which is not sent.
+    let request = parse_curl("curl -G -d a=1 'https://example.com/path#top'").unwrap();
+    assert_eq!(request.path, "https://example.com/path?a=1#top");
+}
+
+#[test]
+fn reads_form_fields_and_their_content_type() {
+    let request = parse_curl(
+        "curl -H 'Content-Type: multipart/form-data' -F 'name=Rex;type=text/plain' \
+         -F 'note=\"a;b \\\"c\\\"\"' --form-string 'raw=x;y' https://example.com",
+    )
+    .unwrap();
+
+    assert_eq!(
+        request.headers,
+        headers(&[(
+            "Content-Type",
+            "multipart/form-data; boundary=RequestEagleFormBoundary"
+        )])
+    );
+    let body = String::from_utf8(request.body.unwrap()).unwrap();
+    assert!(body.contains("name=\"name\"\r\n\r\nRex\r\n"), "{body}");
+    assert!(
+        body.contains("name=\"note\"\r\n\r\na;b \"c\"\r\n"),
+        "{body}"
+    );
+    assert!(body.contains("name=\"raw\"\r\n\r\nx;y\r\n"), "{body}");
+}
+
+#[test]
+fn leaves_out_headers_the_command_removes() {
+    let request = parse_curl("curl --json '{}' -H 'Accept:' https://example.com").unwrap();
+
+    assert_eq!(
+        request.headers,
+        headers(&[("Content-Type", "application/json")])
+    );
 }
 
 #[test]
@@ -213,7 +271,7 @@ fn reads_the_commands_request_eagle_writes() {
         },
         HttpRequest {
             method: Method::Head,
-            path: "http://localhost:3000".into(),
+            path: "http://localhost:3000/".into(),
             ..HttpRequest::default()
         },
     ];

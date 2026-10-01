@@ -6,7 +6,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use request::{HttpRequest, Method};
 use thiserror::Error;
 
-use crate::body::{multipart_form, set_content_type};
+use crate::body::{BOUNDARY, multipart_form};
 
 /// Characters `--data-urlencode` leaves as they are.
 const URL_ENCODED: &AsciiSet = &NON_ALPHANUMERIC
@@ -178,6 +178,8 @@ pub enum CurlError {
     File(String),
     #[error("The cURL command sends both form fields and data. cURL accepts only one of them.")]
     FormAndData,
+    #[error("Request Eagle cannot send a body with {0} requests.")]
+    BodyWithoutMethod(&'static str),
 }
 
 /// Whether the text is a cURL command rather than a URL, such as text pasted
@@ -203,15 +205,21 @@ pub fn parse_curl(command: &str) -> Result<HttpRequest, CurlError> {
     let mut arguments = words.into_iter().skip(1);
 
     while let Some(word) = arguments.next() {
-        if let Some(name) = word.strip_prefix("--").filter(|name| !name.is_empty()) {
-            let value = if LONG_WITH_VALUE.contains(&name) {
-                Some(
-                    arguments
-                        .next()
-                        .ok_or_else(|| CurlError::MissingValue(word.clone()))?,
-                )
-            } else {
-                None
+        if let Some(option) = word.strip_prefix("--").filter(|option| !option.is_empty()) {
+            // The value can follow in the next word or after `=`: `--request=PUT`.
+            let (name, value) = match option.split_once('=') {
+                Some((name, value)) if LONG_WITH_VALUE.contains(&name) => {
+                    (name, Some(value.to_owned()))
+                }
+                _ if LONG_WITH_VALUE.contains(&option) => (
+                    option,
+                    Some(
+                        arguments
+                            .next()
+                            .ok_or_else(|| CurlError::MissingValue(word.clone()))?,
+                    ),
+                ),
+                _ => (option, None),
             };
             options.apply(name, value)?;
         } else if let Some(flags) = word.strip_prefix('-').filter(|flags| !flags.is_empty()) {
@@ -266,7 +274,9 @@ struct Options {
     head: bool,
     get: bool,
     headers: Vec<(String, String)>,
-    data: Vec<String>,
+    /// Lowercase names of headers removed with `-H 'Name:'`.
+    removed: Vec<String>,
+    data: Option<String>,
     json: bool,
     form: Vec<(String, String)>,
     user: Option<String>,
@@ -311,15 +321,19 @@ impl Options {
                     return Err(CurlError::File(format!("--{name} {value}")));
                 }
                 self.json |= name == "json";
-                self.data.push(value);
+                self.add_data(&value, name != "json");
             }
-            "data-raw" => self.data.push(value),
-            "data-urlencode" => self.data.push(url_encode_data(&value)?),
-            "form" | "form-string" => {
+            "data-raw" => self.add_data(&value, true),
+            "data-urlencode" => self.add_data(&url_encode_data(&value)?, true),
+            "form" => {
                 let (field, content) = value.split_once('=').unwrap_or((&value, ""));
-                if name == "form" && content.starts_with(['@', '<']) {
+                if content.starts_with(['@', '<']) {
                     return Err(CurlError::File(format!("--form {value}")));
                 }
+                self.form.push((field.to_owned(), form_value(content)));
+            }
+            "form-string" => {
+                let (field, content) = value.split_once('=').unwrap_or((&value, ""));
                 self.form.push((field.to_owned(), content.to_owned()));
             }
             "upload-file" => return Err(CurlError::File(format!("--upload-file {value}"))),
@@ -329,14 +343,29 @@ impl Options {
         Ok(())
     }
 
+    /// Data from `--json` continues the previous data. Other data options
+    /// separate their data with `&`.
+    fn add_data(&mut self, data: &str, separated: bool) {
+        match &mut self.data {
+            Some(previous) => {
+                if separated {
+                    previous.push('&');
+                }
+                previous.push_str(data);
+            }
+            None => self.data = Some(data.to_owned()),
+        }
+    }
+
     /// A header as cURL reads it: `Name: value`, `Name;` for an empty value,
-    /// or `Name:` to remove a header cURL would add, which leaves nothing to send.
+    /// or `Name:` to remove a header cURL would add.
     fn header(&mut self, header: &str) {
         if let Some((name, value)) = header.split_once(':') {
-            let value = value.trim();
-            if !value.is_empty() {
-                self.headers
-                    .push((name.trim().to_owned(), value.to_owned()));
+            let (name, value) = (name.trim(), value.trim());
+            if value.is_empty() {
+                self.removed.push(name.to_ascii_lowercase());
+            } else {
+                self.headers.push((name.to_owned(), value.to_owned()));
             }
         } else if let Some(name) = header.trim().strip_suffix(';') {
             self.headers.push((name.trim().to_owned(), String::new()));
@@ -349,6 +378,13 @@ impl Options {
             .any(|(header, _)| header.eq_ignore_ascii_case(name))
     }
 
+    /// Adds a header cURL would add, unless the command sets or removes it.
+    fn add_default(&mut self, name: &str, value: &str) {
+        if !self.has_header(name) && !self.removed.contains(&name.to_ascii_lowercase()) {
+            self.headers.push((name.to_owned(), value.to_owned()));
+        }
+    }
+
     fn into_request(mut self) -> Result<HttpRequest, CurlError> {
         let mut url = self.url.take().ok_or(CurlError::MissingUrl)?;
         if !url.contains("://") && !url.starts_with("{{") {
@@ -356,7 +392,7 @@ impl Options {
             url = format!("http://{url}");
         }
 
-        if !self.form.is_empty() && !self.data.is_empty() {
+        if !self.form.is_empty() && self.data.is_some() {
             return Err(CurlError::FormAndData);
         }
 
@@ -379,27 +415,33 @@ impl Options {
                 .push(("Cookie".into(), self.cookies.join("; ")));
         }
 
-        let data = (!self.data.is_empty()).then(|| self.data.join("&"));
         let mut body = None;
 
         if self.get {
             // `--get` sends the data in the query instead of the body.
-            if let Some(data) = data {
+            if let Some(data) = self.data.take() {
+                let fragment = url.find('#').map(|start| url.split_off(start));
                 let separator = if url.contains('?') { '&' } else { '?' };
-                url = format!("{url}{separator}{data}");
+                url = format!("{url}{separator}{data}{}", fragment.unwrap_or_default());
             }
-        } else if let Some(data) = data {
+        } else if let Some(data) = self.data.take() {
             if self.json {
-                set_content_type(&mut self.headers, "application/json");
-                if !self.has_header("accept") {
-                    self.headers
-                        .push(("Accept".into(), "application/json".into()));
-                }
+                self.add_default("Content-Type", "application/json");
+                self.add_default("Accept", "application/json");
             } else {
-                set_content_type(&mut self.headers, "application/x-www-form-urlencoded");
+                self.add_default("Content-Type", "application/x-www-form-urlencoded");
             }
             body = Some(data.into_bytes());
         } else if !self.form.is_empty() {
+            // cURL adds the boundary to a multipart type written without one.
+            for (name, value) in &mut self.headers {
+                if name.eq_ignore_ascii_case("content-type")
+                    && value.to_ascii_lowercase().starts_with("multipart/")
+                    && !value.contains("boundary=")
+                {
+                    *value = format!("{value}; boundary={BOUNDARY}");
+                }
+            }
             body = Some(multipart_form(&self.form, &mut self.headers));
         }
 
@@ -409,6 +451,11 @@ impl Options {
             None if body.is_some() => Method::Post,
             None => Method::Get,
         };
+
+        // Request Eagle leaves out the body of GET and HEAD requests.
+        if body.is_some() && matches!(method, Method::Get | Method::Head) {
+            return Err(CurlError::BodyWithoutMethod(method.as_str()));
+        }
 
         Ok(HttpRequest {
             method,
@@ -431,6 +478,31 @@ fn method_named(method: &str) -> Result<Method, CurlError> {
         "OPTIONS" => Method::Options,
         _ => return Err(CurlError::UnsupportedMethod(method.to_owned())),
     })
+}
+
+/// The text of a `--form` field. cURL ends an unquoted value at `;`, where
+/// attributes such as `;type=text/plain` follow. A quoted value can contain
+/// `;`, and `\"` and `\\` in it stand for `"` and `\`.
+fn form_value(content: &str) -> String {
+    let Some(quoted) = content.strip_prefix('"') else {
+        return content.split(';').next().unwrap_or_default().to_owned();
+    };
+
+    let mut value = String::new();
+    let mut chars = quoted.chars().peekable();
+    while let Some(char) = chars.next() {
+        match char {
+            '"' => break,
+            '\\' => value.push(
+                chars
+                    .next_if(|next| matches!(next, '"' | '\\'))
+                    .unwrap_or('\\'),
+            ),
+            char => value.push(char),
+        }
+    }
+
+    value
 }
 
 /// `--data-urlencode` encodes `content`, the content of `=content`, or the

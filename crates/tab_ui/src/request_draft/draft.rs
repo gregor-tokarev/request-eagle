@@ -10,7 +10,7 @@ use crate::{
     variables::VariableScope,
 };
 use environment::EnvironmentSessions;
-use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
     notification::Notification,
@@ -78,7 +78,6 @@ pub struct RequestDraft {
     split: Entity<ResizableState>,
     /// Shown beside the request while open.
     pub(super) code_snippet: Option<Entity<CodeSnippet>>,
-    code_snippet_split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
@@ -124,7 +123,6 @@ impl RequestDraft {
         let owner = cx.weak_entity();
         let response = cx.new(|cx| ResponseView::new(cx));
         let split = cx.new(|_| ResizableState::default());
-        let code_snippet_split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
 
@@ -149,7 +147,6 @@ impl RequestDraft {
             response,
             split,
             code_snippet: None,
-            code_snippet_split,
             task: None,
             stop: None,
             streaming: false,
@@ -386,7 +383,7 @@ impl RequestDraft {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let request = v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
@@ -429,20 +426,19 @@ impl Render for RequestDraft {
             return request.into_any_element();
         };
 
-        h_resizable("request-code-snippet-split")
-            .with_state(&self.code_snippet_split)
+        // The snippet takes at most half the width, so that both stay usable
+        // in a narrow window.
+        h_flex()
+            .size_full()
+            .child(div().flex_1().min_w_0().h_full().child(request))
             .child(
-                resizable_panel()
-                    .size_range(rems(24.).to_pixels(window.rem_size())..Pixels::MAX)
-                    .child(request),
-            )
-            .child(
-                resizable_panel()
-                    .size(rems(24.).to_pixels(window.rem_size()))
-                    .size_range(
-                        rems(16.).to_pixels(window.rem_size())
-                            ..rems(48.).to_pixels(window.rem_size()),
-                    )
+                div()
+                    .flex_none()
+                    .w(rems(24.))
+                    .max_w(relative(0.5))
+                    .h_full()
+                    .border_l_1()
+                    .border_color(cx.theme().border)
                     .child(code_snippet),
             )
             .into_any_element()

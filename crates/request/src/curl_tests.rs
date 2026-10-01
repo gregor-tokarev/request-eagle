@@ -44,7 +44,7 @@ fn names_the_method_only_when_curl_would_not_choose_it() {
     // The body of a GET request is not sent.
     assert_eq!(
         command(Method::Get, Some("x")),
-        "curl --location 'https://example.com' \\\n--header 'Content-Type: text/plain'"
+        "curl --location 'https://example.com/' \\\n--header 'Content-Type: text/plain'"
     );
     assert!(command(Method::Post, Some("x")).starts_with("curl --location 'https://"));
     assert!(command(Method::Post, None).starts_with("curl --location --request POST 'https://"));
@@ -72,7 +72,7 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
 
     assert_eq!(
         request.curl_command(&values(&[("$guid", "fixed")])),
-        "curl --location 'http://example.com/search?lang=en&q=fish+%26+chips&page={{page}}&id={{$guid}}' \\\n\
+        "curl --location --globoff 'http://example.com/search?lang=en&q=fish+%26+chips&page={{page}}&id={{$guid}}' \\\n\
          --header 'X-Empty;' \\\n\
          --header 'X-Literal: {{name}}'"
     );
@@ -84,6 +84,28 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
     };
     assert_eq!(
         request.curl_command(&HashMap::new()),
-        "curl --location 'https://example.com?a=1'"
+        "curl --location 'https://example.com/?a=1'"
+    );
+}
+
+#[test]
+fn writes_urls_as_sending_does() {
+    let command = |path: &str| {
+        HttpRequest {
+            path: path.into(),
+            ..HttpRequest::default()
+        }
+        .curl_command(&values(&[("term", "hello world")]))
+    };
+
+    // Sending encodes the space, including one a variable fills in.
+    assert_eq!(
+        command("https://example.com/search?q={{term}}"),
+        "curl --location 'https://example.com/search?q=hello%20world'"
+    );
+    // cURL would otherwise expand `[1-3]` into three requests.
+    assert_eq!(
+        command("https://example.com/?filter[name]=Rex"),
+        "curl --location --globoff 'https://example.com/?filter[name]=Rex'"
     );
 }

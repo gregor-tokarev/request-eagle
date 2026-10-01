@@ -20,6 +20,10 @@ pub(crate) struct CodeSnippet {
     editor: Entity<EditorState>,
     /// The request the command was written for.
     request: HttpRequest,
+    /// Variable values and the session revision they were read at. Reading
+    /// the environment files on every edit would slow typing, so they are
+    /// read again only when the variables change.
+    values: (HashMap<String, String>, u64),
     command: SharedString,
     _subscriptions: [Subscription; 2],
 }
@@ -32,7 +36,8 @@ impl CodeSnippet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let command = draft.curl_command(cx);
+        let values = draft.variable_values(cx);
+        let command = draft.request.curl_command(&values.0);
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("bash")
@@ -44,12 +49,12 @@ impl CodeSnippet {
         let subscriptions = [
             cx.observe_in(entity, window, |this, draft, window, cx| {
                 if this.request != draft.read(cx).request {
-                    this.refresh(window, cx);
+                    this.refresh(false, window, cx);
                 }
             }),
             // The active environment or the collection's variables changed.
             cx.observe_in(&draft.variables, window, |this, _, window, cx| {
-                this.refresh(window, cx)
+                this.refresh(true, window, cx)
             }),
         ];
 
@@ -57,17 +62,24 @@ impl CodeSnippet {
             draft: entity.downgrade(),
             editor,
             request: draft.request.clone(),
+            values,
             command: command.into(),
             _subscriptions: subscriptions,
         }
     }
 
-    fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn refresh(&mut self, variables_changed: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(draft) = self.draft.upgrade() else {
             return;
         };
         let draft = draft.read(cx);
-        let command = draft.curl_command(cx);
+
+        // Scripts in other tabs of the collection can change session values.
+        if variables_changed || draft.variables.read(cx).session.revision() != self.values.1 {
+            self.values = draft.variable_values(cx);
+        }
+
+        let command = draft.request.curl_command(&self.values.0);
         self.request = draft.request.clone();
 
         if command != self.command.as_ref() {
@@ -80,19 +92,24 @@ impl CodeSnippet {
 }
 
 impl RequestDraft {
-    /// The request as a cURL command, with the variables that resolve filled in.
-    pub(crate) fn curl_command(&self, cx: &App) -> String {
+    /// The values of the variables that resolve, and the session revision
+    /// they were read at.
+    fn variable_values(&self, cx: &App) -> (HashMap<String, String>, u64) {
         let scope = self.variables.read(cx);
+        let revision = scope.session.revision();
         // Without the environment files, session values still resolve.
         let values = scope
             .values(cx)
             .unwrap_or_else(|_| scope.session.values(HashMap::new()));
 
-        self.request.curl_command(&values)
+        (values, revision)
     }
 
+    /// Copies the request as a cURL command, with the variables that resolve
+    /// filled in.
     pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
-        cx.write_to_clipboard(ClipboardItem::new_string(self.curl_command(cx)));
+        let command = self.request.curl_command(&self.variable_values(cx).0);
+        cx.write_to_clipboard(ClipboardItem::new_string(command));
         window.push_notification(Notification::success("Copied the request as cURL."), cx);
     }
 }
