@@ -4,10 +4,10 @@ use gpui_kit::{
     Entity, InputEvent as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
     VisualTestContext, point, px,
 };
-use request::{GrpcDefinition, GrpcError, GrpcRequest, MethodKind};
+use request::{GrpcDefinition, GrpcError, GrpcRequest, MethodKind, RequestVariables};
 
 use super::GrpcDraft;
-use super::definition::DefinitionState;
+use super::definition::{DefinitionState, lock_decides_tls};
 use super::draft::GrpcSection;
 use crate::request_draft::tests::element_bounds;
 
@@ -234,34 +234,34 @@ fn a_server_that_requires_tls_offers_to_turn_it_on(cx: &mut TestAppContext) {
     draft.read_with(cx, |draft, _| assert!(draft.request.uses_tls()));
 }
 
-#[gpui_kit::test]
-fn a_scheme_from_a_variable_is_not_switched_with_the_lock(cx: &mut TestAppContext) {
+#[test]
+fn the_lock_does_not_decide_a_scheme_from_a_variable() {
     let request = GrpcRequest {
         url: "{{server}}".into(),
         ..GrpcRequest::default()
     };
-    let (draft, cx) = draft(request, cx);
+    let variables =
+        |server: &str| RequestVariables::new([("server".into(), server.into())].into(), None);
+
+    assert!(lock_decides_tls(&request, &variables("localhost:1")));
+    assert!(!lock_decides_tls(
+        &request,
+        &variables("grpcs://localhost:1")
+    ));
+}
+
+#[gpui_kit::test]
+fn a_tls_mismatch_the_lock_cannot_fix_shows_only_the_error(cx: &mut TestAppContext) {
+    let (draft, cx) = draft(GrpcRequest::default(), cx);
 
     draft.update(cx, |draft, cx| {
-        let values = [("server".to_owned(), Some("grpcs://localhost:1".to_owned()))];
-        draft
-            .variables
-            .read(cx)
-            .session
-            .apply(&values.into())
-            .unwrap();
         draft.definition = DefinitionState::Failed(GrpcError::TlsUnsupported);
+        draft.lock_decides_tls = false;
         draft.redraw(cx);
     });
     let tab = element_bounds(cx, "grpc-section-Service definition").unwrap();
     cx.simulate_click(tab.center(), Modifiers::default());
 
-    // The lock can't remove the variable's scheme, so only the error shows.
-    draft.read_with(cx, |draft, cx| {
-        let variables = draft.variables.read(cx).request_variables(cx);
-        let resolved = variables.resolve_grpc_target(&draft.request).unwrap();
-        assert!(resolved.uses_tls());
-    });
     assert!(element_bounds(cx, "grpc-definition-detail").is_some());
     assert!(element_bounds(cx, "grpc-definition-set-tls").is_none());
 }

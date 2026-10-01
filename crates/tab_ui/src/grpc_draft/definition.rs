@@ -128,6 +128,7 @@ impl GrpcDraft {
         let collection = self.collection_path();
         let load = client.load_definition(&self.request, &variables, collection.as_deref());
         self.reflected_target = reflected_target(&self.request, &variables);
+        self.lock_decides_tls = lock_decides_tls(&self.request, &variables);
         let task = cx.background_executor().spawn(load);
 
         self.definition = DefinitionState::Loading;
@@ -682,7 +683,7 @@ impl GrpcDraft {
             DefinitionState::Failed(GrpcError::TlsUnsupported) => Some(false),
             _ => None,
         }
-        .filter(|&tls| self.lock_sets_tls(tls, cx));
+        .filter(|_| self.lock_decides_tls);
 
         // The detail and actions line up with the title, past the 1 rem icon.
         v_flex()
@@ -747,19 +748,6 @@ impl GrpcDraft {
             })
             .into_any_element()
     }
-
-    /// Whether switching the lock makes the request connect with `tls`. A
-    /// scheme that a variable supplies decides TLS instead.
-    fn lock_sets_tls(&self, tls: bool, cx: &App) -> bool {
-        let mut request = self.request.clone();
-        request.set_tls(tls);
-
-        self.variables
-            .read(cx)
-            .request_variables(cx)
-            .resolve_grpc_target(&request)
-            .is_ok_and(|request| request.uses_tls() == tls)
-    }
 }
 
 /// What a reflection request connects to with these variable values.
@@ -772,4 +760,20 @@ pub(super) fn reflected_target(
     }
 
     variables.grpc_target_key(request)
+}
+
+/// Whether the lock decides how the request connects. A URL scheme that a
+/// variable supplies decides TLS instead.
+pub(super) fn lock_decides_tls(
+    request: &request::GrpcRequest,
+    variables: &request::RequestVariables,
+) -> bool {
+    [true, false].into_iter().all(|tls| {
+        let mut request = request.clone();
+        request.set_tls(tls);
+
+        variables
+            .resolve_grpc_target(&request)
+            .is_ok_and(|request| request.uses_tls() == tls)
+    })
 }
