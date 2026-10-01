@@ -209,8 +209,9 @@ impl RequestDraft {
         }
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// The query parameters and path variables in the URL.
@@ -236,12 +237,14 @@ impl RequestDraft {
         });
 
         self.location = Some(location);
+        self.notify_address(cx);
         cx.notify();
     }
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
         self.name = Some(name);
+        self.notify_address(cx);
         cx.notify();
     }
 

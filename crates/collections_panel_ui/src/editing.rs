@@ -181,10 +181,11 @@ impl CollectionPanel {
     pub fn rename_request(
         &mut self,
         path: &Path,
+        expected_id: &str,
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
-        self.collections.rename(path, name)?;
+        self.collections.rename_request(path, expected_id, name)?;
 
         let selected = self
             .selected

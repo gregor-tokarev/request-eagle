@@ -10,7 +10,8 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{
-    CloseTab, CopyAsCurl, CopyAsGrpcurl, NewGrpcTab, NewTab, NewWebSocketTab, SaveRequest,
+    CloseTab, CopyAsCurl, CopyAsGrpcurl, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab,
+    SaveRequest,
 };
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
@@ -68,6 +69,10 @@ impl Page {
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
             Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
+    }
+
+    fn is_request(&self) -> bool {
+        matches!(self, Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_))
     }
 
     /// Name a request tab's request before it is saved.
@@ -706,6 +711,9 @@ impl MainView {
     }
 
     fn save_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // Saving an unsaved request suggests the name being typed in its tab.
+        self.commit_rename(cx);
+
         let Some(tab) = self.tabs.get(index) else {
             return;
         };
@@ -878,10 +886,7 @@ impl MainView {
     fn begin_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let tab = &self.tabs[index];
 
-        if !matches!(
-            tab.page,
-            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_)
-        ) {
+        if !tab.page.is_request() {
             return;
         }
 
@@ -912,6 +917,7 @@ impl MainView {
             input,
             _subscription: subscription,
         });
+        self.scroll_to_tab = Some(index);
         cx.notify();
     }
 
@@ -950,7 +956,7 @@ impl MainView {
             // The tab follows the sidebar's relocation event.
             Some(location) => {
                 let result = self.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.rename_request(&location.path, &name, cx)
+                    sidebar.rename_request(&location.path, &location.id, &name, cx)
                 });
 
                 if let Err(error) = result {
@@ -1232,7 +1238,7 @@ impl MainView {
                         .capture_key_down(cx.listener(Self::on_rename_key_down))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(|_, _, cx| cx.stop_propagation())
-                        .child(Input::new(&rename.input).small())
+                        .child(Input::new(&rename.input).small().aria_label("Request name"))
                         .into_any_element()
                 } else {
                     div()
@@ -1308,6 +1314,11 @@ impl Render for MainView {
             Some(Page::Grpc(draft)) => (None, Some(draft.clone())),
             _ => (None, None),
         };
+        // Only request tabs can be renamed, so other tabs leave Rename tab
+        // out of the palette.
+        let renamable = self
+            .selected
+            .filter(|&index| self.tabs[index].page.is_request());
 
         v_flex()
             .debug_selector(|| "main-view".into())
@@ -1324,6 +1335,11 @@ impl Render for MainView {
                 this.on_action(move |_: &CopyAsGrpcurl, window, cx| {
                     draft.update(cx, |draft, cx| draft.copy_as_grpcurl(window, cx));
                 })
+            })
+            .when_some(renamable, |this, index| {
+                this.on_action(cx.listener(move |this, _: &RenameTab, window, cx| {
+                    this.begin_rename(index, window, cx);
+                }))
             })
             .bg(cx.theme().background)
             .child(

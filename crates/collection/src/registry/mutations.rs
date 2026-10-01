@@ -8,7 +8,7 @@ use environment::EnvironmentSaveError;
 use thiserror::Error;
 
 use crate::collection::{is_reserved, load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry};
+use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry};
 use request::{Request, RequestScripts};
 
 impl CollectionRegistry {
@@ -18,6 +18,32 @@ impl CollectionRegistry {
         path: &Path,
         expected_id: &str,
         request: Request,
+    ) -> Result<(), CollectionEditError> {
+        self.update_file(path, expected_id, |file| file.request = request)
+    }
+
+    /// Renames a request, unless its file now holds a different request.
+    pub fn rename_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        name: &str,
+    ) -> Result<(), CollectionEditError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(CollectionEditError::InvalidName);
+        }
+
+        self.update_file(path, expected_id, |file| file.name = name.to_owned())
+    }
+
+    /// Changes the latest content of a request file, keeping comments and
+    /// external edits, as long as it is still the expected request.
+    fn update_file(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        change: impl FnOnce(&mut FileEntry),
     ) -> Result<(), CollectionEditError> {
         for collection in &mut self.collections {
             if let Some(Entry::File(file)) = find_entry(&mut collection.entries, path) {
@@ -30,7 +56,7 @@ impl CollectionRegistry {
                     return Err(CollectionEditError::RequestReplaced);
                 }
 
-                updated.request = request;
+                change(&mut updated);
                 save_file(&mut updated)?;
                 *file = updated;
 

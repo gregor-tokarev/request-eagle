@@ -147,8 +147,9 @@ impl WebSocketDraft {
         }
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -163,13 +164,13 @@ impl WebSocketDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.notify_controls(cx);
     }
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
         self.name = Some(name);
-        cx.notify();
+        self.notify_controls(cx);
     }
 
     pub fn mark_saved(&mut self, request: WebSocketRequest, cx: &mut Context<Self>) {

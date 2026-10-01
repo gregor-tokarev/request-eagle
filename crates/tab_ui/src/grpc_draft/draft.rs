@@ -195,8 +195,9 @@ impl GrpcDraft {
         cx.notify();
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -211,13 +212,13 @@ impl GrpcDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.redraw(cx);
     }
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
         self.name = Some(name);
-        cx.notify();
+        self.redraw(cx);
     }
 
     pub fn mark_saved(&mut self, request: GrpcRequest, cx: &mut Context<Self>) {
