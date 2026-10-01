@@ -40,7 +40,11 @@ pub struct CookiePage {
 impl CookiePage {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
-            cx.observe_global::<Cookies>(|this, cx| this.reload(cx)),
+            // Also redraws when saving the cookies fails.
+            cx.observe_global::<Cookies>(|this, cx| {
+                this.reload(cx);
+                cx.notify();
+            }),
             // The notice that the jar is off follows the setting.
             cx.observe_global::<Preferences>(|_, cx| cx.notify()),
         ];

@@ -55,6 +55,10 @@ struct JarFile {
     /// What the jar last read from or wrote to the file. Held while saving,
     /// so saves in this process do not interleave.
     saved: Mutex<Saved>,
+    /// Cookies that servers deleted since the jar last saved. Another
+    /// process may have saved them meanwhile, so saving deletes them from
+    /// the file too. Locked after the cookies.
+    deleted: Mutex<HashSet<Key>>,
 }
 
 struct Saved {
@@ -94,6 +98,7 @@ impl CookieJar {
                     revision: 0,
                     cookies,
                 }),
+                deleted: Mutex::default(),
             }),
         })))
     }
@@ -127,20 +132,31 @@ impl CookieJar {
         lock.lock()?;
 
         let current = read(&file.path)?;
-        let (revision, merged) = {
+        let (revision, merged, deleted) = {
             let mut cookies = self.0.cookies.lock().unwrap();
-            let merged = merge(&saved.cookies, &cookies, current);
-            *cookies = store(&merged);
+            let deleted = std::mem::take(&mut *file.deleted.lock().unwrap());
+            let merged = merge(&saved.cookies, &cookies, &deleted, current);
 
-            (self.revision(), merged)
+            // The other process's cookies join this jar, as a change of its own.
+            let imported = merged.len() != cookies.iter_unexpired().count()
+                || merged.iter().any(|cookie| {
+                    let (domain, path, name) = key(cookie);
+                    cookies.get(&domain, &path, &name) != Some(cookie)
+                });
+            if imported {
+                *cookies = store(&merged);
+                self.changed();
+            }
+
+            (self.revision(), merged, deleted)
         };
 
-        // Only the user can read the temporary file, and renaming it replaces
-        // the saved cookies at once.
-        let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-        temporary.write_all(&serde_json::to_vec_pretty(&merged)?)?;
-        temporary.as_file().sync_all()?;
-        temporary.persist(&file.path).map_err(|error| error.error)?;
+        let written = write(&file.path, &merged);
+        if written.is_err() {
+            // Delete them from the file at the next save.
+            file.deleted.lock().unwrap().extend(deleted);
+        }
+        written?;
 
         *saved = Saved {
             revision,
@@ -248,11 +264,23 @@ impl CookieJar {
             return;
         }
 
-        self.0
-            .cookies
-            .lock()
-            .unwrap()
-            .store_response_cookies(cookies.into_iter(), url);
+        let mut store = self.0.cookies.lock().unwrap();
+
+        if let Some(file) = &self.0.file {
+            let mut deleted = file.deleted.lock().unwrap();
+
+            for cookie in &cookies {
+                if let Ok(cookie) = StoredCookie::try_from_raw_cookie(cookie, url) {
+                    if cookie.is_expired() {
+                        deleted.insert(key(&cookie));
+                    } else {
+                        deleted.remove(&key(&cookie));
+                    }
+                }
+            }
+        }
+
+        store.store_response_cookies(cookies.into_iter(), url);
         self.changed();
     }
 
@@ -345,12 +373,29 @@ fn read(path: &Path) -> io::Result<Vec<StoredCookie<'static>>> {
         .collect())
 }
 
+fn write(path: &Path, cookies: &[StoredCookie<'static>]) -> io::Result<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("the cookie file has no directory"))?;
+
+    // Only the user can read the temporary file, and renaming it replaces
+    // the saved cookies at once.
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    temporary.write_all(&serde_json::to_vec_pretty(cookies)?)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
+
+    Ok(())
+}
+
 /// Apply the changes from `saved` to `ours` to the `current` file contents:
 /// cookies that `ours` added or changed replace the file's, and those it
-/// deleted or let expire leave it. The file's other cookies stay.
+/// deleted or let expire leave it, as do those servers `deleted`. The file's
+/// other cookies stay.
 fn merge(
     saved: &[StoredCookie<'static>],
     ours: &CookieStore,
+    deleted: &HashSet<Key>,
     mut current: Vec<StoredCookie<'static>>,
 ) -> Vec<StoredCookie<'static>> {
     let saved = saved
@@ -367,7 +412,7 @@ fn merge(
 
     current.retain(|cookie| {
         let key = key(cookie);
-        !saved.contains_key(&key) || kept.contains(&key)
+        (!saved.contains_key(&key) || kept.contains(&key)) && !deleted.contains(&key)
     });
 
     let mut positions = current

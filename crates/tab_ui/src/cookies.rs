@@ -85,6 +85,9 @@ impl Cookies {
                 if cx.global::<Self>().error != error {
                     cx.update_global::<Self, _>(|cookies, _| cookies.error = error);
                 }
+
+                // Saving takes the cookies other processes saved meanwhile.
+                Self::changed(cx);
             });
         })
         .detach();

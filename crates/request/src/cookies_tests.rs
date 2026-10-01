@@ -105,3 +105,58 @@ fn saving_keeps_the_cookies_another_process_saved_meanwhile() {
     first.save().unwrap();
     assert_eq!(names(&CookieJar::open(&path).unwrap()), ["shared", "slow"]);
 }
+
+#[test]
+fn a_deletion_reaches_cookies_another_process_saved_meanwhile() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cookies.json");
+    let logout = CookieJar::open(&path).unwrap();
+    let login = CookieJar::open(&path).unwrap();
+
+    store(&login, "https://example.com/", &["sid=1; Path=/"]);
+    login.save().unwrap();
+    store(
+        &logout,
+        "https://example.com/",
+        &["sid=; Path=/; Max-Age=0"],
+    );
+    logout.save().unwrap();
+    assert!(CookieJar::open(&path).unwrap().is_empty());
+
+    // Setting the cookie again after a deletion keeps it.
+    store(
+        &logout,
+        "https://example.com/",
+        &["sid=; Path=/; Max-Age=0"],
+    );
+    store(&logout, "https://example.com/", &["sid=2; Path=/"]);
+    logout.save().unwrap();
+    assert_eq!(
+        CookieJar::open(&path)
+            .unwrap()
+            .cookie_header("https://example.com/", &[])
+            .as_deref(),
+        Some("sid=2")
+    );
+}
+
+#[test]
+fn saving_reports_the_cookies_it_took_from_the_file_as_a_change() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cookies.json");
+    let app = CookieJar::open(&path).unwrap();
+    let cli = CookieJar::open(&path).unwrap();
+
+    store(&cli, "https://example.com/", &["cli=1"]);
+    cli.save().unwrap();
+    store(&app, "https://example.org/", &["app=1"]);
+    let revision = app.revision();
+    app.save().unwrap();
+
+    assert!(app.revision() > revision);
+    assert_eq!(app.cookies().len(), 2);
+    // The imported cookies are already saved.
+    let revision = app.revision();
+    app.save().unwrap();
+    assert_eq!(app.revision(), revision);
+}
