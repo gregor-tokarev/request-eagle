@@ -54,8 +54,9 @@ pub enum Command {
     /// Execute a saved request and return the completed response. Script changes
     /// to environment variables last for this invocation and are never persisted.
     /// A gRPC request sends its saved message once, including on client streams,
-    /// and returns every response message with the final status. timeout_ms
-    /// replaces the request's and the setting's timeout for this run.
+    /// and returns every response message with the final status. Requests store
+    /// and send cookies in the app's cookie jar unless cookie_jar is off.
+    /// timeout_ms replaces the request's and the setting's timeout for this run.
     #[serde(rename = "requests.run")]
     RequestsRun {
         path: PathBuf,
@@ -74,9 +75,22 @@ pub enum Command {
         max_response_size_mb: Option<u64>,
         ssl_certificate_verification: Option<bool>,
         follow_all_redirects: Option<bool>,
+        /// Keep the cookies that responses set and send them with later requests.
+        cookie_jar: Option<bool>,
         /// A PEM file of certificate authorities to trust in addition to the
         /// system's. An empty path stops trusting them.
         ca_certificates: Option<PathBuf>,
+    },
+    /// The cookies in the app's cookie jar, optionally of one domain. Each has
+    /// its domain, path, name, value, attributes and expiry in Unix seconds,
+    /// or null for a session cookie.
+    #[serde(rename = "cookies.list")]
+    CookiesList { domain: Option<String> },
+    /// Delete a domain's cookies, or only the one with this name.
+    #[serde(rename = "cookies.delete")]
+    CookiesDelete {
+        domain: String,
+        name: Option<String>,
     },
     /// Present a certificate to the servers of a host that ask for one (mutual
     /// TLS). Supply PEM files, or a PKCS #12 file. The passphrase is kept in the

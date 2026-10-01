@@ -1,6 +1,6 @@
 (function (input, pm, tools) {
     "use strict";
-    const {entries, readBody, responseObject, skip, warn} = tools;
+    const {entries, readBody, responseObject, skip, warn, cookies: jar} = tools;
     let url = input.url;
     const query = input.query;
     const extraQuery = entries(query);
@@ -69,9 +69,9 @@
         },
     };
 
-    // Request Eagle has no cookie jar. Scripts see the cookies of this
-    // exchange: those the request sends, replaced or deleted by those the
-    // response sets.
+    // Scripts see the cookies of this exchange: those the request sends,
+    // from its Cookie header and the cookie jar, replaced or deleted by those
+    // the response sets.
     function cookieList(cookies) {
         const one = name => cookies.find(cookie => cookie.name === String(name));
         return {
@@ -125,24 +125,100 @@
             return cookie;
         })
         .filter(Boolean);
-    const cookies = sentCookies.slice();
-    for (const cookie of setCookies) {
-        const index = cookies.findIndex(existing => existing.name === cookie.name);
-        if (index >= 0) cookies.splice(index, 1);
-        const expired = cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
-        if (!expired) cookies.push(cookie);
+    // A cookie from the jar, with its expiry date and attributes.
+    const fromJar = cookie => ({
+        ...cookie,
+        expires: cookie.expires === null ? undefined : new Date(cookie.expires),
+        sameSite: cookie.sameSite ?? undefined,
+    });
+    // The jar's cookies for a URL, in the order a request sends them. Throws
+    // when the jar is off.
+    const jarCookies = target => JSON.parse(jar("list", String(target), "")).map(fromJar);
+    // Before sending, the URL the request goes to, with its {{variables}}
+    // and :path variables filled as sending fills them.
+    let target = (input.response ? input.url : input.sentUrl ?? input.url).trim();
+    if (target && !target.includes("://")) target = "https://" + target;
+    let sentFromJar = null, setInJar = [];
+    try {
+        sentFromJar = jarCookies(target);
+        // The response's cookies the jar still holds, after their later
+        // replacements, deletions and expiry, including those for other
+        // paths or hosts that a request to this URL does not send.
+        const headers = (input.response?.headers ?? [])
+            .filter(([key]) => key.toLowerCase() === "set-cookie")
+            .map(([, header]) => header);
+        // A redirect's response came from its final URL, which decides the
+        // default path and host of its cookies.
+        const from = input.response?.url ?? target;
+        if (headers.length) setInJar = JSON.parse(jar("stored", from, JSON.stringify(headers))).map(fromJar);
+    } catch {}
+    const expired = cookie => cookie.maxAge !== undefined ? cookie.maxAge <= 0 : cookie.expires !== undefined && cookie.expires <= Date.now();
+    let cookies;
+    if (sentFromJar) {
+        // The jar already holds the cookies the response set, and replaces
+        // those of the Cookie header that the response named.
+        const renamed = new Set(setCookies.map(cookie => cookie.name));
+        const own = sentCookies.filter(cookie => !renamed.has(cookie.name));
+        const named = new Set(own.map(cookie => cookie.name));
+        cookies = own.concat(sentFromJar.filter(cookie => !named.has(cookie.name)));
+        const same = (a, b) => a.name === b.name && a.domain === b.domain && a.path === b.path;
+        for (const cookie of setInJar) {
+            if (!cookies.some(existing => same(existing, cookie))) cookies.push(cookie);
+        }
+    } else {
+        cookies = sentCookies.slice();
+        for (const cookie of setCookies) {
+            const index = cookies.findIndex(existing => existing.name === cookie.name);
+            if (index >= 0) cookies.splice(index, 1);
+            if (!expired(cookie)) cookies.push(cookie);
+        }
     }
 
     pm.request = request;
     pm.cookies = cookieList(cookies);
     pm.cookies.jar = () => {
-        const unavailable = (...args) => {
-            const error = new Error("Request Eagle has no cookie jar. Read cookies with pm.cookies, and send them in a Cookie header.");
-            const callback = args.findLast(argument => typeof argument === "function");
-            if (callback) callback(error);
-            else warn(error.message);
+        // As in Postman, results arrive through callbacks. Without one, a
+        // failure is logged.
+        const call = (callback, action) => {
+            let error = null, result;
+            try { result = action(); } catch (caught) { error = caught; }
+            if (typeof callback === "function") callback(error, result);
+            else if (error) warn(error.message);
         };
-        return {get: unavailable, getAll: unavailable, set: unavailable, unset: unavailable, clear: unavailable};
+        const header = cookie => {
+            let text = `${cookie.name ?? cookie.key ?? ""}=${cookie.value ?? ""}`;
+            if (cookie.domain) text += `; Domain=${cookie.domain}`;
+            if (cookie.path) text += `; Path=${cookie.path}`;
+            if (cookie.expires != null) text += `; Expires=${new Date(cookie.expires).toUTCString()}`;
+            if (cookie.maxAge != null) text += `; Max-Age=${cookie.maxAge}`;
+            if (cookie.secure) text += "; Secure";
+            if (cookie.httpOnly) text += "; HttpOnly";
+            if (cookie.sameSite) text += `; SameSite=${cookie.sameSite}`;
+            return text;
+        };
+        return {
+            get(target, name, callback) {
+                call(callback, () => jarCookies(target).find(cookie => cookie.name === String(name))?.value);
+            },
+            getAll(target, options, callback) {
+                call(typeof options === "function" ? options : callback, () => jarCookies(target));
+            },
+            // set(url, name, value, callback) or set(url, {name, value, ...attributes}, callback)
+            set(target, name, value, callback) {
+                const cookie = name !== null && typeof name === "object" ? name : {name, value};
+                if (cookie === name) callback = value;
+                call(callback, () => {
+                    const stored = JSON.parse(jar("set", String(target), header(cookie)));
+                    return stored === null ? null : fromJar(stored);
+                });
+            },
+            unset(target, name, callback) {
+                call(callback, () => { jar("unset", String(target), String(name)); });
+            },
+            clear(target, callback) {
+                call(callback, () => { jar("clear", String(target), ""); });
+            },
+        };
     };
     // Sending one request has no next request to set, as in Postman outside
     // the Collection Runner.

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 21] = [
+const LOCAL_ICONS: [(&str, &[u8]); 22] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -52,6 +52,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 21] = [
     (
         "icons/trash.svg",
         include_bytes!("../assets/icons/trash.svg"),
+    ),
+    (
+        "icons/cookie.svg",
+        include_bytes!("../assets/icons/cookie.svg"),
     ),
     (
         "icons/refresh-cw.svg",

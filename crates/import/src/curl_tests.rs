@@ -282,7 +282,7 @@ fn reads_the_commands_request_eagle_writes() {
     ];
 
     for request in requests {
-        let command = request.curl_command(&HashMap::new());
+        let command = request.curl_command(&HashMap::new(), None);
         assert_eq!(parse_curl(&command).as_ref(), Ok(&request), "{command}");
     }
 }
@@ -314,7 +314,7 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
         },
         ..HttpRequest::default()
     };
-    let imported = parse_curl(&exported.curl_command(&HashMap::new())).unwrap();
+    let imported = parse_curl(&exported.curl_command(&HashMap::new(), None)).unwrap();
     assert_eq!(imported.settings, exported.settings);
 
     assert!(

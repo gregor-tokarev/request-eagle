@@ -66,7 +66,7 @@ pub fn path_variables(url: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
 /// without a value are sent as written. Each value is resolved with `resolve`,
 /// then the characters that would end the path or start a `{{variable}}` are
 /// encoded, so the value stays in its segment. A `/` in a value is kept.
-pub(crate) fn fill_path_variables<E>(
+pub fn fill_path_variables<E>(
     url: &str,
     values: &[(String, String)],
     mut resolve: impl FnMut(&str) -> Result<String, E>,

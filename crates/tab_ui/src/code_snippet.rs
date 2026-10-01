@@ -24,7 +24,7 @@ pub(crate) trait SnippetDraft: Sized + 'static {
     fn request(&self) -> &Self::Request;
 
     /// The command, with the variables `values` defines filled in.
-    fn command(&self, values: &HashMap<String, String>) -> String;
+    fn command(&self, values: &HashMap<String, String>, cx: &App) -> String;
 
     fn variables(&self) -> &Entity<VariableScope>;
 
@@ -87,7 +87,7 @@ pub(crate) fn toggle_button<D: SnippetDraft>(open: bool, cx: &mut Context<D>) ->
 
 /// Copies the request as a command, with the variables that resolve filled in.
 pub(crate) fn copy<D: SnippetDraft>(draft: &D, window: &mut Window, cx: &mut App) {
-    let command = draft.command(&variable_values(draft.variables(), cx).0);
+    let command = draft.command(&variable_values(draft.variables(), cx).0, cx);
     cx.write_to_clipboard(ClipboardItem::new_string(command));
     window.push_notification(
         Notification::success(format!("Copied the request as {}.", D::PROGRAM)),
@@ -200,14 +200,14 @@ pub(crate) struct CodeSnippet<D: SnippetDraft> {
     /// Below the request in a narrow window, the snippet keeps its controls
     /// in one row to leave room for the response.
     compact: bool,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 4],
 }
 
 impl<D: SnippetDraft> CodeSnippet<D> {
     /// Opened from within an update of `draft`, which `entity` refers to.
     fn new(draft: &D, entity: &Entity<D>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let values = variable_values(draft.variables(), cx);
-        let command = draft.command(&values.0);
+        let command = draft.command(&values.0, cx);
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("bash")
@@ -225,6 +225,13 @@ impl<D: SnippetDraft> CodeSnippet<D> {
             // The active environment or the collection's variables changed.
             cx.observe_in(draft.variables(), window, |this, _, window, cx| {
                 this.refresh(true, window, cx)
+            }),
+            // A cURL command includes the jar's cookies, while the jar is on.
+            cx.observe_global_in::<crate::Cookies>(window, |this, window, cx| {
+                this.refresh(false, window, cx)
+            }),
+            cx.observe_global_in::<preferences::Preferences>(window, |this, window, cx| {
+                this.refresh(false, window, cx)
             }),
         ];
 
@@ -251,7 +258,7 @@ impl<D: SnippetDraft> CodeSnippet<D> {
             self.values = variable_values(draft.variables(), cx);
         }
 
-        let command = draft.command(&self.values.0);
+        let command = draft.command(&self.values.0, cx);
         self.request = draft.request().clone();
 
         if command != self.command.as_ref() {
@@ -300,11 +307,23 @@ impl<D: SnippetDraft> Render for CodeSnippet<D> {
             .on_click(move |_, window, cx| {
                 let _ = draft.update(cx, |draft, cx| draft.toggle_code_snippet(window, cx));
             });
+        // Written again when copied, as cookies may have expired since.
+        let current = self.draft.clone();
         let copy = div().debug_selector(|| "copy-code-snippet".into()).child(
             Clipboard::new("copy-code-snippet")
                 .small()
                 .tooltip("Copy snippet")
-                .value(self.command.clone()),
+                .value_fn(move |_, cx| {
+                    current
+                        .upgrade()
+                        .map(|draft| {
+                            let draft = draft.read(cx);
+                            draft
+                                .command(&variable_values(draft.variables(), cx).0, cx)
+                                .into()
+                        })
+                        .unwrap_or_default()
+                }),
         );
         let program = div()
             .flex_1()

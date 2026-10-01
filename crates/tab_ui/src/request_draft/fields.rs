@@ -289,7 +289,14 @@ impl Render for RequestFields {
                                 [
                                     ("key", name.clone()),
                                     ("value", value.clone()),
-                                    ("description", SharedString::from("Auto-generated")),
+                                    (
+                                        "description",
+                                        SharedString::from(if name == "Cookie" {
+                                            "From the cookie jar"
+                                        } else {
+                                            "Auto-generated"
+                                        }),
+                                    ),
                                 ]
                                 .into_iter()
                                 .enumerate()

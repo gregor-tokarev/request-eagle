@@ -11,7 +11,7 @@ use serde_json::json;
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
 use crate::{
     Execution, ExecutionError, HttpRequest, Method, RequestExecutor, RequestVariables, Response,
-    variables::resolve_request,
+    variables::{resolve_request, sent_url},
 };
 
 /// A dropped request future also interrupts a script on the blocking pool.
@@ -47,6 +47,8 @@ pub(crate) struct ScriptState {
     pub session: Option<EnvironmentSession>,
     /// Runs before the request's own post-response script.
     pub collection_post_response: String,
+    /// Where the response came from, after redirects.
+    pub response_url: Option<String>,
 }
 
 pub(crate) async fn pre_request(
@@ -101,6 +103,7 @@ pub(crate) async fn pre_request(
             },
             session,
             collection_post_response: collection.post_response,
+            response_url: None,
         };
 
         let mut body_changed = false;
@@ -247,6 +250,7 @@ pub(crate) async fn post_response(
                 "code": response.status.as_u16(),
                 "status": response.status.canonical_reason().unwrap_or(""),
                 "responseTime": execution.elapsed.as_secs_f64() * 1000.,
+                "url": state.response_url,
                 "headers": response.headers.iter().map(|(key, value)| {
                     (key.as_str(), String::from_utf8_lossy(value.as_bytes()).into_owned())
                 }).collect::<Vec<_>>(),
@@ -286,6 +290,13 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
     json!({
         "method": request.method.as_str(),
         "url": request.path,
+        // Where the request goes, which decides the jar's cookies for it.
+        "sentUrl": sent_url(
+            &request.path,
+            &request.path_variables,
+            &variables.visible(),
+            &variables.generated,
+        ),
         "query": request.query,
         "headers": request.headers,
         "variables": variables,

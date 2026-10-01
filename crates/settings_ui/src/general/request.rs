@@ -140,6 +140,7 @@ impl Render for RequestSettings {
             .request
             .ssl_certificate_verification;
         let follow_all_redirects = cx.global::<Preferences>().request.follow_all_redirects;
+        let cookie_jar = cx.global::<Preferences>().request.cookie_jar;
 
         section("Request")
             .child(row(
@@ -194,6 +195,19 @@ impl Render for RequestSettings {
                         .checked(follow_all_redirects)
                         .on_click(cx.listener(|this, checked, _, cx| {
                             this.save(|request| request.follow_all_redirects = *checked, cx);
+                        })),
+                ),
+                cx,
+            ))
+            .child(row(
+                "Cookie jar",
+                "Keep the cookies that responses set and send them with later requests to the same sites.",
+                h_flex().w_40().flex_shrink_0().justify_end().child(
+                    Switch::new("cookie-jar")
+                        .accessibility_label("Cookie jar")
+                        .checked(cookie_jar)
+                        .on_click(cx.listener(|this, checked, _, cx| {
+                            this.save(|request| request.cookie_jar = *checked, cx);
                         })),
                 ),
                 cx,

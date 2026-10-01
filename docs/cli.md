@@ -74,5 +74,10 @@ script results.
   also on client streams, and returns every message with the final status;
   non-OK gRPC statuses exit 0 like HTTP errors. Their `before_invoke`,
   `on_message` and `after_response` scripts also need `trust_scripts: true`.
+- `requests.run` keeps the cookies that responses set in the app's cookie
+  jar, `cookies.json` in the data directory, and sends them with later runs to
+  the same sites, as the app does. `cookies.list` shows them and
+  `cookies.delete` removes a domain's cookies, or one by name. Turn the jar off
+  with `settings.request` and `"cookie_jar": false`.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

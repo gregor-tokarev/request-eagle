@@ -28,6 +28,9 @@ pub struct RequestPreferences {
     pub ssl_certificate_verification: bool,
     pub proxy: ProxyPreferences,
     pub follow_all_redirects: bool,
+    /// Keep the cookies that responses set and send them with later requests
+    /// to the same sites. Applies to executors given a jar.
+    pub cookie_jar: bool,
     /// A PEM file of certificate authorities trusted in addition to the system's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_certificates: Option<PathBuf>,
@@ -45,6 +48,7 @@ impl Default for RequestPreferences {
             ssl_certificate_verification: true,
             proxy: ProxyPreferences::default(),
             follow_all_redirects: true,
+            cookie_jar: true,
             ca_certificates: None,
             client_certificates: Vec::new(),
         }

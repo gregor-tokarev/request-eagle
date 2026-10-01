@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{HttpRequest, HttpSettings, Method};
+use crate::{CookieJar, HttpRequest, HttpSettings, Method};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -20,7 +20,10 @@ fn writes_requests_like_postman_snippets() {
     };
 
     assert_eq!(
-        request.curl_command(&values(&[("base", "https://pets.test"), ("token", "abc")])),
+        request.curl_command(
+            &values(&[("base", "https://pets.test"), ("token", "abc")]),
+            None
+        ),
         "curl --location 'https://pets.test/pets' \\\n\
          --header 'Authorization: Bearer abc' \\\n\
          --header 'Content-Type: application/json' \\\n\
@@ -38,7 +41,7 @@ fn names_the_method_only_when_curl_would_not_choose_it() {
             body: body.map(|body| body.as_bytes().to_vec()),
             ..HttpRequest::default()
         }
-        .curl_command(&HashMap::new())
+        .curl_command(&HashMap::new(), None)
     };
 
     // The body of a GET request is not sent.
@@ -71,7 +74,7 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
     };
 
     assert_eq!(
-        request.curl_command(&values(&[("$guid", "fixed")])),
+        request.curl_command(&values(&[("$guid", "fixed")]), None),
         "curl --location --globoff 'http://example.com/search?lang=en&q=fish+%26+chips&page={{page}}&id={{$guid}}' \\\n\
          --header 'X-Empty;' \\\n\
          --header 'X-Literal: {{name}}'"
@@ -83,7 +86,7 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
         ..HttpRequest::default()
     };
     assert_eq!(
-        request.curl_command(&HashMap::new()),
+        request.curl_command(&HashMap::new(), None),
         "curl --location 'https://example.com/?a=1'"
     );
 }
@@ -95,7 +98,7 @@ fn writes_urls_as_sending_does() {
             path: path.into(),
             ..HttpRequest::default()
         }
-        .curl_command(&values(&[("term", "hello world")]))
+        .curl_command(&values(&[("term", "hello world")]), None)
     };
 
     // Sending encodes a variable's value within its query parameter.
@@ -127,7 +130,7 @@ fn fills_variables_as_sending_does() {
     // A value in the query is encoded within its parameter, a path variable
     // is filled in, and an unknown variable stays as written.
     assert_eq!(
-        request.curl_command(&values(&[("term", "a&b c"), ("user", "42")])),
+        request.curl_command(&values(&[("term", "a&b c"), ("user", "42")]), None),
         "curl --location --globoff 'https://example.com/users/42/posts?q=a%26b+c&page={{page}}'"
     );
 }
@@ -144,7 +147,7 @@ fn leaves_out_what_sending_leaves_out_before_filling_variables() {
     };
 
     assert_eq!(
-        request.curl_command(&values(&[("host", "https://example.com")])),
+        request.curl_command(&values(&[("host", "https://example.com")]), None),
         "curl --location 'https://example.com/users'"
     );
 }
@@ -161,7 +164,7 @@ fn keeps_unknown_references_of_path_variables_readable() {
     };
 
     assert_eq!(
-        request.curl_command(&HashMap::new()),
+        request.curl_command(&HashMap::new(), None),
         "curl --location --globoff 'https://example.com/users/{{user}}/posts/7'"
     );
 
@@ -172,7 +175,7 @@ fn keeps_unknown_references_of_path_variables_readable() {
         ..HttpRequest::default()
     };
     assert_eq!(
-        request.curl_command(&HashMap::new()),
+        request.curl_command(&HashMap::new(), None),
         "curl --location --globoff 'https://example.com/files/report%23{{version}}/details'"
     );
 
@@ -183,7 +186,7 @@ fn keeps_unknown_references_of_path_variables_readable() {
         ..HttpRequest::default()
     };
     assert_eq!(
-        request.curl_command(&values(&[("base", "https://example.com/users/:id")])),
+        request.curl_command(&values(&[("base", "https://example.com/users/:id")]), None),
         "curl --location --globoff 'https://example.com/users/{{user}}/{{user}}'"
     );
 }
@@ -196,7 +199,7 @@ fn writes_the_request_settings_that_curl_has_options_for() {
             settings,
             ..HttpRequest::default()
         }
-        .curl_command(&HashMap::new())
+        .curl_command(&HashMap::new(), None)
     };
 
     assert_eq!(
@@ -214,5 +217,62 @@ fn writes_the_request_settings_that_curl_has_options_for() {
             verify_certificates: Some(true),
         }),
         "curl --location 'https://pets.test/'"
+    );
+}
+
+#[test]
+fn includes_the_jar_cookies_for_the_url() {
+    let jar = CookieJar::new();
+    let url = url::Url::parse("https://pets.test/").unwrap();
+    jar.set(&url, "sid=abc; Path=/").unwrap();
+    jar.set(&url, "own=jar; Path=/").unwrap();
+
+    let request = HttpRequest {
+        path: "https://pets.test/pets".into(),
+        ..HttpRequest::default()
+    };
+    assert_eq!(
+        request.curl_command(&HashMap::new(), Some(&jar)),
+        "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: sid=abc; own=jar'"
+    );
+
+    // A cookie the request sets itself takes precedence.
+    let request = HttpRequest {
+        headers: vec![("Cookie".into(), "own=typed".into())],
+        ..request
+    };
+    assert_eq!(
+        request.curl_command(&HashMap::new(), Some(&jar)),
+        "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: own=typed; sid=abc'"
+    );
+    assert_eq!(
+        request.curl_command(&HashMap::new(), None),
+        "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: own=typed'"
+    );
+}
+
+#[test]
+fn includes_the_jar_cookies_beside_literal_braces() {
+    let jar = CookieJar::new();
+    jar.set(
+        &url::Url::parse("https://pets.test/").unwrap(),
+        "sid=abc; Path=/",
+    )
+    .unwrap();
+    let request = |path: &str| HttpRequest {
+        path: path.into(),
+        ..HttpRequest::default()
+    };
+
+    assert!(
+        request("https://pets.test/?q={{!literal}}")
+            .curl_command(&HashMap::new(), Some(&jar))
+            .ends_with("--header 'Cookie: sid=abc'")
+    );
+    // Without a known host, no cookies apply.
+    assert!(
+        !request("{{base}}/pets")
+            .curl_command(&HashMap::new(), Some(&jar))
+            .contains("Cookie")
     );
 }

@@ -78,6 +78,15 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
         .expect("Failed to load collections");
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
+    let cookies_path = home.join(".request-eagle/cookies.json");
+    let cookies = request::CookieJar::open(&cookies_path).map_err(|error| {
+        // The unreadable file stays as it is.
+        format!(
+            "Saved cookies could not be read from {}: {error}. Cookies are kept until you \
+             quit. To save them again, fix or delete the file and restart Request Eagle.",
+            cookies_path.display()
+        )
+    });
     let history = request_history::History::new(home.join(".request-eagle/history"));
 
     let window_options = crate::window_options::use_window_options(cx);
@@ -88,7 +97,15 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
             })
             .detach();
 
-        let workspace = workspace::init(collections, environments, history, updater, window, cx);
+        let workspace = workspace::init(
+            collections,
+            environments,
+            cookies,
+            history,
+            updater,
+            window,
+            cx,
+        );
         let view = cx.new(|_| ApplicationView { workspace });
 
         cx.new(|cx| Root::new(view, window, cx))

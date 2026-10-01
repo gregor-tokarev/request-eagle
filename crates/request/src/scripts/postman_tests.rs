@@ -268,6 +268,7 @@ fn exchange(
         variables: Default::default(),
         session: None,
         collection_post_response: String::new(),
+        response_url: None,
     };
     let result = smol::block_on(post_response(
         request,
@@ -313,7 +314,7 @@ fn cookies_list_what_the_request_sent_and_the_response_set() {
             pm.test("jar", () => {
                 let reported;
                 pm.cookies.jar().get("https://example.com", "b", error => { reported = error; });
-                pm.expect(reported.message).to.include("no cookie jar");
+                pm.expect(reported.message).to.include("cookie jar is off");
             });
             pm.execution.setNextRequest("Next");
         "#,
@@ -344,7 +345,7 @@ fn cookies_before_sending_resolve_variables_in_the_cookie_header() {
     passed(&reports[0]);
     assert_eq!(reports[0].tests.len(), 1);
     assert_eq!(reports[0].logs[0].level, "warn");
-    assert!(reports[0].logs[0].message.contains("no cookie jar"));
+    assert!(reports[0].logs[0].message.contains("cookie jar is off"));
 }
 
 #[test]
