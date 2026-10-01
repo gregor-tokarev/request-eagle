@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields};
 use super::path_variables::{PathVariableChanged, PathVariables};
+use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
     Environments, RequestSent,
@@ -14,6 +15,7 @@ use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
+    notification::Notification,
     scroll::ScrollableElement as _,
     *,
 };
@@ -83,6 +85,8 @@ pub struct RequestDraft {
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
+    /// The request as a cURL command, beside it while open.
+    pub(super) code_snippet: SnippetPanel<Self>,
     pub(super) task: Option<Task<()>>,
     /// The request being sent, which history keeps if it is cancelled after
     /// it went out.
@@ -98,6 +102,33 @@ pub struct RequestDraft {
 }
 
 impl EventEmitter<RequestSent> for RequestDraft {}
+
+impl SnippetDraft for RequestDraft {
+    type Request = HttpRequest;
+    const PROGRAM: &'static str = "cURL";
+
+    fn request(&self) -> &HttpRequest {
+        &self.request
+    }
+
+    fn command(&self, values: &HashMap<String, String>) -> String {
+        self.request.curl_command(values)
+    }
+
+    fn variables(&self) -> &Entity<VariableScope> {
+        &self.variables
+    }
+
+    fn snippet_panel(&mut self) -> &mut SnippetPanel<Self> {
+        &mut self.code_snippet
+    }
+
+    fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        code_snippet::toggle(self, window, cx);
+        self.notify_address(cx);
+        cx.notify();
+    }
+}
 
 impl RequestDraft {
     /// Variables resolve from the request's collection environment, its
@@ -160,6 +191,7 @@ impl RequestDraft {
             body_completion: None,
             response,
             split,
+            code_snippet: SnippetPanel::default(),
             task: None,
             sending: None,
             stop: None,
@@ -235,6 +267,60 @@ impl RequestDraft {
         }
 
         cx.notify();
+    }
+
+    /// Replace the request with the one a pasted cURL command sends. Its
+    /// scripts stay. A command that cannot be read is explained instead.
+    pub(super) fn paste_curl(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request = match import::parse_curl(command) {
+            Ok(request) => request,
+            Err(error) => {
+                window.push_notification(
+                    Notification::error(error.to_string()).title("Could not import cURL"),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        self.request = HttpRequest {
+            scripts: std::mem::take(&mut self.request.scripts),
+            ..request
+        };
+
+        // The URL keeps focus. Path values given before belong to the replaced
+        // request. The other editors are created again from the new request
+        // when they are shown.
+        self.path_values.clear();
+        if let Some(url) = &self.url {
+            let path = self.request.path.clone();
+            url.update(cx, |url, cx| url.set_value(path, window, cx));
+        }
+        if let Some(url) = &self.url_completion {
+            url.update(cx, |url, cx| url.set_path_variables(HashSet::new(), cx));
+        }
+        self.params = None;
+        self.path_variables = None;
+        self.headers = None;
+        self.body = None;
+        self.body_vim = None;
+        self.body_completion = None;
+        self.body_task = None;
+
+        self.set_method(self.request.method, cx);
+        self.prepare(window, cx);
+        self.notify_address(cx);
+    }
+
+    /// Copies the request as a cURL command, with the variables that resolve
+    /// filled in.
+    pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
+        code_snippet::copy(self, window, cx);
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -523,8 +609,8 @@ fn filled_path_variables(values: &[(String, String)]) -> HashSet<String> {
 }
 
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request = v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
             .min_w_0()
@@ -560,7 +646,9 @@ impl Render for RequestDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
-            )
+            );
+
+        code_snippet::with_snippet(self, request.into_any_element(), cx)
     }
 }
 
@@ -576,11 +664,24 @@ impl Render for RequestAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(super::controls::request_header(
-                        "HTTP",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(super::controls::request_header(
+                                        "HTTP",
+                                        draft.location.as_ref(),
+                                        cx,
+                                    )),
+                            )
+                            .child(code_snippet::toggle_button(
+                                draft.code_snippet.snippet.is_some(),
+                                cx,
+                            )),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

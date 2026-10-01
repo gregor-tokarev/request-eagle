@@ -7,6 +7,7 @@
 //! resolve variables from the active global environment.
 
 mod actions;
+mod code_snippet;
 mod collection_page;
 mod environment_editor;
 mod environments;

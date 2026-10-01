@@ -11,11 +11,13 @@
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
 mod certificates;
+mod curl;
 mod error;
 mod event_stream;
 mod executor;
 mod generated_headers;
 mod grpc;
+mod grpcurl;
 mod http;
 mod model;
 mod preferences;
@@ -32,7 +34,11 @@ mod websocket;
 #[cfg(test)]
 mod certificates_tests;
 #[cfg(test)]
+mod curl_tests;
+#[cfg(test)]
 mod event_stream_tests;
+#[cfg(test)]
+mod grpcurl_tests;
 #[cfg(test)]
 mod request_url_tests;
 

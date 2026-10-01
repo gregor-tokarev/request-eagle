@@ -4,7 +4,7 @@
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 /// Separates multipart fields. Fixed, so that imports are reproducible.
-const BOUNDARY: &str = "RequestEagleFormBoundary";
+pub(crate) const BOUNDARY: &str = "RequestEagleFormBoundary";
 
 /// Characters left as they are in form fields, as in `encodeURIComponent`'s
 /// unreserved set.

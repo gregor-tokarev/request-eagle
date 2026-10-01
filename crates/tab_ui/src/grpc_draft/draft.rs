@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use environment::EnvironmentSessions;
@@ -13,6 +14,7 @@ use request::{GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferenc
 
 use super::definition::DefinitionState;
 use super::methods::{MethodList, method_list};
+use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
@@ -70,12 +72,41 @@ pub struct GrpcDraft {
     pub(super) send_error: Option<SharedString>,
     pub(super) client: Option<(RequestPreferences, GrpcClient)>,
     split: Entity<ResizableState>,
+    /// The call as a grpcurl command, beside the request while open.
+    pub(super) code_snippet: SnippetPanel<Self>,
     address: Entity<GrpcAddress>,
     configuration: Entity<GrpcConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<RequestSent> for GrpcDraft {}
+
+impl SnippetDraft for GrpcDraft {
+    type Request = GrpcRequest;
+    const PROGRAM: &'static str = "grpcurl";
+
+    fn request(&self) -> &GrpcRequest {
+        &self.request
+    }
+
+    fn command(&self, values: &HashMap<String, String>) -> String {
+        self.request
+            .grpcurl_command(values, self.collection_path().as_deref())
+    }
+
+    fn variables(&self) -> &Entity<VariableScope> {
+        &self.variables
+    }
+
+    fn snippet_panel(&mut self) -> &mut SnippetPanel<Self> {
+        &mut self.code_snippet
+    }
+
+    fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        code_snippet::toggle(self, window, cx);
+        self.redraw(cx);
+    }
+}
 
 impl GrpcDraft {
     /// Variables resolve from the request's collection environment, its
@@ -146,6 +177,7 @@ impl GrpcDraft {
             send_error: None,
             client: None,
             split,
+            code_snippet: SnippetPanel::default(),
             address,
             configuration,
             _subscriptions: subscriptions,
@@ -184,6 +216,12 @@ impl GrpcDraft {
     pub fn mark_saved(&mut self, request: GrpcRequest, cx: &mut Context<Self>) {
         self.saved_request = request;
         cx.notify();
+    }
+
+    /// Copies the call as a grpcurl command, with the variables that resolve
+    /// filled in.
+    pub fn copy_as_grpcurl(&self, window: &mut Window, cx: &mut App) {
+        code_snippet::copy(self, window, cx);
     }
 
     /// The directory relative `.proto` paths resolve from.
@@ -429,8 +467,8 @@ impl GrpcDraft {
 }
 
 impl Render for GrpcDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request = v_flex()
             .debug_selector(|| "grpc-draft".into())
             .size_full()
             .min_w_0()
@@ -466,7 +504,9 @@ impl Render for GrpcDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
-            )
+            );
+
+        code_snippet::with_snippet(self, request.into_any_element(), cx)
     }
 }
 
@@ -481,11 +521,21 @@ impl Render for GrpcAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(crate::request_draft::request_header(
-                        "gRPC",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(div().flex_1().min_w_0().child(
+                                crate::request_draft::request_header(
+                                    "gRPC",
+                                    draft.location.as_ref(),
+                                    cx,
+                                ),
+                            ))
+                            .child(code_snippet::toggle_button(
+                                draft.code_snippet.snippet.is_some(),
+                                cx,
+                            )),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

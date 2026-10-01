@@ -102,6 +102,7 @@ impl RequestDraft {
         let url = self.url_state(window, cx);
         let method = self.request.method;
         let draft = cx.entity().downgrade();
+        let paste_target = draft.clone();
         let sending = self.task.is_some();
         let streaming = self.streaming;
         // Stopping lasts while the response completes and its scripts run.
@@ -181,7 +182,26 @@ impl RequestDraft {
                             .child(with_variables(
                                 self.url_completion.as_ref().unwrap(),
                                 InputGroup::new("request-url-group")
-                                    .input(Input::new(&url).aria_label("Request URL"))
+                                    .input(
+                                        Input::new(&url)
+                                            .aria_label("Request URL")
+                                            // A pasted cURL command fills in
+                                            // the whole request, as in Postman.
+                                            .on_paste(move |clipboard, window, cx| {
+                                                let Some(command) = clipboard
+                                                    .text()
+                                                    .filter(|text| import::is_curl(text))
+                                                else {
+                                                    return false;
+                                                };
+
+                                                paste_target
+                                                    .update(cx, |draft, cx| {
+                                                        draft.paste_curl(&command, window, cx)
+                                                    })
+                                                    .is_ok()
+                                            }),
+                                    )
                                     .addon(
                                         InputGroupAddon::new("request-method-addon")
                                             .p_1()

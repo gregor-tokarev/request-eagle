@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use collection::Collection;
 
@@ -64,6 +65,26 @@ impl VariableScope {
         active
             .as_deref()
             .map_or_else(|| Ok(HashMap::new()), read_entries)
+    }
+
+    /// When the collection's and the active environment's files were last
+    /// changed. A change made outside the app changes these without
+    /// notifying the scope.
+    pub fn file_versions(&self, cx: &App) -> Vec<Option<SystemTime>> {
+        let active = self
+            .environments
+            .as_ref()
+            .and_then(|environments| environments.read(cx).active_path());
+
+        self.path
+            .iter()
+            .chain(active.iter())
+            .map(|path| {
+                std::fs::metadata(path)
+                    .and_then(|file| file.modified())
+                    .ok()
+            })
+            .collect()
     }
 
     /// The values `{{name}}` resolves to. The active global environment
