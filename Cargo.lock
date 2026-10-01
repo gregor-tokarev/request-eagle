@@ -9849,6 +9849,7 @@ dependencies = [
  "collection",
  "collections_panel_ui",
  "environment",
+ "futures",
  "gpui-kit",
  "history",
  "keybindings_service",

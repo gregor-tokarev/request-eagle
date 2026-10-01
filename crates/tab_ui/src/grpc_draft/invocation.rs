@@ -195,8 +195,16 @@ impl GrpcDraft {
 
     /// The call history keeps once it starts: the request as it is now.
     fn sent(&self) -> RequestSent {
+        let mut request = self.request.clone();
+
+        // History keeps the request outside its collection, where relative
+        // `.proto` paths would not resolve.
+        if let Some(collection) = self.collection_path() {
+            request.definition = request.definition.resolved_from(&collection);
+        }
+
         RequestSent {
-            record: request_history::Record::sent(self.request.clone()),
+            record: request_history::Record::sent(request),
             sent_at: SystemTime::now(),
         }
     }

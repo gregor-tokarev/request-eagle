@@ -50,6 +50,9 @@ pub enum HistoryError {
 /// Sent requests, newest first. The list is one small file, read when the
 /// app opens; each request and its response are files of their own, read
 /// when the request is opened.
+///
+/// Changes apply to the list at once. Each returns the [`Change`] that saves
+/// it, so the files can be written off the UI thread.
 pub struct History {
     directory: PathBuf,
     entries: Vec<Entry>,
@@ -81,7 +84,7 @@ impl History {
     }
 
     /// Keep a sent request, deleting the oldest beyond [`LIMIT`].
-    pub fn add(&mut self, record: &Record, sent_at: SystemTime) -> Result<(), HistoryError> {
+    pub fn add(&mut self, record: Record, sent_at: SystemTime) -> Change {
         let entry = Entry {
             id: Uuid::new_v4().to_string(),
             sent_at: sent_at
@@ -93,18 +96,7 @@ impl History {
             label: record.label().to_owned(),
             address: record.address(),
         };
-
-        let entries = self.directory.join(ENTRIES);
-        fs::create_dir_all(&entries)?;
-        if let Some(response) = &record.response
-            && let Some(body) = &response.body
-        {
-            write(&entries.join(format!("{}.body", entry.id)), body)?;
-        }
-        write(
-            &entries.join(format!("{}.json", entry.id)),
-            &serde_json::to_vec(record)?,
-        )?;
+        let id = entry.id.clone();
 
         // A slow request can complete after one sent later.
         let position = self
@@ -112,21 +104,136 @@ impl History {
             .partition_point(|newer| newer.sent_at > entry.sent_at);
         self.entries.insert(position, entry);
 
-        for old in self.entries.split_off(LIMIT.min(self.entries.len())) {
-            remove_files(&entries, &old.id)?;
-        }
+        let removed = self
+            .entries
+            .split_off(LIMIT.min(self.entries.len()))
+            .into_iter()
+            .map(|old| old.id)
+            .collect();
 
-        self.save()
+        Change {
+            added: Some((id, record)),
+            removed,
+            ..self.change()
+        }
     }
 
-    /// The request and response kept for an entry.
-    pub fn read(&self, id: &str) -> Result<Record, HistoryError> {
+    pub fn delete(&mut self, id: &str) -> Change {
+        let removed = match self.entries.iter().position(|entry| entry.id == id) {
+            Some(position) => vec![self.entries.remove(position).id],
+            None => Vec::new(),
+        };
+
+        Change {
+            removed,
+            ..self.change()
+        }
+    }
+
+    pub fn clear(&mut self) -> Change {
+        self.entries.clear();
+
+        Change {
+            cleared: true,
+            ..self.change()
+        }
+    }
+
+    /// The files of a listed entry's request and response.
+    pub fn files(&self, id: &str) -> Option<RecordFiles> {
         if !self.entries.iter().any(|entry| entry.id == id) || Uuid::parse_str(id).is_err() {
-            return Err(HistoryError::Missing);
+            return None;
         }
 
         let entries = self.directory.join(ENTRIES);
-        let mut record: Record = match fs::read(entries.join(format!("{id}.json"))) {
+
+        Some(RecordFiles {
+            record: entries.join(format!("{id}.json")),
+            body: entries.join(format!("{id}.body")),
+        })
+    }
+
+    /// A change that saves the list as it is now.
+    fn change(&self) -> Change {
+        Change {
+            directory: self.directory.clone(),
+            added: None,
+            removed: Vec::new(),
+            cleared: false,
+            index: self.entries.clone(),
+        }
+    }
+}
+
+/// The files to write after history changed. Save changes in the order they
+/// were made.
+#[must_use]
+pub struct Change {
+    directory: PathBuf,
+    added: Option<(String, Record)>,
+    removed: Vec<String>,
+    cleared: bool,
+    index: Vec<Entry>,
+}
+
+impl Change {
+    pub fn save(self) -> Result<(), HistoryError> {
+        let entries = self.directory.join(ENTRIES);
+
+        if self.cleared {
+            for result in [
+                fs::remove_dir_all(&entries),
+                fs::remove_file(self.directory.join(INDEX)),
+            ] {
+                if let Err(error) = result
+                    && error.kind() != io::ErrorKind::NotFound
+                {
+                    return Err(error.into());
+                }
+            }
+
+            return Ok(());
+        }
+
+        if let Some((id, record)) = &self.added {
+            if let Some(response) = &record.response
+                && let Some(body) = &response.body
+            {
+                write(&entries.join(format!("{id}.body")), body)?;
+            }
+
+            write(
+                &entries.join(format!("{id}.json")),
+                &serde_json::to_vec(record)?,
+            )?;
+        }
+
+        for id in &self.removed {
+            for extension in ["json", "body"] {
+                if let Err(error) = fs::remove_file(entries.join(format!("{id}.{extension}")))
+                    && error.kind() != io::ErrorKind::NotFound
+                {
+                    return Err(error.into());
+                }
+            }
+        }
+
+        write(
+            &self.directory.join(INDEX),
+            &serde_json::to_vec(&self.index)?,
+        )
+    }
+}
+
+/// Where an entry's request and response are kept.
+pub struct RecordFiles {
+    record: PathBuf,
+    body: PathBuf,
+}
+
+impl RecordFiles {
+    pub fn read(&self) -> Result<Record, HistoryError> {
+        let mut record: Record = match fs::read(&self.record) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Err(HistoryError::Missing);
@@ -135,7 +242,7 @@ impl History {
         };
 
         if let Some(response) = &mut record.response {
-            response.body = match fs::read(entries.join(format!("{id}.body"))) {
+            response.body = match fs::read(&self.body) {
                 Ok(body) => Some(body),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => None,
                 Err(error) => return Err(error.into()),
@@ -144,53 +251,6 @@ impl History {
 
         Ok(record)
     }
-
-    pub fn delete(&mut self, id: &str) -> Result<(), HistoryError> {
-        let Some(position) = self.entries.iter().position(|entry| entry.id == id) else {
-            return Ok(());
-        };
-
-        let entry = self.entries.remove(position);
-        remove_files(&self.directory.join(ENTRIES), &entry.id)?;
-
-        self.save()
-    }
-
-    pub fn clear(&mut self) -> Result<(), HistoryError> {
-        self.entries.clear();
-
-        for result in [
-            fs::remove_dir_all(self.directory.join(ENTRIES)),
-            fs::remove_file(self.directory.join(INDEX)),
-        ] {
-            if let Err(error) = result
-                && error.kind() != io::ErrorKind::NotFound
-            {
-                return Err(error.into());
-            }
-        }
-
-        Ok(())
-    }
-
-    fn save(&self) -> Result<(), HistoryError> {
-        write(
-            &self.directory.join(INDEX),
-            &serde_json::to_vec(&self.entries)?,
-        )
-    }
-}
-
-fn remove_files(entries: &Path, id: &str) -> io::Result<()> {
-    for extension in ["json", "body"] {
-        if let Err(error) = fs::remove_file(entries.join(format!("{id}.{extension}")))
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            return Err(error);
-        }
-    }
-
-    Ok(())
 }
 
 /// Replace a file whole, so an interrupted write leaves the previous one.

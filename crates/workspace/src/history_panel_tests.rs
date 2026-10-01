@@ -1,6 +1,8 @@
-use chrono::NaiveDate;
+use std::time::Duration;
 
-use crate::history_panel::{day_label, short_address};
+use chrono::{Local, NaiveDate};
+
+use crate::history_panel::{day_label, short_address, until_midnight};
 
 fn date(year: i32, month: u32, day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, day).unwrap()
@@ -32,4 +34,14 @@ fn shortens_addresses_by_their_scheme() {
         "{{scheme}}://api.test"
     );
     assert_eq!(short_address(""), "");
+}
+
+#[test]
+fn wakes_just_after_midnight() {
+    let now = Local::now();
+    let wait = until_midnight();
+    let woken = now + chrono::Duration::from_std(wait).unwrap();
+
+    assert!(wait <= Duration::from_secs(25 * 60 * 60));
+    assert!(woken.date_naive() > now.date_naive());
 }

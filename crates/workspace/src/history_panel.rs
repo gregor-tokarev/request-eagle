@@ -1,4 +1,10 @@
-use chrono::{DateTime, Datelike as _, Local, NaiveDate};
+use std::time::Duration;
+
+use chrono::{DateTime, Datelike as _, Local, NaiveDate, NaiveTime};
+use futures::{
+    StreamExt as _,
+    channel::{mpsc, oneshot},
+};
 use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
@@ -8,8 +14,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_color;
-use request_history::{Entry, History, Record};
+use request_history::{Change, Entry, History, Record};
 use tab_ui::RequestSent;
+
+/// Work on history's files, run off the UI thread.
+type Job = Box<dyn FnOnce() + Send>;
 
 pub(crate) enum HistoryPanelEvent {
     Open { entry: Entry, record: Record },
@@ -33,6 +42,12 @@ pub(crate) struct HistoryPanel {
     error: Option<String>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
+    /// Jobs run one at a time, in order, so a request is read only after the
+    /// changes made before it are saved.
+    jobs: mpsc::UnboundedSender<Job>,
+    _worker: Task<()>,
+    /// Today and Yesterday move on at midnight.
+    _midnight: Task<()>,
     _search_subscription: Subscription,
 }
 
@@ -53,6 +68,22 @@ impl HistoryPanel {
             }
         });
 
+        let (jobs, mut queue) = mpsc::unbounded::<Job>();
+        let worker = cx.background_executor().spawn(async move {
+            while let Some(job) = queue.next().await {
+                job();
+            }
+        });
+        let midnight = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(until_midnight()).await;
+
+                if this.update(cx, |this, cx| this.refresh(cx)).is_err() {
+                    return;
+                }
+            }
+        });
+
         let mut panel = Self {
             history,
             rows: Vec::new(),
@@ -63,6 +94,9 @@ impl HistoryPanel {
             error,
             focus: cx.focus_handle().tab_stop(true),
             scroll: UniformListScrollHandle::new(),
+            jobs,
+            _worker: worker,
+            _midnight: midnight,
             _search_subscription: search_subscription,
         };
         panel.refresh(cx);
@@ -80,12 +114,36 @@ impl HistoryPanel {
     }
 
     pub(crate) fn record(&mut self, sent: &RequestSent, cx: &mut Context<Self>) {
-        self.error = self
-            .history
-            .add(&sent.record, sent.sent_at)
-            .err()
-            .map(|error| format!("Could not save history: {error}"));
+        let change = self.history.add(sent.record.clone(), sent.sent_at);
+        self.save(change, cx);
         self.refresh(cx);
+    }
+
+    /// Run `job` once the jobs before it are done.
+    fn run<T: Send + 'static>(
+        &self,
+        job: impl FnOnce() -> T + Send + 'static,
+    ) -> oneshot::Receiver<T> {
+        let (result, receiver) = oneshot::channel();
+        let _ = self.jobs.unbounded_send(Box::new(move || {
+            let _ = result.send(job());
+        }));
+
+        receiver
+    }
+
+    fn save(&self, change: Change, cx: &mut Context<Self>) {
+        let saved = self.run(move || change.save());
+
+        cx.spawn(async move |this, cx| {
+            if let Ok(Err(error)) = saved.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.error = Some(format!("Could not save history: {error}"));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     /// Ask to delete every entry. The section shows a confirmation first.
@@ -102,11 +160,9 @@ impl HistoryPanel {
     fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pending_clear = false;
         self.selected = None;
-        self.error = self
-            .history
-            .clear()
-            .err()
-            .map(|error| format!("Could not clear history: {error}"));
+        self.error = None;
+        let change = self.history.clear();
+        self.save(change, cx);
         window.focus(&self.focus, cx);
         self.refresh(cx);
     }
@@ -131,36 +187,48 @@ impl HistoryPanel {
                 .map(|&index| self.entry(index).id.clone());
         }
 
-        self.error = self
-            .history
-            .delete(id)
-            .err()
-            .map(|error| format!("Could not delete from history: {error}"));
+        let change = self.history.delete(id);
+        self.save(change, cx);
         self.refresh(cx);
     }
 
     fn open(&mut self, id: &str, cx: &mut Context<Self>) {
         self.selected = Some(id.to_owned());
 
-        let Some(entry) = self
-            .history
-            .entries()
-            .iter()
-            .find(|entry| entry.id == id)
-            .cloned()
-        else {
+        cx.notify();
+
+        let (Some(entry), Some(files)) = (
+            self.history
+                .entries()
+                .iter()
+                .find(|entry| entry.id == id)
+                .cloned(),
+            self.history.files(id),
+        ) else {
             return;
         };
+        let read = self.run(move || files.read());
 
-        match self.history.read(id) {
-            Ok(record) => {
-                self.error = None;
-                cx.emit(HistoryPanelEvent::Open { entry, record });
-            }
-            Err(error) => self.error = Some(format!("Could not open from history: {error}")),
-        }
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = read.await else {
+                return;
+            };
 
-        cx.notify();
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(record) => {
+                        this.error = None;
+                        cx.emit(HistoryPanelEvent::Open { entry, record });
+                    }
+                    Err(error) => {
+                        this.error = Some(format!("Could not open from history: {error}"))
+                    }
+                }
+
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn entry(&self, index: usize) -> &Entry {
@@ -455,6 +523,23 @@ impl HistoryPanel {
             })
             .into_any_element()
     }
+}
+
+/// The time until the next local midnight, and a moment past it.
+pub(crate) fn until_midnight() -> Duration {
+    let now = Local::now();
+
+    now.date_naive()
+        .succ_opt()
+        .and_then(|tomorrow| {
+            tomorrow
+                .and_time(NaiveTime::MIN)
+                .and_local_timezone(Local)
+                .earliest()
+        })
+        .and_then(|midnight| (midnight - now).to_std().ok())
+        .unwrap_or(Duration::from_secs(60 * 60))
+        + Duration::from_secs(1)
 }
 
 /// The address without its scheme, which leaves room for the path.

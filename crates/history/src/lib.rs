@@ -7,5 +7,5 @@ mod record;
 #[cfg(test)]
 mod tests;
 
-pub use history::{Entry, History, HistoryError, LIMIT};
+pub use history::{Change, Entry, History, HistoryError, LIMIT, RecordFiles};
 pub use record::{BODY_LIMIT, Record, Response};

@@ -68,10 +68,10 @@ fn keeps_requests_newest_first_across_launches() {
     let directory = tempfile::tempdir().unwrap();
     let mut history = History::new(directory.path());
 
-    history.add(&get("https://a.test"), at(10)).unwrap();
-    history.add(&get("{{host}}/b"), at(30)).unwrap();
+    history.add(get("https://a.test"), at(10)).save().unwrap();
+    history.add(get("{{host}}/b"), at(30)).save().unwrap();
     // A slow request completes after one that was sent later.
-    history.add(&get("https://c.test"), at(20)).unwrap();
+    history.add(get("https://c.test"), at(20)).save().unwrap();
 
     let mut reopened = History::new(directory.path());
     reopened.load().unwrap();
@@ -100,9 +100,9 @@ fn reads_a_request_with_its_response() {
         ..Record::sent(request.clone())
     };
 
-    history.add(&record, at(1)).unwrap();
+    history.add(record, at(1)).save().unwrap();
     let id = history.entries()[0].id.clone();
-    let read = history.read(&id).unwrap();
+    let read = history.files(&id).unwrap().read().unwrap();
 
     let request::Request::Http(read_request) = read.request else {
         panic!("expected an HTTP request");
@@ -137,8 +137,12 @@ fn leaves_out_bodies_over_the_limit() {
         ..get("https://large.test")
     };
 
-    history.add(&record, at(1)).unwrap();
-    let read = history.read(&history.entries()[0].id).unwrap();
+    history.add(record, at(1)).save().unwrap();
+    let read = history
+        .files(&history.entries()[0].id)
+        .unwrap()
+        .read()
+        .unwrap();
     let response = read.response.unwrap();
 
     assert_eq!(response.body, None);
@@ -154,8 +158,12 @@ fn keeps_why_a_sent_request_failed() {
         ..get("http://localhost:1")
     };
 
-    history.add(&record, at(1)).unwrap();
-    let read = history.read(&history.entries()[0].id).unwrap();
+    history.add(record, at(1)).save().unwrap();
+    let read = history
+        .files(&history.entries()[0].id)
+        .unwrap()
+        .read()
+        .unwrap();
 
     assert!(read.response.is_none());
     assert_eq!(read.error.as_deref(), Some("connection refused"));
@@ -186,11 +194,15 @@ fn deletes_the_oldest_beyond_the_limit() {
 
     for second in 0..LIMIT as u64 {
         history
-            .add(&get(&format!("/{second}")), at(second))
+            .add(get(&format!("/{second}")), at(second))
+            .save()
             .unwrap();
     }
     let oldest = history.entries().last().unwrap().id.clone();
-    history.add(&get("/newest"), at(LIMIT as u64)).unwrap();
+    history
+        .add(get("/newest"), at(LIMIT as u64))
+        .save()
+        .unwrap();
 
     assert_eq!(history.entries().len(), LIMIT);
     assert_eq!(history.entries()[0].address, "/newest");
@@ -212,15 +224,15 @@ fn deletes_one_request_or_all_of_them() {
         ..get("/a")
     };
 
-    history.add(&record, at(1)).unwrap();
-    history.add(&get("/b"), at(2)).unwrap();
-    history.add(&get("/c"), at(3)).unwrap();
+    history.add(record, at(1)).save().unwrap();
+    history.add(get("/b"), at(2)).save().unwrap();
+    history.add(get("/c"), at(3)).save().unwrap();
     let deleted = history.entries()[2].id.clone();
 
-    history.delete(&deleted).unwrap();
+    history.delete(&deleted).save().unwrap();
 
     assert_eq!(addresses(&history), ["/c", "/b"]);
-    assert!(matches!(history.read(&deleted), Err(HistoryError::Missing)));
+    assert!(history.files(&deleted).is_none());
     assert!(
         !directory
             .path()
@@ -228,7 +240,7 @@ fn deletes_one_request_or_all_of_them() {
             .exists()
     );
 
-    history.clear().unwrap();
+    history.clear().save().unwrap();
     let mut reopened = History::new(directory.path());
     reopened.load().unwrap();
 
@@ -241,13 +253,37 @@ fn deletes_one_request_or_all_of_them() {
 fn reads_only_listed_entries() {
     let directory = tempfile::tempdir().unwrap();
     let mut history = History::new(directory.path());
-    history.add(&get("/a"), at(1)).unwrap();
+    history.add(get("/a"), at(1)).save().unwrap();
     fs::write(directory.path().join("secret.json"), "{}").unwrap();
 
+    assert!(history.files("../secret").is_none());
+
+    // A listed request whose files are gone can no longer be read.
+    let id = history.entries()[0].id.clone();
+    fs::remove_dir_all(directory.path().join("entries")).unwrap();
+
     assert!(matches!(
-        history.read("../secret"),
+        history.files(&id).unwrap().read(),
         Err(HistoryError::Missing)
     ));
+}
+
+#[test]
+fn lists_a_request_at_once_and_writes_it_when_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut history = History::new(directory.path());
+
+    let change = history.add(get("/a"), at(1));
+    let mut reopened = History::new(directory.path());
+    reopened.load().unwrap();
+
+    assert_eq!(addresses(&history), ["/a"]);
+    assert!(reopened.entries().is_empty());
+
+    change.save().unwrap();
+    reopened.load().unwrap();
+
+    assert_eq!(addresses(&reopened), ["/a"]);
 }
 
 #[test]

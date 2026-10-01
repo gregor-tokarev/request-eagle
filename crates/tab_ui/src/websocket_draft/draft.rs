@@ -68,6 +68,9 @@ pub struct WebSocketDraft {
     pub(crate) log: Entity<MessageLog>,
     split: Entity<ResizableState>,
     connection: Option<WebSocketConnection>,
+    /// The request as it was when it started connecting. History keeps it
+    /// once it connects.
+    connecting: Option<RequestSent>,
     events: Option<Task<()>>,
     address: Entity<WebSocketAddress>,
     configuration: Entity<WebSocketConfiguration>,
@@ -133,6 +136,7 @@ impl WebSocketDraft {
             log,
             split,
             connection: None,
+            connecting: None,
             events: None,
             address,
             configuration,
@@ -205,7 +209,7 @@ impl WebSocketDraft {
             .unwrap_or_default();
         let (connection, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
-        cx.emit(RequestSent {
+        self.connecting = Some(RequestSent {
             record: request_history::Record::sent(self.request.clone()),
             sent_at: SystemTime::now(),
         });
@@ -236,6 +240,7 @@ impl WebSocketDraft {
         match self.state {
             ConnectionState::Connecting => {
                 self.connection = None;
+                self.connecting = None;
                 self.events = None;
                 self.set_state(ConnectionState::Disconnected, cx);
             }
@@ -269,9 +274,14 @@ impl WebSocketDraft {
             match event.kind {
                 WebSocketEventKind::Connected(_) if state == ConnectionState::Connecting => {
                     state = ConnectionState::Connected;
+
+                    if let Some(sent) = self.connecting.take() {
+                        cx.emit(sent);
+                    }
                 }
                 WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
                     state = ConnectionState::Disconnected;
+                    self.connecting = None;
                 }
                 _ => {}
             }

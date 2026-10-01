@@ -75,6 +75,9 @@ pub struct RequestDraft {
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
     pub(super) task: Option<Task<()>>,
+    /// The request being sent, which history keeps if it is cancelled after
+    /// it went out.
+    pub(super) sending: Option<(RequestSent, request::Dispatch)>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
     /// Whether the response is an event stream that has not ended yet.
@@ -145,6 +148,7 @@ impl RequestDraft {
             response,
             split,
             task: None,
+            sending: None,
             stop: None,
             streaming: false,
             executor: None,
