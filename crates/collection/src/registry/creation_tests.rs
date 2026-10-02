@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Method, Request, WebSocketRequest, WebSocketSettings};
+use request::{Body, Method, Request, WebSocketRequest, WebSocketSettings};
 
 struct Fixture(PathBuf);
 
@@ -105,7 +105,7 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
     let request = request::HttpRequest {
         method: Method::Post,
         path: "https://example.test/new".into(),
-        body: Some(b"draft body".to_vec()),
+        body: Some(Body::json("draft body")),
         ..Default::default()
     };
     for _ in 0..2 {

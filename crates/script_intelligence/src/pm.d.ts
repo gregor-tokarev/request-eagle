@@ -72,12 +72,38 @@ declare namespace RequestEagle {
         toJSON(): string;
     }
 
+    /** A multipart form's part: text with a value, or a file with its path in src. */
+    type FormPart =
+        | {key: string; value: string; type?: "text"}
+        | {key: string; src: string; type: "file"};
+
+    interface FormData {
+        /** Return the first matching text part's value, or undefined when absent. */
+        get(name: string): string | undefined;
+        has(name: string): boolean;
+        /** Append a part, preserving existing parts with the same name. */
+        add(part: FormPart): void;
+        /** Remove all parts with this name. */
+        remove(name: string): void;
+        /** Replace all matching parts with this one. */
+        upsert(part: FormPart): void;
+        clear(): void;
+        toJSON(): FormPart[];
+    }
+
     interface RequestBody {
-        readonly mode: "raw";
-        /** Decoded body text, or null when absent. Assign text to replace the body. */
+        /** The body's type. A request without a body is raw. */
+        readonly mode: "raw" | "urlencoded" | "formdata" | "file";
+        /** Decoded raw text, or null when absent. After the response, the sent body. Assign text to replace the body with raw text. */
         raw: string | null;
         /** Replace the outgoing body with text. GET and HEAD omit request bodies. */
         update(text: string): void;
+        /** A URL-encoded form's fields. */
+        readonly urlencoded?: Entries;
+        /** A multipart form's parts. */
+        readonly formdata?: FormData;
+        /** The file a binary body sends. */
+        readonly file?: {readonly src: string};
     }
 
     /** The execution snapshot. Edits never modify the request draft or saved file. */

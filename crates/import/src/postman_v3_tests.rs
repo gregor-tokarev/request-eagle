@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
+    Body, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
     WebSocketRequest,
 };
 
@@ -297,16 +297,14 @@ order: 2000
     assert_eq!(request(&pets[0]).0, "Add a pet");
     let add = http(&pets[0]);
     assert_eq!(add.method, Method::Post);
-    assert_eq!(add.body.as_deref(), Some(br#"{"name": "Rex"}"#.as_slice()));
+    assert_eq!(add.body, Some(Body::json(r#"{"name": "Rex"}"#)));
+    // JSON bodies are sent as JSON without a header of their own.
     assert_eq!(
         add.headers,
-        [
-            ("Content-Type".to_owned(), "application/json".to_owned()),
-            (
-                "Authorization".to_owned(),
-                "Basic YWRtaW46c2VjcmV0".to_owned()
-            ),
-        ]
+        [(
+            "Authorization".to_owned(),
+            "Basic YWRtaW46c2VjcmV0".to_owned()
+        )]
     );
 
     let find = http(&pets[1]);

@@ -4,8 +4,8 @@ use std::{
 };
 
 use request::{
-    Execution, GrpcRequest, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method, StatusCode,
-    Version, WebSocketRequest,
+    Body, Execution, GrpcRequest, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method,
+    StatusCode, Version, WebSocketRequest,
 };
 
 use crate::{BODY_LIMIT, History, HistoryError, LIMIT, Record, Response};
@@ -92,7 +92,7 @@ fn reads_a_request_with_its_response() {
         method: Method::Post,
         path: "{{host}}/users".into(),
         headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
-        body: Some(br#"{"name":"Ada"}"#.to_vec()),
+        body: Some(Body::json(r#"{"name":"Ada"}"#)),
         ..Default::default()
     };
     let record = Record {

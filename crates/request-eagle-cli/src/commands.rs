@@ -200,7 +200,7 @@ pub enum GrpcProtocol {
     Grpc,
 }
 
-/// Complete saved HTTP request. Body accepts UTF-8 text or an array of bytes.
+/// Complete saved HTTP request.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestInput {
@@ -230,11 +230,46 @@ pub struct RequestInput {
     pub verify_certificates: Option<bool>,
 }
 
+/// A request body. Text alone is a raw JSON body.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Body {
     Text(String),
-    Bytes(Vec<u8>),
+    Typed(TypedBody),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TypedBody {
+    /// Text sent as written. The language sets the default Content-Type.
+    Raw { language: Language, text: String },
+    /// An application/x-www-form-urlencoded form. Sending encodes each name
+    /// and value after filling in its variables.
+    UrlEncoded { fields: Vec<(String, String)> },
+    /// A multipart/form-data form.
+    Multipart { parts: Vec<FormPart> },
+    /// The contents of a file, read when the request runs. A relative path
+    /// starts at the collection's directory.
+    Binary { file: PathBuf },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    Json,
+    Xml,
+    Text,
+}
+
+/// A text field, or with `file: true` a file whose path is `value`. A
+/// relative path starts at the collection's directory.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FormPart {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub file: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

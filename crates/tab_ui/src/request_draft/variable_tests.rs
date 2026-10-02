@@ -43,7 +43,7 @@ fn environment_errors_are_reported_in_every_request_field() {
             2 => request.headers.push(("X-Message".into(), token)),
             3 => request.query = vec![(token, "value".into())],
             4 => request.query = vec![("message".into(), token)],
-            _ => request.body = Some(token.into_bytes()),
+            _ => request.body = Some(request::Body::json(token)),
         }
         assert!(
             RequestVariables::new(values.clone(), None)
@@ -60,7 +60,7 @@ fn environment_errors_are_reported_in_every_request_field() {
 
     let request = HttpRequest {
         path: "http://example.com".into(),
-        body: Some(b"{{ message }}".to_vec()),
+        body: Some(request::Body::json("{{ message }}")),
         ..Default::default()
     };
     assert!(

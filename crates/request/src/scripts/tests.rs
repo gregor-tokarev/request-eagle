@@ -10,8 +10,8 @@ use super::{
     runtime::{self, Cancellation, ScriptState},
 };
 use crate::{
-    Execution, ExecutionError, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method,
-    RequestExecutor, RequestPreferences, RequestVariables, Response, StatusCode, Version,
+    Body, Execution, ExecutionError, FormPart, HeaderMap, HttpMetrics, HttpRequest, HttpResponse,
+    Method, RequestExecutor, RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
 fn scripted(source: &str) -> HttpRequest {
@@ -31,6 +31,14 @@ fn cancelled() -> Arc<AtomicBool> {
 
 fn executor() -> RequestExecutor {
     RequestExecutor::new(&RequestPreferences::default()).unwrap()
+}
+
+/// The text of a raw body.
+fn raw(body: &Option<Body>) -> Option<&str> {
+    match body {
+        Some(Body::Raw { text, .. }) => Some(text),
+        _ => None,
+    }
 }
 
 fn no_variables() -> RequestVariables {
@@ -82,15 +90,9 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
 
         assert_eq!(sent.path, "http://localhost/hello");
         assert_eq!(sent.method, Method::Post);
-        assert_eq!(
-            sent.headers,
-            [
-                ("X-Test".into(), "a & b".into()),
-                ("Content-Type".into(), "application/json".into())
-            ]
-        );
+        assert_eq!(sent.headers, [("X-Test".into(), "a & b".into())]);
         assert_eq!(sent.query[0].1, "a & b");
-        assert_eq!(sent.body.unwrap(), br#"{"message":"a & b"}"#);
+        assert_eq!(sent.body, Some(Body::json(r#"{"message":"a & b"}"#)));
         assert_eq!(state.variables.values["path"], "hello");
         assert_eq!(reports[0].logs.len(), 1);
         assert_eq!(original.path, "http://localhost/{{path}}");
@@ -104,37 +106,132 @@ fn request_body_reads_preserve_bytes_and_edits_are_exported() {
         for (body, source, expected) in [
             (None, "pm.expect(pm.request.body.raw).to.be.null;", None),
             (
-                Some(vec![]),
+                Some(""),
                 "pm.expect(pm.request.body.raw).to.equal('');",
-                Some(vec![]),
+                Some(""),
             ),
             (
-                Some(vec![0, 255, 42]),
-                "const body = pm.request.body.raw; pm.expect(body).to.equal('\\u0000\\ufffd*'); pm.request.body.raw = body;",
-                Some(vec![0, 255, 42]),
+                Some("\0é*"),
+                "const body = pm.request.body.raw; pm.expect(body).to.equal('\\u0000é*'); pm.request.body.raw = body;",
+                Some("\0é*"),
             ),
             (
-                Some(b"original".to_vec()),
+                Some("original"),
                 "pm.request.body.raw = 'edited'; pm.expect(pm.request.body.raw).to.equal('edited');",
-                Some(b"edited".to_vec()),
+                Some("edited"),
             ),
             (
-                Some(b"original".to_vec()),
+                Some("original"),
                 "const body = pm.request.body.raw; pm.request.body.update('edited'); pm.request.body.raw = body;",
-                Some(b"original".to_vec()),
+                Some("original"),
             ),
             (
-                Some(b"original".to_vec()),
+                Some("original"),
                 "pm.request.body.raw = null; pm.expect(pm.request.body.raw).to.be.null;",
                 None,
             ),
         ] {
             let mut request = scripted(source);
             request.method = Method::Post;
-            request.body = body;
+            request.body = body.map(Body::json);
             let (sent, _, _) = pre_request(request, no_variables()).await.unwrap();
-            assert_eq!(sent.body, expected, "{source}");
+            assert_eq!(raw(&sent.body), expected, "{source}");
         }
+    });
+}
+
+#[test]
+fn scripts_read_and_change_forms_and_files() {
+    smol::block_on(async {
+        let mut request = scripted(
+            r#"
+            pm.expect(pm.request.body.mode).to.equal("urlencoded");
+            pm.expect(pm.request.body.raw).to.be.null;
+            pm.expect(pm.request.body.urlencoded.get("name")).to.equal("{{name}}");
+            pm.request.body.urlencoded.upsert({key: "signature", value: "abc"});
+            pm.request.body.urlencoded.remove("drop");
+        "#,
+        );
+        request.method = Method::Post;
+        request.body = Some(Body::UrlEncoded {
+            fields: vec![
+                ("name".into(), "{{name}}".into()),
+                ("drop".into(), "x".into()),
+            ],
+        });
+        let values = HashMap::from([("name".into(), "Eagle".into())]);
+        let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            sent.body,
+            Some(Body::UrlEncoded {
+                fields: vec![
+                    ("name".into(), "Eagle".into()),
+                    ("signature".into(), "abc".into())
+                ],
+            })
+        );
+
+        let mut request = scripted(
+            r#"
+            pm.expect(pm.request.body.mode).to.equal("formdata");
+            pm.expect(pm.request.body.formdata.toJSON()).to.deep.equal([
+                {key: "title", value: "Hi", type: "text"},
+                {key: "avatar", src: "a.png", type: "file"},
+            ]);
+            pm.expect(pm.request.body.formdata.get("title")).to.equal("Hi");
+            pm.request.body.formdata.upsert({key: "title", value: 1});
+            pm.request.body.formdata.add({key: "document", src: "b.pdf", type: "file"});
+        "#,
+        );
+        request.method = Method::Post;
+        let part = |name: &str, value: &str, file| FormPart {
+            name: name.into(),
+            value: value.into(),
+            file,
+        };
+        request.body = Some(Body::Multipart {
+            parts: vec![part("title", "Hi", false), part("avatar", "a.png", true)],
+        });
+        let (sent, _, _) = pre_request(request, no_variables()).await.unwrap();
+        assert_eq!(
+            sent.body,
+            Some(Body::Multipart {
+                parts: vec![
+                    part("avatar", "a.png", true),
+                    part("title", "1", false),
+                    part("document", "b.pdf", true),
+                ],
+            })
+        );
+
+        // Setting text makes any body raw.
+        let mut request = scripted(
+            "pm.request.body.raw = 'name=x'; pm.expect(pm.request.body.mode).to.equal('raw');",
+        );
+        request.method = Method::Post;
+        request.body = Some(Body::UrlEncoded {
+            fields: vec![("name".into(), "y".into())],
+        });
+        let (sent, _, _) = pre_request(request, no_variables()).await.unwrap();
+        assert_eq!(sent.body, Some(Body::json("name=x")));
+
+        let mut request = scripted(
+            "pm.expect(pm.request.body.mode).to.equal('file'); pm.expect(pm.request.body.file.src).to.equal('data.bin');",
+        );
+        request.method = Method::Post;
+        request.body = Some(Body::Binary {
+            file: "data.bin".into(),
+        });
+        let (sent, _, reports) = pre_request(request, no_variables()).await.unwrap();
+        assert!(reports[0].error.is_none(), "{reports:?}");
+        assert_eq!(
+            sent.body,
+            Some(Body::Binary {
+                file: "data.bin".into()
+            })
+        );
     });
 }
 
@@ -143,17 +240,17 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('path', 'large');");
         request.method = Method::Post;
-        request.body = Some(vec![b'x'; 40 * 1024 * 1024]);
-        let request_buffer = request.body.as_ref().unwrap().as_ptr();
+        request.body = Some(Body::json("x".repeat(40 * 1024 * 1024)));
+        let request_buffer = raw(&request.body).unwrap().as_ptr();
         let (mut request, _, _) = pre_request(request, no_variables()).await.unwrap();
-        assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
+        assert_eq!(raw(&request.body).unwrap().as_ptr(), request_buffer);
 
         request.scripts.post_response =
             "pm.response.to.have.status(200); throw new Error('after status');".into();
         request.scripts.pre_request.clear();
         let (mut request, state, _) = pre_request(request, no_variables()).await.unwrap();
-        assert_eq!(request.body.as_ref().unwrap().as_ptr(), request_buffer);
-        let request_body = request.body.take().map(bytes::Bytes::from);
+        assert_eq!(raw(&request.body).unwrap().as_ptr(), request_buffer);
+        let request_body = request.encode_body().unwrap().map(bytes::Bytes::from);
         // Fits as bytes, but replacement characters would exceed the decode budget.
         let body = vec![255; 11 * 1024 * 1024];
         let response_buffer = body.as_ptr();
@@ -229,12 +326,12 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
 
         let mut request = scripted("pm.variables.set('path', 'fallback');");
         request.path = "http://localhost/{{path}}".into();
-        request.body = Some(vec![0, 255, 42]);
+        request.body = Some(Body::json("\0é*"));
         request.method = Method::Post;
         let variables = RequestVariables::new(HashMap::new(), Some("File unavailable".into()));
         let (sent, _, _) = pre_request(request, variables).await.unwrap();
         assert_eq!(sent.path, "http://localhost/fallback");
-        assert_eq!(sent.body.unwrap(), [0, 255, 42]);
+        assert_eq!(raw(&sent.body), Some("\0é*"));
 
         let mut request = scripted("pm.variables.set('path', 'x'.repeat(1024 * 1024));");
         request.path = format!("http://localhost/{}", "{{path}}".repeat(33));
@@ -268,7 +365,7 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             request.path = "http://localhost/{{$guid}}".into();
             request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
             request.query = vec![("id".into(), "{{$guid}}".into())];
-            request.body = Some(body.as_bytes().to_vec());
+            request.body = Some(Body::json(body));
             let values = HashMap::from([("$guid".into(), "from file".into())]);
             let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
                 .await
@@ -276,7 +373,7 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             assert_eq!(sent.path, "http://localhost/fixed");
             assert_eq!(sent.headers[0].1, "fixed");
             assert_eq!(sent.query[0].1, "fixed");
-            assert_eq!(sent.body.as_deref(), expected.map(str::as_bytes));
+            assert_eq!(raw(&sent.body), expected);
         }
     });
 }
@@ -469,7 +566,7 @@ fn variable_expansion_cannot_allocate_an_unbounded_request() {
     smol::block_on(async {
         let mut request = scripted("pm.variables.set('large', 'x'.repeat(1024 * 1024));");
         request.method = Method::Post;
-        request.body = Some("{{large}}".repeat(40).into_bytes());
+        request.body = Some(Body::json("{{large}}".repeat(40)));
         let error = pre_request(request, no_variables()).await.unwrap_err();
         assert!(error.to_string().contains("output limit"));
     });

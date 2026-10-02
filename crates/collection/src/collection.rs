@@ -330,6 +330,18 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             }
         }
 
+        // A body of another type keeps none of the previous type's fields.
+        if let (Some(current), Some(update)) = (
+            request.get_mut("body").and_then(Item::as_table_like_mut),
+            updates["request"].get("body").and_then(Item::as_table_like),
+        ) {
+            for field in ["language", "text", "fields", "parts", "file"] {
+                if update.get(field).is_none() {
+                    current.remove(field);
+                }
+            }
+        }
+
         // gRPC definitions, settings and scripts also omit optional fields,
         // such as import paths once they are removed.
         for table in ["definition", "settings", "scripts"] {

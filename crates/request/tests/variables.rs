@@ -1,5 +1,5 @@
 use environment::VariableScopes;
-use request::{HttpRequest, Method};
+use request::{Body, HttpRequest, Method};
 use std::collections::HashMap;
 
 fn environment(changes: &[(&str, &str)]) -> VariableScopes {
@@ -89,7 +89,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         path: "https://example.com/{{!customer}}".into(),
         headers: vec![("X-{{!customer}}".into(), "{{!missing}}".into())],
         query: vec![("{{!customer}}".into(), "{{!$guid}}".into())],
-        body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
+        body: Some(Body::json(r#"{"template":"Hello {{!customer}}"}"#)),
         ..Default::default()
     };
     let resolved = draft.resolve_variables(&values).unwrap();
@@ -103,8 +103,8 @@ fn escaped_references_remain_literal_in_every_request_field() {
         ("{{customer}}".into(), "{{$guid}}".into())
     );
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&resolved.body.unwrap()).unwrap()["template"],
-        "Hello {{customer}}"
+        resolved.body,
+        Some(Body::json(r#"{"template":"Hello {{customer}}"}"#))
     );
 }
 
@@ -123,7 +123,7 @@ fn resolves_every_request_field_in_a_snapshot() {
             ("X-Request-ID".into(), "{{$guid}}".into()),
         ],
         query: vec![("{{key}}".into(), "{{$guid}}".into())],
-        body: Some(br#"{"value":"{{value}}","id":"{{$guid}}"}"#.to_vec()),
+        body: Some(Body::json(r#"{"value":"{{value}}","id":"{{$guid}}"}"#)),
         ..Default::default()
     };
     let before = draft.clone();
@@ -135,8 +135,8 @@ fn resolves_every_request_field_in_a_snapshot() {
     assert!(outgoing.path.ends_with(id));
     assert_eq!(&outgoing.headers[1].1, id);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(outgoing.body.as_ref().unwrap()).unwrap()["id"],
-        *id
+        outgoing.body,
+        Some(Body::json(format!(r#"{{"value":"🦅 hello","id":"{id}"}}"#)))
     );
 }
 #[test]
@@ -180,10 +180,10 @@ fn url_fragments_do_not_resolve_or_validate_unsent_references() {
     let request = request::HttpRequest {
         path: "https://example.com/".into(),
         headers: vec![("X-Value".into(), "#{{host}}".into())],
-        body: Some(b"#{{host}}".to_vec()),
+        body: Some(Body::json("#{{host}}")),
         ..Default::default()
     };
     let resolved = request.resolve_variables(&values).unwrap();
     assert_eq!(resolved.headers[0].1, "#example.com");
-    assert_eq!(resolved.body.as_deref(), Some(b"#example.com".as_slice()));
+    assert_eq!(resolved.body, Some(Body::json("#example.com")));
 }

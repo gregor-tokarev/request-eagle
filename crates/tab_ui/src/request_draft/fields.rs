@@ -7,12 +7,16 @@ use gpui_kit::component::{
     button::*,
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu, PopupMenuItem},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::FormPart;
 
 struct FieldRow {
     enabled: bool,
+    /// Whether the value is the path of a file to send.
+    file: bool,
     key: Entity<InputState>,
     value: Entity<InputState>,
     description: Entity<InputState>,
@@ -22,6 +26,9 @@ struct FieldRow {
 
 /// The rows that are sent, in table order.
 pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
+
+/// Asks for a file to send from a row, whose value input takes its path.
+pub(crate) struct ChooseFile(pub Entity<InputState>);
 
 /// A request's editable key/value rows, including one trailing empty row.
 pub(crate) struct RequestFields {
@@ -33,9 +40,12 @@ pub(crate) struct RequestFields {
     /// Whether a row without a name is sent, as a query parameter `=value`
     /// is. Headers and metadata need a name.
     keyless_rows: bool,
+    /// Whether a row can send a file instead of text, as in a multipart form.
+    file_rows: bool,
 }
 
 impl EventEmitter<FieldsChanged> for RequestFields {}
+impl EventEmitter<ChooseFile> for RequestFields {}
 
 impl RequestFields {
     pub(crate) fn new(
@@ -56,6 +66,7 @@ impl RequestFields {
             focus: cx.focus_handle(),
             scope,
             keyless_rows: false,
+            file_rows: false,
         };
 
         for (key, value) in values {
@@ -69,6 +80,77 @@ impl RequestFields {
     pub(crate) fn with_keyless_rows(mut self) -> Self {
         self.keyless_rows = true;
         self
+    }
+
+    /// The parts of a multipart form, whose rows can send files.
+    pub(crate) fn multipart(
+        id: &'static str,
+        parts: &[FormPart],
+        scope: Entity<VariableScope>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let values: Vec<_> = parts
+            .iter()
+            .map(|part| (part.name.clone(), part.value.clone()))
+            .collect();
+        let mut fields = Self::new(id, &values, &[], scope, window, cx);
+        fields.file_rows = true;
+
+        for (row, part) in fields.rows.iter_mut().zip(parts) {
+            row.file = part.file;
+            if part.file {
+                row.value.update(cx, |value, cx| {
+                    value.set_placeholder("Choose a file", window, cx)
+                });
+            }
+        }
+
+        fields
+    }
+
+    /// The rows that are sent, as `FieldsChanged` lists them.
+    pub(crate) fn values(&self, cx: &App) -> Vec<(String, String)> {
+        self.rows
+            .iter()
+            .filter(|row| self.is_sent(row, cx))
+            .map(|row| {
+                (
+                    row.key.read(cx).value().to_string(),
+                    row.value.read(cx).value().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// The rows that are sent as the parts of a multipart form.
+    pub(crate) fn parts(&self, cx: &App) -> Vec<FormPart> {
+        self.rows
+            .iter()
+            .filter(|row| self.is_sent(row, cx))
+            .map(|row| FormPart {
+                name: row.key.read(cx).value().to_string(),
+                value: row.value.read(cx).value().to_string(),
+                file: row.file,
+            })
+            .collect()
+    }
+
+    /// Switch a row between text and a file. Its value no longer applies.
+    fn set_file(&mut self, index: usize, file: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.get_mut(index) else {
+            return;
+        };
+        if row.file == file {
+            return;
+        }
+
+        row.file = file;
+        row.value.update(cx, |value, cx| {
+            value.set_placeholder(if file { "Choose a file" } else { "Value" }, window, cx);
+            value.set_value("", window, cx);
+        });
+        self.emit_change(cx);
     }
 
     /// Enabled rows with a name are sent. With `keyless_rows`, any row with a
@@ -200,6 +282,7 @@ impl RequestFields {
 
         FieldRow {
             enabled: true,
+            file: false,
             key,
             value,
             description,
@@ -209,19 +292,7 @@ impl RequestFields {
     }
 
     fn emit_change(&self, cx: &mut Context<Self>) {
-        let values = self
-            .rows
-            .iter()
-            .filter(|row| self.is_sent(row, cx))
-            .map(|row| {
-                (
-                    row.key.read(cx).value().to_string(),
-                    row.value.read(cx).value().to_string(),
-                )
-            })
-            .collect();
-
-        cx.emit(FieldsChanged(values));
+        cx.emit(FieldsChanged(self.values(cx)));
         cx.notify();
     }
 }
@@ -229,6 +300,7 @@ impl RequestFields {
 impl Render for RequestFields {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.id;
+        let view = cx.entity().downgrade();
 
         v_flex()
             .id(id)
@@ -328,6 +400,8 @@ impl Render for RequestFields {
             .children(self.rows.iter().enumerate().map(|(index, row)| {
                 let populated =
                     !row.key.read(cx).value().is_empty() || !row.value.read(cx).value().is_empty();
+                let file = row.file;
+                let view = view.clone();
 
                 h_flex()
                     .id(("request-field", row.key.entity_id()))
@@ -389,6 +463,65 @@ impl Render for RequestFields {
                                             }
                                         }),
                                 )
+                                // Whether the part sends text or a file.
+                                .when(column == "key" && self.file_rows, |cell| {
+                                    let view = view.clone();
+                                    cell.child(
+                                        Button::new("part-type")
+                                            .debug_selector(move || format!("{id}-type-{index}"))
+                                            .ghost()
+                                            .xsmall()
+                                            .mr_1()
+                                            .label(if file { "File" } else { "Text" })
+                                            .icon(IconName::ChevronDown)
+                                            .accessibility_label(format!(
+                                                "{id} row {} sends {}",
+                                                index + 1,
+                                                if file { "a file" } else { "text" }
+                                            ))
+                                            .dropdown_menu(move |menu, _, _| {
+                                                [("Text", false), ("File", true)].into_iter().fold(
+                                                    menu,
+                                                    |menu, (label, option)| {
+                                                        let view = view.clone();
+                                                        menu.item(
+                                                            PopupMenuItem::new(label)
+                                                                .checked(option == file)
+                                                                .on_click(move |_, window, cx| {
+                                                                    let _ = view.update(
+                                                                        cx,
+                                                                        |view, cx| {
+                                                                            view.set_file(
+                                                                                index, option,
+                                                                                window, cx,
+                                                                            )
+                                                                        },
+                                                                    );
+                                                                }),
+                                                        )
+                                                    },
+                                                )
+                                            }),
+                                    )
+                                })
+                                .when(column == "value" && file, |cell| {
+                                    let input = input.clone();
+                                    cell.child(
+                                        Button::new("choose-file")
+                                            .debug_selector(move || {
+                                                format!("{id}-choose-file-{index}")
+                                            })
+                                            .ghost()
+                                            .xsmall()
+                                            .mr_1()
+                                            .icon(IconName::FolderOpen)
+                                            .accessibility_label("Choose a file")
+                                            .tooltip("Choose a file")
+                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                cx.emit(ChooseFile(input.clone()));
+                                            })),
+                                    )
+                                })
                                 .when(column == "description" && populated, |cell| {
                                     cell.child(
                                         h_flex().absolute().right_1().top_0().h_full().child(

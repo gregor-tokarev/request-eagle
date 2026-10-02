@@ -7,7 +7,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
         path: "http://example.com".into(),
         method: Method::Post,
         headers: vec![("{{header_name}}".into(), "virtual.example".into())],
-        body: Some(b"{}".to_vec()),
+        body: Some(request::Body::json("{}")),
         ..Default::default()
     };
     let preview = super::execution::generated_headers(&request);
@@ -109,4 +109,97 @@ fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
                 .all(|(name, _)| name != "Host")
         );
     }
+}
+
+#[test]
+fn body_types_preview_their_content_type_and_length() {
+    use request::{Body, FormPart, RawLanguage};
+
+    let preview = |method, body| {
+        let request = request::HttpRequest {
+            method,
+            path: "https://example.com".into(),
+            body: Some(body),
+            ..Default::default()
+        };
+        let headers = super::execution::generated_headers(&request);
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(generated, _)| generated == name)
+                .map(|(_, value)| value.clone())
+        };
+
+        (header("Content-Type"), header("Content-Length"))
+    };
+    let some =
+        |content_type: &str, length: &str| (Some(content_type.to_owned()), Some(length.to_owned()));
+
+    assert_eq!(
+        preview(
+            Method::Post,
+            Body::Raw {
+                language: RawLanguage::Xml,
+                text: "<a/>".into(),
+            }
+        ),
+        some("application/xml", "4")
+    );
+    // Empty text is not sent.
+    assert_eq!(
+        preview(Method::Post, Body::json("")),
+        (None, Some("0".to_owned()))
+    );
+    assert_eq!(
+        preview(
+            Method::Put,
+            Body::UrlEncoded {
+                fields: vec![("a b".into(), "&".into())],
+            }
+        ),
+        some("application/x-www-form-urlencoded", "7")
+    );
+    assert_eq!(
+        preview(
+            Method::Post,
+            Body::UrlEncoded {
+                fields: vec![("token".into(), "{{token}}".into())],
+            }
+        ),
+        some("application/x-www-form-urlencoded", "Resolved on Send")
+    );
+    assert_eq!(
+        preview(
+            Method::Delete,
+            Body::Multipart {
+                parts: vec![FormPart {
+                    name: "avatar".into(),
+                    value: "eagle.png".into(),
+                    file: true,
+                }],
+            }
+        ),
+        some(
+            "multipart/form-data; boundary=Calculated on Send",
+            "Calculated on Send"
+        )
+    );
+    assert_eq!(
+        preview(
+            Method::Patch,
+            Body::Binary {
+                file: "eagle.png".into(),
+            }
+        ),
+        some("image/png", "Calculated on Send")
+    );
+    assert_eq!(
+        preview(
+            Method::Get,
+            Body::Binary {
+                file: "eagle.png".into(),
+            }
+        ),
+        (None, None)
+    );
 }

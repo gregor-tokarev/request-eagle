@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{CookieJar, HttpRequest, HttpSettings, Method};
+use crate::{Body, CookieJar, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -15,7 +15,7 @@ fn writes_requests_like_postman_snippets() {
         method: Method::Post,
         path: "{{base}}/pets".into(),
         headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
-        body: Some(b"{\n  \"name\": \"Rex's\"\n}".to_vec()),
+        body: Some(Body::json("{\n  \"name\": \"Rex's\"\n}")),
         ..HttpRequest::default()
     };
 
@@ -38,7 +38,7 @@ fn names_the_method_only_when_curl_would_not_choose_it() {
             method,
             path: "example.com".into(),
             headers: vec![("Content-Type".into(), "text/plain".into())],
-            body: body.map(|body| body.as_bytes().to_vec()),
+            body: body.map(Body::json),
             ..HttpRequest::default()
         }
         .curl_command(&HashMap::new(), None)
@@ -142,7 +142,7 @@ fn leaves_out_what_sending_leaves_out_before_filling_variables() {
     let request = HttpRequest {
         method: Method::Get,
         path: "{{host}}/users".into(),
-        body: Some(b"{{unfinished".to_vec()),
+        body: Some(Body::json("{{unfinished")),
         ..HttpRequest::default()
     };
 
@@ -274,5 +274,73 @@ fn includes_the_jar_cookies_beside_literal_braces() {
         !request("{{base}}/pets")
             .curl_command(&HashMap::new(), Some(&jar))
             .contains("Cookie")
+    );
+}
+
+#[test]
+fn writes_each_body_type_with_the_option_that_sends_it() {
+    let command = |body| {
+        HttpRequest {
+            method: Method::Post,
+            path: "https://example.com/upload".into(),
+            body: Some(body),
+            ..HttpRequest::default()
+        }
+        .curl_command(&values(&[("name", "Rex & co")]), None)
+    };
+
+    assert_eq!(
+        command(Body::Raw {
+            language: RawLanguage::Xml,
+            text: "<pet>{{name}}</pet>".into(),
+        }),
+        "curl --location 'https://example.com/upload' \\\n\
+         --header 'Content-Type: application/xml' \\\n\
+         --data '<pet>Rex & co</pet>'"
+    );
+    // cURL encodes the values; names it sends as written.
+    assert_eq!(
+        command(Body::UrlEncoded {
+            fields: vec![
+                ("pet name".into(), "{{name}}".into()),
+                ("token".into(), "{{token}}".into()),
+            ],
+        }),
+        "curl --location 'https://example.com/upload' \\\n\
+         --data-urlencode 'pet+name=Rex & co' \\\n\
+         --data-urlencode 'token={{token}}'"
+    );
+    assert_eq!(
+        command(Body::Multipart {
+            parts: vec![
+                FormPart {
+                    name: "title".into(),
+                    value: "@{{name}};type=text".into(),
+                    file: false,
+                },
+                FormPart {
+                    name: "avatar".into(),
+                    value: "/tmp/my \"eagle\";1.png".into(),
+                    file: true,
+                },
+            ],
+        }),
+        "curl --location 'https://example.com/upload' \\\n\
+         --form-string 'title=@Rex & co;type=text' \\\n\
+         --form 'avatar=@\"/tmp/my \\\"eagle\\\";1.png\"'"
+    );
+    // cURL would call the file a URL-encoded form.
+    assert_eq!(
+        command(Body::Binary {
+            file: "/tmp/eagle.png".into(),
+        }),
+        "curl --location 'https://example.com/upload' \\\n\
+         --header 'Content-Type: image/png' \\\n\
+         --data-binary '@/tmp/eagle.png'"
+    );
+    // A form without fields sends nothing, so the method is named.
+    assert_eq!(
+        command(Body::UrlEncoded { fields: Vec::new() }),
+        "curl --location --request POST 'https://example.com/upload'"
     );
 }

@@ -14,6 +14,8 @@ environment = { path = "../environment" }
 flate2 = "1"
 futures = "0.3"
 percent-encoding = "2"
+# The media type of a file sent as a body or form field, by its extension.
+mime_guess = "2"
 http_client = { package = "gpui-pre-http-client", version = "=0.3.5" }
 hyper-util = { version = "0.1", features = ["tokio"] }
 # Client certificates: PKCS #12 files and encrypted PEM keys.

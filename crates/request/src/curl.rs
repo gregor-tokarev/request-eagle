@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{CookieJar, HttpRequest, Method};
+use crate::{Body, CookieJar, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -30,10 +30,23 @@ impl HttpRequest {
             *key = keep_unknown(key, values);
             *value = keep_unknown(value, values);
         }
-        if let Some(body) = &mut request.body
-            && let Ok(text) = std::str::from_utf8(body)
-        {
-            *body = keep_unknown(text, values).into_bytes();
+        match &mut request.body {
+            Some(Body::Raw { text, .. }) => *text = keep_unknown(text, values),
+            Some(Body::UrlEncoded { fields }) => {
+                for (name, value) in fields {
+                    *name = keep_unknown(name, values);
+                    *value = keep_unknown(value, values);
+                }
+            }
+            Some(Body::Multipart { parts }) => {
+                for part in parts {
+                    part.name = keep_unknown(&part.name, values);
+                    if !part.file {
+                        part.value = keep_unknown(&part.value, values);
+                    }
+                }
+            }
+            Some(Body::Binary { .. }) | None => {}
         }
 
         // Filling in a path variable encodes its value, including the braces
@@ -59,7 +72,21 @@ impl HttpRequest {
                 .replace(&format!("\u{E000}{index}\u{E000}"), reference);
         }
         let url = url(&request.path, &request.query);
-        let body = request.body.as_deref().filter(|body| !body.is_empty());
+        let data = request.body.as_ref().map(data).unwrap_or_default();
+
+        // cURL names the type of forms itself; it would send raw text and
+        // files as a URL-encoded form.
+        if let Some(body @ (Body::Raw { .. } | Body::Binary { .. })) = &request.body
+            && !data.is_empty()
+            && !request
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        {
+            request
+                .headers
+                .push(("Content-Type".into(), body.content_type()));
+        }
 
         // The jar's cookies for the request's own URL, which cURL sends on
         // to redirects as well. A URL whose host is not known has none.
@@ -99,7 +126,7 @@ impl HttpRequest {
             Method::Head => command.push_str(" --head"),
             // cURL sends a body with POST unless told otherwise.
             Method::Get => {}
-            Method::Post if body.is_some() => {}
+            Method::Post if !data.is_empty() => {}
             method => {
                 command.push_str(" --request ");
                 command.push_str(method.as_str());
@@ -119,18 +146,42 @@ impl HttpRequest {
             command.push_str(&quote(&header));
         }
 
-        if let Some(body) = body {
-            let body = String::from_utf8_lossy(body);
-            // `--data` reads a file when its value starts with `@`.
-            command.push_str(if body.contains('@') {
-                " \\\n--data-raw "
-            } else {
-                " \\\n--data "
-            });
-            command.push_str(&quote(&body));
+        for (option, value) in data {
+            command.push_str(" \\\n--");
+            command.push_str(option);
+            command.push(' ');
+            command.push_str(&quote(&value));
         }
 
         command
+    }
+}
+
+/// The options that send the body, with their values.
+fn data(body: &Body) -> Vec<(&'static str, String)> {
+    match body {
+        Body::Raw { text, .. } if text.is_empty() => Vec::new(),
+        // `--data` reads a file when its value starts with `@`.
+        Body::Raw { text, .. } if text.contains('@') => vec![("data-raw", text.clone())],
+        Body::Raw { text, .. } => vec![("data", text.clone())],
+        // cURL encodes the value, but expects the name to be encoded already.
+        Body::UrlEncoded { fields } => fields
+            .iter()
+            .map(|(name, value)| ("data-urlencode", format!("{}={value}", form_encode(name))))
+            .collect(),
+        Body::Multipart { parts } => parts
+            .iter()
+            .map(|part| {
+                if part.file {
+                    // A quoted file name may contain `;` and `,`.
+                    let path = part.value.replace('\\', "\\\\").replace('"', "\\\"");
+                    ("form", format!("{}=@\"{path}\"", part.name))
+                } else {
+                    ("form-string", format!("{}={}", part.name, part.value))
+                }
+            })
+            .collect(),
+        Body::Binary { file } => vec![("data-binary", format!("@{}", file.display()))],
     }
 }
 

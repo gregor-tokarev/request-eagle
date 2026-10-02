@@ -38,8 +38,12 @@ pub struct HttpRequest {
 
     #[serde(default)]
     pub headers: Vec<(String, String)>,
-    #[serde(default)]
-    pub body: Option<Vec<u8>>,
+    #[serde(
+        default,
+        deserialize_with = "crate::body::stored",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub body: Option<crate::Body>,
     /// Sent after the URL's own query. The app keeps its parameters in the
     /// URL; see `inline_query`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -90,7 +94,8 @@ impl HttpRequest {
         }
     }
 
-    /// Apply the request editor's URL and JSON defaults to a resolved snapshot.
+    /// Apply the request editor's URL default to a resolved snapshot, and
+    /// leave out the body of a method that sends none.
     pub fn prepare_for_send(mut self) -> Self {
         self.path = self.path.trim().to_owned();
         if !self.path.is_empty() && !self.path.contains("://") && !self.path.starts_with("{{") {
@@ -99,17 +104,43 @@ impl HttpRequest {
 
         if matches!(self.method, Method::Get | Method::Head) {
             self.body = None;
-        } else if self.body.is_some()
-            && !self
-                .headers
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-        {
-            self.headers
-                .push(("Content-Type".into(), "application/json".into()));
         }
 
         self
+    }
+
+    /// The bytes of the resolved body, with its files read. Adds the
+    /// `Content-Type` the body needs unless the request sets one; a
+    /// multipart type written without its boundary gets it. Empty raw text
+    /// sends no body.
+    pub(crate) fn encode_body(&mut self) -> Result<Option<Vec<u8>>, crate::ExecutionError> {
+        let Some(body) = &mut self.body else {
+            return Ok(None);
+        };
+        if matches!(body, crate::Body::Raw { text, .. } if text.is_empty()) {
+            return Ok(None);
+        }
+        let (bytes, content_type) = body.encode()?;
+
+        let own = self
+            .headers
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"));
+        let Some((_, value)) = own else {
+            self.headers.push(("Content-Type".into(), content_type));
+            return Ok(Some(bytes));
+        };
+
+        let lowercase = value.to_ascii_lowercase();
+        if lowercase.trim_start().starts_with("multipart/")
+            && !lowercase.contains("boundary=")
+            && let Some((_, boundary)) = content_type.split_once("; boundary=")
+        {
+            value.push_str("; boundary=");
+            value.push_str(boundary);
+        }
+
+        Ok(Some(bytes))
     }
 }
 

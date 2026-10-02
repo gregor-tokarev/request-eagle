@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 use url::form_urlencoded;
 
-use crate::{GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{Body, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -338,11 +338,26 @@ impl HttpRequest {
             *value = resolver.resolve(value)?;
         }
 
-        if let Some(body) = &mut request.body
-            && let Ok(text) = std::str::from_utf8(body)
-            && (body_changed || text.contains("{{"))
-        {
-            *body = resolver.resolve(text)?.into_bytes();
+        match &mut request.body {
+            Some(Body::Raw { text, .. }) if body_changed || text.contains("{{") => {
+                *text = resolver.resolve(text)?;
+            }
+            Some(Body::UrlEncoded { fields }) => {
+                for (name, value) in fields {
+                    *name = resolver.resolve(name)?;
+                    *value = resolver.resolve(value)?;
+                }
+            }
+            // A file is sent from the path as written.
+            Some(Body::Multipart { parts }) => {
+                for part in parts {
+                    part.name = resolver.resolve(&part.name)?;
+                    if !part.file {
+                        part.value = resolver.resolve(&part.value)?;
+                    }
+                }
+            }
+            Some(Body::Raw { .. } | Body::Binary { .. }) | None => {}
         }
 
         Ok(request)

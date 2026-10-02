@@ -10,6 +10,7 @@
 //! connection's events through a channel until it closes. `GrpcClient` loads
 //! gRPC service definitions and starts calls whose events arrive on a channel.
 
+mod body;
 mod certificates;
 mod cookies;
 mod curl;
@@ -33,6 +34,8 @@ mod variables;
 mod websocket;
 
 #[cfg(test)]
+mod body_tests;
+#[cfg(test)]
 mod certificates_tests;
 #[cfg(test)]
 mod cookies_tests;
@@ -47,6 +50,7 @@ mod request_url_tests;
 
 pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
+pub use body::{Body, FormPart, RawLanguage};
 pub use certificates::{CertificateFiles, ClientCertificate};
 pub use cookies::{Cookie, CookieJar};
 pub use error::ExecutionError;

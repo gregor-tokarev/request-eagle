@@ -1,5 +1,5 @@
 use collection::ImportedItem;
-use request::{HttpRequest, Method, Request};
+use request::{Body, HttpRequest, Method, Request};
 use serde_json::json;
 
 use crate::{ImportError, parse};
@@ -23,7 +23,10 @@ fn folder(item: &ImportedItem) -> (&str, &[ImportedItem]) {
 }
 
 fn json_body(request: &HttpRequest) -> serde_json::Value {
-    serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
+    let Some(Body::Raw { text, .. }) = &request.body else {
+        panic!("expected a raw body");
+    };
+    serde_json::from_str(text).unwrap()
 }
 
 const PET_STORE: &str = r##"
@@ -202,12 +205,10 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
     let (_, store) = folder(&import.collection.items[1]);
     let (_, order) = http(&store[0]);
     assert_eq!(order.path, "{{base_url}}/stores/{{storeId}}/orders");
+    // JSON bodies are sent as JSON without a header of their own.
     assert_eq!(
         order.headers,
-        [
-            ("X-API-Key".to_owned(), "{{apiKey}}".to_owned()),
-            ("Content-Type".to_owned(), "application/json".to_owned()),
-        ]
+        [("X-API-Key".to_owned(), "{{apiKey}}".to_owned())]
     );
     assert_eq!(json_body(order), json!({"quantity": 2}));
 
@@ -223,9 +224,11 @@ fn openapi_bodies_are_generated_from_schemas() {
     let (_, update) = http(&pets[1]);
 
     assert_eq!(update.method, Method::Put);
-    assert_eq!(
-        update.headers[1],
-        ("Content-Type".to_owned(), "application/json".to_owned())
+    assert!(
+        !update
+            .headers
+            .iter()
+            .any(|(name, _)| name == "Content-Type")
     );
 
     let body = json_body(update);
@@ -290,7 +293,12 @@ fn swagger_specifications_are_imported() {
 
     let (name, login) = http(&collection.items[1]);
     assert_eq!(name, "POST /login");
-    assert_eq!(login.body.as_deref(), Some(b"user=admin".as_slice()));
+    assert_eq!(
+        login.body,
+        Some(Body::UrlEncoded {
+            fields: vec![("user".into(), "admin".into())],
+        })
+    );
 }
 
 #[test]

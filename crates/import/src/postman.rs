@@ -4,12 +4,14 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use collection::{ImportedCollection, ImportedItem};
-use request::{HttpRequest, HttpSettings, Method, Request, RequestScripts};
+use request::{
+    Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage, Request, RequestScripts,
+};
 use serde_json::Value;
 
 use crate::{
     Import, ImportError,
-    body::{multipart_form, set_content_type, url_encoded_form, url_encoded_form_script},
+    body::set_content_type,
     document::{clean_name, text},
 };
 
@@ -151,7 +153,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     let mut headers = pairs(&request["header"]);
     let mut query = Vec::new();
     let mut scripts = inherited.scripts.then(scripts(item));
-    let body = body(&request["body"], &mut headers, &mut scripts);
+    let body = body(&request["body"], &mut headers);
     // Postman applies authorization after the pre-request scripts, which may
     // set the credentials it uses.
     authorize(
@@ -245,51 +247,77 @@ fn assemble_url(url: &Value) -> String {
     assembled
 }
 
-fn body(
-    body: &Value,
-    headers: &mut Vec<(String, String)>,
-    scripts: &mut Scripts,
-) -> Option<Vec<u8>> {
+fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Body> {
     if body["disabled"].as_bool() == Some(true) {
         return None;
     }
 
     match body["mode"].as_str()? {
         "raw" => {
-            let raw = body["raw"].as_str().filter(|raw| !raw.is_empty())?;
-            let content_type = match body["options"]["raw"]["language"].as_str() {
-                Some("json") => "application/json",
-                Some("xml") => "application/xml",
-                Some("html") => "text/html",
-                Some("javascript") => "application/javascript",
-                _ => "text/plain",
+            let text = body["raw"]
+                .as_str()
+                .filter(|raw| !raw.is_empty())?
+                .to_owned();
+            // Other languages are sent as text of their own type.
+            let language = match body["options"]["raw"]["language"].as_str() {
+                Some("json") => RawLanguage::Json,
+                Some("xml") => RawLanguage::Xml,
+                Some("html") => {
+                    set_content_type(headers, "text/html");
+                    RawLanguage::Text
+                }
+                Some("javascript") => {
+                    set_content_type(headers, "application/javascript");
+                    RawLanguage::Text
+                }
+                _ => RawLanguage::Text,
             };
-            set_content_type(headers, content_type);
 
-            Some(raw.as_bytes().to_vec())
+            Some(Body::Raw { language, text })
         }
         "urlencoded" => {
             let fields = pairs(&body["urlencoded"]);
-            if fields.is_empty() {
-                return None;
-            }
-            scripts.pre_request.extend(url_encoded_form_script(&fields));
-
-            Some(url_encoded_form(&fields, headers))
+            (!fields.is_empty()).then_some(Body::UrlEncoded { fields })
         }
         "formdata" => {
-            // Files are not part of a saved request, so only text fields remain.
-            let fields: Vec<_> = body["formdata"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|field| field["type"].as_str() != Some("file"))
-                .filter(|field| field["disabled"].as_bool() != Some(true))
-                .filter_map(|field| {
-                    Some((field["key"].as_str()?.to_owned(), text(field.get("value"))))
-                })
-                .collect();
-            (!fields.is_empty()).then(|| multipart_form(&fields, headers))
+            let mut parts = Vec::new();
+            let fields = body["formdata"].as_array().into_iter().flatten();
+            for field in fields.filter(|field| field["disabled"].as_bool() != Some(true)) {
+                let Some(name) = field["key"].as_str() else {
+                    continue;
+                };
+
+                if field["type"].as_str() != Some("file") {
+                    parts.push(FormPart {
+                        name: name.to_owned(),
+                        value: text(field.get("value")),
+                        file: false,
+                    });
+                    continue;
+                }
+
+                // A field can send several files, or none chosen yet.
+                let files = match &field["src"] {
+                    Value::Array(files) => files.iter().filter_map(Value::as_str).collect(),
+                    Value::String(file) => vec![file.as_str()],
+                    _ => Vec::new(),
+                };
+                for file in if files.is_empty() { vec![""] } else { files } {
+                    parts.push(FormPart {
+                        name: name.to_owned(),
+                        value: file.to_owned(),
+                        file: true,
+                    });
+                }
+            }
+
+            (!parts.is_empty()).then_some(Body::Multipart { parts })
+        }
+        "file" => {
+            let file = body["file"]["src"]
+                .as_str()
+                .filter(|file| !file.is_empty())?;
+            Some(Body::Binary { file: file.into() })
         }
         "graphql" => {
             let graphql = &body["graphql"];
@@ -301,13 +329,12 @@ fn body(
                 Value::Null => String::new(),
                 variables => serde_json::to_string_pretty(variables).ok()?,
             };
-            set_content_type(headers, "application/json");
 
-            Some(if variables.is_empty() {
-                format!("{{\n  \"query\": {query}\n}}").into_bytes()
+            Some(Body::json(if variables.is_empty() {
+                format!("{{\n  \"query\": {query}\n}}")
             } else {
-                format!("{{\n  \"query\": {query},\n  \"variables\": {variables}\n}}").into_bytes()
-            })
+                format!("{{\n  \"query\": {query},\n  \"variables\": {variables}\n}}")
+            }))
         }
         _ => None,
     }

@@ -3,13 +3,16 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
 use request::{
     CookieJar, GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings,
-    HttpRequest, HttpSettings, Method, RequestExecutor, RequestPreferences, RequestScripts,
-    RequestVariables, Response, ScriptPhase, ScriptReport,
+    HttpRequest, HttpSettings, Method, RawLanguage, RequestExecutor, RequestPreferences,
+    RequestScripts, RequestVariables, Response, ScriptPhase, ScriptReport,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
-use crate::commands::{Body, GrpcProtocol, GrpcRequestInput, Method as InputMethod, RequestInput};
+use crate::commands::{
+    Body, FormPart, GrpcProtocol, GrpcRequestInput, Language, Method as InputMethod, RequestInput,
+    TypedBody,
+};
 
 /// `cookies` is the app's cookie jar file.
 pub async fn run(
@@ -82,6 +85,9 @@ pub async fn run(
     .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
     let mut request = request;
+    if let Some(body) = &mut request.body {
+        body.resolve_files(&collection.path);
+    }
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
         request.settings.timeout_ms = None;
@@ -295,8 +301,29 @@ impl From<RequestInput> for HttpRequest {
             query: input.query,
             path_variables: input.path_variables,
             body: input.body.map(|body| match body {
-                Body::Text(text) => text.into_bytes(),
-                Body::Bytes(bytes) => bytes,
+                Body::Text(text) => request::Body::json(text),
+                Body::Typed(TypedBody::Raw { language, text }) => request::Body::Raw {
+                    language: match language {
+                        Language::Json => RawLanguage::Json,
+                        Language::Xml => RawLanguage::Xml,
+                        Language::Text => RawLanguage::Text,
+                    },
+                    text,
+                },
+                Body::Typed(TypedBody::UrlEncoded { fields }) => {
+                    request::Body::UrlEncoded { fields }
+                }
+                Body::Typed(TypedBody::Multipart { parts }) => request::Body::Multipart {
+                    parts: parts
+                        .into_iter()
+                        .map(|part| request::FormPart {
+                            name: part.name,
+                            value: part.value,
+                            file: part.file,
+                        })
+                        .collect(),
+                },
+                Body::Typed(TypedBody::Binary { file }) => request::Body::Binary { file },
             }),
             scripts: RequestScripts {
                 pre_request: input.pre_request,
@@ -327,13 +354,30 @@ impl From<&HttpRequest> for RequestInput {
             headers: request.headers.clone(),
             query: request.query.clone(),
             path_variables: request.path_variables.clone(),
-            body: request
-                .body
-                .as_ref()
-                .map(|bytes| match String::from_utf8(bytes.clone()) {
-                    Ok(text) => Body::Text(text),
-                    Err(_) => Body::Bytes(bytes.clone()),
-                }),
+            body: request.body.clone().map(|body| {
+                Body::Typed(match body {
+                    request::Body::Raw { language, text } => TypedBody::Raw {
+                        language: match language {
+                            RawLanguage::Json => Language::Json,
+                            RawLanguage::Xml => Language::Xml,
+                            RawLanguage::Text => Language::Text,
+                        },
+                        text,
+                    },
+                    request::Body::UrlEncoded { fields } => TypedBody::UrlEncoded { fields },
+                    request::Body::Multipart { parts } => TypedBody::Multipart {
+                        parts: parts
+                            .into_iter()
+                            .map(|part| FormPart {
+                                name: part.name,
+                                value: part.value,
+                                file: part.file,
+                            })
+                            .collect(),
+                    },
+                    request::Body::Binary { file } => TypedBody::Binary { file },
+                })
+            }),
             pre_request: request.scripts.pre_request.clone(),
             post_response: request.scripts.post_response.clone(),
             timeout_ms: request.settings.timeout_ms,

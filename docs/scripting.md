@@ -83,6 +83,18 @@ Like the primary request, they store and send cookies in the cookie jar, so a
 login subrequest's session cookie goes with the request that follows.
 Timers, filesystem access, and `fetch` are not provided.
 
+## Read and change the body
+
+`pm.request.body.mode` names the body's type, as in Postman: `raw`,
+`urlencoded`, `formdata` or `file`.
+
+| API | Body |
+| --- | --- |
+| `pm.request.body.raw` | Raw text. Setting it, or calling `update(text)`, makes any body raw text. After the response, it is what was sent. |
+| `pm.request.body.urlencoded` | A URL-encoded form's fields: `get`, `has`, `add`, `remove`, `upsert`, `clear` and `toJSON`, like headers. |
+| `pm.request.body.formdata` | A multipart form's parts, with the same methods. Text parts have a `value`; file parts have `type: "file"` and the file's path in `src`. |
+| `pm.request.body.file.src` | The path of the file a binary body sends. |
+
 ## Sign and encode values
 
 ```js

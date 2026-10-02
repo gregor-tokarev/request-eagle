@@ -50,23 +50,55 @@
 
     let body, originalBody;
     let bodyLoaded = false, bodyChanged = false;
+    // A form's fields, and a multipart form's parts as Postman lists them:
+    // text parts with a value, file parts with the path in `src`.
+    const fields = input.body.fields ?? [];
+    const parts = (input.body.parts ?? []).map(part => part.file
+        ? {key: part.name, src: part.value, type: "file"}
+        : {key: part.name, value: part.value, type: "text"});
+    const formdata = {
+        get(name) { return parts.find(part => part.key === String(name))?.value; },
+        has(name) { return parts.some(part => part.key === String(name)); },
+        add(part) {
+            parts.push(part.type === "file"
+                ? {key: String(part.key), src: String(part.src ?? ""), type: "file"}
+                : {key: String(part.key), value: String(part.value ?? ""), type: "text"});
+        },
+        remove(name) {
+            for (let i = parts.length - 1; i >= 0; i--) {
+                if (parts[i].key === String(name)) parts.splice(i, 1);
+            }
+        },
+        upsert(part) { this.remove(part.key); this.add(part); },
+        clear() { parts.length = 0; },
+        toJSON() { return parts.map(part => ({...part})); },
+    };
+    const requestBody = {
+        mode: input.body.mode,
+        get raw() {
+            if (!bodyLoaded && !bodyChanged) {
+                body = originalBody = readBody(false);
+                bodyLoaded = true;
+            }
+            return body;
+        },
+        // Setting text makes the body raw, as `update` does in Postman.
+        set raw(value) {
+            body = value;
+            bodyChanged = !bodyLoaded || value !== originalBody;
+            if (bodyChanged) this.mode = "raw";
+        },
+        update(value) { this.raw = String(value); },
+    };
+    if (input.body.mode === "urlencoded") requestBody.urlencoded = entries(fields);
+    if (input.body.mode === "formdata") requestBody.formdata = formdata;
+    if (input.body.mode === "file") requestBody.file = {src: input.body.file};
     const request = {
         method: input.method,
         get url() { return requestUrl; },
         set url(value) { requestUrl.update(value); },
         headers: entries(input.headers, true),
-        body: {
-            mode: "raw",
-            get raw() {
-                if (!bodyLoaded && !bodyChanged) {
-                    body = originalBody = readBody(false);
-                    bodyLoaded = true;
-                }
-                return body;
-            },
-            set raw(value) { body = value; bodyChanged = !bodyLoaded || value !== originalBody; },
-            update(value) { this.raw = String(value); },
-        },
+        body: requestBody,
     };
 
     // Scripts see the cookies of this exchange: those the request sends,
@@ -238,5 +270,9 @@
         headers: input.headers,
         body: bodyChanged ? body : null,
         body_changed: bodyChanged,
+        fields: input.body.mode === "urlencoded" ? fields : null,
+        parts: input.body.mode === "formdata" ? parts.map(part => part.type === "file"
+            ? {name: part.key, value: part.src, file: true}
+            : {name: part.key, value: part.value}) : null,
     });
 })

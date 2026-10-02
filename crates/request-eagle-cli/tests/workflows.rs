@@ -103,7 +103,15 @@ fn saved_collection_lifecycle_uses_the_backend_without_an_app() {
     .unwrap();
 
     let mut request = created["request"].clone();
-    request["body"] = json!([0, 255, 128]);
+    // Text alone is raw JSON.
+    assert_eq!(
+        request["body"],
+        json!({"type":"raw","language":"json","text":"old"})
+    );
+    request["body"] = json!({"type":"multipart","parts":[
+        {"name":"title","value":"Hi"},
+        {"name":"avatar","value":"files/eagle.png","file":true},
+    ]});
     request["headers"] = json!([["X-Test", "one"], ["X-Test", "two"]]);
     let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":request}));
     assert_eq!(updated["id"], created["id"]);

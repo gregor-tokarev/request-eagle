@@ -3,10 +3,8 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use request::{HttpRequest, HttpSettings, Method};
+use request::{Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 use thiserror::Error;
-
-use crate::body::{BOUNDARY, multipart_form};
 
 /// Characters `--data-urlencode` leaves as they are.
 const URL_ENCODED: &AsciiSet = &NON_ALPHANUMERIC
@@ -174,7 +172,7 @@ pub enum CurlError {
     MissingUrl,
     #[error("Request Eagle cannot send {0} requests.")]
     UnsupportedMethod(String),
-    #[error("Request Eagle cannot send files, so it cannot import {0}.")]
+    #[error("Request Eagle cannot send files this way, so it cannot import {0}.")]
     File(String),
     #[error("The cURL command sends both form fields and data. cURL accepts only one of them.")]
     FormAndData,
@@ -280,8 +278,10 @@ struct Options {
     /// Lowercase names of headers removed with `-H 'Name:'`.
     removed: Vec<String>,
     data: Option<String>,
+    /// The file `--data-binary @file` sends.
+    file: Option<String>,
     json: bool,
-    form: Vec<(String, String)>,
+    form: Vec<FormPart>,
     user: Option<String>,
     cookies: Vec<String>,
     insecure: bool,
@@ -322,25 +322,48 @@ impl Options {
             "oauth2-bearer" => self
                 .headers
                 .push(("Authorization".into(), format!("Bearer {value}"))),
+            // Only `--data-binary` sends a file as it is.
+            "data-binary" if value.starts_with('@') => {
+                if self.file.is_some() || self.data.is_some() {
+                    return Err(CurlError::File(format!("--{name} {value} with other data")));
+                }
+                self.file = Some(value[1..].to_owned());
+            }
             "data" | "data-ascii" | "data-binary" | "json" => {
                 if value.starts_with('@') {
                     return Err(CurlError::File(format!("--{name} {value}")));
                 }
+                if self.file.is_some() {
+                    return Err(CurlError::File(format!("--{name} {value} with a file")));
+                }
                 self.json |= name == "json";
                 self.add_data(&value, name != "json");
+            }
+            "data-raw" | "data-urlencode" if self.file.is_some() => {
+                return Err(CurlError::File(format!("--{name} {value} with a file")));
             }
             "data-raw" => self.add_data(&value, true),
             "data-urlencode" => self.add_data(&url_encode_data(&value)?, true),
             "form" => {
                 let (field, content) = value.split_once('=').unwrap_or((&value, ""));
-                if content.starts_with(['@', '<']) {
+                // `<file` sends the file's text as the value.
+                if content.starts_with('<') {
                     return Err(CurlError::File(format!("--form {value}")));
                 }
-                self.form.push((field.to_owned(), form_value(content)));
+                let file = content.strip_prefix('@');
+                self.form.push(FormPart {
+                    name: field.to_owned(),
+                    value: form_value(file.unwrap_or(content)),
+                    file: file.is_some(),
+                });
             }
             "form-string" => {
                 let (field, content) = value.split_once('=').unwrap_or((&value, ""));
-                self.form.push((field.to_owned(), content.to_owned()));
+                self.form.push(FormPart {
+                    name: field.to_owned(),
+                    value: content.to_owned(),
+                    file: false,
+                });
             }
             "upload-file" => return Err(CurlError::File(format!("--upload-file {value}"))),
             // In seconds, which may have a fraction. Zero is no limit, as in
@@ -401,6 +424,24 @@ impl Options {
         }
     }
 
+    /// The language data is highlighted in, by the type it is sent as.
+    fn language(&self) -> RawLanguage {
+        let content_type = self
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        if content_type.contains("json") {
+            RawLanguage::Json
+        } else if content_type.contains("xml") {
+            RawLanguage::Xml
+        } else {
+            RawLanguage::Text
+        }
+    }
+
     fn into_request(mut self) -> Result<HttpRequest, CurlError> {
         let mut url = self.url.take().ok_or(CurlError::MissingUrl)?;
         if !url.contains("://") && !url.starts_with("{{") {
@@ -408,7 +449,7 @@ impl Options {
             url = format!("http://{url}");
         }
 
-        if !self.form.is_empty() && self.data.is_some() {
+        if !self.form.is_empty() && (self.data.is_some() || self.file.is_some()) {
             return Err(CurlError::FormAndData);
         }
 
@@ -434,31 +475,35 @@ impl Options {
         let mut body = None;
 
         if self.get {
+            if let Some(file) = &self.file {
+                return Err(CurlError::File(format!("--get --data-binary @{file}")));
+            }
             // `--get` sends the data in the query instead of the body.
             if let Some(data) = self.data.take() {
                 let fragment = url.find('#').map(|start| url.split_off(start));
                 let separator = if url.contains('?') { '&' } else { '?' };
                 url = format!("{url}{separator}{data}{}", fragment.unwrap_or_default());
             }
-        } else if let Some(data) = self.data.take() {
+        } else if let Some(text) = self.data.take() {
             if self.json {
                 self.add_default("Content-Type", "application/json");
                 self.add_default("Accept", "application/json");
             } else {
                 self.add_default("Content-Type", "application/x-www-form-urlencoded");
             }
-            body = Some(data.into_bytes());
+            body = Some(Body::Raw {
+                language: self.language(),
+                text,
+            });
+        } else if let Some(file) = self.file.take() {
+            self.add_default("Content-Type", "application/x-www-form-urlencoded");
+            body = Some(Body::Binary { file: file.into() });
         } else if !self.form.is_empty() {
-            // cURL adds the boundary to a multipart type written without one.
-            for (name, value) in &mut self.headers {
-                if name.eq_ignore_ascii_case("content-type")
-                    && value.to_ascii_lowercase().starts_with("multipart/")
-                    && !value.contains("boundary=")
-                {
-                    *value = format!("{value}; boundary={BOUNDARY}");
-                }
-            }
-            body = Some(multipart_form(&self.form, &mut self.headers));
+            // Sending adds the boundary to a multipart type written without
+            // one, as cURL does.
+            body = Some(Body::Multipart {
+                parts: std::mem::take(&mut self.form),
+            });
         }
 
         let method = match self.method.as_deref() {
