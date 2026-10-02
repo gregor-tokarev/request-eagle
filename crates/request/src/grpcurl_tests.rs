@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
-use crate::{GrpcDefinition, GrpcRequest, GrpcSettings};
+use crate::{GrpcRequest, GrpcSettings};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -160,8 +159,14 @@ fn applies_the_request_settings() {
     );
 }
 
+// The expected commands use Unix paths.
+#[cfg(unix)]
 #[test]
 fn names_proto_files_as_their_import_paths_do() {
+    use std::path::{Path, PathBuf};
+
+    use crate::GrpcDefinition;
+
     let command = |definition: GrpcDefinition, collection: Option<&Path>| {
         GrpcRequest {
             definition,
