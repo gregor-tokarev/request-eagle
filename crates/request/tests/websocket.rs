@@ -512,14 +512,18 @@ fn closing_abandons_a_send_the_peer_never_reads() {
 
         let started = std::time::Instant::now();
         connection.close();
-        assert!(matches!(
-            next(&mut events).await,
-            WebSocketEventKind::Closed(WebSocketClose {
-                code: None,
-                by_client: true,
-                ..
-            })
-        ));
+        let event = next(&mut events).await;
+        assert!(
+            matches!(
+                event,
+                WebSocketEventKind::Closed(WebSocketClose {
+                    code: None,
+                    by_client: true,
+                    ..
+                })
+            ),
+            "{event:?}"
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
     });
 }
