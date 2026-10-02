@@ -18,3 +18,6 @@ gpui-kit = { workspace = true, features = ["component"] }
 preferences = { path = "../preferences" }
 keybindings_service = { path = "../keybindings_service" }
 updater = { path = "../updater" }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["component", "test-support"] }
