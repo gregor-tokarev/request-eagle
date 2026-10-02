@@ -236,6 +236,7 @@ impl WebSocketDraft {
         });
 
         self.location = Some(location);
+        self.refresh_inherited(cx);
         self.notify_controls(cx);
     }
 
@@ -297,15 +298,10 @@ impl WebSocketDraft {
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
             .unwrap_or_default();
-        // History keeps the authorization that was sent, inherited or not.
-        let recorded = WebSocketRequest {
-            auth: variables.effective_auth(&self.request.auth),
-            ..self.request.clone()
-        };
         let (connection, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
         self.connecting = Some(RequestSent {
-            record: request_history::Record::sent(recorded),
+            record: request_history::Record::sent(self.request.clone()),
             sent_at: SystemTime::now(),
         });
 

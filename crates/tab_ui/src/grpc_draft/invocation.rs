@@ -197,8 +197,6 @@ impl GrpcDraft {
     /// The call history keeps once it starts: the request as it is now.
     fn sent(&self) -> RequestSent {
         let mut request = self.request.clone();
-        // With the authorization that was sent, inherited or not.
-        request.auth = self.effective_auth();
 
         // History keeps the request outside its collection, where relative
         // `.proto` paths would not resolve.

@@ -342,6 +342,8 @@ order: 2000
         WebSocketRequest {
             url: "wss://pets.test/updates".into(),
             headers: vec![Field::new("Authorization", "Bearer {{token}}")],
+            // Postman sends WebSocket handshakes no inherited authorization.
+            auth: Auth::None,
             ..WebSocketRequest::default()
         }
     );

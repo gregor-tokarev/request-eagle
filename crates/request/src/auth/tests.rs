@@ -89,22 +89,22 @@ fn simple_credentials_go_where_they_are_configured() {
         )]
     );
     assert_eq!(
-        credentials(Auth::OAuth2(OAuth2Auth {
+        credentials(Auth::OAuth2(Box::new(OAuth2Auth {
             access_token: "token".into(),
             header_prefix: "Token".into(),
             ..OAuth2Auth::default()
-        })),
+        }))),
         [Credential::Header(
             "Authorization".into(),
             "Token token".into()
         )]
     );
     assert_eq!(
-        credentials(Auth::OAuth2(OAuth2Auth {
+        credentials(Auth::OAuth2(Box::new(OAuth2Auth {
             access_token: "token".into(),
             add_to: AuthLocation::Query,
             ..OAuth2Auth::default()
-        })),
+        }))),
         [Credential::Query("access_token".into(), "token".into())]
     );
 
@@ -147,7 +147,7 @@ fn a_header_or_parameter_the_request_sends_itself_takes_precedence() {
     let own = Field::new("authorization", "Bearer own");
     let mut headers = vec![own.clone()];
     authorize_bearer(&mut headers);
-    assert_eq!(headers, [own.clone()]);
+    assert_eq!(headers, std::slice::from_ref(&own));
 
     // A header that is switched off is not sent, so it does not count.
     let switched_off = Field {
@@ -358,7 +358,7 @@ fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
                 .into(),
         ..JwtAuth::default()
     };
-    let credentials = Auth::Jwt(auth.clone())
+    let credentials = Auth::Jwt(Box::new(auth.clone()))
         .credentials(None, SystemTime::now())
         .unwrap();
 
@@ -373,7 +373,7 @@ fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
 
     // Headers join alg and typ; the secret may be Base64; the token may go
     // in the query.
-    let credentials = Auth::Jwt(JwtAuth {
+    let credentials = Auth::Jwt(Box::new(JwtAuth {
         algorithm: JwtAlgorithm::Hs512,
         secret: STANDARD.encode("secret"),
         secret_base64: true,
@@ -381,7 +381,7 @@ fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
         add_to: AuthLocation::Query,
         query_param: "jwt".into(),
         ..auth.clone()
-    })
+    }))
     .credentials(None, SystemTime::now())
     .unwrap();
     let [Credential::Query(name, token)] = credentials.as_slice() else {
@@ -398,10 +398,10 @@ fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
         crypto::hmac(ring::hmac::HMAC_SHA512, b"secret", input.as_bytes())
     );
 
-    let error = Auth::Jwt(JwtAuth {
+    let error = Auth::Jwt(Box::new(JwtAuth {
         payload: "{".into(),
         ..auth
-    })
+    }))
     .credentials(None, SystemTime::now())
     .unwrap_err();
     assert!(
@@ -420,7 +420,7 @@ fn jwt_signs_with_rsa_and_elliptic_curve_keys() {
         ..JwtAuth::default()
     };
     let token = header(
-        &Auth::Jwt(auth.clone())
+        &Auth::Jwt(Box::new(auth.clone()))
             .credentials(None, SystemTime::now())
             .unwrap(),
         "Authorization",
@@ -434,11 +434,11 @@ fn jwt_signs_with_rsa_and_elliptic_curve_keys() {
 
     let key = rcgen::KeyPair::generate().unwrap();
     let token = header_value(
-        Auth::Jwt(JwtAuth {
+        Auth::Jwt(Box::new(JwtAuth {
             algorithm: JwtAlgorithm::Es256,
             private_key: key.serialize_pem(),
             ..auth.clone()
-        }),
+        })),
         "Authorization",
     );
     let (_, _, signature, input) = jwt_parts(&token);
@@ -447,10 +447,10 @@ fn jwt_signs_with_rsa_and_elliptic_curve_keys() {
         .unwrap();
 
     // An RSA key cannot sign ES256.
-    let error = Auth::Jwt(JwtAuth {
+    let error = Auth::Jwt(Box::new(JwtAuth {
         algorithm: JwtAlgorithm::Es256,
         ..auth
-    })
+    }))
     .credentials(None, SystemTime::now())
     .unwrap_err();
     assert!(error.starts_with("Could not sign the JWT"), "{error}");
@@ -537,7 +537,7 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
         ..AwsSignatureAuth::default()
     };
 
-    let credentials = Auth::AwsSignature(auth.clone())
+    let credentials = Auth::AwsSignature(Box::new(auth.clone()))
         .credentials(Some(&outgoing("GET", &url)), time)
         .unwrap();
     assert_eq!(header(&credentials, "X-Amz-Date"), "20150830T123600Z");
@@ -548,11 +548,11 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
 
     // A presigned URL carries the same in its query, and S3 signs the
     // payload's hash header.
-    let credentials = Auth::AwsSignature(AwsSignatureAuth {
+    let credentials = Auth::AwsSignature(Box::new(AwsSignatureAuth {
         add_to: AuthLocation::Query,
         session_token: "session".into(),
         ..auth.clone()
-    })
+    }))
     .credentials(Some(&outgoing("GET", &url)), time)
     .unwrap();
     let names: Vec<&str> = credentials
@@ -574,10 +574,10 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
         ]
     );
 
-    let credentials = Auth::AwsSignature(AwsSignatureAuth {
+    let credentials = Auth::AwsSignature(Box::new(AwsSignatureAuth {
         service: "s3".into(),
         ..auth.clone()
-    })
+    }))
     .credentials(Some(&outgoing("GET", &url)), time)
     .unwrap();
     assert_eq!(
@@ -589,13 +589,67 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
             .contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date,")
     );
 
-    let error = Auth::AwsSignature(AwsSignatureAuth {
+    let error = Auth::AwsSignature(Box::new(AwsSignatureAuth {
         region: " ".into(),
         ..auth
-    })
+    }))
     .credentials(Some(&outgoing("GET", &url)), time)
     .unwrap_err();
     assert_eq!(error, "Enter the AWS region in the Auth tab");
+}
+
+#[test]
+fn aws_paths_are_encoded_as_each_service_signs_them() {
+    // Other services sign the path as it is sent, so its escapes are
+    // encoded again, as in AWS's own example.
+    assert_eq!(aws::canonical_uri("", false), "/");
+    assert_eq!(aws::canonical_uri("//example//", false), "/example/");
+    assert_eq!(
+        aws::canonical_uri("/documents%20and%20settings/", false),
+        "/documents%2520and%2520settings/"
+    );
+    assert_eq!(
+        aws::canonical_uri("/logs-*/_search", false),
+        "/logs-%2A/_search"
+    );
+    assert_eq!(
+        aws::canonical_uri("/functions/arn:aws:lambda:x/invocations", false),
+        "/functions/arn%3Aaws%3Alambda%3Ax/invocations"
+    );
+
+    // S3 signs each segment of the decoded key once and keeps every slash.
+    assert_eq!(aws::canonical_uri("/my%20file.txt", true), "/my%20file.txt");
+    assert_eq!(aws::canonical_uri("/a*b//c", true), "/a%2Ab//c");
+}
+
+#[test]
+fn sending_leaves_out_fields_that_are_not_sent() {
+    let oauth2 = Auth::OAuth2(Box::new(OAuth2Auth {
+        access_token: "{{token}}".into(),
+        client_secret: "{{secret}}".into(),
+        token_url: "{{issuer}}/token".into(),
+        ..OAuth2Auth::default()
+    }));
+    assert_eq!(
+        oauth2.sending(),
+        Auth::OAuth2(Box::new(OAuth2Auth {
+            access_token: "{{token}}".into(),
+            ..OAuth2Auth::default()
+        }))
+    );
+
+    let jwt = Auth::Jwt(Box::new(JwtAuth {
+        secret: "{{secret}}".into(),
+        private_key: "{{key}}".into(),
+        ..JwtAuth::default()
+    }));
+    let Auth::Jwt(sent) = jwt.sending() else {
+        unreachable!()
+    };
+    assert_eq!(
+        (sent.secret.as_str(), sent.private_key.as_str()),
+        ("{{secret}}", "")
+    );
 }
 
 #[test]
@@ -668,9 +722,9 @@ fn saved_requests_keep_only_an_authorization_they_choose() {
     .unwrap();
     assert_eq!(
         oauth.auth,
-        Auth::OAuth2(OAuth2Auth {
+        Auth::OAuth2(Box::new(OAuth2Auth {
             access_token: "t".into(),
             ..OAuth2Auth::default()
-        })
+        }))
     );
 }

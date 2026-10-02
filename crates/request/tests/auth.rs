@@ -221,14 +221,14 @@ fn aws_signatures_cover_the_request_as_it_is_sent() {
                 language: request::RawLanguage::Text,
                 text: "contents".into(),
             }),
-            auth: Auth::AwsSignature(AwsSignatureAuth {
+            auth: Auth::AwsSignature(Box::new(AwsSignatureAuth {
                 access_key: "AKID".into(),
                 secret_key: "{{secret}}".into(),
                 session_token: "session".into(),
                 region: "eu-west-1".into(),
                 service: "s3".into(),
                 add_to: AuthLocation::Header,
-            }),
+            })),
             ..HttpRequest::default()
         };
 
@@ -401,6 +401,12 @@ fn authorization_codes_return_to_the_callback_and_are_exchanged_with_pkce() {
             };
 
             assert!(get("/favicon.ico".into()).await.starts_with("HTTP/1.1 404"));
+            // Another page cannot end the sign-in without its state.
+            assert!(
+                get("/callback?error=access_denied".into())
+                    .await
+                    .starts_with("HTTP/1.1 400")
+            );
             get(format!("/callback?code=abc&state={state}")).await
         });
 
@@ -486,13 +492,13 @@ fn curl_snippets_carry_the_authorization() {
     );
 
     let command = HttpRequest {
-        auth: Auth::AwsSignature(AwsSignatureAuth {
+        auth: Auth::AwsSignature(Box::new(AwsSignatureAuth {
             access_key: "AKID".into(),
             secret_key: "secret".into(),
             region: "us-east-1".into(),
             service: "execute-api".into(),
             ..AwsSignatureAuth::default()
-        }),
+        })),
         ..request
     }
     .curl_command(&values, None);

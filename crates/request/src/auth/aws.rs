@@ -163,17 +163,29 @@ pub(super) fn sign(
     Ok(added)
 }
 
-/// Each segment of the path encoded as AWS expects: twice, except for S3.
-fn canonical_uri(path: &str, s3: bool) -> String {
-    if path.is_empty() {
-        return "/".into();
+/// The path as AWS signs it. S3 encodes each segment of the decoded path.
+/// Other services encode the path as it is sent, so its own escapes are
+/// encoded again, and leave out empty segments.
+pub(super) fn canonical_uri(path: &str, s3: bool) -> String {
+    if s3 {
+        let path = if path.is_empty() { "/" } else { path };
+
+        return path
+            .split('/')
+            .map(|segment| encode(&percent_decode_str(segment).decode_utf8_lossy()))
+            .collect::<Vec<_>>()
+            .join("/");
     }
 
-    path.split('/')
-        .map(|segment| {
-            let encoded = encode(&percent_decode_str(segment).decode_utf8_lossy());
-            if s3 { encoded } else { encode(&encoded) }
-        })
-        .collect::<Vec<_>>()
-        .join("/")
+    let segments: Vec<String> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(encode)
+        .collect();
+    let mut uri = format!("/{}", segments.join("/"));
+    if path.ends_with('/') && !segments.is_empty() {
+        uri.push('/');
+    }
+
+    uri
 }

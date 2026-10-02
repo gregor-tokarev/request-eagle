@@ -220,24 +220,32 @@ impl GrpcDraft {
     /// Read the collection's authorization again, which another tab may
     /// have changed.
     fn refresh_inherited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.inherited.is_some();
+
+        // Servers may require credentials to answer reflection. A tab shown
+        // for the first time loads its services right away instead.
+        if self.update_inherited(cx) && shown && self.request.auth.is_inherit() {
+            self.schedule_reflection(window, cx);
+        }
+    }
+
+    /// Whether the collection's authorization changed since it was read.
+    fn update_inherited(&mut self, cx: &mut Context<Self>) -> bool {
         let inherited = self.location.as_ref().map(|location| Inherited {
             name: location.collection.clone(),
             auth: self.variables.read(cx).collection_auth(),
         });
         if inherited == self.inherited {
-            return;
+            return false;
         }
 
-        let previous = std::mem::replace(&mut self.inherited, inherited);
+        self.inherited = inherited;
         if let Some(auth) = &self.auth {
             let inherited = self.inherited.clone();
             auth.update(cx, |auth, cx| auth.set_inherited(inherited, cx));
         }
-        // Servers may require credentials to answer reflection. A tab shown
-        // for the first time loads its services right away instead.
-        if previous.is_some() && self.request.auth.is_inherit() {
-            self.schedule_reflection(window, cx);
-        }
+
+        true
     }
 
     pub(super) fn auth_editor(
@@ -291,6 +299,8 @@ impl GrpcDraft {
         });
 
         self.location = Some(location);
+        // Invoking reloads the services if the credentials changed.
+        self.update_inherited(cx);
         self.redraw(cx);
     }
 

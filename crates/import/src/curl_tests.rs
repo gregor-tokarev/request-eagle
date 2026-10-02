@@ -451,13 +451,13 @@ fn credentials_become_the_requests_authorization() {
     );
     assert_eq!(
         auth("curl --aws-sigv4 aws:amz:eu-west-1:s3 --user AKID:secret https://example.com"),
-        Auth::AwsSignature(AwsSignatureAuth {
+        Auth::AwsSignature(Box::new(AwsSignatureAuth {
             access_key: "AKID".into(),
             secret_key: "secret".into(),
             region: "eu-west-1".into(),
             service: "s3".into(),
             ..AwsSignatureAuth::default()
-        })
+        }))
     );
 
     // The commands Request Eagle writes read back to the same authorization.

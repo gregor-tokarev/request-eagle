@@ -14,13 +14,14 @@ pub enum Auth {
     Basic(PasswordAuth),
     /// Answers the server's Digest challenge, so the request is sent twice.
     Digest(PasswordAuth),
+    // The kinds with many fields are boxed, which keeps every request small.
     #[serde(rename = "oauth1")]
-    OAuth1(OAuth1Auth),
+    OAuth1(Box<OAuth1Auth>),
     #[serde(rename = "oauth2")]
-    OAuth2(OAuth2Auth),
-    Jwt(JwtAuth),
+    OAuth2(Box<OAuth2Auth>),
+    Jwt(Box<JwtAuth>),
     #[serde(rename = "aws_signature")]
-    AwsSignature(AwsSignatureAuth),
+    AwsSignature(Box<AwsSignatureAuth>),
 }
 
 /// The kinds of authorization, in the order the Auth tab lists them.
@@ -277,6 +278,45 @@ impl Auth {
         matches!(self, Self::Inherit | Self::None)
     }
 
+    /// The authorization with only the fields that sending uses. The others,
+    /// such as how OAuth 2.0 gets a new token or the key of a JWT algorithm
+    /// that is not chosen, are cleared, so their variables need no values.
+    pub fn sending(&self) -> Self {
+        match self {
+            Self::OAuth1(auth) => {
+                let mut auth = auth.clone();
+                if auth.signature_method.uses_private_key() {
+                    auth.consumer_secret.clear();
+                    auth.token_secret.clear();
+                } else {
+                    auth.private_key.clear();
+                }
+                Self::OAuth1(auth)
+            }
+            Self::OAuth2(auth) => Self::OAuth2(Box::new(OAuth2Auth {
+                access_token: auth.access_token.clone(),
+                header_prefix: auth.header_prefix.clone(),
+                add_to: auth.add_to,
+                ..OAuth2Auth::default()
+            })),
+            Self::Jwt(auth) => {
+                let mut auth = auth.clone();
+                if auth.algorithm.uses_secret() {
+                    auth.private_key.clear();
+                } else {
+                    auth.secret.clear();
+                    auth.secret_base64 = false;
+                }
+                match auth.add_to {
+                    AuthLocation::Header => auth.query_param.clear(),
+                    AuthLocation::Query => auth.header_prefix.clear(),
+                }
+                Self::Jwt(auth)
+            }
+            auth => auth.clone(),
+        }
+    }
+
     /// Every text field, which may hold `{{variables}}`.
     pub(crate) fn texts_mut(&mut self) -> Vec<&mut String> {
         match self {
@@ -384,10 +424,10 @@ impl AuthKind {
             Self::Bearer => Auth::Bearer(BearerAuth::default()),
             Self::Basic => Auth::Basic(PasswordAuth::default()),
             Self::Digest => Auth::Digest(PasswordAuth::default()),
-            Self::OAuth1 => Auth::OAuth1(OAuth1Auth::default()),
-            Self::OAuth2 => Auth::OAuth2(OAuth2Auth::default()),
-            Self::Jwt => Auth::Jwt(JwtAuth::default()),
-            Self::AwsSignature => Auth::AwsSignature(AwsSignatureAuth::default()),
+            Self::OAuth1 => Auth::OAuth1(Box::default()),
+            Self::OAuth2 => Auth::OAuth2(Box::default()),
+            Self::Jwt => Auth::Jwt(Box::default()),
+            Self::AwsSignature => Auth::AwsSignature(Box::default()),
         }
     }
 

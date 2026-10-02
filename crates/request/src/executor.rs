@@ -109,19 +109,25 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
+                // Digest may send the body again; otherwise HTTP owns it.
+                let digest_body = matches!(request.auth, Auth::Digest(_))
+                    .then(|| body.clone())
+                    .flatten();
                 let (mut response, mut url) = executor
                     .http
-                    .execute(&request, body.clone(), events.as_mut())
+                    .execute(&request, body, events.as_mut())
                     .await?;
 
-                if let Some(answer) = answer_digest(&request, &response, &url, body.as_deref()) {
+                if let Some(answer) =
+                    answer_digest(&request, &response, &url, digest_body.as_deref())
+                {
                     // Answer the server that challenged, after any redirects.
                     request.path = url.to_string();
                     request.query.clear();
                     request.headers.push(Field::new("Authorization", answer));
                     (response, url) = executor
                         .http
-                        .execute(&request, body, events.as_mut())
+                        .execute(&request, digest_body, events.as_mut())
                         .await?;
                 }
                 state.response_url = Some(url.into());

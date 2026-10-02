@@ -21,7 +21,7 @@ use url::{Host, Url};
 
 use super::credentials::basic;
 use super::crypto::{random_token, sha256};
-use super::{Auth, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant};
+use super::{OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant};
 use crate::{Body, Field, HttpRequest, Method, RequestExecutor, RequestVariables, StatusCode};
 
 /// How long to wait for the browser to return after signing in.
@@ -53,9 +53,7 @@ impl RequestExecutor {
         auth: &OAuth2Auth,
         variables: &RequestVariables,
     ) -> Result<OAuth2TokenRequest, String> {
-        let Auth::OAuth2(auth) = variables.resolve_auth(&Auth::OAuth2(auth.clone()))? else {
-            unreachable!("resolving keeps the kind of authorization");
-        };
+        let auth = resolve_token_request(auth, variables)?;
         if auth.token_url.trim().is_empty() {
             return Err("Enter the access token URL".into());
         }
@@ -76,6 +74,40 @@ impl RequestExecutor {
             token: Box::pin(async move { request_token(&executor, &auth, fields, true).await }),
         })
     }
+}
+
+/// The settings of the grant's token request, with their `{{variables}}`
+/// resolved. The others may hold variables that have no value yet, such as
+/// the current token.
+fn resolve_token_request(
+    auth: &OAuth2Auth,
+    variables: &RequestVariables,
+) -> Result<OAuth2Auth, String> {
+    let mut auth = auth.clone();
+    auth.access_token.clear();
+    if auth.grant_type != OAuth2Grant::AuthorizationCode {
+        auth.auth_url.clear();
+        auth.callback_url.clear();
+    }
+    if auth.grant_type != OAuth2Grant::Password {
+        auth.username.clear();
+        auth.password.clear();
+    }
+
+    for text in [
+        &mut auth.auth_url,
+        &mut auth.token_url,
+        &mut auth.callback_url,
+        &mut auth.client_id,
+        &mut auth.client_secret,
+        &mut auth.scope,
+        &mut auth.username,
+        &mut auth.password,
+    ] {
+        *text = variables.resolve_text(text)?;
+    }
+
+    Ok(auth)
 }
 
 fn authorization_code(
@@ -314,6 +346,17 @@ async fn receive_code(
         }
 
         let parameters: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        // Only the sign-in this request started can end it, also with an error.
+        if parameters.get("state").map(String::as_str) != Some(state) {
+            respond(
+                &mut stream,
+                "400 Bad Request",
+                "This sign-in was not started by Request Eagle.",
+            )
+            .await;
+            continue;
+        }
+
         if let Some(error) = parameters.get("error") {
             let description = parameters
                 .get("error_description")
@@ -339,15 +382,6 @@ async fn receive_code(
             .await;
             continue;
         };
-        if parameters.get("state").map(String::as_str) != Some(state) {
-            respond(
-                &mut stream,
-                "400 Bad Request",
-                "This sign-in was not started by Request Eagle.",
-            )
-            .await;
-            continue;
-        }
 
         respond(
             &mut stream,

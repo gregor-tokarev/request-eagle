@@ -50,7 +50,8 @@ impl GrpcDraft {
                     metadata: Field::enabled(&self.request.metadata)
                         .map(|(key, value)| (key.to_owned(), value.to_owned()))
                         .collect(),
-                    auth: self.effective_auth(),
+                    // Getting a new OAuth 2.0 token changes nothing sent.
+                    auth: self.effective_auth().sending(),
                     verify_certificates: self.request.settings.verify_certificates,
                     server_name: self.request.settings.server_name.clone(),
                 })

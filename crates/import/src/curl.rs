@@ -550,13 +550,13 @@ impl Options {
         if let Some(provider) = self.aws_sigv4.take() {
             let mut parts = provider.split(':').skip(2);
 
-            return Auth::AwsSignature(AwsSignatureAuth {
+            return Auth::AwsSignature(Box::new(AwsSignatureAuth {
                 access_key: username.to_owned(),
                 secret_key: password.to_owned(),
                 region: parts.next().unwrap_or_default().to_owned(),
                 service: parts.next().unwrap_or_default().to_owned(),
                 ..AwsSignatureAuth::default()
-            });
+            }));
         }
 
         let credentials = PasswordAuth {

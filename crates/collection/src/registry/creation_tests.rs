@@ -186,11 +186,11 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
         url: "wss://{{host}}/feed".into(),
         headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         query: vec![Field::new("room", "42")],
-        auth: Auth::OAuth2(OAuth2Auth {
+        auth: Auth::OAuth2(Box::new(OAuth2Auth {
             access_token: "{{token}}".into(),
             client_id: "app".into(),
             ..OAuth2Auth::default()
-        }),
+        })),
         message: "{\"subscribe\":\"prices\"}".into(),
         settings: WebSocketSettings {
             timeout_ms: Some(0),

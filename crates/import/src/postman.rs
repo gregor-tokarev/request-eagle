@@ -387,7 +387,7 @@ pub(crate) fn auth(auth: &Value) -> Auth {
         }),
         "basic" => Auth::Basic(password()),
         "digest" => Auth::Digest(password()),
-        "oauth1" => Auth::OAuth1(OAuth1Auth {
+        "oauth1" => Auth::OAuth1(Box::new(OAuth1Auth {
             signature_method: OAuth1Signature::ALL
                 .into_iter()
                 .find(|method| method.label() == value("signatureMethod"))
@@ -405,12 +405,12 @@ pub(crate) fn auth(auth: &Value) -> Auth {
             } else {
                 AuthLocation::Header
             },
-        }),
+        })),
         "oauth2" => {
             let grant = value("grant_type");
             let callback = value("redirect_uri");
 
-            Auth::OAuth2(OAuth2Auth {
+            Auth::OAuth2(Box::new(OAuth2Auth {
                 access_token: value("accessToken"),
                 header_prefix: or("headerPrefix", "Bearer"),
                 add_to: if value("addTokenTo") == "queryParams" {
@@ -442,9 +442,9 @@ pub(crate) fn auth(auth: &Value) -> Auth {
                 } else {
                     OAuth2ClientAuthentication::Header
                 },
-            })
+            }))
         }
-        "jwt" => Auth::Jwt(JwtAuth {
+        "jwt" => Auth::Jwt(Box::new(JwtAuth {
             algorithm: JwtAlgorithm::ALL
                 .into_iter()
                 .find(|algorithm| algorithm.label() == value("algorithm"))
@@ -464,8 +464,8 @@ pub(crate) fn auth(auth: &Value) -> Auth {
             },
             header_prefix: or("headerPrefix", "Bearer"),
             query_param: or("queryParamKey", "token"),
-        }),
-        "awsv4" => Auth::AwsSignature(AwsSignatureAuth {
+        })),
+        "awsv4" => Auth::AwsSignature(Box::new(AwsSignatureAuth {
             access_key: value("accessKey"),
             secret_key: value("secretKey"),
             session_token: value("sessionToken"),
@@ -476,7 +476,7 @@ pub(crate) fn auth(auth: &Value) -> Auth {
             } else {
                 AuthLocation::Header
             },
-        }),
+        })),
         _ => Auth::None,
     }
 }

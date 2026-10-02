@@ -293,7 +293,7 @@ fn postman_authorizations_keep_their_settings() {
     );
     assert_eq!(
         http(&items[1]).1.auth,
-        Auth::OAuth1(OAuth1Auth {
+        Auth::OAuth1(Box::new(OAuth1Auth {
             signature_method: OAuth1Signature::HmacSha256,
             consumer_key: "key".into(),
             consumer_secret: "secret".into(),
@@ -301,11 +301,11 @@ fn postman_authorizations_keep_their_settings() {
             token_secret: "{{tokenSecret}}".into(),
             add_to: AuthLocation::Query,
             ..OAuth1Auth::default()
-        })
+        }))
     );
     assert_eq!(
         http(&items[2]).1.auth,
-        Auth::OAuth2(OAuth2Auth {
+        Auth::OAuth2(Box::new(OAuth2Auth {
             access_token: "{{access}}".into(),
             add_to: AuthLocation::Query,
             grant_type: OAuth2Grant::AuthorizationCode,
@@ -317,28 +317,28 @@ fn postman_authorizations_keep_their_settings() {
             client_authentication: OAuth2ClientAuthentication::Body,
             // Postman's callback page returns to Postman.
             ..OAuth2Auth::default()
-        })
+        }))
     );
     assert_eq!(
         http(&items[3]).1.auth,
-        Auth::Jwt(JwtAuth {
+        Auth::Jwt(Box::new(JwtAuth {
             algorithm: JwtAlgorithm::Rs256,
             private_key: "{{key}}".into(),
             payload: "{\"sub\": \"me\"}".into(),
             add_to: AuthLocation::Query,
             query_param: "jwt".into(),
             ..JwtAuth::default()
-        })
+        }))
     );
     assert_eq!(
         http(&items[4]).1.auth,
-        Auth::AwsSignature(AwsSignatureAuth {
+        Auth::AwsSignature(Box::new(AwsSignatureAuth {
             access_key: "AKID".into(),
             secret_key: "{{secret}}".into(),
             region: "eu-west-1".into(),
             service: "execute-api".into(),
             ..AwsSignatureAuth::default()
-        })
+        }))
     );
     assert_eq!(
         http(&items[5]).1.auth,

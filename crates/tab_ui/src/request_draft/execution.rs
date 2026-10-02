@@ -98,9 +98,15 @@ pub(super) fn generated_headers(request: &HttpRequest, auth: &Auth) -> Vec<(Stri
         }
     }
 
-    // An Authorization header of the authorization replaces credentials
-    // written in the URL.
-    let auth_headers = auth.preview_headers();
+    // A request that sends the authorization's header itself sends none of
+    // the authorization's. Otherwise, its Authorization header replaces
+    // credentials written in the URL.
+    let mut auth_headers = auth.preview_headers();
+    if auth_headers.first().is_some_and(|(name, _)| {
+        Field::enabled(&request.headers).any(|(own, _)| own.eq_ignore_ascii_case(name))
+    }) {
+        auth_headers.clear();
+    }
     if auth_headers.iter().any(|(name, _)| name == "Authorization") {
         headers.retain(|(name, _)| name != "Authorization");
     }
@@ -188,11 +194,6 @@ impl RequestDraft {
         let request = self.sent_request();
         let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
-        // History keeps the authorization that was sent, inherited or not.
-        let recorded = HttpRequest {
-            auth: variables.effective_auth(&request.auth),
-            ..request.clone()
-        };
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -208,7 +209,7 @@ impl RequestDraft {
         self.stop = Some(stop);
         self.sending = Some((
             RequestSent {
-                record: request_history::Record::sent(recorded),
+                record: request_history::Record::sent(request.clone()),
                 sent_at: SystemTime::now(),
             },
             dispatch.clone(),

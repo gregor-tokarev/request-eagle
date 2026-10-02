@@ -671,6 +671,8 @@ fn handshakes_send_the_authorization_the_request_inherits() {
 }
 
 #[test]
+// The handshake callback returns tokio-tungstenite's own error response.
+#[allow(clippy::result_large_err)]
 fn digest_handshakes_answer_the_servers_challenge() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();

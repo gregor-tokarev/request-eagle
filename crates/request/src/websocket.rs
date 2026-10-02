@@ -83,9 +83,13 @@ pub fn websocket_handshake_headers(
         generated.insert(0, ("Host".into(), "Resolved on connect".into()));
     }
 
-    // An Authorization header of the authorization replaces credentials
-    // written in the URL.
-    let auth_headers = auth.preview_headers();
+    // A request that sends the authorization's header itself sends none of
+    // the authorization's. Otherwise, its Authorization header replaces
+    // credentials written in the URL.
+    let mut auth_headers = auth.preview_headers();
+    if auth_headers.first().is_some_and(|(name, _)| has(name)) {
+        auth_headers.clear();
+    }
     if auth_headers.iter().any(|(name, _)| name == "Authorization") {
         generated.retain(|(name, _)| name != "Authorization");
     }
@@ -582,6 +586,8 @@ async fn handshake(
             &[],
         )
     {
+        // The answer replaces credentials written in the URL.
+        headers.retain(|(name, _)| !name.eq_ignore_ascii_case("authorization"));
         headers.push(("Authorization".into(), answer));
         response = send(&headers)
             .await

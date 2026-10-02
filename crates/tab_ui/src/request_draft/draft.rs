@@ -327,6 +327,7 @@ impl RequestDraft {
         });
 
         self.location = Some(location);
+        self.refresh_inherited(cx);
         self.notify_address(cx);
         cx.notify();
     }

@@ -109,7 +109,7 @@ impl GrpcRequest {
             .collect();
         // The authorization's credentials, as invoking adds them. One that
         // cannot be made, such as a JWT without its key, is left out.
-        let mut auth = request.auth.clone();
+        let mut auth = request.auth.sending();
         auth.resolve_with(|text| Ok::<_, ()>(fill(text))).ok();
         let credentials = crate::grpc::auth_metadata(&metadata, &auth).unwrap_or_default();
         let metadata = Field::pairs(&metadata);

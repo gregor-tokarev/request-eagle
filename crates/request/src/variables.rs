@@ -53,23 +53,12 @@ impl RequestVariables {
     }
 
     /// The authorization a request sends: its own, or its collection's
-    /// when it inherits it.
+    /// when it inherits it, with only the fields that sending uses.
     pub fn effective_auth(&self, auth: &Auth) -> Auth {
         match auth {
-            Auth::Inherit => self.collection_auth.clone(),
-            auth => auth.clone(),
+            Auth::Inherit => self.collection_auth.sending(),
+            auth => auth.sending(),
         }
-    }
-
-    /// The authorization a request sends, with its `{{variables}}` resolved.
-    pub(crate) fn resolve_auth(&self, auth: &Auth) -> Result<Auth, String> {
-        let mut auth = self.effective_auth(auth);
-        let mut resolver = self.resolver();
-
-        auth.resolve_with(|text| resolver.resolve(text))
-            .map_err(|error| describe_error(error, self.environment_error.as_deref()))?;
-
-        Ok(auth)
     }
 
     /// Read the collection's variables and the active environment with the

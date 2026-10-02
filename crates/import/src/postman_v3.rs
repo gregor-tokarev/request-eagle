@@ -194,6 +194,8 @@ fn request(
         "websocket-request" => Some(Request::WebSocket(WebSocketRequest {
             url: text(request.get("url")),
             headers: postman::fields(&entries(&request["headers"])),
+            // Postman sends a WebSocket handshake only its own authorization.
+            auth: postman::own_auth(&json!({ "auth": auth })).map_or(Auth::None, postman::auth),
             ..WebSocketRequest::default()
         })),
         _ => None,

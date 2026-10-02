@@ -108,8 +108,9 @@ impl Auth {
     }
 
     /// The headers that sending adds for this authorization, for showing
-    /// before it is sent. A value is `None` when it is only known then: it
-    /// has `{{variables}}`, or it is signed or answers a challenge.
+    /// before it is sent, the one a request can set itself first. A value is
+    /// `None` when it is only known then: it has `{{variables}}`, or it is
+    /// signed or answers a challenge.
     pub fn preview_headers(&self) -> Vec<(String, Option<String>)> {
         let known = |value: String| (!value.contains("{{")).then_some(value);
         let calculated = || vec![("Authorization".to_owned(), None)];

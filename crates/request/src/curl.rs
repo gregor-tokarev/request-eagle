@@ -20,6 +20,7 @@ impl HttpRequest {
         cookies: Option<&CookieJar>,
     ) -> String {
         let mut request = self.clone();
+        request.auth = request.auth.sending();
         // Sending leaves these bodies out before it resolves anything.
         if matches!(request.method, Method::Get | Method::Head) {
             request.body = None;
