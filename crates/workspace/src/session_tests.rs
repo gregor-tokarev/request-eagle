@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui_kit::{Bounds, point, px, size};
 
-use crate::session::{SavedSidebar, SavedTab, Session, fit_bounds};
+use crate::session::{SavedFile, SavedSidebar, SavedTab, Session, fit_bounds};
 
 fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<gpui_kit::Pixels> {
     Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
@@ -68,7 +68,7 @@ fn saved_session_loads_back_the_same() {
         window: serde_json::from_value(serde_json::json!({
             "display": "6f1c2a1e-0d3b-4c39-9a51-0c5e8d5c2b7f",
             "bounds": {
-                "maximized": {
+                "fullscreen": {
                     "origin": { "x": 20.0, "y": 40.0 },
                     "size": { "width": 1200.0, "height": 800.0 },
                 },
@@ -84,13 +84,17 @@ fn saved_session_loads_back_the_same() {
         tabs: vec![
             SavedTab::Request {
                 title: "Get user".into(),
-                path: Some(PathBuf::from("/collections/api/get-user.toml")),
+                file: Some(SavedFile {
+                    path: PathBuf::from("/collections/api/get-user.toml"),
+                    id: "2d0c5b8e-7a8f-4a52-9d1b-3c4e5f6a7b8c".into(),
+                    collection: PathBuf::from("/collections/api"),
+                }),
                 name: None,
                 draft: None,
             },
             SavedTab::Request {
                 title: "Login".into(),
-                path: None,
+                file: None,
                 name: Some("Login".into()),
                 draft: Some(
                     request::HttpRequest {

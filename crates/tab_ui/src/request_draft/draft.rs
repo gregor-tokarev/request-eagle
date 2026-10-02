@@ -43,7 +43,7 @@ pub struct RequestLocation {
 
 impl RequestLocation {
     /// The directory of the collection that stores the request.
-    pub(crate) fn collection_path(&self) -> Option<PathBuf> {
+    pub fn collection_path(&self) -> Option<PathBuf> {
         self.path
             .ancestors()
             .nth(self.folders.len() + 1)

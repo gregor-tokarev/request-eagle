@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
 /// Protocol-specific request data shared by collection files and editable drafts.
@@ -26,6 +28,25 @@ impl Request {
             Self::Http(request) => &request.path,
             Self::Grpc(request) => &request.url,
             Self::WebSocket(request) => &request.url,
+        }
+    }
+
+    /// Resolve file paths relative to `collection`, so a copy of the
+    /// request kept outside it still finds its files.
+    pub fn resolved_from(&self, collection: &Path) -> Self {
+        match self {
+            Self::Http(request) => Self::Http(HttpRequest {
+                body: request
+                    .body
+                    .as_ref()
+                    .map(|body| body.resolved_from(collection)),
+                ..request.clone()
+            }),
+            Self::Grpc(request) => Self::Grpc(crate::GrpcRequest {
+                definition: request.definition.resolved_from(collection),
+                ..request.clone()
+            }),
+            Self::WebSocket(request) => Self::WebSocket(request.clone()),
         }
     }
 }

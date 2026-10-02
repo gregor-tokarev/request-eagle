@@ -60,12 +60,17 @@ impl Session {
                 .uuid()
                 .is_ok_and(|uuid| uuid.to_string() == window.display)
         })?;
-        let fit = |bounds| fit_bounds(bounds, display.bounds());
 
         let bounds = match window.bounds {
-            SavedBounds::Windowed(bounds) => WindowBounds::Windowed(fit(bounds)),
-            SavedBounds::Maximized(bounds) => WindowBounds::Maximized(fit(bounds)),
-            SavedBounds::Fullscreen(bounds) => WindowBounds::Fullscreen(fit(bounds)),
+            SavedBounds::Windowed(bounds) => {
+                WindowBounds::Windowed(fit_bounds(bounds, display.bounds()))
+            }
+            // As the first window: maximizing a window that already fills the
+            // display would restore it to a smaller size on macOS.
+            SavedBounds::Maximized => WindowBounds::Maximized(display.default_bounds()),
+            SavedBounds::Fullscreen(bounds) => {
+                WindowBounds::Fullscreen(fit_bounds(bounds, display.bounds()))
+            }
         };
 
         Some((display.id(), bounds))
@@ -84,23 +89,28 @@ impl SavedWindow {
     pub(crate) fn capture(window: &Window, cx: &App) -> Option<Self> {
         let display = window.display(cx)?.uuid().ok()?.to_string();
 
-        let bounds = match window.window_bounds() {
-            WindowBounds::Windowed(bounds) => SavedBounds::Windowed(bounds),
-            WindowBounds::Maximized(bounds) => SavedBounds::Maximized(bounds),
-            WindowBounds::Fullscreen(bounds) => SavedBounds::Fullscreen(bounds),
+        // Some platforms leave the full-screen or maximized state out of the
+        // window's bounds.
+        let bounds = window.window_bounds().get_bounds();
+        let bounds = if window.is_fullscreen() {
+            SavedBounds::Fullscreen(bounds)
+        } else if window.is_maximized() {
+            SavedBounds::Maximized
+        } else {
+            SavedBounds::Windowed(bounds)
         };
 
         Some(Self { display, bounds })
     }
 }
 
-/// `WindowBounds`, which cannot be saved itself. A maximized or full-screen
-/// window keeps the bounds it returns to. They are relative to the display.
+/// Like `WindowBounds`, which cannot be saved itself. A full-screen window
+/// keeps the bounds it returns to. Bounds are relative to the display.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SavedBounds {
     Windowed(Bounds<Pixels>),
-    Maximized(Bounds<Pixels>),
+    Maximized,
     Fullscreen(Bounds<Pixels>),
 }
 
@@ -150,8 +160,9 @@ pub(crate) enum SavedTab {
     /// request is not saved.
     Request {
         title: String,
+        /// Where the request is saved. None while it is not.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<PathBuf>,
+        file: Option<SavedFile>,
         /// The name given to a request that is not saved yet.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
@@ -165,4 +176,13 @@ pub(crate) enum SavedTab {
         name: String,
     },
     Cookies,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SavedFile {
+    pub(crate) path: PathBuf,
+    /// Tells the request apart from another one saved at the same path later.
+    pub(crate) id: String,
+    /// Where the request's relative file paths start.
+    pub(crate) collection: PathBuf,
 }

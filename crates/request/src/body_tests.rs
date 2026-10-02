@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::{Body, ExecutionError, FormPart, HttpRequest, Method, RawLanguage};
+use crate::{
+    Body, ExecutionError, FormPart, GrpcDefinition, GrpcRequest, HttpRequest, Method, RawLanguage,
+    Request,
+};
 
 fn post(body: Body) -> HttpRequest {
     HttpRequest {
@@ -268,4 +271,40 @@ fn files_are_stored_relative_to_the_collection_and_resolved_from_it() {
         }
     );
     assert_eq!(resolved.relative_to(collection), binary);
+}
+
+#[test]
+fn requests_kept_outside_their_collection_still_find_their_files() {
+    let collection = Path::new("/collections/pets");
+
+    let http = Request::Http(post(Body::Binary {
+        file: "data.bin".into(),
+    }));
+    let Request::Http(http) = http.resolved_from(collection) else {
+        panic!("an HTTP request stays one");
+    };
+    assert_eq!(
+        http.body,
+        Some(Body::Binary {
+            file: collection.join("data.bin")
+        })
+    );
+
+    let grpc = Request::Grpc(GrpcRequest {
+        definition: GrpcDefinition::ProtoFile {
+            path: "protos/pets.proto".into(),
+            import_paths: vec!["shared".into()],
+        },
+        ..Default::default()
+    });
+    let Request::Grpc(grpc) = grpc.resolved_from(collection) else {
+        panic!("a gRPC request stays one");
+    };
+    assert_eq!(
+        grpc.definition,
+        GrpcDefinition::ProtoFile {
+            path: collection.join("protos/pets.proto"),
+            import_paths: vec![collection.join("shared")],
+        }
+    );
 }

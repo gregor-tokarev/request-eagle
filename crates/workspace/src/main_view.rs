@@ -16,7 +16,7 @@ use crate::actions::{
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
-use crate::session::SavedTab;
+use crate::session::{SavedFile, SavedTab};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
@@ -93,7 +93,11 @@ impl Page {
                        name: &Option<SharedString>,
                        request: request::Request| SavedTab::Request {
             title: title.to_string(),
-            path: location.as_ref().map(|location| location.path.clone()),
+            file: location.as_ref().map(|location| SavedFile {
+                path: location.path.clone(),
+                id: location.id.to_string(),
+                collection: location.collection_path().unwrap_or_default(),
+            }),
             name: name.as_ref().map(ToString::to_string),
             draft: (location.is_none() || self.is_dirty(cx)).then_some(request),
         };
@@ -318,14 +322,14 @@ impl MainView {
         match tab {
             SavedTab::Request {
                 title,
-                path,
+                file,
                 name: unsaved_name,
                 draft,
             } => {
-                let saved = path.and_then(|path| self.sidebar.read(cx).open_event_at(&path));
-
-                match (saved, draft) {
-                    (
+                // The file must still hold the same request, in the draft's
+                // protocol.
+                let saved = file.as_ref().and_then(|file| {
+                    match self.sidebar.read(cx).open_event_at(&file.path) {
                         Some(CollectionPanelEvent::OpenRequest {
                             id,
                             path,
@@ -333,24 +337,38 @@ impl MainView {
                             collection,
                             folders,
                             request,
-                        }),
-                        draft,
-                    ) => {
-                        let location = RequestLocation {
-                            path,
-                            id,
-                            name: name.clone(),
-                            collection,
-                            folders,
-                        };
-                        // A draft of another protocol than its file is left out.
-                        let draft = draft.filter(|draft| {
-                            mem::discriminant(draft) == mem::discriminant(&request)
-                        });
+                        }) if id.as_ref() == file.id
+                            && draft.as_ref().is_none_or(|draft| {
+                                mem::discriminant(draft) == mem::discriminant(&request)
+                            }) =>
+                        {
+                            let location = RequestLocation {
+                                path,
+                                id,
+                                name,
+                                collection,
+                                folders,
+                            };
 
-                        self.restore_request(name, draft, request, Some(location), cx);
+                            Some((location, request))
+                        }
+                        _ => None,
                     }
-                    (_, Some(draft)) => {
+                });
+
+                match (saved, draft) {
+                    (Some((location, request)), draft) => {
+                        let title = location.name.clone();
+                        self.restore_request(title, draft, request, Some(location), cx);
+                    }
+                    // Changes to a request whose file is gone reopen unsaved,
+                    // still finding the files they refer to.
+                    (None, Some(draft)) => {
+                        let draft = match &file {
+                            Some(file) => draft.resolved_from(&file.collection),
+                            None => draft,
+                        };
+                        let name = unsaved_name.or_else(|| file.is_some().then(|| title.clone()));
                         let empty = match &draft {
                             request::Request::Http(_) => request::Request::Http(Default::default()),
                             request::Request::Grpc(_) => request::Request::Grpc(Default::default()),
@@ -361,11 +379,11 @@ impl MainView {
                         let index =
                             self.restore_request(title.into(), Some(draft), empty, None, cx);
 
-                        if let Some(name) = unsaved_name {
+                        if let Some(name) = name {
                             self.tabs[index].page.set_name(name.into(), cx);
                         }
                     }
-                    (_, None) => return false,
+                    (None, None) => return false,
                 }
             }
             SavedTab::Collection { path } => {
