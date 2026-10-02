@@ -6,7 +6,7 @@ use request::{
     WebSocketRequest,
 };
 
-use crate::{ImportError, read};
+use crate::{ImportError, document_tests::read_collection};
 
 fn write(root: &Path, path: &str, content: &str) {
     let path = root.join(path);
@@ -107,7 +107,7 @@ order: 1000
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
 
     assert_eq!(import.collection.name, "Shop API");
     assert_eq!(import.collection.variables["host"], "localhost:50051");
@@ -183,7 +183,7 @@ order: 2000
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let (_, orders) = folder(&import.collection.items[0]);
 
     let list = grpc(&orders[0]);
@@ -283,7 +283,7 @@ order: 2000
         "$kind: mqtt-request\nurl: mqtt://pets.test\norder: 500\n",
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let items = &import.collection.items;
 
     assert_eq!(import.collection.name, "Pet Store");
@@ -389,7 +389,7 @@ auth:
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let items = &import.collection.items;
     let bearer = |token: &str| vec![("Authorization".to_owned(), format!("Bearer {token}"))];
 
@@ -409,7 +409,7 @@ fn collection_folders_without_a_definition_are_named_after_the_folder() {
         "$kind: http-request\nurl: https://pets.test/pets\n",
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
 
     assert_eq!(import.collection.name, "Pet Store");
     assert_eq!(
@@ -429,11 +429,13 @@ fn folders_that_are_not_postman_collections_are_explained() {
     );
 
     assert!(matches!(
-        read(directory.path()).err().unwrap(),
+        read_collection(directory.path()).err().unwrap(),
         ImportError::NotPostmanFolder
     ));
     assert!(matches!(
-        read(&directory.path().join("missing.json")).err().unwrap(),
+        read_collection(&directory.path().join("missing.json"))
+            .err()
+            .unwrap(),
         ImportError::Read { .. }
     ));
 }

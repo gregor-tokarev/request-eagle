@@ -57,6 +57,17 @@ impl Environments {
         self.catalog.path(name)
     }
 
+    /// The directory of environment files.
+    pub fn catalog(&self) -> &GlobalEnvironments {
+        &self.catalog
+    }
+
+    /// Lists the environments again after files were added to the directory.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.reload();
+        cx.notify();
+    }
+
     pub(crate) fn active_path(&self) -> Option<PathBuf> {
         self.active.as_deref().map(|name| self.catalog.path(name))
     }

@@ -1,9 +1,12 @@
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
 };
 
 use thiserror::Error;
+
+use crate::{Environment, EnvironmentSaveError};
 
 const EXTENSION: &str = "toml";
 
@@ -83,6 +86,37 @@ impl GlobalEnvironments {
         unreachable!()
     }
 
+    /// Saves variables from another app as a new environment named after
+    /// `base`, or `base 2`, `base 3`, and so on. Path separators in the name
+    /// become `-`, so any name fits.
+    pub fn import(
+        &self,
+        base: &str,
+        entries: HashMap<String, String>,
+    ) -> Result<String, GlobalEnvironmentError> {
+        let base: String = base
+            .chars()
+            .map(|character| match character {
+                '/' | '\\' | ':' => '-',
+                character if character.is_control() => ' ',
+                character => character,
+            })
+            .collect();
+        let base = base.trim().trim_start_matches('.').trim();
+        let name = self.create(if base.is_empty() { "Imported" } else { base })?;
+
+        let environment = Environment {
+            path: self.path(&name),
+            entries,
+        };
+        if let Err(error) = environment.save_file() {
+            let _ = fs::remove_file(&environment.path);
+            return Err(error.into());
+        }
+
+        Ok(name)
+    }
+
     pub fn rename(&self, from: &str, to: &str) -> Result<String, GlobalEnvironmentError> {
         let to = to.trim();
         if !valid_name(to) {
@@ -145,4 +179,6 @@ pub enum GlobalEnvironmentError {
     AlreadyExists,
     #[error("{0}")]
     Io(#[from] io::Error),
+    #[error("{0}")]
+    Save(#[from] EnvironmentSaveError),
 }

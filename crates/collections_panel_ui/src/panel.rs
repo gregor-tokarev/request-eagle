@@ -53,6 +53,8 @@ pub enum CollectionPanelEvent {
     },
     /// A request imported without saving it, such as a pasted cURL command.
     OpenUnsavedRequest(HttpRequest),
+    /// Imported environments were added to the environments directory.
+    EnvironmentsImported,
 }
 
 /// The collections tree and its search, editing, and drag interactions.

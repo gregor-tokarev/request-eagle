@@ -9,7 +9,7 @@ use request::{Body, FormPart, HttpRequest, Method, RawLanguage, Request, Request
 use serde_json::{Map, Value};
 
 use crate::{
-    Import, ImportError,
+    CollectionImport, ImportError,
     body::set_content_type,
     document::{clean_name, text},
 };
@@ -37,7 +37,7 @@ const PATH_VALUE: &AsciiSet = &CONTROLS
 
 static NULL: Value = Value::Null;
 
-pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
+pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError> {
     // Unquoted YAML versions are numbers.
     let openapi = text(document.get("openapi"));
     let swagger = text(document.get("swagger"));
@@ -108,7 +108,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
         .chain(requests)
         .collect();
 
-    Ok(Import {
+    Ok(CollectionImport {
         collection: ImportedCollection {
             name: clean_name(document["info"]["title"].as_str(), "OpenAPI"),
             variables,

@@ -1365,6 +1365,7 @@ name = "collections_panel_ui"
 version = "0.1.0"
 dependencies = [
  "collection",
+ "environment",
  "gpui-kit",
  "import",
  "keybindings_service",
