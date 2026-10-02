@@ -21,6 +21,8 @@ pub(crate) struct Outgoing<'a> {
     pub body: &'a [u8],
     /// The fields of a URL-encoded form body, which OAuth 1.0 signs.
     pub form: &'a [(String, String)],
+    /// The headers it sends, some of which AWS signs.
+    pub headers: &'a [(String, String)],
 }
 
 impl Auth {
@@ -174,9 +176,9 @@ pub(crate) fn authorize(
     body: &[u8],
     form: &[(String, String)],
 ) -> Result<(), String> {
-    let Some((location, name)) = auth.credential_name() else {
+    if auth.credential_name().is_none() || sends_own_credential(auth, url, query, headers) {
         return Ok(());
-    };
+    }
     let Ok(mut url) = Url::parse(url) else {
         return Ok(());
     };
@@ -187,21 +189,13 @@ pub(crate) fn authorize(
         url.query_pairs_mut().extend_pairs(sent);
     }
 
-    let overridden = match location {
-        AuthLocation::Header => {
-            Field::enabled(headers).any(|(header, _)| header.eq_ignore_ascii_case(name))
-        }
-        AuthLocation::Query => url.query_pairs().any(|(key, _)| key == name),
-    };
-    if overridden {
-        return Ok(());
-    }
-
+    let sent_headers = Field::pairs(headers);
     let request = Outgoing {
         method,
         url: &url,
         body,
         form,
+        headers: &sent_headers,
     };
     for credential in auth.credentials(Some(&request), SystemTime::now())? {
         match credential {
@@ -211,6 +205,27 @@ pub(crate) fn authorize(
     }
 
     Ok(())
+}
+
+/// Whether a request sends the credential its authorization would add, as
+/// an enabled header or a parameter of its URL or query. Its own then takes
+/// precedence, and the authorization adds nothing.
+pub(crate) fn sends_own_credential(
+    auth: &Auth,
+    url: &str,
+    query: &[Field],
+    headers: &[Field],
+) -> bool {
+    match auth.credential_name() {
+        Some((AuthLocation::Header, name)) => {
+            Field::enabled(headers).any(|(header, _)| header.trim().eq_ignore_ascii_case(name))
+        }
+        Some((AuthLocation::Query, name)) => {
+            Field::enabled(query).any(|(key, _)| key == name)
+                || Url::parse(url).is_ok_and(|url| url.query_pairs().any(|(key, _)| key == name))
+        }
+        None => false,
+    }
 }
 
 fn authorization(value: String) -> Credential {

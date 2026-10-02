@@ -443,11 +443,28 @@ fn credentials_become_the_requests_authorization() {
             password: String::new(),
         })
     );
+    // cURL sends the bearer token, also when it is given a user.
+    for command in [
+        "curl --oauth2-bearer t0ken https://example.com",
+        "curl -u user:pass --oauth2-bearer t0ken https://example.com",
+    ] {
+        assert_eq!(
+            auth(command),
+            Auth::Bearer(BearerAuth {
+                token: "t0ken".into()
+            })
+        );
+    }
+    // The host names a region and service left out.
     assert_eq!(
-        auth("curl --oauth2-bearer t0ken https://example.com"),
-        Auth::Bearer(BearerAuth {
-            token: "t0ken".into()
-        })
+        auth("curl --aws-sigv4 aws:amz -u key:secret https://s3.us-east-1.amazonaws.com/bucket"),
+        Auth::AwsSignature(Box::new(AwsSignatureAuth {
+            access_key: "key".into(),
+            secret_key: "secret".into(),
+            region: "us-east-1".into(),
+            service: "s3".into(),
+            ..AwsSignatureAuth::default()
+        }))
     );
     assert_eq!(
         auth("curl --aws-sigv4 aws:amz:eu-west-1:s3 --user AKID:secret https://example.com"),

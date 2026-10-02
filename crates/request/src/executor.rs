@@ -121,9 +121,6 @@ impl RequestExecutor {
                 if let Some(answer) =
                     answer_digest(&request, &response, &url, digest_body.as_deref())
                 {
-                    // Answer the server that challenged, after any redirects.
-                    request.path = url.to_string();
-                    request.query.clear();
                     request.headers.push(Field::new("Authorization", answer));
                     (response, url) = executor
                         .http
@@ -204,7 +201,9 @@ fn authorize(request: &mut HttpRequest, body: Option<&[u8]>) -> Result<(), Execu
 }
 
 /// The Authorization header that answers a Digest challenge in the
-/// response, unless the request set its own.
+/// response, unless the request set its own. Only the address the request
+/// was sent to is answered: a redirect may lead to another server, which
+/// must not learn the credentials, or change the method and body.
 fn answer_digest(
     request: &HttpRequest,
     response: &crate::HttpResponse,
@@ -218,6 +217,16 @@ fn answer_digest(
         || Field::enabled(&request.headers)
             .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
     {
+        return None;
+    }
+
+    let mut sent = url::Url::parse(&request.path).ok()?;
+    sent.set_fragment(None);
+    let query = Field::pairs(&request.query);
+    if !query.is_empty() {
+        sent.query_pairs_mut().extend_pairs(query);
+    }
+    if sent != *url {
         return None;
     }
 

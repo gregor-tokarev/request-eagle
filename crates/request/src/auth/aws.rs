@@ -33,9 +33,26 @@ pub(super) fn sign(
         }
     }
 
-    let time = DateTime::<Utc>::from(now);
-    let amz_date = time.format("%Y%m%dT%H%M%SZ").to_string();
-    let date = time.format("%Y%m%d").to_string();
+    // The request's own x-amz-* headers are signed too, and one it sets
+    // itself replaces the one signing would add.
+    let own: Vec<(String, String)> = request
+        .headers
+        .iter()
+        .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+        .filter(|(name, _)| name.starts_with("x-amz-"))
+        .collect();
+    let own_value = |name: &str| {
+        own.iter()
+            .find(|(own, _)| own == name)
+            .map(|(_, value)| value.clone())
+    };
+
+    let amz_date = own_value("x-amz-date").unwrap_or_else(|| {
+        DateTime::<Utc>::from(now)
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
+    });
+    let date: String = amz_date.chars().take(8).collect();
     let scope = format!("{date}/{region}/{service}/aws4_request");
     let credential = format!("{}/{scope}", auth.access_key.trim());
     let s3 = service == "s3";
@@ -49,30 +66,35 @@ pub(super) fn sign(
         .query_pairs()
         .map(|(name, value)| (name.into_owned(), value.into_owned()))
         .collect();
+    let mut headers = own.clone();
+    headers.push(("host".into(), host));
+    let mut added = Vec::new();
 
-    let (payload, mut headers, mut added) = match auth.add_to {
+    let payload = match auth.add_to {
         AuthLocation::Header => {
-            let payload = hex(&sha256(request.body));
-            let mut headers = vec![("x-amz-date", amz_date.clone())];
-            let mut added = vec![Credential::Header("X-Amz-Date".into(), amz_date.clone())];
+            let payload =
+                own_value("x-amz-content-sha256").unwrap_or_else(|| hex(&sha256(request.body)));
+            let mut generated = vec![("X-Amz-Date", amz_date.clone())];
             if s3 {
-                headers.push(("x-amz-content-sha256", payload.clone()));
-                added.push(Credential::Header(
-                    "X-Amz-Content-Sha256".into(),
-                    payload.clone(),
-                ));
+                generated.push(("X-Amz-Content-Sha256", payload.clone()));
             }
             if !auth.session_token.is_empty() {
-                headers.push(("x-amz-security-token", auth.session_token.clone()));
-                added.push(Credential::Header(
-                    "X-Amz-Security-Token".into(),
-                    auth.session_token.clone(),
-                ));
+                generated.push(("X-Amz-Security-Token", auth.session_token.clone()));
             }
 
-            (payload, headers, added)
+            for (name, value) in generated {
+                let lowercase = name.to_ascii_lowercase();
+                if own_value(&lowercase).is_none() {
+                    headers.push((lowercase, value.clone()));
+                    added.push(Credential::Header(name.to_owned(), value));
+                }
+            }
+
+            payload
         }
         AuthLocation::Query => {
+            let mut signed: Vec<&str> = headers.iter().map(|(name, _)| name.as_str()).collect();
+            signed.sort();
             let mut parameters = vec![
                 ("X-Amz-Algorithm", ALGORITHM.to_owned()),
                 ("X-Amz-Credential", credential.clone()),
@@ -84,33 +106,31 @@ pub(super) fn sign(
             if !auth.session_token.is_empty() {
                 parameters.push(("X-Amz-Security-Token", auth.session_token.clone()));
             }
-            parameters.push(("X-Amz-SignedHeaders", "host".to_owned()));
+            parameters.push(("X-Amz-SignedHeaders", signed.join(";")));
             query.extend(
                 parameters
                     .iter()
                     .map(|(name, value)| ((*name).to_owned(), value.clone())),
             );
+            added.extend(
+                parameters
+                    .into_iter()
+                    .map(|(name, value)| Credential::Query(name.to_owned(), value)),
+            );
 
             // S3 cannot know the body of a presigned URL in advance.
-            let payload = if s3 {
+            if s3 {
                 "UNSIGNED-PAYLOAD".to_owned()
             } else {
                 hex(&sha256(request.body))
-            };
-            let added = parameters
-                .into_iter()
-                .map(|(name, value)| Credential::Query(name.to_owned(), value))
-                .collect();
-
-            (payload, Vec::new(), added)
+            }
         }
     };
 
-    headers.push(("host", host));
     headers.sort();
     let signed_headers = headers
         .iter()
-        .map(|(name, _)| *name)
+        .map(|(name, _)| name.as_str())
         .collect::<Vec<_>>()
         .join(";");
     let canonical_headers: String = headers

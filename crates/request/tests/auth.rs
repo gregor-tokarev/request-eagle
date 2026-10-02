@@ -211,6 +211,60 @@ fn digest_requests_answer_the_challenge_and_send_their_body_again() {
 }
 
 #[test]
+fn digest_answers_only_the_address_the_request_was_sent_to() {
+    smol::block_on(async {
+        // Another server challenges the request after a redirect.
+        let (other, other_server) = serve(vec![
+            "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"other\", nonce=\"n\", qop=\"auth\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ])
+        .await;
+        let redirect: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 302 Found\r\nLocation: {other}/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .into_boxed_str(),
+        );
+        let (url, server) = serve(vec![redirect]).await;
+        let request = HttpRequest {
+            path: url,
+            auth: Auth::Digest(PasswordAuth {
+                username: "user".into(),
+                password: "secret".into(),
+            }),
+            ..HttpRequest::default()
+        };
+
+        let execution = executor().execute(request, variables(&[])).await.unwrap();
+        assert_eq!(status(&execution.response), 401);
+
+        server.await;
+        let received = other_server.await;
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].header("authorization"), None);
+    });
+}
+
+#[test]
+fn a_credential_the_request_sends_itself_needs_no_inherited_variables() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![OK]).await;
+        let request = HttpRequest {
+            path: url,
+            headers: vec![Field::new("Authorization", "Bearer own")],
+            ..HttpRequest::default()
+        };
+        let variables = variables(&[]).with_collection_auth(Auth::Bearer(BearerAuth {
+            token: "{{missing}}".into(),
+        }));
+
+        executor().execute(request, variables).await.unwrap();
+
+        let received = server.await;
+        assert_eq!(received[0].header("authorization"), Some("Bearer own"));
+    });
+}
+
+#[test]
 fn aws_signatures_cover_the_request_as_it_is_sent() {
     smol::block_on(async {
         let (url, server) = serve(vec![OK]).await;
@@ -287,7 +341,9 @@ fn client_credentials_tokens_come_from_the_token_endpoint() {
             grant_type: OAuth2Grant::ClientCredentials,
             token_url: format!("{url}/token"),
             client_id: "{{client}}".into(),
-            client_secret: "secret".into(),
+            client_secret: "se:cret+".into(),
+            // Not used by this grant, so its variable needs no value.
+            password: "{{missing}}".into(),
             scope: "read write".into(),
             ..OAuth2Auth::default()
         };
@@ -302,9 +358,10 @@ fn client_credentials_tokens_come_from_the_token_endpoint() {
 
         let received = server.await;
         assert!(received[0].head.starts_with("POST /token "));
+        // Form-encoded before Basic encoding: "app:se%3Acret%2B".
         assert_eq!(
             received[0].header("authorization"),
-            Some("Basic YXBwOnNlY3JldA==")
+            Some("Basic YXBwOnNlJTNBY3JldCUyQg==")
         );
         assert_eq!(received[0].header("accept"), Some("application/json"));
         assert_eq!(

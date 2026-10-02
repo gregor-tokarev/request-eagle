@@ -156,7 +156,15 @@ impl RequestVariables {
             field.value = resolve(&field.value)?;
         }
 
+        // Metadata that sends the credential itself takes precedence, so the
+        // authorization's variables need no values.
         request.auth = self.effective_auth(&request.auth);
+        let own_credential = request.auth.credential_name().is_some_and(|(_, name)| {
+            Field::enabled(&request.metadata).any(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+        });
+        if own_credential {
+            request.auth = Auth::None;
+        }
         request.auth.resolve_with(&mut resolve)?;
 
         if message {
@@ -207,6 +215,14 @@ impl RequestVariables {
                 field.value = resolver.resolve(&field.value)?;
             }
 
+            if crate::auth::sends_own_credential(
+                &request.auth,
+                &request.url,
+                &request.query,
+                &request.headers,
+            ) {
+                request.auth = Auth::None;
+            }
             request.auth.resolve_with(|text| resolver.resolve(text))
         };
 
@@ -364,6 +380,16 @@ impl HttpRequest {
             field.value = resolver.resolve(&field.value)?;
         }
 
+        // A header or parameter that sends the credential itself takes
+        // precedence, so the authorization's variables need no values.
+        if crate::auth::sends_own_credential(
+            &request.auth,
+            &request.path,
+            &request.query,
+            &request.headers,
+        ) {
+            request.auth = Auth::None;
+        }
         request.auth.resolve_with(|text| resolver.resolve(text))?;
 
         match &mut request.body {

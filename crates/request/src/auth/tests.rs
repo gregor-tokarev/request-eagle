@@ -21,6 +21,7 @@ fn outgoing<'a>(method: &'a str, url: &'a Url) -> Outgoing<'a> {
         url,
         body: &[],
         form: &[],
+        headers: &[],
     }
 }
 
@@ -228,6 +229,7 @@ fn oauth1_signs_the_query_form_and_protocol_parameters() {
         url: &url,
         body: b"",
         form: &form,
+        headers: &[],
     };
     let auth = OAuth1Auth {
         consumer_key: "xvz1evFS4wEEPTGEFPHBog".into(),
@@ -596,6 +598,54 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
     .credentials(Some(&outgoing("GET", &url)), time)
     .unwrap_err();
     assert_eq!(error, "Enter the AWS region in the Auth tab");
+}
+
+#[test]
+fn aws_signatures_cover_the_requests_own_amz_headers() {
+    let url = Url::parse("https://bucket.s3.amazonaws.com/key").unwrap();
+    let headers = [
+        ("Content-Type".to_owned(), "text/plain".to_owned()),
+        ("X-Amz-Meta-Project".to_owned(), " review ".to_owned()),
+        ("x-amz-date".to_owned(), "20150830T123600Z".to_owned()),
+    ];
+    let request = Outgoing {
+        headers: &headers,
+        ..outgoing("PUT", &url)
+    };
+    let auth = AwsSignatureAuth {
+        access_key: "AKID".into(),
+        secret_key: "secret".into(),
+        region: "us-east-1".into(),
+        service: "s3".into(),
+        ..AwsSignatureAuth::default()
+    };
+
+    let credentials = Auth::AwsSignature(Box::new(auth.clone()))
+        .credentials(Some(&request), SystemTime::now())
+        .unwrap();
+    let authorization = header(&credentials, "Authorization");
+    assert!(
+        authorization.contains(
+            "Credential=AKID/20150830/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-project,"
+        ),
+        "{authorization}"
+    );
+    // The request's own date is used rather than another one added.
+    assert!(!credentials.iter().any(
+        |credential| matches!(credential, Credential::Header(name, _) if name == "X-Amz-Date")
+    ));
+
+    // A presigned URL lists the headers sent with it.
+    let credentials = Auth::AwsSignature(Box::new(AwsSignatureAuth {
+        add_to: AuthLocation::Query,
+        ..auth
+    }))
+    .credentials(Some(&request), SystemTime::now())
+    .unwrap();
+    assert!(credentials.contains(&Credential::Query(
+        "X-Amz-SignedHeaders".into(),
+        "host;x-amz-date;x-amz-meta-project".into()
+    )));
 }
 
 #[test]

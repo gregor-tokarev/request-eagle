@@ -193,9 +193,12 @@ async fn request_token(
     if auth.client_authentication == OAuth2ClientAuthentication::Header
         && !auth.client_secret.is_empty()
     {
+        // Each is form-encoded first (RFC 6749, section 2.3.1).
+        let encode =
+            |text: &str| url::form_urlencoded::byte_serialize(text.as_bytes()).collect::<String>();
         headers.push(Field::new(
             "Authorization",
-            basic(client_id, &auth.client_secret),
+            basic(&encode(client_id), &encode(&auth.client_secret)),
         ));
     } else {
         if !client_id.is_empty() {

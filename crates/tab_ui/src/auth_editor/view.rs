@@ -190,7 +190,6 @@ impl Render for AuthEditor {
                         "",
                         false,
                         Checkbox::new("auth-secret-base64")
-                            .small()
                             .label("Secret is Base64 encoded")
                             .checked(base64)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {

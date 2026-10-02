@@ -471,7 +471,7 @@ impl Options {
             return Err(CurlError::FormAndData);
         }
 
-        let auth = self.auth();
+        let auth = self.auth(&url);
 
         if !self.cookies.is_empty() {
             self.headers
@@ -543,31 +543,61 @@ impl Options {
 impl Options {
     /// The authorization of `--user`, `--digest`, `--aws-sigv4` and
     /// `--oauth2-bearer`. Without them, the request inherits its collection's.
-    fn auth(&mut self) -> Auth {
+    fn auth(&mut self, url: &str) -> Auth {
         let user = self.user.take().unwrap_or_default();
         let (username, password) = user.split_once(':').unwrap_or((&user, ""));
 
         if let Some(provider) = self.aws_sigv4.take() {
             let mut parts = provider.split(':').skip(2);
+            // Like cURL, a region and service left out come from a host such
+            // as `ec2.us-east-1.amazonaws.com`.
+            let host = url
+                .split_once("://")
+                .map_or(url, |(_, rest)| rest)
+                .split(['/', '?', '#'])
+                .next()
+                .and_then(|authority| authority.rsplit('@').next())
+                .and_then(|host| host.split(':').next())
+                .unwrap_or_default();
+            let mut labels = host.split('.').filter(|_| host.matches('.').count() >= 2);
+            let (service, region) = (labels.next(), labels.next());
 
             return Auth::AwsSignature(Box::new(AwsSignatureAuth {
                 access_key: username.to_owned(),
                 secret_key: password.to_owned(),
-                region: parts.next().unwrap_or_default().to_owned(),
-                service: parts.next().unwrap_or_default().to_owned(),
+                region: parts
+                    .next()
+                    .filter(|region| !region.is_empty())
+                    .or(region)
+                    .unwrap_or_default()
+                    .to_owned(),
+                service: parts
+                    .next()
+                    .filter(|service| !service.is_empty())
+                    .or(service)
+                    .unwrap_or_default()
+                    .to_owned(),
                 ..AwsSignatureAuth::default()
             }));
+        }
+
+        // cURL sends the bearer token rather than Basic credentials.
+        if let Some(token) = self.bearer.take() {
+            return Auth::Bearer(BearerAuth { token });
+        }
+
+        if user.is_empty() {
+            return Auth::Inherit;
         }
 
         let credentials = PasswordAuth {
             username: username.to_owned(),
             password: password.to_owned(),
         };
-        match self.bearer.take() {
-            _ if !user.is_empty() && self.digest => Auth::Digest(credentials),
-            _ if !user.is_empty() => Auth::Basic(credentials),
-            Some(token) => Auth::Bearer(BearerAuth { token }),
-            None => Auth::Inherit,
+        if self.digest {
+            Auth::Digest(credentials)
+        } else {
+            Auth::Basic(credentials)
         }
     }
 }

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
+use crate::{Auth, Body, CookieJar, Field, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -170,9 +170,11 @@ impl HttpRequest {
 }
 
 /// The options that send the request's resolved authorization. cURL
-/// computes Basic, Digest and AWS signatures itself; the credentials of the
-/// others are added to the request as sending adds them now. One that cannot
-/// be made, such as a JWT without its key, is left out.
+/// computes Basic, Digest and AWS signatures itself, the latter in a header
+/// even for a request presigned in its query, so it covers the body cURL
+/// sends. The credentials of the others are added to the request as sending
+/// adds them now. One that cannot be made, such as a JWT without its key, is
+/// left out.
 fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>)> {
     let auth = std::mem::take(&mut request.auth);
     let own_authorization = Field::enabled(&request.headers)
@@ -190,7 +192,7 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
         Auth::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
         Auth::Basic(auth) => vec![user(&auth.username, &auth.password)],
         Auth::Digest(auth) => vec![("digest", None), user(&auth.username, &auth.password)],
-        Auth::AwsSignature(aws) if aws.add_to == AuthLocation::Header => {
+        Auth::AwsSignature(aws) => {
             if !aws.session_token.is_empty() {
                 request.headers.push(Field::new(
                     "X-Amz-Security-Token",

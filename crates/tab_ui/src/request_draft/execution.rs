@@ -194,6 +194,13 @@ impl RequestDraft {
         let request = self.sent_request();
         let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
+        // History keeps the authorization that was sent, also an inherited
+        // one, so the request can be sent again from it. Settings that are
+        // not sent, such as how OAuth 2.0 gets a token, are left out.
+        let recorded = HttpRequest {
+            auth: variables.effective_auth(&request.auth),
+            ..request.clone()
+        };
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -209,7 +216,7 @@ impl RequestDraft {
         self.stop = Some(stop);
         self.sending = Some((
             RequestSent {
-                record: request_history::Record::sent(request.clone()),
+                record: request_history::Record::sent(recorded),
                 sent_at: SystemTime::now(),
             },
             dispatch.clone(),
