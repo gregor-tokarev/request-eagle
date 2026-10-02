@@ -78,7 +78,7 @@ declare namespace RequestEagle {
         | {key: string; src: string; type: "file"};
 
     interface FormData {
-        /** Return the first matching text part's value, or undefined when absent. */
+        /** Return the last matching part's value, or undefined when absent or a file. */
         get(name: string): string | undefined;
         has(name: string): boolean;
         /** Append a part, preserving existing parts with the same name. */

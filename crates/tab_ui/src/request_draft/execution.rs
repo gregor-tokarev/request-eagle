@@ -48,8 +48,16 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
             .any(|(name, value)| name.contains("{{") || value.contains("{{")),
         _ => false,
     };
-    // An unknown length is not zero, so the header is shown.
-    let body_bytes = body.map_or(0, |body| body.known_len().unwrap_or(1));
+    // An unknown length is not zero, so the header is shown. A request that
+    // sets its own length shows none.
+    let own_length = request.headers.iter().any(|(name, _)| {
+        name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+    });
+    let body_bytes = match body {
+        Some(body) if !own_length => body.known_len().unwrap_or(1),
+        _ => 0,
+    };
     let url = request_url(&request.path);
     let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();

@@ -224,61 +224,64 @@ fn files_are_read_when_sent_and_must_be_chosen() {
 }
 
 #[test]
-fn relative_files_resolve_from_the_collection() {
+fn files_are_stored_relative_to_the_collection_and_resolved_from_it() {
     let collection = Path::new("/collections/pets");
     let absolute = if cfg!(windows) {
         "C:\\data.bin"
     } else {
         "/data.bin"
     };
-    let mut body = Body::Multipart {
+    let part = |name: &str, value: &str, file| FormPart {
+        name: name.into(),
+        value: value.into(),
+        file,
+    };
+    let stored = Body::Multipart {
         parts: vec![
-            FormPart {
-                name: "relative".into(),
-                value: "files/a.png".into(),
-                file: true,
-            },
-            FormPart {
-                name: "absolute".into(),
-                value: absolute.into(),
-                file: true,
-            },
-            FormPart {
-                name: "unchosen".into(),
-                value: String::new(),
-                file: true,
-            },
-            FormPart {
-                name: "text".into(),
-                value: "files/a.png".into(),
-                file: false,
-            },
+            part("relative", "files/a.png", true),
+            part("absolute", absolute, true),
+            part("unchosen", "", true),
+            part("text", "files/a.png", false),
         ],
     };
-    body.resolve_files(collection);
-
-    let Body::Multipart { parts } = body else {
-        unreachable!()
+    let inside = collection.join("files/a.png");
+    let sent = Body::Multipart {
+        parts: vec![
+            part("relative", inside.to_str().unwrap(), true),
+            part("absolute", absolute, true),
+            part("unchosen", "", true),
+            part("text", "files/a.png", false),
+        ],
     };
-    let values: Vec<_> = parts.iter().map(|part| part.value.as_str()).collect();
-    assert_eq!(
-        values,
-        [
-            collection.join("files/a.png").to_str().unwrap(),
-            absolute,
-            "",
-            "files/a.png"
-        ]
-    );
 
-    let mut binary = Body::Binary {
+    assert_eq!(stored.resolved_from(collection), sent);
+    assert_eq!(sent.relative_to(collection), stored);
+
+    let binary = Body::Binary {
         file: "data.bin".into(),
     };
-    binary.resolve_files(collection);
+    let resolved = binary.resolved_from(collection);
     assert_eq!(
-        binary,
+        resolved,
         Body::Binary {
             file: collection.join("data.bin")
         }
     );
+    assert_eq!(resolved.relative_to(collection), binary);
+}
+
+#[test]
+fn form_lengths_are_counted_as_sent() {
+    for fields in [
+        Vec::new(),
+        vec![("a b".to_owned(), "&=+é".to_owned())],
+        vec![
+            ("".to_owned(), "x".to_owned()),
+            ("n".to_owned(), "".to_owned()),
+        ],
+    ] {
+        let mut request = post(Body::UrlEncoded { fields });
+        let length = request.body.as_ref().unwrap().known_len();
+        assert_eq!(length, Some(request.encode_body().unwrap().unwrap().len()));
+    }
 }

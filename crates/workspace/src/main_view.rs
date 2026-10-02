@@ -855,7 +855,11 @@ impl MainView {
 
         match (&self.tabs[index].page, &file.request) {
             (Page::Request(draft), request::Request::Http(request)) => {
-                draft.update(cx, |draft, cx| draft.mark_saved(request.clone(), cx));
+                draft.update(cx, |draft, cx| {
+                    // Saving can store body files relative to the collection.
+                    draft.set_body(request.body.clone(), window, cx);
+                    draft.mark_saved(request.clone(), cx);
+                });
             }
             (Page::Grpc(draft), request::Request::Grpc(request)) => {
                 draft.update(cx, |draft, cx| {

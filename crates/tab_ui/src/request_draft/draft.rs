@@ -228,7 +228,7 @@ impl RequestDraft {
             .as_ref()
             .and_then(RequestLocation::collection_path);
         if let (Some(body), Some(collection)) = (&mut request.body, collection) {
-            body.resolve_files(&collection);
+            *body = body.resolved_from(&collection);
         }
 
         request

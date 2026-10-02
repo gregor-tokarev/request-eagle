@@ -94,7 +94,7 @@ impl RequestFields {
             .iter()
             .map(|part| (part.name.clone(), part.value.clone()))
             .collect();
-        let mut fields = Self::new(id, &values, &[], scope, window, cx);
+        let mut fields = Self::new(id, &values, &[], scope, window, cx).with_keyless_rows();
         fields.file_rows = true;
 
         for (row, part) in fields.rows.iter_mut().zip(parts) {
@@ -470,7 +470,7 @@ impl Render for RequestFields {
                                         Button::new("part-type")
                                             .debug_selector(move || format!("{id}-type-{index}"))
                                             .ghost()
-                                            .xsmall()
+                                            .small()
                                             .mr_1()
                                             .label(if file { "File" } else { "Text" })
                                             .icon(IconName::ChevronDown)
@@ -512,7 +512,7 @@ impl Render for RequestFields {
                                                 format!("{id}-choose-file-{index}")
                                             })
                                             .ghost()
-                                            .xsmall()
+                                            .small()
                                             .mr_1()
                                             .icon(IconName::FolderOpen)
                                             .accessibility_label("Choose a file")

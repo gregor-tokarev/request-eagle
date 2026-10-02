@@ -9,7 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Body, Method, RawLanguage};
 
-use super::draft::{RequestDraft, RequestLocation};
+use super::draft::{RequestDraft, RequestLocation, RequestSection};
 use super::fields::{ChooseFile, FieldsChanged, RequestFields};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 
@@ -93,6 +93,24 @@ impl RequestDraft {
                 self.body_file_state(window, cx);
             }
         }
+    }
+
+    /// Show the body as saved, whose file paths saving can make relative.
+    pub fn set_body(&mut self, body: Option<Body>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.request.body == body {
+            return;
+        }
+
+        // The editors that show file paths are made again from the body.
+        self.request.body = body;
+        self.parts = None;
+        self.body_file = None;
+        if self.section == RequestSection::Body {
+            self.body_state(window, cx);
+        }
+
+        self.refresh_generated_headers(cx);
+        cx.notify();
     }
 
     /// Change the type of the body. Each type's editor keeps what was
@@ -208,7 +226,10 @@ impl RequestDraft {
             _ => Vec::new(),
         };
         let scope = self.variables.clone();
-        let form = cx.new(|cx| RequestFields::new("form", &fields, &[], scope, window, cx));
+        // A field without a name is sent as `=value`.
+        let form = cx.new(|cx| {
+            RequestFields::new("form", &fields, &[], scope, window, cx).with_keyless_rows()
+        });
         self._subscriptions
             .push(cx.subscribe(&form, |this, _, event: &FieldsChanged, cx| {
                 if let Some(Body::UrlEncoded { fields }) = &mut this.request.body {

@@ -84,42 +84,59 @@ impl Body {
         }
     }
 
-    /// The number of bytes sent, unless files decide it.
+    /// The number of bytes sent, unless files decide it. A form's length is
+    /// counted without encoding it.
     pub fn known_len(&self) -> Option<usize> {
+        let encoded = |text: &str| byte_serialize(text.as_bytes()).map(str::len).sum::<usize>();
+
         match self {
             Self::Raw { text, .. } => Some(text.len()),
-            Self::UrlEncoded { fields } => Some(url_encoded(fields).len()),
+            // Each field is `name=value`, and `&` separates them.
+            Self::UrlEncoded { fields } => Some(
+                fields
+                    .iter()
+                    .map(|(name, value)| encoded(name) + 1 + encoded(value))
+                    .sum::<usize>()
+                    + fields.len().saturating_sub(1),
+            ),
             Self::Multipart { .. } | Self::Binary { .. } => None,
         }
     }
 
-    /// Paths of files are stored relative to the collection when they are
-    /// inside it. This makes them absolute again for sending.
-    pub fn resolve_files(&mut self, collection: &Path) {
-        let resolve = |path: &str| {
-            let path = Path::new(path);
-            if path.as_os_str().is_empty() || path.is_absolute() {
-                None
-            } else {
-                Some(collection.join(path))
-            }
-        };
+    /// Store paths of files inside `collection` relative to it, so the
+    /// collection keeps working when it is renamed, moved or shared.
+    pub fn relative_to(&self, collection: &Path) -> Self {
+        self.with_files(|path| path.strip_prefix(collection).ok().map(Path::to_path_buf))
+    }
 
-        match self {
+    /// Resolve paths relative to `collection`, as they are sent.
+    pub fn resolved_from(&self, collection: &Path) -> Self {
+        self.with_files(|path| {
+            (!path.as_os_str().is_empty() && path.is_relative()).then(|| collection.join(path))
+        })
+    }
+
+    /// The body with each file path that `change` gives a new one replaced.
+    fn with_files(&self, change: impl Fn(&Path) -> Option<PathBuf>) -> Self {
+        let mut body = self.clone();
+
+        match &mut body {
             Self::Multipart { parts } => {
                 for part in parts.iter_mut().filter(|part| part.file) {
-                    if let Some(path) = resolve(&part.value) {
+                    if let Some(path) = change(Path::new(&part.value)) {
                         part.value = path.to_string_lossy().into_owned();
                     }
                 }
             }
             Self::Binary { file } => {
-                if let Some(path) = resolve(&file.to_string_lossy()) {
+                if let Some(path) = change(file) {
                     *file = path;
                 }
             }
             Self::Raw { .. } | Self::UrlEncoded { .. } => {}
         }
+
+        body
     }
 
     /// The bytes sent, and the `Content-Type` they need. Files are read now.

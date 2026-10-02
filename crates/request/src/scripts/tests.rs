@@ -181,8 +181,13 @@ fn scripts_read_and_change_forms_and_files() {
                 {key: "avatar", src: "a.png", type: "file"},
             ]);
             pm.expect(pm.request.body.formdata.get("title")).to.equal("Hi");
+            // As in Postman, the last part with the name gives the value.
+            pm.request.body.formdata.add({key: "avatar", value: "text"});
+            pm.expect(pm.request.body.formdata.get("avatar")).to.equal("text");
+            pm.request.body.formdata.remove("avatar");
             pm.request.body.formdata.upsert({key: "title", value: 1});
-            pm.request.body.formdata.add({key: "document", src: "b.pdf", type: "file"});
+            // A file the request attaches can be sent again.
+            pm.request.body.formdata.upsert({key: "avatar", src: "a.png", type: "file"});
         "#,
         );
         request.method = Method::Post;
@@ -198,13 +203,34 @@ fn scripts_read_and_change_forms_and_files() {
         assert_eq!(
             sent.body,
             Some(Body::Multipart {
-                parts: vec![
-                    part("avatar", "a.png", true),
-                    part("title", "1", false),
-                    part("document", "b.pdf", true),
-                ],
+                parts: vec![part("title", "1", false), part("avatar", "a.png", true)],
             })
         );
+
+        // Scripts cannot read files, so they cannot attach them either.
+        let mut request = scripted(
+            "pm.request.body.formdata.upsert({key: 'avatar', src: '/etc/hosts', type: 'file'});",
+        );
+        request.method = Method::Post;
+        request.body = Some(Body::Multipart {
+            parts: vec![part("title", "Hi", false), part("avatar", "a.png", true)],
+        });
+        let error = pre_request(request, no_variables()).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "pre-request script failed: Scripts cannot attach files. Choose the file for \"avatar\" in the request's body."
+        );
+
+        // Prototype changes cannot add one to the parts the sandbox returns.
+        let mut request = scripted(
+            "const map = Array.prototype.map; Array.prototype.map = function (f) { return map.call(this, f).concat([{name: 'x', value: '/etc/hosts', file: true}]); };",
+        );
+        request.method = Method::Post;
+        request.body = Some(Body::Multipart {
+            parts: vec![part("title", "Hi", false)],
+        });
+        let error = pre_request(request, no_variables()).await.unwrap_err();
+        assert!(error.to_string().contains("cannot attach files"), "{error}");
 
         // Setting text makes any body raw.
         let mut request = scripted(

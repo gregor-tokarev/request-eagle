@@ -111,6 +111,17 @@ pub(crate) async fn pre_request(
             response_url: None,
         };
 
+        // Scripts have no access to files, so they can keep or remove the
+        // files the request attaches but not attach others.
+        let attached: Vec<String> = match &request.body {
+            Some(Body::Multipart { parts }) => parts
+                .iter()
+                .filter(|part| part.file)
+                .map(|part| part.value.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
+
         let mut body_changed = false;
         for (collection, source) in scripts {
             let input = input(&request, &state.variables);
@@ -184,6 +195,23 @@ pub(crate) async fn pre_request(
                     _ => Body::json(text),
                 });
             } else {
+                if let Some(part) = changes.parts.iter().flatten().find(|part| {
+                    part.file && !attached.contains(&part.value)
+                }) {
+                    let message = format!(
+                        "Scripts cannot attach files. Choose the file for \"{}\" in the request's body.",
+                        part.name
+                    );
+                    report.error = Some(message.clone());
+                    return Err(after_earlier_scripts(
+                        reports,
+                        ExecutionError::Script {
+                            message,
+                            report: Box::new(report),
+                        },
+                    ));
+                }
+
                 match (&mut request.body, changes.fields, changes.parts) {
                     (Some(Body::UrlEncoded { fields }), Some(changed), _) => *fields = changed,
                     (Some(Body::Multipart { parts }), _, Some(changed)) => *parts = changed,

@@ -280,16 +280,18 @@ fn reads_form_fields_and_their_content_type() {
 #[test]
 fn reads_the_files_forms_and_data_send() {
     let request = parse_curl(
-        "curl -F 'avatar=@\"my;photo.jpg\";type=image/jpeg' -F 'doc=@notes.txt;filename=n' \
-         https://example.com",
+        "curl -F 'avatar=@\"my;photo,1.jpg\";type=image/jpeg' -F 'doc=@notes.txt;filename=n' \
+         -F 'files=@a.txt,b.txt;type=text/plain' https://example.com",
     )
     .unwrap();
     assert_eq!(
         request.body,
         Some(Body::Multipart {
             parts: vec![
-                part("avatar", "my;photo.jpg", true),
+                part("avatar", "my;photo,1.jpg", true),
                 part("doc", "notes.txt", true),
+                part("files", "a.txt", true),
+                part("files", "b.txt", true),
             ],
         })
     );

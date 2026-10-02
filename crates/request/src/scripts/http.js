@@ -57,7 +57,12 @@
         ? {key: part.name, src: part.value, type: "file"}
         : {key: part.name, value: part.value, type: "text"});
     const formdata = {
-        get(name) { return parts.find(part => part.key === String(name))?.value; },
+        // The last part with the name, as in Postman.
+        get(name) {
+            for (let i = parts.length - 1; i >= 0; i--) {
+                if (parts[i].key === String(name)) return parts[i].value;
+            }
+        },
         has(name) { return parts.some(part => part.key === String(name)); },
         add(part) {
             parts.push(part.type === "file"

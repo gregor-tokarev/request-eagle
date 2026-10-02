@@ -85,9 +85,9 @@ pub async fn run(
     .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
     let mut request = request;
-    if let Some(body) = &mut request.body {
-        body.resolve_files(&collection.path);
-    }
+    request.body = request
+        .body
+        .map(|body| body.resolved_from(&collection.path));
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
         request.settings.timeout_ms = None;

@@ -350,12 +350,29 @@ impl Options {
                 if content.starts_with('<') {
                     return Err(CurlError::File(format!("--form {value}")));
                 }
-                let file = content.strip_prefix('@');
-                self.form.push(FormPart {
-                    name: field.to_owned(),
-                    value: form_value(file.unwrap_or(content)),
-                    file: file.is_some(),
-                });
+                let Some(files) = content.strip_prefix('@') else {
+                    self.form.push(FormPart {
+                        name: field.to_owned(),
+                        value: form_value(content),
+                        file: false,
+                    });
+                    return Ok(());
+                };
+
+                // `@a.txt,b.txt` sends both files in the field. A quoted
+                // name can contain a comma.
+                let files = if files.starts_with('"') {
+                    vec![form_value(files)]
+                } else {
+                    files.split(',').map(form_value).collect()
+                };
+                for file in files {
+                    self.form.push(FormPart {
+                        name: field.to_owned(),
+                        value: file,
+                        file: true,
+                    });
+                }
             }
             "form-string" => {
                 let (field, content) = value.split_once('=').unwrap_or((&value, ""));
