@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{App, Context, SharedString, Task};
 
 use super::{
-    CollectionPanel,
+    CollectionPanel, CollectionPanelEvent,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -59,6 +59,12 @@ impl CollectionPanel {
         if let Some(index) = self.tree.index_of(path) {
             self.open(index, cx);
         }
+    }
+
+    /// The event that would open the collection or request at `path`, for a
+    /// caller that opens the page itself. None when nothing is saved there.
+    pub fn open_event_at(&self, path: &Path) -> Option<CollectionPanelEvent> {
+        self.open_event(self.tree.index_of(path)?)
     }
 }
 

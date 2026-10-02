@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use crate::actions::*;
 use crate::{
@@ -7,6 +7,7 @@ use crate::{
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
     history_panel::{HistoryPanel, HistoryPanelEvent},
     main_view::{MainView, Page},
+    session::{SavedSidebar, SavedWindow, Session},
     top_panel::TopPanel,
 };
 use collection::CollectionRegistry;
@@ -57,6 +58,9 @@ pub(crate) struct Workspace {
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
+    /// Where the window, sidebar and tabs are saved when the window closes.
+    session_path: PathBuf,
+
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
     _history_subscription: Subscription,
@@ -69,10 +73,18 @@ impl Workspace {
         environments: GlobalEnvironments,
         history: History,
         updater: Entity<Updater>,
+        session: Session,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let sidebar_visible = cx.new(|_| true);
+        let Session {
+            path: session_path,
+            sidebar: sidebar_state,
+            tabs,
+            selected_tab,
+            ..
+        } = session;
+        let sidebar_visible = cx.new(|_| sidebar_state.visible);
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
 
@@ -157,7 +169,6 @@ impl Workspace {
                     });
                 }
             });
-        window.focus(&sidebar.focus_handle(cx), cx);
 
         let active_environment = cx
             .try_global::<preferences::Preferences>()
@@ -193,18 +204,35 @@ impl Workspace {
             },
         );
 
-        let main_view =
-            cx.new(|cx| MainView::new(environments, sidebar.clone(), history.clone(), window, cx));
-        main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
+        let main_view = cx.new(|cx| {
+            MainView::new(
+                environments,
+                sidebar.clone(),
+                history.clone(),
+                tabs,
+                selected_tab,
+                window,
+                cx,
+            )
+        });
+
+        // Start in the collections tree, or in the tabs while it is hidden or
+        // folded.
+        if sidebar_state.visible && sidebar_state.collections {
+            window.focus(&sidebar.focus_handle(cx), cx);
+            main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
+        } else {
+            main_view.update(cx, |view, cx| view.focus(window, cx));
+        }
 
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
             history,
-            collections_open: true,
-            environments_open: true,
-            history_open: true,
+            collections_open: sidebar_state.collections,
+            environments_open: sidebar_state.environments,
+            history_open: sidebar_state.history,
             collections_header: cx.focus_handle(),
             environments_header: cx.focus_handle(),
             history_header: cx.focus_handle(),
@@ -217,10 +245,34 @@ impl Workspace {
             previous_focus: None,
             updater,
             command_palette: None,
+            session_path,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
             _history_subscription: history_subscription,
             _settings_subscription: None,
+        }
+    }
+
+    /// Save the window, sidebar and tabs for the next launch.
+    fn save_session(&self, window: &Window, cx: &App) {
+        let session = Session {
+            path: self.session_path.clone(),
+            window: SavedWindow::capture(window, cx),
+            sidebar: SavedSidebar {
+                visible: *self.sidebar_visible.read(cx),
+                collections: self.collections_open,
+                environments: self.environments_open,
+                history: self.history_open,
+            },
+            tabs: self.main_view.read(cx).saved_tabs(cx),
+            selected_tab: self.main_view.read(cx).selected,
+        };
+
+        if let Err(error) = session.save() {
+            eprintln!(
+                "Could not save the session to {}: {error}",
+                self.session_path.display()
+            );
         }
     }
 
@@ -913,22 +965,60 @@ impl Render for Workspace {
     }
 }
 
+/// Save the session as the window closes, while its bounds can still be
+/// read, or when the app quits with the window open.
+fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mut App) {
+    let closing = workspace.downgrade();
+    window.on_window_should_close(cx, move |window, cx| {
+        if let Some(workspace) = closing.upgrade() {
+            workspace.read(cx).save_session(window, cx);
+        }
+
+        true
+    });
+
+    let workspace = workspace.downgrade();
+    let handle = window.window_handle();
+    cx.on_app_quit(move |cx| {
+        let _ = handle.update(cx, |_, window, cx| {
+            if let Some(workspace) = workspace.upgrade() {
+                workspace.read(cx).save_session(window, cx);
+            }
+        });
+
+        async {}
+    })
+    .detach();
+}
+
 /// `cookies` is the jar that every request shares, or why it could not be
-/// read.
+/// read. `session` is how the workspace last looked; it is saved again when
+/// the window closes.
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
     cookies: Result<request::CookieJar, String>,
     history: History,
     updater: Entity<Updater>,
+    session: Session,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
     crate::actions::init(cx);
     tab_ui::Cookies::init(cookies, cx);
 
-    let workspace =
-        cx.new(|cx| Workspace::new(collections, environments, history, updater, window, cx));
+    let workspace = cx.new(|cx| {
+        Workspace::new(
+            collections,
+            environments,
+            history,
+            updater,
+            session,
+            window,
+            cx,
+        )
+    });
+    save_session_on_close(&workspace, window, cx);
     on_toggle_sidebar(&workspace, window.window_handle(), cx);
     on_open_settings(&workspace, window.window_handle(), cx);
     on_open_cookies(&workspace, window.window_handle(), cx);

@@ -1,11 +1,20 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{App, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, px, rems};
 
-pub(crate) fn use_window_options(cx: &mut App) -> WindowOptions {
-    let display = cx.primary_display();
+pub(crate) fn use_window_options(session: &workspace::Session, cx: &mut App) -> WindowOptions {
+    // Open where the window was closed, unless that display is gone. The
+    // first window fills the primary display.
+    let (display_id, window_bounds) = match session.window_placement(cx) {
+        Some((display_id, bounds)) => (Some(display_id), Some(bounds)),
+        None => {
+            let display = cx.primary_display();
 
-    let display_id = display.as_ref().map(|display| display.id());
-    let window_bounds = display.map(|display| WindowBounds::Maximized(display.default_bounds()));
+            (
+                display.as_ref().map(|display| display.id()),
+                display.map(|display| WindowBounds::Maximized(display.default_bounds())),
+            )
+        }
+    };
 
     WindowOptions {
         titlebar: Some(TitlebarOptions {

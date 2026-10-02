@@ -44,6 +44,12 @@ pub fn run() {
             return;
         };
 
+        // Read how the app was last left while the preferences load.
+        let session_path = home.join(".request-eagle/session.json");
+        let session = cx
+            .background_executor()
+            .spawn(async move { workspace::Session::load(session_path) });
+
         if let Err(error) =
             keybindings_service::load_overrides(home.join(".request-eagle/keybindings.json"), cx)
         {
@@ -59,13 +65,14 @@ pub fn run() {
                 return;
             }
 
-            cx.update(|cx| open_workspace(&home, cx));
+            let session = session.await;
+            cx.update(|cx| open_workspace(&home, session, cx));
         })
         .detach();
     });
 }
 
-fn open_workspace(home: &std::path::Path, cx: &mut App) {
+fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut App) {
     request_eagle_theme::init(cx);
 
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
@@ -89,7 +96,7 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
     });
     let history = request_history::History::new(home.join(".request-eagle/history"));
 
-    let window_options = crate::window_options::use_window_options(cx);
+    let window_options = crate::window_options::use_window_options(&session, cx);
     cx.open_window(window_options, move |window, cx| {
         window
             .observe_window_appearance(|window, cx| {
@@ -103,6 +110,7 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
             cookies,
             history,
             updater,
+            session,
             window,
             cx,
         );
