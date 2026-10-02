@@ -173,10 +173,14 @@ fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditEr
                 }
             }
 
+            // Both paths resolve to the folder's real name when only their
+            // case differs.
             #[cfg(not(unix))]
             {
                 let _ = destination_metadata;
-                return Err(CollectionEditError::AlreadyExists);
+                if fs::canonicalize(path)? != fs::canonicalize(&destination)? {
+                    return Err(CollectionEditError::AlreadyExists);
+                }
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
