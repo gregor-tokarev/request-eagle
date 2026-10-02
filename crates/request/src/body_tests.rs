@@ -269,19 +269,3 @@ fn files_are_stored_relative_to_the_collection_and_resolved_from_it() {
     );
     assert_eq!(resolved.relative_to(collection), binary);
 }
-
-#[test]
-fn form_lengths_are_counted_as_sent() {
-    for fields in [
-        Vec::new(),
-        vec![("a b".to_owned(), "&=+é".to_owned())],
-        vec![
-            ("".to_owned(), "x".to_owned()),
-            ("n".to_owned(), "".to_owned()),
-        ],
-    ] {
-        let mut request = post(Body::UrlEncoded { fields });
-        let length = request.body.as_ref().unwrap().known_len();
-        assert_eq!(length, Some(request.encode_body().unwrap().unwrap().len()));
-    }
-}

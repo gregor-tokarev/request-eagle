@@ -38,25 +38,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         .as_ref()
         .filter(|_| !matches!(request.method, Method::Get | Method::Head))
         .filter(|body| !matches!(body, Body::Raw { text, .. } if text.is_empty()));
-    // Files decide the length, and a multipart form's boundary is chosen
-    // when it is sent.
-    let calculated = matches!(body, Some(Body::Multipart { .. } | Body::Binary { .. }));
-    let templated_body = match body {
-        Some(Body::Raw { text, .. }) => text.contains("{{"),
-        Some(Body::UrlEncoded { fields }) => fields
-            .iter()
-            .any(|(name, value)| name.contains("{{") || value.contains("{{")),
-        _ => false,
-    };
-    // An unknown length is not zero, so the header is shown. A request that
-    // sets its own length shows none.
-    let own_length = request.headers.iter().any(|(name, _)| {
-        name.eq_ignore_ascii_case("content-length")
-            || name.eq_ignore_ascii_case("transfer-encoding")
-    });
-    let body_bytes = match body {
-        Some(body) if !own_length => body.known_len().unwrap_or(1),
-        _ => 0,
+    // Only raw text has its length at hand. Encoding a form or reading
+    // files on each edit would be slow, and a multipart form's boundary is
+    // chosen when it is sent.
+    let (body_bytes, calculated, templated_body) = match body {
+        Some(Body::Raw { text, .. }) => (text.len(), false, text.contains("{{")),
+        // An unknown length is not zero, so the header is shown.
+        Some(_) => (1, true, false),
+        None => (0, false, false),
     };
     let url = request_url(&request.path);
     let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {

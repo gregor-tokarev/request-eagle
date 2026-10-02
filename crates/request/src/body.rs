@@ -84,25 +84,6 @@ impl Body {
         }
     }
 
-    /// The number of bytes sent, unless files decide it. A form's length is
-    /// counted without encoding it.
-    pub fn known_len(&self) -> Option<usize> {
-        let encoded = |text: &str| byte_serialize(text.as_bytes()).map(str::len).sum::<usize>();
-
-        match self {
-            Self::Raw { text, .. } => Some(text.len()),
-            // Each field is `name=value`, and `&` separates them.
-            Self::UrlEncoded { fields } => Some(
-                fields
-                    .iter()
-                    .map(|(name, value)| encoded(name) + 1 + encoded(value))
-                    .sum::<usize>()
-                    + fields.len().saturating_sub(1),
-            ),
-            Self::Multipart { .. } | Self::Binary { .. } => None,
-        }
-    }
-
     /// Store paths of files inside `collection` relative to it, so the
     /// collection keeps working when it is renamed, moved or shared.
     pub fn relative_to(&self, collection: &Path) -> Self {

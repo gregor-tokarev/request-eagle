@@ -857,7 +857,7 @@ impl MainView {
             (Page::Request(draft), request::Request::Http(request)) => {
                 draft.update(cx, |draft, cx| {
                     // Saving can store body files relative to the collection.
-                    draft.set_body(request.body.clone(), window, cx);
+                    draft.set_saved_files(request.body.clone(), window, cx);
                     draft.mark_saved(request.clone(), cx);
                 });
             }

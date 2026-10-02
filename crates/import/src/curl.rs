@@ -359,17 +359,11 @@ impl Options {
                     return Ok(());
                 };
 
-                // `@a.txt,b.txt` sends both files in the field. A quoted
-                // name can contain a comma.
-                let files = if files.starts_with('"') {
-                    vec![form_value(files)]
-                } else {
-                    files.split(',').map(form_value).collect()
-                };
-                for file in files {
+                // `@a.txt,b.txt` sends both files in the field.
+                for file in split_outside_quotes(files, ',') {
                     self.form.push(FormPart {
                         name: field.to_owned(),
-                        value: file,
+                        value: form_value(file),
                         file: true,
                     });
                 }
@@ -588,6 +582,32 @@ fn form_value(content: &str) -> String {
     }
 
     unquoted()
+}
+
+/// Splits `text` at each `separator` outside double quotes, in which `\"`
+/// and `\\` stand for a quote and a backslash.
+fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    let mut chars = text.char_indices();
+
+    while let Some((index, char)) = chars.next() {
+        match char {
+            '\\' if quoted => {
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            char if char == separator && !quoted => {
+                parts.push(&text[start..index]);
+                start = index + char.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+
+    parts
 }
 
 /// `--data-urlencode` encodes `content`, the content of `=content`, or the

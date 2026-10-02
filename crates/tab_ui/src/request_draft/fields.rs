@@ -136,6 +136,29 @@ impl RequestFields {
             .collect()
     }
 
+    /// Show the paths of the files `parts` sends in the rows that send them.
+    pub(crate) fn set_files(
+        &mut self,
+        parts: &[FormPart],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sent: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|row| self.is_sent(row, cx))
+            .map(|row| (row.file, row.value.clone()))
+            .collect();
+
+        for ((file, input), part) in sent.into_iter().zip(parts) {
+            if file && part.file && input.read(cx).value() != part.value.as_str() {
+                input.update(cx, |input, cx| {
+                    input.set_value(part.value.clone(), window, cx)
+                });
+            }
+        }
+    }
+
     /// Switch a row between text and a file. Its value no longer applies.
     fn set_file(&mut self, index: usize, file: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(row) = self.rows.get_mut(index) else {

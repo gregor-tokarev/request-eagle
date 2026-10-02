@@ -9,7 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Body, Method, RawLanguage};
 
-use super::draft::{RequestDraft, RequestLocation, RequestSection};
+use super::draft::{RequestDraft, RequestLocation};
 use super::fields::{ChooseFile, FieldsChanged, RequestFields};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 
@@ -95,19 +95,33 @@ impl RequestDraft {
         }
     }
 
-    /// Show the body as saved, whose file paths saving can make relative.
-    pub fn set_body(&mut self, body: Option<Body>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Show the file paths of the body as saved, which saving can make
+    /// relative to the collection. The editors keep everything else.
+    pub fn set_saved_files(
+        &mut self,
+        body: Option<Body>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.request.body == body {
             return;
         }
 
-        // The editors that show file paths are made again from the body.
-        self.request.body = body;
-        self.parts = None;
-        self.body_file = None;
-        if self.section == RequestSection::Body {
-            self.body_state(window, cx);
+        match &body {
+            Some(Body::Binary { file }) => {
+                if let Some(input) = &self.body_file {
+                    let path = file.to_string_lossy().into_owned();
+                    input.update(cx, |input, cx| input.set_value(path, window, cx));
+                }
+            }
+            Some(Body::Multipart { parts }) => {
+                if let Some(table) = &self.parts {
+                    table.update(cx, |table, cx| table.set_files(parts, window, cx));
+                }
+            }
+            _ => {}
         }
+        self.request.body = body;
 
         self.refresh_generated_headers(cx);
         cx.notify();

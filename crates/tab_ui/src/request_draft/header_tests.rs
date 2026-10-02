@@ -157,16 +157,7 @@ fn body_types_preview_their_content_type_and_length() {
                 fields: vec![("a b".into(), "&".into())],
             }
         ),
-        some("application/x-www-form-urlencoded", "7")
-    );
-    assert_eq!(
-        preview(
-            Method::Post,
-            Body::UrlEncoded {
-                fields: vec![("token".into(), "{{token}}".into())],
-            }
-        ),
-        some("application/x-www-form-urlencoded", "Resolved on Send")
+        some("application/x-www-form-urlencoded", "Calculated on Send")
     );
     assert_eq!(
         preview(
