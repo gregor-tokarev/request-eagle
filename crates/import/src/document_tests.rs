@@ -106,9 +106,20 @@ fn postman_workspace_folders_import_each_collection_and_environment() {
     );
     write(
         &workspace,
+        "collections/.Hidden/.resources/definition.yaml",
+        "$kind: collection\n",
+    );
+    write(
+        &workspace,
         "environments/Staging.environment.yaml",
         "name: Staging\nvalues: []\n",
     );
+    write(
+        &workspace,
+        "environments/DEV.ENVIRONMENT.YML",
+        "name: Dev\n",
+    );
+    write(&workspace, "environments/.DS_Store", "");
     write(
         &workspace,
         "globals/workspace.globals.yaml",
@@ -116,8 +127,10 @@ fn postman_workspace_folders_import_each_collection_and_environment() {
     );
     write(&workspace, "specs/Shop/openapi.yaml", "openapi: 3.1.0\n");
     let expected = [
+        workspace.join("collections/.Hidden"),
         workspace.join("collections/Admin"),
         workspace.join("collections/Shop"),
+        workspace.join("environments/DEV.ENVIRONMENT.YML"),
         workspace.join("environments/Staging.environment.yaml"),
     ];
 
@@ -125,7 +138,7 @@ fn postman_workspace_folders_import_each_collection_and_environment() {
     // folder of collections all import the workspace.
     assert_eq!(sources(directory.path()), expected);
     assert_eq!(sources(&workspace), expected);
-    assert_eq!(sources(&workspace.join("collections")), expected[..2]);
+    assert_eq!(sources(&workspace.join("collections")), expected[..3]);
 
     // Anything else imports as it is.
     for path in [
@@ -135,4 +148,71 @@ fn postman_workspace_folders_import_each_collection_and_environment() {
     ] {
         assert_eq!(sources(&path), std::slice::from_ref(&path));
     }
+}
+
+#[test]
+fn workspaces_include_the_resources_their_manifest_lists() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path();
+    write(
+        repository,
+        "postman/environments/Dev.environment.yaml",
+        "name: Dev\n",
+    );
+    write(
+        repository,
+        "api/environments/Prod.environment.yaml",
+        "name: Prod\n",
+    );
+    write(
+        repository,
+        "api/Orders/.resources/definition.yaml",
+        "$kind: collection\n",
+    );
+    // Paths are relative to `.postman`, and resources in the default folders
+    // may be listed too.
+    write(
+        repository,
+        ".postman/resources.yaml",
+        r#"workspace:
+  id: 8d00dc0f-cd89-4d04-a828-ae8284c8b4fe
+cloudResources:
+  environments:
+    ../postman/environments/Dev.environment.yaml: 40303981-76fce2d0
+localResources:
+  collections:
+    - ../api/Orders
+  environments:
+    - ../api/environments/Prod.environment.yaml
+"#,
+    );
+
+    let found = sources(repository);
+
+    assert_eq!(found.len(), 3);
+    assert_eq!(
+        found[0],
+        repository.join("postman/environments/Dev.environment.yaml")
+    );
+    assert!(found[1].ends_with("api/Orders"));
+    assert!(found[2].ends_with("api/environments/Prod.environment.yaml"));
+    assert_eq!(found, sources(&repository.join("postman")));
+}
+
+#[test]
+fn environment_files_may_leave_out_their_variables() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Empty.environment.yaml");
+    fs::write(&path, "name: Empty\n").unwrap();
+
+    assert!(matches!(
+        read(&path).unwrap(),
+        Import::Environment(environment)
+            if environment.name == "Empty" && environment.variables.is_empty()
+    ));
+    // Content alone does not show that it is an environment.
+    assert!(matches!(
+        parse("name: Empty\n").err().unwrap(),
+        ImportError::UnknownFormat
+    ));
 }

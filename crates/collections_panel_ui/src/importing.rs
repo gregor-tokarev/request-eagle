@@ -85,7 +85,13 @@ impl CollectionPanel {
 
         let several = paths.len() > 1;
         for path in &paths {
-            let Some(index) = self.tree.items.iter().position(|item| &item.path == path) else {
+            let Some(index) = self
+                .tree
+                .roots
+                .iter()
+                .copied()
+                .find(|&index| &self.tree.items[index].path == path)
+            else {
                 continue;
             };
 
@@ -308,12 +314,12 @@ impl ImportDialog {
             collections,
             environments,
             skipped,
-            failed,
+            mut failed,
         } = outcome;
 
-        // Nothing was written, so the dialog stays open to try again.
-        if collections.is_empty() && environments.is_empty() {
-            self.error = Some(failed.join("\n"));
+        // A single failure stays in the dialog, so it can be tried again.
+        if collections.is_empty() && environments.is_empty() && failed.len() <= 1 {
+            self.error = failed.pop();
             cx.notify();
             return;
         }
@@ -416,6 +422,7 @@ impl Summary {
         };
 
         match (self.collections.len(), self.environments.len()) {
+            (0, 0) => "Nothing was imported.".to_owned(),
             (collections, 0) => format!("Imported {}.", count(collections, "collection")),
             (0, environments) => format!("Imported {}.", count(environments, "environment")),
             (collections, environments) => format!(

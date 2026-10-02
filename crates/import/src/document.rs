@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
@@ -65,20 +66,44 @@ pub fn sources(path: &Path) -> Vec<PathBuf> {
         folder if folder.is_dir() => folder,
         _ => path.to_owned(),
     };
+    let collections = workspace.join("collections");
+    let environments = workspace.join("environments");
 
+    // A folder that cannot be listed is read itself, which explains why.
+    let mut sources = Vec::new();
+    match children(&collections) {
+        Ok(folders) => {
+            sources.extend(folders.into_iter().filter(|folder| {
+                folder.is_dir() && postman_v3::is_collection(folder).unwrap_or(true)
+            }))
+        }
+        Err(_) => sources.push(collections),
+    }
     // The workspace's `collections` folder may be chosen itself.
-    let collections = [workspace.join("collections"), path.to_owned()]
-        .into_iter()
-        .flat_map(|folder| children(&folder))
-        .filter(|folder| folder.is_dir() && postman_v3::is_collection(folder).unwrap_or(false));
-    let environments = children(&workspace.join("environments"))
-        .into_iter()
-        .filter(|file| {
-            let name = file_name(file).unwrap_or_default();
-            file.is_file() && ENVIRONMENT_EXTENSIONS.iter().any(|end| name.ends_with(end))
-        });
+    sources.extend(
+        children(path)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|folder| folder.is_dir() && postman_v3::is_collection(folder).unwrap_or(false)),
+    );
+    match children(&environments) {
+        Ok(files) => sources.extend(
+            files
+                .into_iter()
+                .filter(|file| file.is_file() && is_environment_file(file)),
+        ),
+        Err(_) => sources.push(environments),
+    }
 
-    let sources: Vec<_> = collections.chain(environments).collect();
+    let repository = match file_name(path) {
+        Some("postman") => path.parent().unwrap_or(path),
+        _ => path,
+    };
+    sources.extend(listed(repository));
+
+    let mut seen = HashSet::new();
+    sources.retain(|source| seen.insert(fs::canonicalize(source).unwrap_or(source.clone())));
+
     if sources.is_empty() {
         vec![path.to_owned()]
     } else {
@@ -86,19 +111,54 @@ pub fn sources(path: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// The folder's entries in name order, without hidden ones. A folder that
-/// cannot be read has none.
-fn children(folder: &Path) -> Vec<PathBuf> {
-    let mut children: Vec<_> = fs::read_dir(folder)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| file_name(path).is_some_and(|name| !name.starts_with('.')))
-        .collect();
+/// The collections and environments a repository's manifest lists, which
+/// may be kept outside `postman`.
+fn listed(repository: &Path) -> Vec<PathBuf> {
+    let manifest = repository.join(".postman");
+    let Ok(source) = fs::read_to_string(manifest.join("resources.yaml")) else {
+        return Vec::new();
+    };
+    let Ok(document) = serde_saphyr::from_str::<Value>(&source) else {
+        return Vec::new();
+    };
+
+    // Paths are relative to `.postman`. Local resources are listed, and the
+    // ones already in the cloud map to their IDs.
+    let mut paths = Vec::new();
+    for kind in ["collections", "environments"] {
+        if let Value::Array(listed) = &document["localResources"][kind] {
+            paths.extend(listed.iter().filter_map(Value::as_str));
+        }
+        if let Value::Object(mapped) = &document["cloudResources"][kind] {
+            paths.extend(mapped.keys().map(String::as_str));
+        }
+    }
+
+    paths.into_iter().map(|path| manifest.join(path)).collect()
+}
+
+/// The folder's entries in name order. A missing folder has none.
+fn children(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+
+    let mut children = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<io::Result<Vec<_>>>()?;
     children.sort();
 
-    children
+    Ok(children)
+}
+
+/// Whether Postman would read the file as one of a workspace's environments.
+fn is_environment_file(path: &Path) -> bool {
+    let name = file_name(path).unwrap_or_default().to_lowercase();
+    ENVIRONMENT_EXTENSIONS
+        .iter()
+        .any(|extension| name.ends_with(extension))
 }
 
 fn file_name(path: &Path) -> Option<&str> {
@@ -116,20 +176,22 @@ pub fn read(path: &Path) -> Result<Import, ImportError> {
         source,
     })?;
 
+    // An environment file may leave out its variables, which content alone
+    // would not show to be an environment.
+    if is_environment_file(path) {
+        let document = document(&source)?;
+        if document["name"].is_string() {
+            return Ok(Import::Environment(postman_environment::convert(&document)));
+        }
+    }
+
     parse(&source)
 }
 
 /// Converts a Postman collection or environment, or an OpenAPI specification,
 /// recognized by its content.
 pub fn parse(source: &str) -> Result<Import, ImportError> {
-    let source = source.trim_start_matches('\u{feff}');
-
-    // YAML also reads JSON, but JSON's errors are clearer for JSON files.
-    let document: Value = if source.trim_start().starts_with(['{', '[']) {
-        serde_json::from_str(source).map_err(|error| ImportError::Syntax(error.to_string()))?
-    } else {
-        serde_saphyr::from_str(source).map_err(|error| ImportError::Syntax(error.to_string()))?
-    };
+    let document = document(source)?;
 
     if document.get("openapi").is_some() || document.get("swagger").is_some() {
         openapi::convert(&document).map(Import::Collection)
@@ -143,6 +205,18 @@ pub fn parse(source: &str) -> Result<Import, ImportError> {
         Err(ImportError::PostmanV3File)
     } else {
         Err(ImportError::UnknownFormat)
+    }
+}
+
+/// The JSON or YAML document in `source`.
+fn document(source: &str) -> Result<Value, ImportError> {
+    let source = source.trim_start_matches('\u{feff}');
+
+    // YAML also reads JSON, but JSON's errors are clearer for JSON files.
+    if source.trim_start().starts_with(['{', '[']) {
+        serde_json::from_str(source).map_err(|error| ImportError::Syntax(error.to_string()))
+    } else {
+        serde_saphyr::from_str(source).map_err(|error| ImportError::Syntax(error.to_string()))
     }
 }
 

@@ -95,6 +95,16 @@ fn imports_environments_under_names_that_fit() {
         environments.import(".", HashMap::new()).unwrap(),
         "Imported"
     );
+    let long = environments
+        .import(&"é".repeat(200), HashMap::new())
+        .unwrap();
+    assert_eq!(long, "é".repeat(60));
+    assert_eq!(
+        environments
+            .import(&"é".repeat(200), HashMap::new())
+            .unwrap(),
+        format!("{long} 2")
+    );
 
     let imported = Environment::from_file(environments.path("tm-prod")).unwrap();
     assert_eq!(imported.entries, entries);

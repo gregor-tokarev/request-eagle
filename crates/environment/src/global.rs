@@ -10,6 +10,10 @@ use crate::{Environment, EnvironmentSaveError};
 
 const EXTENSION: &str = "toml";
 
+/// Leaves room in the 255-byte file name limit of common filesystems for a
+/// number and the extension.
+const MAX_IMPORTED_NAME_BYTES: usize = 120;
+
 /// Named environments that apply to requests in every collection. Each one is
 /// a TOML file in a single directory, and its file name is the environment name.
 #[derive(Clone, Debug)]
@@ -88,21 +92,25 @@ impl GlobalEnvironments {
 
     /// Saves variables from another app as a new environment named after
     /// `base`, or `base 2`, `base 3`, and so on. Path separators in the name
-    /// become `-`, so any name fits.
+    /// become `-`, and a long name is shortened, so any name fits.
     pub fn import(
         &self,
         base: &str,
         entries: HashMap<String, String>,
     ) -> Result<String, GlobalEnvironmentError> {
-        let base: String = base
-            .chars()
-            .map(|character| match character {
+        let mut name = String::new();
+        for character in base.chars() {
+            let character = match character {
                 '/' | '\\' | ':' => '-',
                 character if character.is_control() => ' ',
                 character => character,
-            })
-            .collect();
-        let base = base.trim().trim_start_matches('.').trim();
+            };
+            if name.len() + character.len_utf8() > MAX_IMPORTED_NAME_BYTES {
+                break;
+            }
+            name.push(character);
+        }
+        let base = name.trim().trim_start_matches('.').trim();
         let name = self.create(if base.is_empty() { "Imported" } else { base })?;
 
         let environment = Environment {
