@@ -1,5 +1,7 @@
 use crate::credentials::Secret;
-use crate::{AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences};
+use crate::{
+    AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences, UpdateTrack,
+};
 use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,6 +17,7 @@ pub struct Preferences {
     pub appearance: AppearancePreferences,
     pub request: RequestPreferences,
     pub vim_mode: bool,
+    pub update_track: UpdateTrack,
     /// The global environment selected in the workspace, by name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_environment: Option<String>,

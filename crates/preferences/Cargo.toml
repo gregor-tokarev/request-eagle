@@ -33,6 +33,10 @@ security-framework-sys = "2"
 core-foundation = "0.10"
 smol = "2"
 
+[target.'cfg(windows)'.dependencies]
+smol = "2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+
 [dev-dependencies]
 p12-keystore = "0.3"
 rcgen = { version = "0.14", default-features = false, features = ["ring"] }

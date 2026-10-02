@@ -363,6 +363,8 @@ impl ProxySettings {
                     div().pb_4().text_color(cx.theme().muted_foreground).child(
                         if cfg!(target_os = "linux") {
                             "Credentials are saved in your desktop keyring. Use a password-protected keyring or KeePassXC database to encrypt them on disk."
+                        } else if cfg!(windows) {
+                            "Credentials are saved in Windows Credential Manager."
                         } else {
                             "Credentials are saved in macOS Keychain."
                         },

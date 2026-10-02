@@ -55,11 +55,17 @@ impl CredentialStore for NativeCredentialStore {
 pub(crate) use crate::linux_credentials::{delete, read, write};
 #[cfg(target_os = "macos")]
 pub(crate) use crate::macos_credentials::{delete, read, write};
+#[cfg(windows)]
+pub(crate) use crate::windows_credentials::{delete, read, write};
 
 pub(crate) fn unavailable() -> anyhow::Error {
     if cfg!(target_os = "linux") {
         anyhow!(
             "Could not access a Secret Service keyring. Start and unlock your provider (KeePassXC, GNOME Keyring, or KWallet) in this desktop session, then retry. KeePassXC requires Secret Service integration enabled. Credentials were not saved to a plaintext file."
+        )
+    } else if cfg!(windows) {
+        anyhow!(
+            "Could not access Windows Credential Manager. Check that your account may save credentials, then retry. Credentials were not saved to a plaintext file."
         )
     } else {
         anyhow!(

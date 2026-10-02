@@ -1,21 +1,28 @@
+#[cfg(target_os = "macos")]
 use super::install;
+use super::package::{self, INSTALLS_IN_APP, MANIFEST};
 
 use std::sync::Arc;
 
 use gpui_kit::{
     App, AppContext, Context, Entity,
-    http_client::{AsyncBody, HttpClient},
+    http_client::{AsyncBody, HttpClient, StatusCode},
 };
+use preferences::{Preferences, UpdateTrack};
 use semver::Version;
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
 use smol::io::AsyncReadExt;
 
-const UPDATE_MANIFEST_URL: &str = "https://github.com/gregor-tokarev/request-eagle/releases/latest/download/request-eagle-update.json";
+#[cfg(test)]
+mod tests;
+
+const REPOSITORY: &str = "gregor-tokarev/request-eagle";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct UpdateManifest {
     pub version: String,
     pub(super) url: String,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) sha256: String,
 }
 
@@ -37,7 +44,10 @@ pub enum UpdateStatus {
 
 pub struct Updater {
     pub(super) current_version: &'static str,
+    /// The track the latest check looked at.
+    track: UpdateTrack,
     pub(super) status: UpdateStatus,
+    #[cfg(target_os = "macos")]
     pub(super) prepared_update: Option<install::PreparedUpdate>,
 }
 
@@ -71,24 +81,68 @@ impl Updater {
 
         let http_client = cx.http_client();
         let current_version = self.current_version;
+        let track = self.track;
 
         cx.spawn(async move |this, cx| {
-            let status = match check_for_update(http_client, current_version).await {
+            let status = match check_for_update(http_client, current_version, track).await {
                 Ok(Some(manifest)) => UpdateStatus::Available(manifest),
                 Ok(None) => UpdateStatus::UpToDate,
                 Err(error) => UpdateStatus::Error(error),
             };
 
-            let _ = this.update(cx, |this, cx| this.set_status(status, cx));
+            let _ = this.update(cx, |this, cx| {
+                // A newer check already looks at the track chosen since.
+                if this.track == track {
+                    this.set_status(status, cx);
+                }
+            });
         })
         .detach();
     }
 
+    /// Check the newly chosen track. An update that is downloading finishes
+    /// first, and one that is ready is dropped for the new track's answer.
+    fn follow_track(&mut self, cx: &mut Context<Self>) {
+        let track = cx.global::<Preferences>().update_track;
+
+        if track == self.track
+            || matches!(
+                self.status,
+                UpdateStatus::Downloading { .. } | UpdateStatus::Verifying(_)
+            )
+        {
+            return;
+        }
+
+        self.track = track;
+
+        #[cfg(target_os = "macos")]
+        {
+            self.prepared_update = None;
+        }
+
+        self.status = UpdateStatus::Idle;
+        self.check(cx);
+    }
+
+    /// Downloads and verifies the update on macOS. Elsewhere the browser
+    /// downloads the installer or package, and the system installs it.
     pub fn download(&mut self, cx: &mut Context<Self>) {
         let UpdateStatus::Available(manifest) = self.status.clone() else {
             return;
         };
 
+        if !INSTALLS_IN_APP {
+            cx.open_url(&manifest.url);
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        self.download_in_app(manifest, cx);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn download_in_app(&mut self, manifest: UpdateManifest, cx: &mut Context<Self>) {
         let version = manifest.version.clone();
 
         self.set_status(
@@ -131,62 +185,99 @@ impl Updater {
 
     /// Only a finished download stores a prepared update, so this does
     /// nothing until the status is `Ready`.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     pub fn relaunch(&mut self, cx: &mut Context<Self>) {
-        let Some(update) = self.prepared_update.take() else {
-            return;
-        };
-
-        match update.launch_installer() {
-            Ok(()) => cx.quit(),
-            Err(error) => self.set_status(UpdateStatus::Error(error), cx),
+        #[cfg(target_os = "macos")]
+        if let Some(update) = self.prepared_update.take() {
+            match update.launch_installer() {
+                Ok(()) => cx.quit(),
+                Err(error) => self.set_status(UpdateStatus::Error(error), cx),
+            }
         }
     }
 }
 
 pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
-    let updater = cx.new(|_| Updater {
-        current_version,
-        status: UpdateStatus::Idle,
-        prepared_update: None,
+    let updater = cx.new(|cx| {
+        cx.observe_global::<Preferences>(Updater::follow_track)
+            .detach();
+
+        Updater {
+            current_version,
+            track: cx.global::<Preferences>().update_track,
+            status: UpdateStatus::Idle,
+            #[cfg(target_os = "macos")]
+            prepared_update: None,
+        }
     });
 
-    // Bare cargo binaries cannot be replaced by the app-bundle installer.
-    if install::current_app_bundle().is_ok() {
+    // Builds from source cannot be replaced by a release package.
+    if package::installed() {
         updater.update(cx, |updater, cx| updater.check(cx));
     }
 
     updater
 }
 
-pub(super) async fn check_for_update(
+/// A release as the GitHub API lists it.
+#[derive(Deserialize)]
+struct Release {
+    tag_name: String,
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// Find this platform's manifest in the newest release. Nightly builds and
+/// the stable releases promoted from them share one version sequence.
+fn newest_manifest_url(releases: &[Release]) -> Option<&str> {
+    releases
+        .iter()
+        .filter_map(|release| {
+            let version = Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
+            let manifest = release.assets.iter().find(|asset| asset.name == MANIFEST)?;
+
+            Some((version, manifest.browser_download_url.as_str()))
+        })
+        .max_by(|(first, _), (second, _)| first.cmp(second))
+        .map(|(_, url)| url)
+}
+
+async fn check_for_update(
     http_client: Arc<dyn HttpClient>,
     current_version: &str,
+    track: UpdateTrack,
 ) -> Result<Option<UpdateManifest>, String> {
-    let mut response = http_client
-        .get(UPDATE_MANIFEST_URL, AsyncBody::empty(), true)
-        .await
-        .map_err(|error| format!("Could not check for updates: {error}"))?;
-    let status = response.status();
+    let manifest_url = match track {
+        // GitHub's latest release is the newest one not marked as a prerelease.
+        UpdateTrack::Stable => {
+            format!("https://github.com/{REPOSITORY}/releases/latest/download/{MANIFEST}")
+        }
+        UpdateTrack::Nightly => {
+            let releases: Option<Vec<Release>> = get_json(
+                &http_client,
+                &format!("https://api.github.com/repos/{REPOSITORY}/releases?per_page=30"),
+                "release list",
+            )
+            .await?;
 
-    let mut body = Vec::new();
-    response
-        .body_mut()
-        .read_to_end(&mut body)
-        .await
-        .map_err(|error| format!("Could not read the update manifest: {error}"))?;
+            match releases.as_deref().and_then(newest_manifest_url) {
+                Some(url) => url.to_owned(),
+                None => return Ok(None),
+            }
+        }
+    };
 
-    if !status.is_success() {
-        let detail = String::from_utf8_lossy(&body).trim().to_string();
-
-        return Err(if detail.is_empty() {
-            format!("GitHub returned {status} for the update manifest.")
-        } else {
-            detail
-        });
-    }
-
-    let manifest: UpdateManifest = serde_json::from_slice(&body)
-        .map_err(|error| format!("The update manifest is invalid: {error}"))?;
+    // A track without a release for this platform has nothing to offer yet.
+    let Some(manifest): Option<UpdateManifest> =
+        get_json(&http_client, &manifest_url, "update manifest").await?
+    else {
+        return Ok(None);
+    };
 
     let installed = Version::parse(current_version)
         .map_err(|error| format!("The installed version is invalid: {error}"))?;
@@ -194,4 +285,47 @@ pub(super) async fn check_for_update(
         .map_err(|error| format!("The released version is invalid: {error}"))?;
 
     Ok((released > installed).then_some(manifest))
+}
+
+/// Fetch and decode a JSON document, or `None` when GitHub has no such file.
+async fn get_json<T: DeserializeOwned>(
+    http_client: &Arc<dyn HttpClient>,
+    url: &str,
+    name: &str,
+) -> Result<Option<T>, String> {
+    let mut response = http_client
+        .get(url, AsyncBody::empty(), true)
+        .await
+        .map_err(|error| format!("Could not check for updates: {error}"))?;
+    let status = response.status();
+
+    if status == StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+
+    // Unauthenticated API requests are limited per network address.
+    if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+        return Err("GitHub is limiting update checks from this network. Try again later.".into());
+    }
+
+    let mut body = Vec::new();
+    response
+        .body_mut()
+        .read_to_end(&mut body)
+        .await
+        .map_err(|error| format!("Could not read the {name}: {error}"))?;
+
+    if !status.is_success() {
+        let detail = String::from_utf8_lossy(&body).trim().to_string();
+
+        return Err(if detail.is_empty() {
+            format!("GitHub returned {status} for the {name}.")
+        } else {
+            detail
+        });
+    }
+
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(|error| format!("The {name} is invalid: {error}"))
 }
