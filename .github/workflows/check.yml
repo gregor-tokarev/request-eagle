@@ -288,24 +288,13 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p collection -p environment -p history -p request --lib
 
-      # One at a time, so the log names a test that hangs. Windows does not
-      # stop a hung test at a step timeout, so this stops it and keeps the log.
       - name: Test sending requests
         if: ${{ !cancelled() }}
-        run: |
-          cargo test --locked --no-run -p request --tests
-          $log = "$env:RUNNER_TEMP\request-tests.log"
-          $tests = Start-Process cargo -NoNewWindow -PassThru `
-            -ArgumentList 'test', '--locked', '--no-fail-fast', '-p', 'request', '--tests', '--', '--test-threads=1' `
-            -RedirectStandardOutput $log -RedirectStandardError "$log.err"
-          # PowerShell only reports the exit code of a process whose handle it opened.
-          $null = $tests.Handle
-
-          $finished = $tests.WaitForExit(15 * 60 * 1000)
-          if (-not $finished) { taskkill /T /F /PID $tests.Id | Out-Null }
-          Get-Content "$log.err", $log
-          if (-not $finished) { throw 'A request test hung' }
-          if ($tests.ExitCode -ne 0) { throw "Request tests failed with code $($tests.ExitCode)" }
+        run: >-
+          cargo test --locked --no-fail-fast -p request --test certificates --test cookies
+          --test event_stream --test execution --test generated_headers --test grpc
+          --test protocol_settings --test proxy --test range_response
+          --test response_encoding --test variables --test websocket
 
       - name: Store credentials in Windows Credential Manager
         if: ${{ !cancelled() }}
@@ -342,3 +331,32 @@ jobs:
           name: windows-screenshot
           path: ${{ runner.temp }}/windows.png
           if-no-files-found: ignore
+
+      # These tests hang on Windows. Each runs on its own and is stopped after a
+      # minute, because Windows does not stop a hung test at a step timeout.
+      - name: Test request scripts one at a time
+        if: ${{ !cancelled() }}
+        run: |
+          $build = cargo test --locked -p request --test script_workflows --no-run --message-format=json |
+            ConvertFrom-Json | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable }
+          $binary = $build[-1].executable
+          $names = & $binary --list --format terse | ForEach-Object { $_ -replace ': test$', '' }
+          $failed = @()
+
+          foreach ($name in $names) {
+            $test = Start-Process $binary -ArgumentList '--exact', $name -NoNewWindow -PassThru `
+              -RedirectStandardOutput "$env:RUNNER_TEMP\test.log" -RedirectStandardError "$env:RUNNER_TEMP\test.err"
+            $null = $test.Handle
+
+            if (-not $test.WaitForExit(60000)) {
+              taskkill /T /F /PID $test.Id | Out-Null
+              $failed += "$name (hung)"
+            } elseif ($test.ExitCode -ne 0) {
+              Get-Content "$env:RUNNER_TEMP\test.log", "$env:RUNNER_TEMP\test.err"
+              $failed += $name
+            }
+
+            Write-Output "$name finished"
+          }
+
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
