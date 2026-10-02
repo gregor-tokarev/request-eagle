@@ -3,7 +3,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use request::{HttpRequest, Method};
+use request::{HttpRequest, HttpSettings, Method};
 use thiserror::Error;
 
 use crate::body::{BOUNDARY, multipart_form};
@@ -193,8 +193,9 @@ pub fn is_curl(text: &str) -> bool {
     })
 }
 
-/// The request a cURL command sends. Options that only change how cURL
-/// connects or prints, such as `--location` or `--silent`, are left out.
+/// The request a cURL command sends. `--insecure` and `--max-time` become
+/// its settings. Other options that only change how cURL connects or prints,
+/// such as `--location` or `--silent`, are left out.
 pub fn parse_curl(command: &str) -> Result<HttpRequest, CurlError> {
     if !is_curl(command) {
         return Err(CurlError::NotCurl);
@@ -260,6 +261,8 @@ fn long_name(flag: char) -> &'static str {
         'G' => "get",
         'H' => "header",
         'I' => "head",
+        'k' => "insecure",
+        'm' => "max-time",
         'T' => "upload-file",
         'u' => "user",
         'X' => "request",
@@ -281,6 +284,8 @@ struct Options {
     form: Vec<(String, String)>,
     user: Option<String>,
     cookies: Vec<String>,
+    insecure: bool,
+    timeout_ms: Option<u64>,
 }
 
 impl Options {
@@ -289,6 +294,7 @@ impl Options {
             match name {
                 "get" => self.get = true,
                 "head" => self.head = true,
+                "insecure" => self.insecure = true,
                 _ => {}
             }
             return Ok(());
@@ -337,6 +343,16 @@ impl Options {
                 self.form.push((field.to_owned(), content.to_owned()));
             }
             "upload-file" => return Err(CurlError::File(format!("--upload-file {value}"))),
+            // In seconds, which may have a fraction. Zero is no limit, as in
+            // Request Eagle.
+            "max-time" => {
+                self.timeout_ms = value
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|seconds| seconds.is_finite() && *seconds >= 0.)
+                    .map(|seconds| (seconds * 1000.).round() as u64);
+            }
             _ => {}
         }
 
@@ -462,6 +478,11 @@ impl Options {
             path: url,
             headers: self.headers,
             body,
+            settings: HttpSettings {
+                timeout_ms: self.timeout_ms,
+                follow_redirects: None,
+                verify_certificates: self.insecure.then_some(false),
+            },
             ..HttpRequest::default()
         })
     }

@@ -69,6 +69,11 @@ impl RequestExecutor {
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
         let executor = self.clone();
         let opened = events.as_ref().map(|events| events.opened.clone());
+        let timeout = match request.settings.timeout_ms {
+            Some(0) => None,
+            Some(timeout) => Some(Duration::from_millis(timeout)),
+            None => self.timeout,
+        };
 
         async move {
             let cancellation = scripts::Cancellation::new();
@@ -106,7 +111,7 @@ impl RequestExecutor {
                 Ok((request, post_body, state, execution))
             };
 
-            let (request, body, state, execution) = match executor.timeout {
+            let (request, body, state, execution) = match timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;

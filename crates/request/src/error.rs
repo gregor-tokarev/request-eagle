@@ -40,6 +40,10 @@ pub enum ExecutionError {
     #[error("could not initialize the HTTP client: {0}")]
     Client(#[source] reqwest::Error),
 
+    /// A certificate from Settings could not be used.
+    #[error("{0}")]
+    Certificate(String),
+
     #[error("invalid request URL: {0}")]
     InvalidUrl(#[from] url::ParseError),
 

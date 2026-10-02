@@ -260,6 +260,7 @@ impl RequestDraft {
             ("Headers", Some(RequestSection::Headers)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
             ("Scripts", Some(RequestSection::Scripts)),
+            ("Settings", Some(RequestSection::Settings)),
         ];
 
         h_flex().flex_none().gap_2().min_w_0().child(

@@ -16,6 +16,9 @@ futures = "0.3"
 percent-encoding = "2"
 http_client = { package = "gpui-pre-http-client", version = "=0.3.5" }
 hyper-util = { version = "0.1", features = ["tokio"] }
+# Client certificates: PKCS #12 files and encrypted PEM keys.
+p12-keystore = "0.3"
+pkcs8 = { version = "0.11", features = ["encryption"] }
 ipnet = "2"
 jsonschema = { version = "0.56", default-features = false, features = ["idna"] }
 # Use the same reqwest fork as GPUI's runtime adapter.
@@ -50,7 +53,7 @@ brotli = "8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 h2 = "0.4"
-rcgen = { version = "0.14", default-features = false, features = ["ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }
 tokio = { version = "1", features = ["net", "io-util", "macros", "rt-multi-thread"] }
 tokio-rustls = "0.26"
 tokio-stream = { version = "0.1", features = ["net"] }

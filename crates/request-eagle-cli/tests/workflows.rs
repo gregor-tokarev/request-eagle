@@ -374,6 +374,92 @@ fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
 }
 
 #[test]
+fn request_settings_are_saved_with_the_request() {
+    let cli = Cli::new();
+    let collection = cli.collection();
+    let created = cli.create(
+        &collection,
+        json!({"method":"GET","url":"https://example.invalid","timeout_ms":0,"follow_redirects":false,"verify_certificates":false}),
+    );
+    let path = created["path"].as_str().unwrap();
+    assert_eq!(created["request"]["timeout_ms"], 0);
+    assert_eq!(created["request"]["follow_redirects"], false);
+    assert_eq!(created["request"]["verify_certificates"], false);
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("[request.settings]")
+    );
+
+    // Settings left unset follow the preferences and leave the file.
+    let mut request = created["request"].clone();
+    request.as_object_mut().unwrap().remove("timeout_ms");
+    request
+        .as_object_mut()
+        .unwrap()
+        .remove("verify_certificates");
+    let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":request}));
+    assert_eq!(updated["request"], request);
+    let source = fs::read_to_string(path).unwrap();
+    assert!(source.contains("follow_redirects = false"), "{source}");
+    assert!(
+        !source.contains("timeout_ms") && !source.contains("verify_certificates"),
+        "{source}"
+    );
+}
+
+#[test]
+fn certificate_settings_are_added_and_removed() {
+    let cli = Cli::new();
+    let ca = cli.0.path().join("ca.pem");
+    let settings = cli.call(json!({"command":"settings.request","ca_certificates":ca}));
+    assert_eq!(settings["request"]["ca_certificates"], json!(ca));
+
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["api.example.com".into()]).unwrap();
+    let certificate_path = cli.0.path().join("client.crt");
+    let key_path = cli.0.path().join("client.key");
+    let combined_path = cli.0.path().join("client.pem");
+    fs::write(&certificate_path, cert.pem()).unwrap();
+    fs::write(&key_path, signing_key.serialize_pem()).unwrap();
+    fs::write(&combined_path, cert.pem() + &signing_key.serialize_pem()).unwrap();
+
+    let settings = cli.call(json!({"command":"settings.client_certificates.add","host":" api.example.com:8443 ","certificate":certificate_path,"key":key_path}));
+    let certificate = &settings["request"]["client_certificates"][0];
+    assert_eq!(certificate["host"], "api.example.com:8443");
+    assert_eq!(
+        certificate["files"],
+        json!({"format":"pem","certificate":certificate_path,"key":key_path})
+    );
+    let id = certificate["id"].as_str().unwrap().to_owned();
+    cli.call(json!({"command":"settings.client_certificates.add","host":"*.example.com","certificate":combined_path}));
+
+    let path = cli.0.path().join("preferences.json");
+    let before = fs::read(&path).unwrap();
+    for input in [
+        json!({"command":"settings.client_certificates.add","host":"https://api.example.com","certificate":combined_path}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","certificate":combined_path,"pkcs12":"/certs/client.p12"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","pkcs12":"/certs/missing.p12"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","certificate":certificate_path}),
+        json!({"command":"settings.client_certificates.remove","id":"unknown"}),
+    ] {
+        assert_eq!(cli.raw(&input.to_string()).0, 1, "{input}");
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    let settings = cli.call(json!({"command":"settings.client_certificates.remove","id":id}));
+    let certificates = settings["request"]["client_certificates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(certificates.len(), 1);
+    assert_eq!(certificates[0]["host"], "*.example.com");
+
+    let settings = cli.call(json!({"command":"settings.request","ca_certificates":""}));
+    assert!(settings["request"].get("ca_certificates").is_none());
+}
+
+#[test]
 fn settings_edits_preserve_the_desktop_vim_preference() {
     let cli = Cli::new();
     let path = cli.0.path().join("preferences.json");

@@ -4,6 +4,7 @@ mod draft;
 mod execution;
 mod fields;
 mod path_variables;
+mod settings;
 
 #[cfg(test)]
 mod header_tests;

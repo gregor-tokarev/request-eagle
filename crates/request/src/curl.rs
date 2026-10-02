@@ -9,7 +9,8 @@ use crate::{CookieJar, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
-    /// following redirects. `{{variables}}` that `values` defines are filled
+    /// following redirects and with the timeout and certificate checks of the
+    /// request's settings. `{{variables}}` that `values` defines are filled
     /// in as sending fills them, including `:name` path variables; others,
     /// and generated ones such as `{{$guid}}`, stay as written. The cookies
     /// that `cookies` would add join the request's Cookie header.
@@ -78,7 +79,18 @@ impl HttpRequest {
             }
         }
 
-        let mut command = String::from("curl --location");
+        let settings = &request.settings;
+        let mut command = String::from("curl");
+        if settings.follow_redirects != Some(false) {
+            command.push_str(" --location");
+        }
+        if settings.verify_certificates == Some(false) {
+            command.push_str(" --insecure");
+        }
+        if let Some(timeout) = settings.timeout_ms.filter(|timeout| *timeout > 0) {
+            // In seconds, which may have a fraction.
+            command.push_str(&format!(" --max-time {}", timeout as f64 / 1000.));
+        }
         // cURL would read brackets and braces as patterns of several URLs.
         if url.contains(['[', ']', '{', '}']) {
             command.push_str(" --globoff");

@@ -56,6 +56,7 @@ pub enum Command {
     /// A gRPC request sends its saved message once, including on client streams,
     /// and returns every response message with the final status. Requests store
     /// and send cookies in the app's cookie jar unless cookie_jar is off.
+    /// timeout_ms replaces the request's and the setting's timeout for this run.
     #[serde(rename = "requests.run")]
     RequestsRun {
         path: PathBuf,
@@ -76,6 +77,9 @@ pub enum Command {
         follow_all_redirects: Option<bool>,
         /// Keep the cookies that responses set and send them with later requests.
         cookie_jar: Option<bool>,
+        /// A PEM file of certificate authorities to trust in addition to the
+        /// system's. An empty path stops trusting them.
+        ca_certificates: Option<PathBuf>,
     },
     /// The cookies in the app's cookie jar, optionally of one domain. Each has
     /// its domain, path, name, value, attributes and expiry in Unix seconds,
@@ -88,6 +92,25 @@ pub enum Command {
         domain: String,
         name: Option<String>,
     },
+    /// Present a certificate to the servers of a host that ask for one (mutual
+    /// TLS). Supply PEM files, or a PKCS #12 file. The passphrase is kept in the
+    /// OS credential store. The result lists the certificate with its ID.
+    #[serde(rename = "settings.client_certificates.add")]
+    SettingsClientCertificatesAdd {
+        /// `api.example.com`, optionally with a port. `*.example.com` matches
+        /// its subdomains. Without a port, any port matches.
+        host: String,
+        /// A PEM certificate, followed by any intermediates. It may hold the key.
+        certificate: Option<PathBuf>,
+        /// A PEM private key, if it is not in the certificate file.
+        key: Option<PathBuf>,
+        /// A PKCS #12 file (.p12 or .pfx), instead of PEM files.
+        pkcs12: Option<PathBuf>,
+        /// Decrypts an encrypted key or the PKCS #12 file.
+        passphrase: Option<String>,
+    },
+    #[serde(rename = "settings.client_certificates.remove")]
+    SettingsClientCertificatesRemove { id: String },
     #[serde(rename = "settings.appearance")]
     SettingsAppearance {
         mode: Option<AppearanceMode>,
@@ -156,6 +179,10 @@ pub struct GrpcRequestInput {
     /// MiB, or 0 for any size. Unset follows max_response_size_mb.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_response_message_mb: Option<u64>,
+    /// Milliseconds for unary calls and server reflection, or 0 for no
+    /// deadline. Unset follows the timeout_ms setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
     /// JavaScript run before the method is invoked.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub before_invoke: String,
@@ -192,6 +219,15 @@ pub struct RequestInput {
     pub pre_request: String,
     #[serde(default)]
     pub post_response: String,
+    /// Milliseconds, or 0 for no deadline. Unset follows the timeout_ms setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// Unset follows the follow_all_redirects setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<bool>,
+    /// Unset follows the ssl_certificate_verification setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_certificates: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 21] = [
+const LOCAL_ICONS: [(&str, &[u8]); 22] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -37,6 +37,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 21] = [
     ),
     // Lucide icons that GPUI Kit does not bundle by default.
     ("icons/lock.svg", include_bytes!("../assets/icons/lock.svg")),
+    (
+        "icons/shield-check.svg",
+        include_bytes!("../assets/icons/shield-check.svg"),
+    ),
     (
         "icons/lock-open.svg",
         include_bytes!("../assets/icons/lock-open.svg"),

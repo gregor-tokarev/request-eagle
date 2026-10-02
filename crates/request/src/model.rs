@@ -50,6 +50,34 @@ pub struct HttpRequest {
     pub path_variables: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "crate::RequestScripts::is_empty")]
     pub scripts: crate::RequestScripts,
+    #[serde(default, skip_serializing_if = "HttpSettings::is_default")]
+    pub settings: HttpSettings,
+}
+
+/// Per-request options. Each unset option follows the request preferences.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HttpSettings {
+    /// Deadline through the complete response body. Zero disables it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_certificates: Option<bool>,
+}
+
+impl HttpSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// How many options differ from the request preferences.
+    pub fn overrides(&self) -> usize {
+        usize::from(self.timeout_ms.is_some())
+            + usize::from(self.follow_redirects.is_some())
+            + usize::from(self.verify_certificates.is_some())
+    }
 }
 
 impl HttpRequest {
@@ -110,6 +138,30 @@ pub struct WebSocketRequest {
     /// Saved with the request, so it can be sent again after reopening it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub message: String,
+    #[serde(default, skip_serializing_if = "WebSocketSettings::is_default")]
+    pub settings: WebSocketSettings,
+}
+
+/// Per-connection options. Each unset option follows the request preferences.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct WebSocketSettings {
+    /// Deadline for the handshake. Zero disables it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_certificates: Option<bool>,
+}
+
+impl WebSocketSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// How many options differ from the request preferences.
+    pub fn overrides(&self) -> usize {
+        usize::from(self.timeout_ms.is_some()) + usize::from(self.verify_certificates.is_some())
+    }
 }
 
 impl From<WebSocketRequest> for Request {

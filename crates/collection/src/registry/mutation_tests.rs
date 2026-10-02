@@ -167,6 +167,7 @@ request_custom = 'keep the request metadata'
         body: Some(b"new body".to_vec()),
         query: vec![("page".into(), "2".into())],
         path_variables: vec![("team".into(), "core".into())],
+        settings: Default::default(),
     };
 
     registry

@@ -137,6 +137,7 @@ order: 1000
                 server_name: "shop.internal".into(),
                 include_default_fields: false,
                 max_response_message_mb: Some(16),
+                timeout_ms: None,
             },
             scripts: GrpcScripts {
                 before_invoke: "console.log('invoke');".into(),

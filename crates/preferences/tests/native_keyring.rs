@@ -2,7 +2,7 @@
 //! synthetic credentials, then removes its keyring entry. Never uses app settings.
 use anyhow::{Result, ensure};
 use gpui_kit::{App, AsyncApp};
-use preferences::{Preferences, ProxyMode, ProxyPreferences};
+use preferences::{CertificateFiles, ClientCertificate, Preferences, ProxyMode, ProxyPreferences};
 use std::{
     fs,
     sync::{
@@ -102,6 +102,66 @@ async fn round_trip(cx: &mut AsyncApp) -> Result<()> {
             .is_err()
     );
     ensure!(cx.read_global::<Preferences, _>(|p, _| p.request.proxy.validate().is_err()));
+
+    certificate_round_trip(cx).await
+}
+
+async fn certificate_round_trip(cx: &mut AsyncApp) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let passphrase = "request-eagle-smoke-passphrase";
+    cx.update(|cx| preferences::load(directory.path(), cx))
+        .await?;
+    // Adding a certificate checks that the passphrase opens its file.
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["mtls.example.invalid".into()])?;
+    let mut store = p12_keystore::KeyStore::new();
+    store.add_entry(
+        "client",
+        p12_keystore::KeyStoreEntry::PrivateKeyChain(p12_keystore::PrivateKeyChain::new(
+            vec![1],
+            p12_keystore::PrivateKey::from_der(&signing_key.serialize_der())?,
+            [p12_keystore::Certificate::from_der(cert.der())?],
+        )),
+    );
+    let pkcs12 = directory.path().join("client.p12");
+    fs::write(&pkcs12, store.writer(passphrase).write()?)?;
+    let certificate = ClientCertificate {
+        id: String::new(),
+        host: "mtls.example.invalid".into(),
+        files: CertificateFiles::Pkcs12 { path: pkcs12 },
+        has_passphrase: false,
+        passphrase: passphrase.into(),
+        passphrase_unavailable: false,
+    };
+    println!("Saving a synthetic certificate passphrase to the native store");
+    cx.update(|cx| preferences::add_client_certificate(certificate, cx))
+        .await?;
+    let path = directory.path().join("preferences.json");
+    let document = fs::read_to_string(&path)?;
+    ensure!(!document.contains(passphrase));
+    let id = cx.read_global::<Preferences, _>(|p, _| p.request.client_certificates[0].id.clone());
+
+    println!("Reloading the certificate passphrase from the native store");
+    cx.update(|cx| preferences::load(directory.path(), cx))
+        .await?;
+    ensure!(cx.read_global::<Preferences, _>(
+        |p, _| p.request.client_certificates[0].passphrase == passphrase
+    ));
+    let file = preferences::PreferencesFile::new(directory.path());
+    ensure!(file.request_preferences().await?.client_certificates[0].passphrase == passphrase);
+
+    println!("Deleting the certificate passphrase from the native store");
+    file.remove_client_certificate(&id).await?;
+    ensure!(file.read()?.request.client_certificates.is_empty());
+
+    // Reload the old reference to verify deletion, not just the JSON update.
+    fs::write(&path, document)?;
+    cx.update(|cx| preferences::load(directory.path(), cx))
+        .await?;
+    ensure!(cx.read_global::<Preferences, _>(|p, _| {
+        p.request.client_certificates[0].passphrase_unavailable
+    }));
+    ensure!(file.request_preferences().await?.client_certificates[0].passphrase_unavailable);
     Ok(())
 }
 

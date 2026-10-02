@@ -1,6 +1,6 @@
-use crate::credentials::{CredentialStore, NativeCredentialStore, ProxyCredentials};
+use crate::credentials::{CredentialStore, NativeCredentialStore, ProxyCredentials, Secret};
 use crate::file::{persist, read_document};
-use crate::{Preferences, ProxyPreferences};
+use crate::{ClientCertificate, Preferences, ProxyPreferences};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use gpui_kit::{App, Global, Task};
@@ -73,17 +73,58 @@ pub fn load(directory: impl AsRef<Path>, cx: &mut App) -> Task<Result<()>> {
     let proxy = &preferences.request.proxy;
     let legacy = !proxy.username.is_empty() || !proxy.password.is_empty();
     let id = preferences.proxy_credentials_id.clone();
+    let passphrases = preferences
+        .request
+        .client_certificates
+        .iter()
+        .filter(|certificate| certificate.has_passphrase)
+        .map(|certificate| certificate.id.clone())
+        .collect::<Vec<_>>();
     cx.global_mut::<Storage>().legacy_credentials = legacy;
     cx.set_global(preferences);
 
     cx.spawn(async move |cx| {
+        // A certificate whose passphrase is unavailable explains it when used.
+        for id in passphrases {
+            let task = cx.update(|cx| {
+                let credentials = &cx.global::<Storage>().credentials;
+                credentials.read(Secret::CertificatePassphrase, &id, cx)
+            });
+            let passphrase = task
+                .await
+                .ok()
+                .flatten()
+                .and_then(|passphrase| String::from_utf8(passphrase).ok());
+
+            cx.update(|cx| {
+                let mut preferences = cx.global::<Preferences>().clone();
+                let certificate = preferences
+                    .request
+                    .client_certificates
+                    .iter_mut()
+                    .find(|certificate| certificate.id == id);
+
+                if let Some(certificate) = certificate {
+                    match passphrase {
+                        Some(passphrase) => certificate.passphrase = passphrase,
+                        None => certificate.passphrase_unavailable = true,
+                    }
+                    cx.set_global(preferences);
+                }
+            });
+        }
+
         let result = if legacy {
             // The plaintext document remains untouched until the keyring write succeeds.
             let task =
                 cx.update(|cx| update_proxy(cx.global::<Preferences>().request.proxy.clone(), cx));
             task.await
         } else if let Some(id) = id {
-            let task = cx.update(|cx| cx.global::<Storage>().credentials.read(&id, cx));
+            let task = cx.update(|cx| {
+                cx.global::<Storage>()
+                    .credentials
+                    .read(Secret::ProxyCredentials, &id, cx)
+            });
             match decode_credentials(task.await) {
                 Ok(credentials) => {
                     cx.update(|cx| {
@@ -132,6 +173,10 @@ pub fn update(cx: &mut App, change: impl FnOnce(&mut Preferences)) -> Result<()>
 
         if preferences.request.proxy != previous.request.proxy {
             bail!("Proxy settings must be saved through the credential store.");
+        }
+
+        if preferences.request.client_certificates != previous.request.client_certificates {
+            bail!("Client certificates must be saved through the credential store.");
         }
 
         persist(path, &preferences)?;
@@ -190,7 +235,8 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
             } else if old_proxy.credentials_unavailable && !changed && !legacy {
                 if proxy.mode == crate::ProxyMode::Custom && proxy.authentication {
                     if let Some(id) = &previous.proxy_credentials_id {
-                        let task = cx.update(|cx| credentials.read(id, cx));
+                        let task =
+                            cx.update(|cx| credentials.read(Secret::ProxyCredentials, id, cx));
                         let restored = decode_credentials(task.await)?;
                         proxy.username = restored.username;
                         proxy.password = restored.password;
@@ -226,7 +272,14 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
                     username: proxy.username.clone(),
                     password: proxy.password.clone(),
                 })?;
-                let task = cx.update(|cx| credentials.write(new_id.as_ref().unwrap(), &secret, cx));
+                let task = cx.update(|cx| {
+                    credentials.write(
+                        Secret::ProxyCredentials,
+                        new_id.as_ref().unwrap(),
+                        &secret,
+                        cx,
+                    )
+                });
                 task.await?;
             }
 
@@ -251,7 +304,9 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
 
             if saved.is_err() && staged {
                 let _ = cx
-                    .update(|cx| credentials.delete(new_id.as_ref().unwrap(), cx))
+                    .update(|cx| {
+                        credentials.delete(Secret::ProxyCredentials, new_id.as_ref().unwrap(), cx)
+                    })
                     .await;
             } else if saved.is_ok()
                 && previous.proxy_credentials_id != new_id
@@ -259,7 +314,11 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
             {
                 // The new reference is already durable. Cleanup failures must
                 // not roll it back; any orphan remains encrypted in the keyring.
-                if cx.update(|cx| credentials.delete(id, cx)).await.is_err() {
+                if cx
+                    .update(|cx| credentials.delete(Secret::ProxyCredentials, id, cx))
+                    .await
+                    .is_err()
+                {
                     eprintln!("Could not remove an unused encrypted proxy credential entry");
                 }
             }
@@ -284,6 +343,135 @@ pub fn update_proxy(mut proxy: ProxyPreferences, cx: &mut App) -> Task<Result<()
     .detach();
 
     cx.spawn(async move |_| receive.await.context("Proxy save was interrupted")?)
+}
+
+/// Check a client certificate's files, then save it under a new ID. Its
+/// passphrase goes to the OS credential store before the preferences refer to it.
+pub fn add_client_certificate(
+    mut certificate: ClientCertificate,
+    cx: &mut App,
+) -> Task<Result<()>> {
+    init(cx);
+
+    let checked = check_writable(cx)
+        .and_then(|()| certificate.validate().map_err(|error| anyhow!(error)))
+        .and_then(|()| Ok(certificate.files.clone().absolute()?));
+    match checked {
+        Ok(files) => certificate.files = files,
+        Err(error) => return Task::ready(Err(error)),
+    }
+
+    certificate.id = Uuid::new_v4().to_string();
+    certificate.host = certificate.host.trim().to_owned();
+    certificate.has_passphrase = !certificate.passphrase.is_empty();
+    certificate.passphrase_unavailable = false;
+
+    let storage = cx.global::<Storage>();
+    let path = storage.path.clone();
+    let credentials = storage.credentials.clone();
+    let staged = certificate.has_passphrase && path.is_some();
+
+    cx.spawn(async move |cx| {
+        // Reading and decrypting the files must not block the UI.
+        let (certificate, checked) = cx
+            .background_executor()
+            .spawn(async move {
+                let checked = certificate.check();
+                (certificate, checked)
+            })
+            .await;
+        checked.map_err(|error| anyhow!(error))?;
+
+        if staged {
+            let write = cx.update(|cx| {
+                credentials.write(
+                    Secret::CertificatePassphrase,
+                    &certificate.id,
+                    certificate.passphrase.as_bytes(),
+                    cx,
+                )
+            });
+            write.await?;
+        }
+
+        let id = certificate.id.clone();
+        let saved = cx.update(|cx| {
+            check_writable(cx)?;
+
+            // Other settings can change while the OS keyring is open.
+            let mut preferences = cx.global::<Preferences>().clone();
+            preferences.request.client_certificates.push(certificate);
+
+            if let Some(path) = &path {
+                persist(path, &preferences)?;
+            }
+
+            cx.set_global(preferences);
+            Ok(())
+        });
+
+        if saved.is_err() && staged {
+            let _ = cx
+                .update(|cx| credentials.delete(Secret::CertificatePassphrase, &id, cx))
+                .await;
+        }
+
+        saved
+    })
+}
+
+/// Forget a client certificate, then remove its passphrase from the OS
+/// credential store.
+pub fn remove_client_certificate(id: &str, cx: &mut App) -> Result<()> {
+    init(cx);
+    check_writable(cx)?;
+
+    let mut preferences = cx.global::<Preferences>().clone();
+    let certificates = &mut preferences.request.client_certificates;
+    let Some(index) = certificates
+        .iter()
+        .position(|certificate| certificate.id == id)
+    else {
+        return Ok(());
+    };
+    let removed = certificates.remove(index);
+    let storage = cx.global::<Storage>();
+
+    if let Some(path) = &storage.path {
+        persist(path, &preferences)?;
+
+        if removed.has_passphrase {
+            // The preferences no longer refer to it, so a failure leaves only
+            // an unused encrypted entry.
+            let delete = storage
+                .credentials
+                .delete(Secret::CertificatePassphrase, id, cx);
+            cx.background_executor()
+                .spawn(async move {
+                    if delete.await.is_err() {
+                        eprintln!("Could not remove an unused certificate passphrase entry");
+                    }
+                })
+                .detach();
+        }
+    }
+
+    cx.set_global(preferences);
+    Ok(())
+}
+
+/// Whether preferences can be saved now. Legacy proxy credentials must reach
+/// the credential store first, or saving would drop them.
+fn check_writable(cx: &App) -> Result<()> {
+    check_load_error(cx)?;
+
+    if cx.global::<Storage>().legacy_credentials {
+        bail!(
+            "Unlock your credential store and retry in Settings > Proxy before saving preferences."
+        );
+    }
+
+    Ok(())
 }
 
 fn check_load_error(cx: &App) -> Result<()> {

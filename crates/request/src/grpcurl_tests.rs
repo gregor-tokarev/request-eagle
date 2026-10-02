@@ -152,6 +152,7 @@ fn applies_the_request_settings() {
             server_name: "api.internal".into(),
             include_default_fields: false,
             max_response_message_mb: Some(0),
+            timeout_ms: None,
         }),
         "grpcurl -insecure \\\n\
          -max-msg-sz 4294967295 \\\n\

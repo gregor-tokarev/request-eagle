@@ -18,6 +18,7 @@ mod grpc_draft;
 mod grpc_response;
 mod request_draft;
 mod request_sent;
+mod request_settings;
 mod response_view;
 mod script_editor;
 mod section_count;

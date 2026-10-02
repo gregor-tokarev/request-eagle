@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use http_client::{
     AsyncBody, HttpClient, Method, RedirectPolicy, Request, Response, Url,
@@ -11,10 +13,11 @@ use crate::{CookieJar, ExecutionError};
 
 const REDIRECT_LIMIT: u32 = 100;
 
-/// Send the request, following redirects when `follow` is set. Returns the
-/// final response and the URL it came from.
+/// Send the request, following redirects when `follow` is set. Each hop is
+/// sent with the client for its URL. Returns the final response and the URL
+/// it came from.
 pub(crate) async fn send(
-    client: &reqwest_client::ReqwestClient,
+    client: impl Fn(&Url) -> Result<Arc<reqwest_client::ReqwestClient>, ExecutionError>,
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
@@ -36,7 +39,10 @@ pub(crate) async fn send(
             hop.headers_mut().insert(COOKIE, cookie);
         }
 
-        let response = client.send(hop).await.map_err(ExecutionError::Transport)?;
+        let response = client(&url)?
+            .send(hop)
+            .await
+            .map_err(ExecutionError::Transport)?;
 
         if let Some(jar) = cookies {
             jar.store(&url, response.headers());

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use request::{
-    EventStream, Execution, ExecutionError, HttpRequest, HttpVersion, Method, Request,
-    RequestExecutor, RequestPreferences, RequestVariables, Response, Version,
+    EventStream, Execution, ExecutionError, HttpRequest, HttpSettings, HttpVersion, Method,
+    Request, RequestExecutor, RequestPreferences, RequestVariables, Response, Version,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -158,6 +158,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                             pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
                         "#.into(),
                     },
+                    settings: HttpSettings::default(),
                 };
             let execution = executor().execute(request, no_variables()).await.unwrap();
             for report in execution.scripts {
@@ -295,6 +296,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             scripts: Default::default(),
             query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
             path_variables: Vec::new(),
+            settings: HttpSettings::default(),
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
@@ -558,6 +560,113 @@ fn redirects_follow_the_setting_and_preserve_http_method_semantics() {
                     assert_eq!(response.headers["location"], "/final");
                     assert_eq!(response.body, b"moved");
                 }
+            }
+        }
+    });
+}
+
+#[test]
+fn request_settings_override_the_redirect_and_timeout_preferences() {
+    smol::block_on(async {
+        // Following is on in preferences and off for this request.
+        let (url, server) = serve(
+            b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let execution = executor()
+            .execute(
+                HttpRequest {
+                    path: url,
+                    settings: HttpSettings {
+                        follow_redirects: Some(false),
+                        ..HttpSettings::default()
+                    },
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
+            .await
+            .unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.status.as_u16(), 302);
+
+        // Following is off in preferences and on for this request.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/start", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            for response in [
+                &b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..],
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone",
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                stream.write_all(response).await.unwrap();
+            }
+        });
+        let execution = RequestExecutor::new(&RequestPreferences {
+            timeout_ms: 2_000,
+            follow_all_redirects: false,
+            ..RequestPreferences::default()
+        })
+        .unwrap()
+        .execute(
+            HttpRequest {
+                path: url,
+                settings: HttpSettings {
+                    follow_redirects: Some(true),
+                    ..HttpSettings::default()
+                },
+                ..HttpRequest::default()
+            },
+            no_variables(),
+        )
+        .await
+        .unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.body, b"done");
+
+        // A request's timeout replaces the preference, and zero turns it off.
+        for (preference, setting) in [(0, Some(150)), (150, Some(0))] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = smol::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                smol::Timer::after(Duration::from_millis(400)).await;
+                let _ = stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nslow")
+                    .await;
+            });
+            let result = RequestExecutor::new(&RequestPreferences {
+                timeout_ms: preference,
+                ..RequestPreferences::default()
+            })
+            .unwrap()
+            .execute(
+                HttpRequest {
+                    path: url,
+                    settings: HttpSettings {
+                        timeout_ms: setting,
+                        ..HttpSettings::default()
+                    },
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
+            .await;
+
+            if setting == Some(0) {
+                let Response::Http(response) = result.unwrap().response;
+                assert_eq!(response.body, b"slow");
+                server.await;
+            } else {
+                assert!(matches!(
+                    result.unwrap_err(),
+                    ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150)
+                ));
             }
         }
     });
@@ -1343,6 +1452,28 @@ fn preserves_serialized_request_and_preference_formats() {
     assert_eq!(preferences.max_response_size_mb, 50);
     assert!(preferences.ssl_certificate_verification);
     assert!(preferences.follow_all_redirects);
+
+    // Settings are saved only when a request changes them.
+    assert!(encoded.get("settings").is_none());
+    let request: Request = serde_json::from_str(
+        r#"{"type":"http","method":"GET","path":"https://example.test","settings":{"timeout_ms":0,"verify_certificates":false}}"#,
+    )
+    .unwrap();
+    let Request::Http(http) = &request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(
+        http.settings,
+        HttpSettings {
+            timeout_ms: Some(0),
+            follow_redirects: None,
+            verify_certificates: Some(false),
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(&request).unwrap()["settings"],
+        serde_json::json!({"timeout_ms": 0, "verify_certificates": false})
+    );
 
     let preferences: RequestPreferences =
         serde_json::from_str(r#"{"follow_all_redirects":false}"#).unwrap();

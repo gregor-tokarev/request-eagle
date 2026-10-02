@@ -8,8 +8,8 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use updater::Updater;
 
 use crate::{
-    actions::CloseSettings, appearance::AppearanceSettings, general::GeneralSettings,
-    keybindings::KeybindingsPage, layout, proxy::ProxySettings,
+    actions::CloseSettings, appearance::AppearanceSettings, certificates::CertificateSettings,
+    general::GeneralSettings, keybindings::KeybindingsPage, layout, proxy::ProxySettings,
 };
 
 const SIDEBAR_MIN: Rems = rems(14.);
@@ -23,6 +23,7 @@ pub enum SettingsEvent {
 pub enum SettingsPage {
     General,
     Proxy,
+    Certificates,
     Appearance,
     Keybindings,
 }
@@ -32,6 +33,7 @@ impl SettingsPage {
         match self {
             Self::General => "General",
             Self::Proxy => "Proxy",
+            Self::Certificates => "Certificates",
             Self::Appearance => "Appearance",
             Self::Keybindings => "Keybindings",
         }
@@ -41,6 +43,7 @@ impl SettingsPage {
         match self {
             Self::General => Icon::new(IconName::Settings2),
             Self::Proxy => Icon::default().path("icons/network.svg"),
+            Self::Certificates => Icon::default().path("icons/shield-check.svg"),
             Self::Appearance => Icon::new(IconName::Palette),
             Self::Keybindings => Icon::default().path("icons/keyboard.svg"),
         }
@@ -51,6 +54,7 @@ pub struct Settings {
     page: SettingsPage,
     general: Entity<GeneralSettings>,
     proxy: Entity<ProxySettings>,
+    certificates: Entity<CertificateSettings>,
     appearance: Entity<AppearanceSettings>,
     keybindings: Entity<KeybindingsPage>,
     focus_handle: FocusHandle,
@@ -64,6 +68,7 @@ impl Settings {
             page: SettingsPage::General,
             general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
             proxy: cx.new(|cx| ProxySettings::new(window, cx)),
+            certificates: cx.new(|cx| CertificateSettings::new(window, cx)),
             appearance: cx.new(|cx| AppearanceSettings::new(window, cx)),
             keybindings: cx.new(|cx| KeybindingsPage::new(window, cx)),
             focus_handle: cx.focus_handle(),
@@ -72,9 +77,10 @@ impl Settings {
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
-            SettingsPage::General | SettingsPage::Proxy | SettingsPage::Appearance => {
-                window.focus(&self.focus_handle, cx)
-            }
+            SettingsPage::General
+            | SettingsPage::Proxy
+            | SettingsPage::Certificates
+            | SettingsPage::Appearance => window.focus(&self.focus_handle, cx),
             SettingsPage::Keybindings => self
                 .keybindings
                 .update(cx, |page, cx| page.focus_search(window, cx)),
@@ -92,6 +98,7 @@ impl Settings {
         [
             SettingsPage::General,
             SettingsPage::Proxy,
+            SettingsPage::Certificates,
             SettingsPage::Appearance,
             SettingsPage::Keybindings,
         ]
@@ -207,7 +214,7 @@ impl Render for Settings {
                     .py(layout::page_inset(window))
                     .child(self.keybindings.clone())
                     .into_any_element(),
-                SettingsPage::General | SettingsPage::Proxy => div()
+                SettingsPage::General | SettingsPage::Proxy | SettingsPage::Certificates => div()
                     .id("settings-scroll")
                     .flex_1()
                     .min_h_0()
@@ -217,10 +224,12 @@ impl Render for Settings {
                             .items_center()
                             .px(layout::page_inset(window))
                             .py(layout::page_inset(window))
-                            .child(if self.page == SettingsPage::Proxy {
-                                self.proxy.clone().into_any_element()
-                            } else {
-                                self.general.clone().into_any_element()
+                            .child(match self.page {
+                                SettingsPage::Proxy => self.proxy.clone().into_any_element(),
+                                SettingsPage::Certificates => {
+                                    self.certificates.clone().into_any_element()
+                                }
+                                _ => self.general.clone().into_any_element(),
                             }),
                     )
                     .into_any_element(),

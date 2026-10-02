@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{CookieJar, HttpRequest, Method};
+use crate::{CookieJar, HttpRequest, HttpSettings, Method};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -188,6 +188,35 @@ fn keeps_unknown_references_of_path_variables_readable() {
     assert_eq!(
         request.curl_command(&values(&[("base", "https://example.com/users/:id")]), None),
         "curl --location --globoff 'https://example.com/users/{{user}}/{{user}}'"
+    );
+}
+
+#[test]
+fn writes_the_request_settings_that_curl_has_options_for() {
+    let command = |settings| {
+        HttpRequest {
+            path: "https://pets.test".into(),
+            settings,
+            ..HttpRequest::default()
+        }
+        .curl_command(&HashMap::new(), None)
+    };
+
+    assert_eq!(
+        command(HttpSettings {
+            timeout_ms: Some(1500),
+            follow_redirects: Some(false),
+            verify_certificates: Some(false),
+        }),
+        "curl --insecure --max-time 1.5 'https://pets.test/'"
+    );
+    assert_eq!(
+        command(HttpSettings {
+            timeout_ms: Some(0),
+            follow_redirects: Some(true),
+            verify_certificates: Some(true),
+        }),
+        "curl --location 'https://pets.test/'"
     );
 }
 

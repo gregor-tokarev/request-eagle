@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use request::{HttpRequest, Method};
+use request::{HttpRequest, HttpSettings, Method};
 
 use crate::{CurlError, is_curl, parse_curl};
 
@@ -285,4 +285,42 @@ fn reads_the_commands_request_eagle_writes() {
         let command = request.curl_command(&HashMap::new(), None);
         assert_eq!(parse_curl(&command).as_ref(), Ok(&request), "{command}");
     }
+}
+
+#[test]
+fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
+    let request = parse_curl("curl -sSk -m 2.5 https://example.com").unwrap();
+    assert_eq!(
+        request.settings,
+        HttpSettings {
+            timeout_ms: Some(2500),
+            follow_redirects: None,
+            verify_certificates: Some(false),
+        }
+    );
+
+    let request =
+        parse_curl("curl --location --insecure --max-time=30 https://example.com").unwrap();
+    assert_eq!(request.settings.timeout_ms, Some(30_000));
+    assert_eq!(request.settings.verify_certificates, Some(false));
+
+    // A command written from a request's settings reads back the same.
+    let exported = HttpRequest {
+        path: "https://example.com/".into(),
+        settings: HttpSettings {
+            timeout_ms: Some(1500),
+            follow_redirects: None,
+            verify_certificates: Some(false),
+        },
+        ..HttpRequest::default()
+    };
+    let imported = parse_curl(&exported.curl_command(&HashMap::new(), None)).unwrap();
+    assert_eq!(imported.settings, exported.settings);
+
+    assert!(
+        parse_curl("curl https://example.com")
+            .unwrap()
+            .settings
+            .is_default()
+    );
 }

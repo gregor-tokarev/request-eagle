@@ -28,6 +28,7 @@ pub(crate) enum RequestSection {
     Headers,
     Body,
     Scripts,
+    Settings,
 }
 
 /// Where a saved request is stored, and how the collections sidebar names it.
@@ -79,6 +80,7 @@ pub struct RequestDraft {
     pub(super) body_json_valid: bool,
     pub(super) body_task: Option<Task<()>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     pub(super) variables: Entity<VariableScope>,
     pub(super) variable_sessions: EnvironmentSessions,
     pub(super) url_completion: Option<Entity<VariableInput>>,
@@ -191,6 +193,7 @@ impl RequestDraft {
             body_json_valid: false,
             body_task: None,
             scripts: None,
+            timeout: None,
             variables,
             variable_sessions: sessions,
             url_completion: None,
@@ -357,6 +360,9 @@ impl RequestDraft {
             }
             RequestSection::Scripts => {
                 self.script_state(window, cx);
+            }
+            RequestSection::Settings => {
+                self.timeout_state(window, cx);
             }
         }
 
@@ -715,6 +721,7 @@ impl Render for RequestConfiguration {
                     RequestSection::Params => draft.params(window, cx),
                     RequestSection::Body => draft.body(window, cx),
                     RequestSection::Scripts => draft.script_editor(cx).into_any_element(),
+                    RequestSection::Settings => draft.settings(window, cx),
                 };
 
                 v_flex()

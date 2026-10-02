@@ -4,9 +4,11 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use preferences::Preferences;
 
 use super::draft::GrpcDraft;
+use crate::request_settings::{
+    follow_preference, override_switch, preferences, row, rows, timeout_input, timeout_value,
+};
 
 impl GrpcDraft {
     /// Create the settings inputs when the Settings tab is first shown.
@@ -23,7 +25,7 @@ impl GrpcDraft {
         });
         let max_message = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(self.preferences(cx).max_response_size_mb.to_string())
+                .placeholder(preferences(cx).max_response_size_mb.to_string())
                 .default_value(
                     settings
                         .max_response_message_mb
@@ -31,6 +33,7 @@ impl GrpcDraft {
                         .unwrap_or_default(),
                 )
         });
+        let timeout = cx.new(|cx| timeout_input(settings.timeout_ms, window, cx));
 
         self._subscriptions.push(cx.subscribe_in(
             &server_name,
@@ -55,14 +58,29 @@ impl GrpcDraft {
                 }
             },
         ));
+        self._subscriptions.push(
+            cx.subscribe(&timeout, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.request.settings.timeout_ms = timeout_value(input.read(cx));
+                    cx.notify();
+                }
+            }),
+        );
+        self._subscriptions.push(follow_preference(
+            &max_message,
+            |preferences| preferences.max_response_size_mb.to_string(),
+            window,
+            cx,
+        ));
+        self._subscriptions.push(follow_preference(
+            &timeout,
+            |preferences| preferences.timeout_ms.to_string(),
+            window,
+            cx,
+        ));
         self.server_name = Some(server_name);
         self.max_message = Some(max_message);
-    }
-
-    fn preferences(&self, cx: &App) -> request::RequestPreferences {
-        cx.try_global::<Preferences>()
-            .map(|preferences| preferences.request.clone())
-            .unwrap_or_default()
+        self.timeout = Some(timeout);
     }
 
     pub(super) fn settings_tab(
@@ -73,31 +91,27 @@ impl GrpcDraft {
         self.settings_inputs(window, cx);
 
         let settings = &self.request.settings;
-        let verify = settings
-            .verify_certificates
-            .unwrap_or(self.preferences(cx).ssl_certificate_verification);
         let include_defaults = settings.include_default_fields;
 
-        v_flex()
-            .debug_selector(|| "grpc-settings".into())
-            .w_full()
-            .max_w(rems(50.))
-            .child(row(
+        rows(
+            [
+            row(
                 "Enable server certificate verification",
                 "Verify the server certificate when invoking a method over a secure connection. Follows Settings until changed here.",
-                div().debug_selector(|| "grpc-verify-certificates".into()).child(
-                Switch::new("grpc-verify-certificates")
-                    .accessibility_label("Enable server certificate verification")
-                    .checked(verify)
-                    .on_click(cx.listener(|this, checked, window, cx| {
-                        this.request.settings.verify_certificates = Some(*checked);
+                override_switch(
+                    "grpc-verify-certificates",
+                    "Enable server certificate verification",
+                    settings.verify_certificates,
+                    preferences(cx).ssl_certificate_verification,
+                    cx.listener(|this, value: &Option<bool>, window, cx| {
+                        this.request.settings.verify_certificates = *value;
                         this.schedule_reflection(window, cx);
                         this.redraw(cx);
-                    })),
+                    }),
                 ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Override server name for certificate verification",
                 "Check the certificate against this name instead of the URL's host.",
                 div()
@@ -105,8 +119,20 @@ impl GrpcDraft {
                     .w_40()
                     .child(Input::new(self.server_name.as_ref().unwrap())),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
+                "Request timeout",
+                "How long to wait for a unary call or server reflection, in ms. Streams stay open until they end. To never time out, set to 0. Empty follows Settings.",
+                div()
+                    .debug_selector(|| "grpc-timeout".into())
+                    .w_40()
+                    .child(
+                        Input::new(self.timeout.as_ref().unwrap())
+                            .suffix(div().text_color(cx.theme().muted_foreground).child("ms")),
+                    ),
+                cx,
+            ),
+            row(
                 "Include fields with default values in the response",
                 "Show response fields with default values, such as empty strings and zeros. Turn this off to leave them out.",
                 div().debug_selector(|| "grpc-include-default-fields".into()).child(
@@ -119,8 +145,8 @@ impl GrpcDraft {
                     })),
                 ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Maximum response message size",
                 "The largest message to receive, in MB. To receive messages of any size, set to 0. Empty follows Settings.",
                 div()
@@ -131,32 +157,11 @@ impl GrpcDraft {
                             .suffix(div().text_color(cx.theme().muted_foreground).child("MB")),
                     ),
                 cx,
-            ))
-            .into_any_element()
-    }
-}
-
-/// A setting's title and description beside its control.
-fn row(title: &'static str, description: &'static str, control: impl IntoElement, cx: &App) -> Div {
-    h_flex()
-        .w_full()
-        .items_start()
-        .justify_between()
-        .gap_4()
-        .py_3()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap_1()
-                .child(div().font_weight(FontWeight::MEDIUM).child(title))
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(description),
-                ),
+            ),
+            ],
+            cx,
         )
-        .child(div().flex_none().child(control))
+        .debug_selector(|| "grpc-settings".into())
+        .into_any_element()
+    }
 }

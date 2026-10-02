@@ -175,18 +175,7 @@ impl ProxyPreferences {
         })?;
         let endpoint = reqwest::Url::parse(&format!("{scheme}://{host}:{}", self.port))
             .map_err(|_| ExecutionError::InvalidProxy("Enter a valid proxy hostname and port."))?;
-        let bypass = self
-            .bypass
-            .split(',')
-            .map(str::trim)
-            .filter(|host| !host.is_empty())
-            .map(|host| {
-                host.strip_prefix("*.")
-                    .unwrap_or(host)
-                    .trim_matches(['[', ']'])
-                    .to_ascii_lowercase()
-            })
-            .collect::<Vec<_>>();
+        let bypass = bypass_rules(&self.bypass);
         let http = self.http;
         let https = self.https;
 
@@ -211,6 +200,107 @@ impl ProxyPreferences {
         // excluded request types or bypass hosts.
         Ok(builder.no_proxy().proxy(proxy))
     }
+}
+
+impl ProxyPreferences {
+    /// Whether requests to `url` reach their proxy over TLS. That handshake
+    /// checks the proxy's certificate, and the pinned transport would also
+    /// offer it the destination's client certificate.
+    pub(crate) fn uses_tls(&self, url: &url::Url) -> bool {
+        match self.mode {
+            ProxyMode::Disabled => false,
+            ProxyMode::Custom => {
+                let enabled = match url.scheme() {
+                    "http" => self.http,
+                    "https" => self.https,
+                    _ => false,
+                };
+
+                self.protocol == ProxyProtocol::Https
+                    && enabled
+                    && !bypasses(url, &bypass_rules(&self.bypass))
+            }
+            ProxyMode::System => {
+                system_proxy(url.scheme())
+                    .is_some_and(|proxy| proxy.to_ascii_lowercase().starts_with("https://"))
+                    && !system_bypasses(url)
+            }
+        }
+    }
+}
+
+/// The proxy that the transport takes from the environment for a scheme:
+/// its variable, else `ALL_PROXY`. CGI requests can set `HTTP_PROXY`, so it
+/// is ignored there. Other platform settings name HTTP proxies.
+fn system_proxy(scheme: &str) -> Option<String> {
+    let variable = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let specific = match scheme {
+        "https" => variable("HTTPS_PROXY").or_else(|| variable("https_proxy")),
+        "http" if std::env::var_os("REQUEST_METHOD").is_none() => {
+            variable("HTTP_PROXY").or_else(|| variable("http_proxy"))
+        }
+        _ => None,
+    };
+
+    specific
+        .or_else(|| variable("ALL_PROXY"))
+        .or_else(|| variable("all_proxy"))
+}
+
+/// Whether `NO_PROXY` sends `url` directly, by the transport's rules: IP
+/// addresses and ranges, `*`, and domains with their subdomains. Other
+/// patterns, such as `*.example.com`, match only themselves.
+fn system_bypasses(url: &url::Url) -> bool {
+    let Ok(list) = std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_matches(['[', ']']);
+    let address = host.parse::<std::net::IpAddr>().ok();
+
+    list.split(',')
+        .map(str::trim)
+        .filter(|rule| !rule.is_empty())
+        .any(|rule| {
+            if let Ok(network) = rule.parse::<ipnet::IpNet>() {
+                return address.is_some_and(|address| network.contains(&address));
+            }
+            if let Ok(rule) = rule.parse::<std::net::IpAddr>() {
+                return address == Some(rule);
+            }
+            if address.is_some() {
+                return false;
+            }
+
+            rule == "*"
+                || rule == host
+                || rule.strip_prefix('.') == Some(host)
+                || (host.ends_with(rule)
+                    && (rule.starts_with('.')
+                        || host.as_bytes().get(host.len() - rule.len() - 1) == Some(&b'.')))
+        })
+}
+
+/// Comma-separated hosts, domains or IP ranges, as `bypasses` compares them.
+fn bypass_rules(bypass: &str) -> Vec<String> {
+    bypass
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(|host| {
+            host.strip_prefix("*.")
+                .unwrap_or(host)
+                .trim_matches(['[', ']'])
+                .to_ascii_lowercase()
+        })
+        .collect()
 }
 
 fn bypasses(url: &reqwest::Url, rules: &[String]) -> bool {

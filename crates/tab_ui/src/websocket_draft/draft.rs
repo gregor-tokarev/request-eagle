@@ -43,6 +43,7 @@ pub(crate) enum WebSocketSection {
     Message,
     Params,
     Headers,
+    Settings,
 }
 
 /// An editable WebSocket request owned by one tab, and its connection.
@@ -65,6 +66,7 @@ pub struct WebSocketDraft {
     message_completion: Option<Entity<VariableInput>>,
     message_json_valid: bool,
     message_task: Option<Task<()>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     variables: Entity<VariableScope>,
     variable_sessions: EnvironmentSessions,
     pub(crate) log: Entity<MessageLog>,
@@ -76,7 +78,7 @@ pub struct WebSocketDraft {
     events: Option<Task<()>>,
     address: Entity<WebSocketAddress>,
     configuration: Entity<WebSocketConfiguration>,
-    _subscriptions: Vec<Subscription>,
+    pub(super) _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<RequestSent> for WebSocketDraft {}
@@ -134,6 +136,7 @@ impl WebSocketDraft {
             message_completion: None,
             message_json_valid: false,
             message_task: None,
+            timeout: None,
             variables,
             variable_sessions: sessions,
             log,
@@ -190,6 +193,9 @@ impl WebSocketDraft {
             }
             WebSocketSection::Params | WebSocketSection::Headers => {
                 self.fields_state(window, cx);
+            }
+            WebSocketSection::Settings => {
+                self.timeout_state(window, cx);
             }
         }
 
@@ -547,6 +553,7 @@ impl WebSocketDraft {
                 WebSocketSection::Headers,
                 self.request.headers.len() + self.handshake_headers.len(),
             ),
+            ("Settings", WebSocketSection::Settings, 0),
         ];
 
         Tabs::new("websocket-sections")
@@ -731,6 +738,7 @@ impl Render for WebSocketConfiguration {
                     WebSocketSection::Params | WebSocketSection::Headers => {
                         draft.fields_state(window, cx).into_any_element()
                     }
+                    WebSocketSection::Settings => draft.settings(window, cx),
                 };
 
                 v_flex()

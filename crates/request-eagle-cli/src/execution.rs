@@ -3,8 +3,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
 use request::{
     CookieJar, GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings,
-    HttpRequest, Method, RequestExecutor, RequestPreferences, RequestScripts, RequestVariables,
-    Response, ScriptPhase, ScriptReport,
+    HttpRequest, HttpSettings, Method, RequestExecutor, RequestPreferences, RequestScripts,
+    RequestVariables, Response, ScriptPhase, ScriptReport,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
@@ -30,7 +30,7 @@ pub async fn run(
         .context("Unknown collection")?;
     let request = match file.request.clone() {
         request::Request::Http(request) => request,
-        request::Request::Grpc(request) => {
+        request::Request::Grpc(mut request) => {
             if !request.scripts.is_empty() && !trust_scripts {
                 bail!(
                     "Read the saved request's scripts, then set trust_scripts=true to approve this run"
@@ -41,6 +41,7 @@ pub async fn run(
             let mut settings = preferences.request_preferences().await?;
             if let Some(timeout) = timeout_ms {
                 settings.timeout_ms = timeout;
+                request.settings.timeout_ms = None;
             }
 
             let jar = cookie_jar(cookies, &settings)?;
@@ -80,8 +81,10 @@ pub async fn run(
     )
     .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
+    let mut request = request;
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
+        request.settings.timeout_ms = None;
     }
 
     let jar = cookie_jar(cookies, &settings)?;
@@ -163,10 +166,12 @@ async fn run_grpc(
     let mut metadata = Vec::new();
     let mut scripts = Vec::new();
     // Streams have no deadline in the app; here the command must return.
-    let deadline = std::time::Duration::from_millis(match settings.timeout_ms {
-        0 => 60_000,
-        timeout => timeout,
-    });
+    let deadline = std::time::Duration::from_millis(
+        match request.settings.timeout_ms.unwrap_or(settings.timeout_ms) {
+            0 => 60_000,
+            timeout => timeout,
+        },
+    );
     let ends_at = std::time::Instant::now() + deadline;
 
     while let Some(event) = smol::future::or(events.next(), async {
@@ -232,6 +237,7 @@ impl From<GrpcRequestInput> for GrpcRequest {
                 server_name: input.server_name,
                 include_default_fields: input.include_default_fields.unwrap_or(true),
                 max_response_message_mb: input.max_response_message_mb,
+                timeout_ms: input.timeout_ms,
             },
             scripts: GrpcScripts {
                 before_invoke: input.before_invoke,
@@ -264,6 +270,7 @@ impl From<&GrpcRequest> for GrpcRequestInput {
             server_name: request.settings.server_name.clone(),
             include_default_fields: (!request.settings.include_default_fields).then_some(false),
             max_response_message_mb: request.settings.max_response_message_mb,
+            timeout_ms: request.settings.timeout_ms,
             before_invoke: request.scripts.before_invoke.clone(),
             on_message: request.scripts.on_message.clone(),
             after_response: request.scripts.after_response.clone(),
@@ -295,6 +302,11 @@ impl From<RequestInput> for HttpRequest {
                 pre_request: input.pre_request,
                 post_response: input.post_response,
             },
+            settings: HttpSettings {
+                timeout_ms: input.timeout_ms,
+                follow_redirects: input.follow_redirects,
+                verify_certificates: input.verify_certificates,
+            },
         }
     }
 }
@@ -324,6 +336,9 @@ impl From<&HttpRequest> for RequestInput {
                 }),
             pre_request: request.scripts.pre_request.clone(),
             post_response: request.scripts.post_response.clone(),
+            timeout_ms: request.settings.timeout_ms,
+            follow_redirects: request.settings.follow_redirects,
+            verify_certificates: request.settings.verify_certificates,
         }
     }
 }
