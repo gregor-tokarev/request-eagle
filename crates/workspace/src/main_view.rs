@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, mem, path::Path};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
@@ -16,7 +16,8 @@ use crate::actions::{
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
-use collections_panel_ui::CollectionPanel;
+use crate::session::SavedTab;
+use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft,
@@ -83,6 +84,40 @@ impl Page {
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
+        }
+    }
+
+    /// The tab as the next launch reopens it.
+    fn saved(&self, title: &SharedString, cx: &App) -> SavedTab {
+        let request = |location: &Option<RequestLocation>,
+                       name: &Option<SharedString>,
+                       request: request::Request| SavedTab::Request {
+            title: title.to_string(),
+            path: location.as_ref().map(|location| location.path.clone()),
+            name: name.as_ref().map(ToString::to_string),
+            draft: (location.is_none() || self.is_dirty(cx)).then_some(request),
+        };
+
+        match self {
+            Page::Request(draft) => {
+                let draft = draft.read(cx);
+                request(&draft.location, &draft.name, draft.request.clone().into())
+            }
+            Page::Grpc(draft) => {
+                let draft = draft.read(cx);
+                request(&draft.location, &draft.name, draft.request.clone().into())
+            }
+            Page::WebSocket(draft) => {
+                let draft = draft.read(cx);
+                request(&draft.location, &draft.name, draft.request.clone().into())
+            }
+            Page::Collection(page) => SavedTab::Collection {
+                path: page.read(cx).path.clone(),
+            },
+            Page::Environment(editor) => SavedTab::Environment {
+                name: editor.read(cx).name.to_string(),
+            },
+            Page::Cookies(_) => SavedTab::Cookies,
         }
     }
 
@@ -219,10 +254,14 @@ pub(crate) struct MainView {
 }
 
 impl MainView {
+    /// Reopens `tabs`, the tabs open when the app last closed, or opens an
+    /// empty request when none of them can be opened.
     pub(crate) fn new(
         environments: Entity<Environments>,
         sidebar: Entity<CollectionPanel>,
         history: Entity<HistoryPanel>,
+        tabs: Vec<SavedTab>,
+        selected_tab: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -255,9 +294,155 @@ impl MainView {
             _environment_subscriptions: [picker_subscription, environments_subscription],
         };
 
-        view.new_tab(cx);
+        let mut selected = None;
+        for (index, tab) in tabs.into_iter().enumerate() {
+            if view.restore_tab(tab, window, cx) && selected_tab == Some(index) {
+                selected = view.selected;
+            }
+        }
+
+        if let Some(index) = selected {
+            view.select_tab(index, cx);
+        }
+        if view.tabs.is_empty() {
+            view.new_tab(cx);
+        }
 
         view
+    }
+
+    /// Reopen a tab saved when the app closed, selecting it, and tell whether
+    /// it opened. A saved request or collection that is gone stays closed,
+    /// unless the tab kept unsaved changes to it.
+    fn restore_tab(&mut self, tab: SavedTab, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match tab {
+            SavedTab::Request {
+                title,
+                path,
+                name: unsaved_name,
+                draft,
+            } => {
+                let saved = path.and_then(|path| self.sidebar.read(cx).open_event_at(&path));
+
+                match (saved, draft) {
+                    (
+                        Some(CollectionPanelEvent::OpenRequest {
+                            id,
+                            path,
+                            name,
+                            collection,
+                            folders,
+                            request,
+                        }),
+                        draft,
+                    ) => {
+                        let location = RequestLocation {
+                            path,
+                            id,
+                            name: name.clone(),
+                            collection,
+                            folders,
+                        };
+                        // A draft of another protocol than its file is left out.
+                        let draft = draft.filter(|draft| {
+                            mem::discriminant(draft) == mem::discriminant(&request)
+                        });
+
+                        self.restore_request(name, draft, request, Some(location), cx);
+                    }
+                    (_, Some(draft)) => {
+                        let empty = match &draft {
+                            request::Request::Http(_) => request::Request::Http(Default::default()),
+                            request::Request::Grpc(_) => request::Request::Grpc(Default::default()),
+                            request::Request::WebSocket(_) => {
+                                request::Request::WebSocket(Default::default())
+                            }
+                        };
+                        let index =
+                            self.restore_request(title.into(), Some(draft), empty, None, cx);
+
+                        if let Some(name) = unsaved_name {
+                            self.tabs[index].page.set_name(name.into(), cx);
+                        }
+                    }
+                    (_, None) => return false,
+                }
+            }
+            SavedTab::Collection { path } => {
+                let Some(CollectionPanelEvent::OpenCollection {
+                    path,
+                    name,
+                    variables,
+                    scripts,
+                }) = self.sidebar.read(cx).open_event_at(&path)
+                else {
+                    return false;
+                };
+
+                self.open_collection(&path, name, variables, scripts, window, cx);
+            }
+            SavedTab::Environment { name } => {
+                let Some(name) = self
+                    .environments
+                    .read(cx)
+                    .names()
+                    .iter()
+                    .find(|saved| **saved == name)
+                    .cloned()
+                else {
+                    return false;
+                };
+                let environments = self.environments.clone();
+                let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
+
+                self.open_tab(name, Page::Environment(editor), cx);
+            }
+            SavedTab::Cookies => self.open_cookies(cx),
+        }
+
+        true
+    }
+
+    /// Open a request tab that shows `draft`, or the saved request when there
+    /// is no draft. Its changes are measured from `saved`.
+    fn restore_request(
+        &mut self,
+        title: SharedString,
+        draft: Option<request::Request>,
+        saved: request::Request,
+        location: Option<RequestLocation>,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let index = match draft.unwrap_or_else(|| saved.clone()) {
+            request::Request::Http(request) => self.open_draft(title, request, location, cx),
+            request::Request::Grpc(request) => self.open_grpc_draft(title, request, location, cx),
+            request::Request::WebSocket(request) => {
+                self.open_websocket(title, request, location, cx)
+            }
+        };
+
+        match (&self.tabs[index].page, saved) {
+            (Page::Request(draft), request::Request::Http(saved)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(saved, cx));
+            }
+            (Page::Grpc(draft), request::Request::Grpc(saved)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(saved, cx));
+            }
+            (Page::WebSocket(draft), request::Request::WebSocket(saved)) => {
+                draft.update(cx, |draft, cx| draft.mark_saved(saved, cx));
+            }
+            _ => {}
+        }
+
+        index
+    }
+
+    /// The open tabs, as the next launch reopens them.
+    pub(crate) fn saved_tabs(&self, cx: &App) -> Vec<SavedTab> {
+        self.tabs
+            .iter()
+            .map(|tab| tab.page.saved(&tab.title, cx))
+            .collect()
     }
 
     fn open_tab(

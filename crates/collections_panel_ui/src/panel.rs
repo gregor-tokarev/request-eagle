@@ -231,47 +231,45 @@ impl CollectionPanel {
 
     /// Open a collection or request row in a tab; folder rows have no page.
     pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
-        match self.tree.items[index].kind {
-            ItemKind::Collection => self.open_collection(index, cx),
-            ItemKind::Folder => {}
-            ItemKind::Request(_) => self.open_request(index, cx),
+        if let Some(event) = self.open_event(index) {
+            cx.emit(event);
         }
     }
 
-    fn open_collection(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// The event that opens a collection or request row's page.
+    pub(super) fn open_event(&self, index: usize) -> Option<CollectionPanelEvent> {
         let item = &self.tree.items[index];
-        let Some(collection) = self
-            .collections
-            .collections()
-            .iter()
-            .find(|collection| collection.path == item.path)
-        else {
-            return;
-        };
 
-        cx.emit(CollectionPanelEvent::OpenCollection {
-            path: item.path.clone(),
-            name: item.label.clone(),
-            variables: collection.local_env().entries.clone(),
-            scripts: collection.scripts().clone(),
-        });
-    }
+        match item.kind {
+            ItemKind::Collection => {
+                let collection = self
+                    .collections
+                    .collections()
+                    .iter()
+                    .find(|collection| collection.path == item.path)?;
 
-    fn open_request(&mut self, index: usize, cx: &mut Context<Self>) {
-        let item = &self.tree.items[index];
-        let Some(file) = self.collections.file(&item.path) else {
-            return;
-        };
-        let (collection, folders) = self.tree.location(index);
+                Some(CollectionPanelEvent::OpenCollection {
+                    path: item.path.clone(),
+                    name: item.label.clone(),
+                    variables: collection.local_env().entries.clone(),
+                    scripts: collection.scripts().clone(),
+                })
+            }
+            ItemKind::Folder => None,
+            ItemKind::Request(_) => {
+                let file = self.collections.file(&item.path)?;
+                let (collection, folders) = self.tree.location(index);
 
-        cx.emit(CollectionPanelEvent::OpenRequest {
-            id: file.id.clone().into(),
-            path: item.path.clone(),
-            name: item.label.clone(),
-            collection,
-            folders,
-            request: file.request.clone(),
-        });
+                Some(CollectionPanelEvent::OpenRequest {
+                    id: file.id.clone().into(),
+                    path: item.path.clone(),
+                    name: item.label.clone(),
+                    collection,
+                    folders,
+                    request: file.request.clone(),
+                })
+            }
+        }
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {

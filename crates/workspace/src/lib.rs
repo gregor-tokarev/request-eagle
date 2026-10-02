@@ -8,11 +8,15 @@ mod environment_picker;
 mod history_panel;
 mod main_view;
 mod save_request;
+mod session;
 mod top_panel;
 mod workspace;
 
 #[cfg(test)]
 mod history_panel_tests;
+#[cfg(test)]
+mod session_tests;
 
 pub use actions::{OpenGeneralSettings, OpenSettings};
+pub use session::Session;
 pub use workspace::init;

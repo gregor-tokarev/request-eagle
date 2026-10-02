@@ -10550,8 +10550,11 @@ dependencies = [
  "keybindings_service",
  "preferences",
  "request",
+ "serde",
+ "serde_json",
  "settings_ui",
  "tab_ui",
+ "tempfile",
  "theme",
  "updater",
 ]
