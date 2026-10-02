@@ -13,19 +13,28 @@ pub(super) const MANIFEST: &str = "request-eagle-update-debian.json";
 /// package are downloaded in the browser and installed by the system.
 pub const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");
 
+/// The macOS installer keeps the previous version until the new one confirms
+/// that it started. Elsewhere the system installer has already finished.
+#[cfg(not(target_os = "macos"))]
+pub fn confirm_startup() {}
+
 /// Whether this copy was installed from a release package rather than built
 /// from source, so it looks for updates on its own.
+#[cfg(target_os = "macos")]
 pub(super) fn installed() -> bool {
-    #[cfg(target_os = "macos")]
-    return super::install::current_app_bundle().is_ok();
+    super::install::current_app_bundle().is_ok()
+}
 
-    // The installer leaves its uninstaller beside the app.
-    #[cfg(windows)]
-    return std::env::current_exe()
-        .is_ok_and(|executable| executable.with_file_name("unins000.exe").is_file());
+/// The installer leaves its uninstaller beside the app.
+#[cfg(windows)]
+pub(super) fn installed() -> bool {
+    std::env::current_exe()
+        .is_ok_and(|executable| executable.with_file_name("unins000.exe").is_file())
+}
 
-    // The Debian package installs the app here.
-    #[cfg(not(any(target_os = "macos", windows)))]
-    return std::env::current_exe()
-        .is_ok_and(|executable| executable == std::path::Path::new("/usr/bin/request-eagle"));
+/// The Debian package installs the app here.
+#[cfg(not(any(target_os = "macos", windows)))]
+pub(super) fn installed() -> bool {
+    std::env::current_exe()
+        .is_ok_and(|executable| executable == std::path::Path::new("/usr/bin/request-eagle"))
 }

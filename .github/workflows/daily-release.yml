@@ -43,5 +43,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.prepare.outputs.tag }}
-      track: nightly
     secrets: inherit

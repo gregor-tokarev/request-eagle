@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use collection::{ImportedCollection, ImportedItem};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
-use request::{Body, FormPart, HttpRequest, Method, RawLanguage, Request, RequestScripts};
+use request::{Body, Field, FormPart, HttpRequest, Method, RawLanguage, Request, RequestScripts};
 use serde_json::{Map, Value};
 
 use crate::{
-    Import, ImportError,
+    CollectionImport, ImportError,
     body::set_content_type,
     document::{clean_name, text},
 };
@@ -37,7 +37,7 @@ const PATH_VALUE: &AsciiSet = &CONTROLS
 
 static NULL: Value = Value::Null;
 
-pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
+pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError> {
     // Unquoted YAML versions are numbers.
     let openapi = text(document.get("openapi"));
     let swagger = text(document.get("swagger"));
@@ -108,7 +108,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
         .chain(requests)
         .collect();
 
-    Ok(Import {
+    Ok(CollectionImport {
         collection: ImportedCollection {
             name: clean_name(document["info"]["title"].as_str(), "OpenAPI"),
             variables,
@@ -192,8 +192,12 @@ impl<'a> Spec<'a> {
                 }
                 // Optional parameters change what the server does, so only
                 // required ones are sent.
-                Some("query") if required => query.extend(self.query_pairs(name, parameter)),
-                Some("header") if required => headers.push((name.to_owned(), value())),
+                Some("query") if required => query.extend(
+                    self.query_pairs(name, parameter)
+                        .into_iter()
+                        .map(Field::from),
+                ),
+                Some("header") if required => headers.push(Field::new(name, value())),
                 Some("body") => body_schema = Some(&parameter["schema"]),
                 Some("formData") if parameter["type"] != "file" => {
                     form.push((name.to_owned(), value()));
@@ -335,11 +339,7 @@ impl<'a> Spec<'a> {
     }
 
     /// An OpenAPI 3 request body, preferring JSON.
-    fn request_body(
-        &self,
-        operation: &'a Value,
-        headers: &mut Vec<(String, String)>,
-    ) -> Option<Body> {
+    fn request_body(&self, operation: &'a Value, headers: &mut Vec<Field>) -> Option<Body> {
         let content = self.resolve(&operation["requestBody"])["content"].as_object()?;
         let (media_type, media) = content
             .iter()
@@ -373,8 +373,8 @@ impl<'a> Spec<'a> {
     fn authorize(
         &self,
         operation: &Value,
-        headers: &mut Vec<(String, String)>,
-        query: &mut Vec<(String, String)>,
+        headers: &mut Vec<Field>,
+        query: &mut Vec<Field>,
         variables: &mut HashMap<String, String>,
     ) {
         let requirements = operation
@@ -400,13 +400,13 @@ impl<'a> Spec<'a> {
             };
 
             if bearer {
-                headers.push(("Authorization".into(), format!("Bearer {credential}")));
+                headers.push(Field::new("Authorization", format!("Bearer {credential}")));
             } else if scheme["type"] == "apiKey"
                 && let Some(name) = scheme["name"].as_str()
             {
                 match scheme["in"].as_str() {
-                    Some("header") => headers.push((name.to_owned(), credential)),
-                    Some("query") => query.push((name.to_owned(), credential)),
+                    Some("header") => headers.push(Field::new(name, credential)),
+                    Some("query") => query.push(Field::new(name, credential)),
                     _ => continue,
                 }
             } else {
@@ -559,7 +559,7 @@ fn fill_path(path: &str, values: &HashMap<&str, String>) -> String {
 
 /// The body that sends an example value as its media type. A media type
 /// other than the body's own becomes the request's `Content-Type`.
-fn encode(media_type: &str, value: &Value, headers: &mut Vec<(String, String)>) -> Option<Body> {
+fn encode(media_type: &str, value: &Value, headers: &mut Vec<Field>) -> Option<Body> {
     if value.is_null() {
         return None;
     }

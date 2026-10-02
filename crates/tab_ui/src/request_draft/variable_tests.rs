@@ -1,4 +1,4 @@
-use request::Method;
+use request::{Field, Method};
 use std::collections::HashMap;
 
 #[test]
@@ -39,10 +39,10 @@ fn environment_errors_are_reported_in_every_request_field() {
         let token = "{{ message }}".to_owned();
         match field {
             0 => request.path.push_str(&format!("/{token}")),
-            1 => request.headers.push((token, "value".into())),
-            2 => request.headers.push(("X-Message".into(), token)),
-            3 => request.query = vec![(token, "value".into())],
-            4 => request.query = vec![("message".into(), token)],
+            1 => request.headers.push(Field::new(token, "value")),
+            2 => request.headers.push(Field::new("X-Message", token)),
+            3 => request.query = vec![Field::new(token, "value")],
+            4 => request.query = vec![Field::new("message", token)],
             _ => request.body = Some(request::Body::json(token)),
         }
         assert!(

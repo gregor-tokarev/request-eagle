@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
 use crate::{
-    Body, Execution, ExecutionError, FormPart, HttpRequest, Method, RequestExecutor,
+    Body, Execution, ExecutionError, Field, FormPart, HttpRequest, Method, RequestExecutor,
     RequestVariables, Response,
     variables::{resolve_request, sent_url},
 };
@@ -182,8 +182,8 @@ pub(crate) async fn pre_request(
             let changes = output.request;
             request.method = changes.method;
             request.path = changes.url;
-            request.query = changes.query;
-            request.headers = changes.headers;
+            request.query = changes.query.into_iter().map(Field::from).collect();
+            request.headers = changes.headers.into_iter().map(Field::from).collect();
             state.variables = output.variables;
 
             if changes.body_changed {
@@ -355,8 +355,8 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
             &variables.visible(),
             &variables.generated,
         ),
-        "query": request.query,
-        "headers": request.headers,
+        "query": Field::enabled(&request.query).collect::<Vec<_>>(),
+        "headers": Field::enabled(&request.headers).collect::<Vec<_>>(),
         "body": body,
         "variables": variables,
     })

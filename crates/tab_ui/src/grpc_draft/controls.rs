@@ -6,6 +6,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::Field;
 
 use super::definition::DefinitionState;
 use super::draft::{GrpcDraft, GrpcSection};
@@ -175,7 +176,7 @@ impl GrpcDraft {
             (
                 "Metadata",
                 GrpcSection::Metadata,
-                self.request.metadata.len(),
+                Field::enabled(&self.request.metadata).count(),
             ),
             ("Service definition", GrpcSection::Definition, 0),
             ("Scripts", GrpcSection::Scripts, self.script_count()),

@@ -5,12 +5,12 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
 if [[ "$(git branch --show-current)" != main ]]; then
-  echo 'Nightly releases must run on main' >&2
+  echo 'Daily releases must run on main' >&2
   exit 1
 fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
-  echo 'Nightly releases require a clean checkout' >&2
+  echo 'Daily releases require a clean checkout' >&2
   exit 1
 fi
 
@@ -18,7 +18,7 @@ latest_tag="$(git tag --merged HEAD --sort=-version:refname |
   awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ && !found { print; found = 1 }')"
 
 if [[ -n "$latest_tag" && "$(git rev-parse "$latest_tag^{commit}")" == "$(git rev-parse HEAD)" ]]; then
-  # Nightly releases are prereleases, so both tracks count as published.
+  # Daily builds are published as pre-releases, so count those as published.
   published_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
     --jq '.[] | select(.draft == false) | .tag_name')"
 

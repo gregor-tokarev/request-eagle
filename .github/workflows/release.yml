@@ -1,18 +1,14 @@
 name: Release
 
 # Builds every platform's package for a vX.Y.Z tag and publishes them as one
-# GitHub release. Nightly releases are prereleases; stable ones become the
-# latest release, which stable installs update to.
+# GitHub pre-release, which nightly installs update to. The Promote release
+# workflow makes a tested one the stable release behind releases/latest.
 
 on:
   workflow_call:
     inputs:
       tag:
         description: Existing vX.Y.Z tag to release
-        required: true
-        type: string
-      track:
-        description: stable or nightly
         required: true
         type: string
   push:
@@ -24,14 +20,6 @@ on:
         description: Existing vX.Y.Z tag to release
         required: true
         type: string
-      track:
-        description: Update track of the release
-        required: true
-        default: stable
-        type: choice
-        options:
-          - stable
-          - nightly
       dry_run:
         description: Build and verify the selected branch without publishing a release
         required: true
@@ -56,27 +44,20 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
-      track: ${{ steps.release.outputs.track }}
     steps:
       - name: Resolve release tag
         id: release
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-          TRACK: ${{ inputs.track || 'stable' }}
         run: |
           tag="$RELEASE_TAG"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Expected a vX.Y.Z tag, got: $tag" >&2
             exit 1
           fi
-          if [[ "$TRACK" != stable && "$TRACK" != nightly ]]; then
-            echo "Expected the stable or nightly track, got: $TRACK" >&2
-            exit 1
-          fi
           {
             echo "tag=$tag"
             echo "version=${tag#v}"
-            echo "track=$TRACK"
           } >> "$GITHUB_OUTPUT"
 
       # Tags are needed for the release notes.
@@ -372,22 +353,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
-          TRACK: ${{ needs.prepare.outputs.track }}
         run: |
           # The macOS CLI arrives in a cli directory beside the app packages.
           mv dist/cli/* dist/
           rmdir dist/cli
           (cd dist && sha256sum -- * > SHA256SUMS)
 
-          if [[ "$TRACK" == nightly ]]; then
-            track=(--prerelease)
-          else
-            track=(--latest)
-          fi
-
           gh release create "$TAG" \
             --verify-tag \
+            --prerelease \
             --title "Request Eagle $VERSION" \
             --notes-file notes/release-notes.md \
-            "${track[@]}" \
             dist/*

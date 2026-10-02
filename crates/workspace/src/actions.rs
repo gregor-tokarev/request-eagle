@@ -294,7 +294,7 @@ pub(crate) fn init(cx: &mut App) {
     keybindings_service::register(
         ImportCollection,
         "Import collection",
-        "Import a cURL command, a Postman collection, or an OpenAPI specification.",
+        "Import a cURL command, Postman collections and environments, or an OpenAPI specification.",
         "Collections",
         Some("secondary-o"),
         Some("Workspace"),

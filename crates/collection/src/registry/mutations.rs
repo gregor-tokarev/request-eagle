@@ -134,11 +134,15 @@ impl CollectionRegistry {
         {
             fs::remove_dir_all(path)?;
             self.collections.remove(index);
+            self.skipped
+                .retain(|skipped| !skipped.path.starts_with(path));
             return Ok(());
         }
 
         for collection in &mut self.collections {
             if delete_entry(&mut collection.entries, path)? {
+                self.skipped
+                    .retain(|skipped| !skipped.path.starts_with(path));
                 return Ok(());
             }
         }

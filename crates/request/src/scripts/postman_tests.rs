@@ -11,7 +11,7 @@ use super::{
     runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
-    Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
+    Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
     RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
@@ -242,7 +242,7 @@ fn exchange(
     source: &str,
 ) -> ScriptReport {
     let request = HttpRequest {
-        headers: request_headers,
+        headers: request_headers.into_iter().map(Field::from).collect(),
         scripts: RequestScripts {
             post_response: source.into(),
             ..Default::default()
@@ -328,7 +328,7 @@ fn cookies_list_what_the_request_sent_and_the_response_set() {
 fn cookies_before_sending_resolve_variables_in_the_cookie_header() {
     let request = HttpRequest {
         path: "https://example.com".into(),
-        headers: vec![("cookie".into(), "session={{token}}".into())],
+        headers: vec![Field::new("cookie", "session={{token}}")],
         scripts: RequestScripts {
             pre_request: r#"
                 pm.test("cookie", () => pm.expect(pm.cookies.get("session")).to.equal("abc"));

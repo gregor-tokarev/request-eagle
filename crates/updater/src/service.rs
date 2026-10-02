@@ -1,12 +1,12 @@
 #[cfg(target_os = "macos")]
 use super::install;
-use super::package::{self, INSTALLS_IN_APP, MANIFEST};
+use super::package::{self, MANIFEST};
 
 use std::sync::Arc;
 
 use gpui_kit::{
     App, AppContext, Context, Entity,
-    http_client::{AsyncBody, HttpClient, StatusCode},
+    http_client::{self, AsyncBody, HttpClient, Request, Response, StatusCode},
 };
 use preferences::{Preferences, UpdateTrack};
 use semver::Version;
@@ -132,13 +132,11 @@ impl Updater {
             return;
         };
 
-        if !INSTALLS_IN_APP {
-            cx.open_url(&manifest.url);
-            return;
-        }
-
         #[cfg(target_os = "macos")]
         self.download_in_app(manifest, cx);
+
+        #[cfg(not(target_os = "macos"))]
+        cx.open_url(&manifest.url);
     }
 
     #[cfg(target_os = "macos")]
@@ -259,12 +257,16 @@ async fn check_for_update(
             format!("https://github.com/{REPOSITORY}/releases/latest/download/{MANIFEST}")
         }
         UpdateTrack::Nightly => {
-            let releases: Option<Vec<Release>> = get_json(
-                &http_client,
-                &format!("https://api.github.com/repos/{REPOSITORY}/releases?per_page=30"),
-                "release list",
-            )
-            .await?;
+            let request = Request::get(format!(
+                "https://api.github.com/repos/{REPOSITORY}/releases?per_page=30"
+            ))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", format!("RequestEagle/{current_version}"))
+            .body(AsyncBody::empty())
+            .map_err(|error| format!("Could not check for updates: {error}"))?;
+
+            let releases: Option<Vec<Release>> =
+                get_json(http_client.send(request), "release list").await?;
 
             match releases.as_deref().and_then(newest_manifest_url) {
                 Some(url) => url.to_owned(),
@@ -274,8 +276,11 @@ async fn check_for_update(
     };
 
     // A track without a release for this platform has nothing to offer yet.
-    let Some(manifest): Option<UpdateManifest> =
-        get_json(&http_client, &manifest_url, "update manifest").await?
+    let Some(manifest): Option<UpdateManifest> = get_json(
+        http_client.get(&manifest_url, AsyncBody::empty(), true),
+        "update manifest",
+    )
+    .await?
     else {
         return Ok(None);
     };
@@ -288,14 +293,12 @@ async fn check_for_update(
     Ok((released > installed).then_some(manifest))
 }
 
-/// Fetch and decode a JSON document, or `None` when GitHub has no such file.
+/// Decode a JSON document, or `None` when GitHub has no such file.
 async fn get_json<T: DeserializeOwned>(
-    http_client: &Arc<dyn HttpClient>,
-    url: &str,
+    response: impl Future<Output = http_client::Result<Response<AsyncBody>>>,
     name: &str,
 ) -> Result<Option<T>, String> {
-    let mut response = http_client
-        .get(url, AsyncBody::empty(), true)
+    let mut response = response
         .await
         .map_err(|error| format!("Could not check for updates: {error}"))?;
     let status = response.status();

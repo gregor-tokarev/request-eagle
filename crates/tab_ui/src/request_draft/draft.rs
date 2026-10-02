@@ -20,7 +20,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{HttpRequest, Method};
+use request::{Field, HttpRequest, Method};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {
@@ -487,25 +487,29 @@ impl RequestDraft {
         cx.notify();
     }
 
-    /// Write the Params table's rows into the URL's query.
-    fn set_query(
-        &mut self,
-        params: &[(String, String)],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let path = request::with_query_params(&self.request.path, params);
-        if path == self.request.path {
+    /// Write the Params table's rows that are sent into the URL's query, and
+    /// keep those switched off beside it.
+    fn set_query(&mut self, params: &[Field], window: &mut Window, cx: &mut Context<Self>) {
+        let path = request::with_query_params(&self.request.path, &Field::pairs(params));
+        let off: Vec<_> = params
+            .iter()
+            .filter(|param| !param.enabled)
+            .cloned()
+            .collect();
+        if path == self.request.path && off == self.request.query {
             return;
         }
 
-        if let Some(url) = &self.url {
-            url.update(cx, |url, cx| url.set_value(path.clone(), window, cx));
-        }
-        self.request.path = path;
+        if path != self.request.path {
+            if let Some(url) = &self.url {
+                url.update(cx, |url, cx| url.set_value(path.clone(), window, cx));
+            }
+            self.request.path = path;
 
-        self.refresh_generated_headers(cx);
-        self.notify_address(cx);
+            self.refresh_generated_headers(cx);
+            self.notify_address(cx);
+        }
+        self.request.query = off;
         cx.notify();
     }
 
@@ -588,7 +592,19 @@ impl RequestDraft {
         }
 
         let scope = self.variables.clone();
-        let values = request::query_params(&self.request.path);
+        // The URL holds the parameters that are sent; those switched off are
+        // kept beside it.
+        let values: Vec<_> = request::query_params(&self.request.path)
+            .into_iter()
+            .map(Field::from)
+            .chain(
+                self.request
+                    .query
+                    .iter()
+                    .filter(|param| !param.enabled)
+                    .cloned(),
+            )
+            .collect();
         let params = cx.new(|cx| {
             RequestFields::new("params", &values, &[], scope.clone(), window, cx)
                 .with_keyless_rows()

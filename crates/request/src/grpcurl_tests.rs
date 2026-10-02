@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{GrpcRequest, GrpcSettings};
+use crate::{Field, GrpcRequest, GrpcSettings};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -26,9 +26,9 @@ fn writes_calls_with_metadata_and_a_message() {
     let request = GrpcRequest {
         url: "grpc://{{host}}:9000".into(),
         metadata: vec![
-            ("Authorization".into(), "Bearer {{token}}".into()),
-            ("x-empty".into(), String::new()),
-            (" ".into(), "unnamed".into()),
+            Field::new("Authorization", "Bearer {{token}}"),
+            Field::new("x-empty", String::new()),
+            Field::new(" ", "unnamed"),
         ],
         message: "{\n  \"name\": \"{{name}}'s\"\n}".into(),
         ..unary("")
@@ -98,7 +98,7 @@ fn connects_as_invoking_does() {
 #[test]
 fn keeps_unknown_and_generated_variables() {
     let request = GrpcRequest {
-        metadata: vec![("x-request-id".into(), "{{$guid}}".into())],
+        metadata: vec![Field::new("x-request-id", "{{$guid}}")],
         message: r#"{"id": "{{id}}", "literal": "{{!name}}"}"#.into(),
         ..unary("grpcs://{{host}}/")
     };

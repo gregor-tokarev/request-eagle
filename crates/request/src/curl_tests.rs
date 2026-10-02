@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Body, CookieJar, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
+use crate::{Body, CookieJar, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -14,7 +14,7 @@ fn writes_requests_like_postman_snippets() {
     let request = HttpRequest {
         method: Method::Post,
         path: "{{base}}/pets".into(),
-        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         body: Some(Body::json("{\n  \"name\": \"Rex's\"\n}")),
         ..HttpRequest::default()
     };
@@ -37,7 +37,7 @@ fn names_the_method_only_when_curl_would_not_choose_it() {
         HttpRequest {
             method,
             path: "example.com".into(),
-            headers: vec![("Content-Type".into(), "text/plain".into())],
+            headers: vec![Field::new("Content-Type", "text/plain")],
             body: body.map(Body::json),
             ..HttpRequest::default()
         }
@@ -62,13 +62,13 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
     let request = HttpRequest {
         path: "http://example.com/search?lang=en#results".into(),
         query: vec![
-            ("q".into(), "fish & chips".into()),
-            ("page".into(), "{{page}}".into()),
-            ("id".into(), "{{$guid}}".into()),
+            Field::new("q", "fish & chips"),
+            Field::new("page", "{{page}}"),
+            Field::new("id", "{{$guid}}"),
         ],
         headers: vec![
-            ("X-Empty".into(), String::new()),
-            ("X-Literal".into(), "{{!name}}".into()),
+            Field::new("X-Empty", String::new()),
+            Field::new("X-Literal", "{{!name}}"),
         ],
         ..HttpRequest::default()
     };
@@ -82,7 +82,7 @@ fn adds_query_parameters_and_keeps_unknown_variables() {
 
     let request = HttpRequest {
         path: "https://example.com".into(),
-        query: vec![("a".into(), "1".into())],
+        query: vec![Field::new("a", "1")],
         ..HttpRequest::default()
     };
     assert_eq!(
@@ -238,7 +238,7 @@ fn includes_the_jar_cookies_for_the_url() {
 
     // A cookie the request sets itself takes precedence.
     let request = HttpRequest {
-        headers: vec![("Cookie".into(), "own=typed".into())],
+        headers: vec![Field::new("Cookie", "own=typed")],
         ..request
     };
     assert_eq!(

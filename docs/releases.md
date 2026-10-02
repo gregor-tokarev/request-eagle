@@ -5,11 +5,12 @@ Settings > General > Update track, which is stable unless changed.
 
 | Track | What it gets | How a release gets there |
 | --- | --- | --- |
-| Nightly | A build of `main` every day it changed | The Nightly release workflow, on its own |
-| Stable | Nightly builds that worked out | Promote to stable, run by hand |
+| Nightly | Every build, most days one from `main` | The Nightly release workflow, on its own |
+| Stable | Builds that worked out as nightly builds | Promote release, run by hand |
 
-Both tracks share one version sequence. A nightly release is a GitHub
-prerelease; a stable one is GitHub's latest release. Switching from nightly to
+Both tracks share one version sequence. Every release is published as a GitHub
+pre-release, which nightly installs update to. Promoting one makes it GitHub's
+latest release, which stable installs update to. Switching from nightly to
 stable keeps the installed build until a newer one is promoted.
 
 ## Nightly releases
@@ -17,18 +18,17 @@ stable keeps the installed build until a newer one is promoted.
 `.github/workflows/daily-release.yml` runs every morning at 06:17 UTC. When
 `main` has changed since the last release, `scripts/prepare-daily-release.sh`
 bumps the patch version, commits and tags it, and the Release workflow builds
-and publishes it as a prerelease. Run the workflow by hand to release sooner.
+and publishes it as a pre-release. Run the workflow by hand to release sooner.
+Pushing a `vX.Y.Z` tag whose version matches `crates/request-eagle/Cargo.toml`
+also publishes a pre-release.
 
 ## Stable releases
 
-Run **Promote to stable** (`.github/workflows/promote.yml`) with a nightly tag,
-or with no tag for the newest nightly. It marks that release as the latest
-release, without rebuilding it, and rewrites its notes to list everything
-merged since the previous stable release. It refuses a release older than the
-current stable one.
-
-Pushing a `vX.Y.Z` tag whose version matches `crates/request-eagle/Cargo.toml`
-also publishes a stable release.
+Run **Promote release** (`.github/workflows/promote-release.yml`) with a
+pre-release tag, or with no tag for the newest pre-release. It marks that
+release as the latest release, without rebuilding it, and rewrites its notes to
+list everything merged since the previous stable release. With no tag, it does
+nothing when the stable release is already the newest.
 
 ## What a release contains
 
