@@ -283,6 +283,7 @@ fn reads_the_files_forms_and_data_send() {
         "curl -F 'avatar=@\"my;photo,1.jpg\";type=image/jpeg' -F 'doc=@notes.txt;filename=n' \
          -F 'files=@a.txt,b.txt;type=text/plain' \
          -F 'named=@c.txt;filename=\"client,copy.txt\"' -F 'quote=@a\"b.txt,b.txt' \
+         -F 'spaced=@d.txt;filename= \"e,f.txt\"' -F 'listed=@ \"g,h.txt\" , i.txt' \
          https://example.com",
     )
     .unwrap();
@@ -297,6 +298,9 @@ fn reads_the_files_forms_and_data_send() {
                 part("named", "c.txt", true),
                 part("quote", "a\"b.txt", true),
                 part("quote", "b.txt", true),
+                part("spaced", "d.txt", true),
+                part("listed", "g,h.txt", true),
+                part("listed", "i.txt", true),
             ],
         })
     );

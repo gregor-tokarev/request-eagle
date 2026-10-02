@@ -584,13 +584,16 @@ fn form_value(content: &str) -> String {
     unquoted()
 }
 
-/// Splits the files of a `--form` field at commas, as cURL does. A file
-/// name or attribute value that starts with a double quote can contain
-/// commas; other quotes are part of the name.
+/// Splits the files of a `--form` field at commas, as cURL does, without
+/// the blanks around each. A file name or attribute value that starts with
+/// a double quote, after any blanks, can contain commas; other quotes are
+/// part of the name.
 fn form_files(files: &str) -> Vec<&str> {
+    let blank = |char: char| char == ' ' || char == '\t';
     let mut parts = Vec::new();
     let mut start = 0;
     let mut quoted = false;
+    // The last character other than a blank since the file began.
     let mut previous = None;
     let mut chars = files.char_indices();
 
@@ -600,16 +603,20 @@ fn form_files(files: &str) -> Vec<&str> {
                 chars.next();
             }
             '"' if quoted => quoted = false,
-            '"' if index == start || previous == Some('=') => quoted = true,
+            '"' if matches!(previous, None | Some('=')) => quoted = true,
             ',' if !quoted => {
-                parts.push(&files[start..index]);
+                parts.push(files[start..index].trim_matches(blank));
                 start = index + 1;
+                previous = None;
+                continue;
             }
             _ => {}
         }
-        previous = Some(char);
+        if !blank(char) {
+            previous = Some(char);
+        }
     }
-    parts.push(&files[start..]);
+    parts.push(files[start..].trim_matches(blank));
 
     parts
 }
