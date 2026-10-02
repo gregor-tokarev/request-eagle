@@ -9,6 +9,9 @@ impl Render for TopPanel {
         // bar draws them and moves the window, unless the system decorates it.
         if !cfg!(target_os = "macos") {
             return TitleBar::new()
+                // Closing the only window quits, which saves the session while
+                // the window can still be read. Only Linux uses this handler.
+                .on_close_window(|_, _, cx| cx.quit())
                 .bg(cx.theme().tokens.title_bar.background)
                 .text_sm()
                 .child("Request Eagle")

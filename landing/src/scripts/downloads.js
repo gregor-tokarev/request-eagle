@@ -1,7 +1,7 @@
 // Styles keep the navigation bar opaque until this script is running to track the scroll.
 document.documentElement.classList.add("js");
 
-const RELEASES = "https://api.github.com/repos/gregor-tokarev/request-eagle/releases?per_page=30";
+const API = "https://api.github.com/repos/gregor-tokarev/request-eagle/releases";
 
 const nav = document.querySelector("[data-nav]");
 const streaks = document.querySelector(".streaks");
@@ -29,20 +29,32 @@ boost.addEventListener("focusout", () => setStreakSpeed(1));
 
 // Releases are read from GitHub on each visit, so publishing or promoting one is all it takes to update this page.
 
-async function loadReleases() {
-  const response = await fetch(RELEASES, { headers: { Accept: "application/vnd.github+json" } });
+const responses = {};
 
-  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+// Each address is fetched once per visit, when a track first needs it.
+function load(address) {
+  responses[address] ??= fetch(address, { headers: { Accept: "application/vnd.github+json" } }).then((response) => {
+    if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
 
-  return response.json();
+    return response.json();
+  });
+
+  return responses[address];
 }
 
-const releases = loadReleases();
+// The recent releases, newest first, are mostly nightly builds, and include the stable ones among
+// them, since each was a nightly build first. The latest release is the newest stable one, which
+// may be older than all of them.
+async function releasesOn(track) {
+  const recent = await load(`${API}?per_page=30`);
 
-// Stable releases are the ones that are not prereleases. Nightly builds include them, since a stable
-// release was a nightly build first. GitHub lists the newest release first.
+  if (track === "nightly") return recent;
+
+  return [await load(`${API}/latest`), ...recent.filter((release) => !release.prerelease)];
+}
+
 async function offer(track) {
-  const candidates = (await releases).filter((release) => track === "nightly" || !release.prerelease);
+  const candidates = await releasesOn(track);
 
   for (const link of files) {
     const asset = candidates

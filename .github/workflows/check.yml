@@ -146,9 +146,11 @@ jobs:
           key: debian-${{ hashFiles('Cargo.lock') }}
           restore-keys: debian-
 
-      # Release builds embed notes from the same script.
+      # Release builds embed notes from the same script. Checkout trusts the
+      # container's workspace for its own Git calls only.
       - name: Write release notes
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*')"
           python3 scripts/release-notes.py json "$tag" > "$RUNNER_TEMP/release-notes.json"
           echo "REQUEST_EAGLE_RELEASE_NOTES=$RUNNER_TEMP/release-notes.json" >> "$GITHUB_ENV"
@@ -251,6 +253,10 @@ jobs:
           # The updater recognizes an installed copy by its uninstaller.
           $install = "$env:LOCALAPPDATA\Programs\Request Eagle"
           if (-not (Test-Path "$install\unins000.exe")) { throw 'The installer did not install Request Eagle' }
+
+          # The C runtime is linked in, so machines without the Visual C++ Redistributable can run it.
+          $binary = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$install\request-eagle.exe"))
+          if ($binary.Contains('VCRUNTIME140.dll', [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Request Eagle needs the Visual C++ Redistributable' }
 
           $app = Start-Process "$install\request-eagle.exe" -PassThru
           Start-Sleep -Seconds 20

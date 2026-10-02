@@ -157,6 +157,9 @@ fn search_text(value: &str) -> String {
         .replace('⌘', " cmd ")
         .replace("command", "cmd")
         .replace("super", "cmd")
+        // Windows names the platform key, but "win" alone is also in "window".
+        .replace("win-", "cmd-")
+        .replace("win+", "cmd+")
         .replace('⌃', " ctrl ")
         .replace("control", "ctrl")
         .replace('⌥', " alt ")
