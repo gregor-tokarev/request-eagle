@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 use url::form_urlencoded;
 
-use crate::{Auth, Body, Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{
+    Auth, Body, ExecutionInfo, Field, GrpcRequest, HttpRequest, LocalVariables, RequestScripts,
+    WebSocketRequest,
+};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -20,6 +23,9 @@ pub struct RequestVariables {
     /// Values `{{$name}}` resolves to instead of generating new ones, set by
     /// a gRPC call's Before invoke script for the whole call.
     pub(crate) generated: BTreeMap<String, String>,
+    pub(crate) iteration_data: BTreeMap<String, serde_json::Value>,
+    pub(crate) info: ExecutionInfo,
+    pub(crate) locals: Option<LocalVariables>,
 }
 
 impl RequestVariables {
@@ -43,6 +49,27 @@ impl RequestVariables {
     /// phase. A failure to read them stops the send before any script runs.
     pub fn with_collection_scripts(mut self, scripts: Result<RequestScripts, String>) -> Self {
         self.collection_scripts = scripts;
+        self
+    }
+
+    /// Values of a Collection Runner's data file row. `{{name}}` prefers them
+    /// to every scope, and scripts read them with `pm.iterationData`, typed
+    /// as a JSON file gives them.
+    pub fn with_iteration_data(mut self, data: BTreeMap<String, serde_json::Value>) -> Self {
+        self.iteration_data = data;
+        self
+    }
+
+    /// What `pm.info` tells the request's scripts.
+    pub fn with_info(mut self, info: ExecutionInfo) -> Self {
+        self.info = info;
+        self
+    }
+
+    /// Start with the `pm.variables` values that earlier requests left in
+    /// `locals`, and leave this request's there once each phase succeeds.
+    pub fn with_local_variables(mut self, locals: LocalVariables) -> Self {
+        self.locals = Some(locals);
         self
     }
 
@@ -95,6 +122,9 @@ impl RequestVariables {
             collection_auth: Auth::Inherit,
             environment_error,
             generated: BTreeMap::new(),
+            iteration_data: BTreeMap::new(),
+            info: ExecutionInfo::default(),
+            locals: None,
         }
     }
 

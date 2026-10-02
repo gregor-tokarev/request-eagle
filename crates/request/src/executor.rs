@@ -13,6 +13,9 @@ use crate::{
     RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
 };
 
+/// How much of a raw body `Execution::sent` keeps.
+const SENT_TEXT_LIMIT: usize = 64 * 1024;
+
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
 /// Construct a new executor when request preferences change.
 #[derive(Clone)]
@@ -109,6 +112,17 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
+                // Encoding moved raw text into the body's bytes. Keep only its
+                // start for the request as sent, so a large upload is not
+                // copied again.
+                let sent_text = match (&request.body, &body) {
+                    (Some(Body::Raw { .. }), Some(bytes)) => Some(
+                        String::from_utf8_lossy(&bytes[..bytes.len().min(SENT_TEXT_LIMIT)])
+                            .into_owned(),
+                    ),
+                    _ => None,
+                };
+
                 // Digest may send the body again; otherwise HTTP owns it.
                 let digest_body = matches!(request.auth, Auth::Digest(_))
                     .then(|| body.clone())
@@ -128,10 +142,17 @@ impl RequestExecutor {
                         .await?;
                 }
                 state.response_url = Some(url.into());
+
+                let mut sent = request.clone();
+                if let (Some(Body::Raw { text, .. }), Some(sent_text)) = (&mut sent.body, sent_text)
+                {
+                    *text = sent_text;
+                }
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
                     scripts: std::mem::take(&mut reports),
+                    sent: Some(sent),
                 };
 
                 Ok((request, post_body, state, execution))

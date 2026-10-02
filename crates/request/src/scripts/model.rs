@@ -1,3 +1,8 @@
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -31,6 +36,59 @@ impl GrpcScripts {
         self.before_invoke.is_empty()
             && self.on_message.is_empty()
             && self.after_response.is_empty()
+    }
+}
+
+/// What `pm.info` tells scripts about the request and, in a Collection
+/// Runner, the iteration it belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionInfo {
+    pub request_name: String,
+    pub request_id: String,
+    /// Counting from 0.
+    pub iteration: usize,
+    pub iteration_count: usize,
+}
+
+impl Default for ExecutionInfo {
+    /// A request sent on its own runs once.
+    fn default() -> Self {
+        Self {
+            request_name: String::new(),
+            request_id: String::new(),
+            iteration: 0,
+            iteration_count: 1,
+        }
+    }
+}
+
+impl ExecutionInfo {
+    pub(super) fn input(&self, event: &str) -> serde_json::Value {
+        serde_json::json!({
+            "eventName": event,
+            "iteration": self.iteration,
+            "iterationCount": self.iteration_count,
+            "requestName": self.request_name,
+            "requestId": self.request_id,
+        })
+    }
+}
+
+/// `pm.variables` values that requests pass on to the next one, as the
+/// requests of a Collection Runner's run do. Clones share the values.
+#[derive(Clone, Debug, Default)]
+pub struct LocalVariables(Arc<Mutex<BTreeMap<String, String>>>);
+
+impl LocalVariables {
+    pub fn get(&self) -> BTreeMap<String, String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub(super) fn set(&self, values: BTreeMap<String, String>) {
+        *self.0.lock().unwrap_or_else(|error| error.into_inner()) = values;
     }
 }
 
@@ -73,6 +131,18 @@ pub struct ScriptReport {
     pub tests: Vec<ScriptTest>,
     pub logs: Vec<ScriptLog>,
     pub error: Option<String>,
+    /// What the script chose with `pm.execution.setNextRequest`. Only the
+    /// Collection Runner follows it.
+    pub next_request: Option<NextRequest>,
+}
+
+/// The request a Collection Runner sends after this one, as a script set it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NextRequest {
+    /// `setNextRequest(null)` ends the iteration after this request.
+    Stop,
+    /// A request's name or ID.
+    Request(String),
 }
 
 impl ScriptReport {

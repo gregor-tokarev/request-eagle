@@ -7,7 +7,7 @@ use std::{
 use environment::EnvironmentSessions;
 
 use super::{
-    RequestScripts, ScriptReport,
+    ExecutionInfo, LocalVariables, NextRequest, RequestScripts, ScriptReport,
     runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
@@ -175,6 +175,221 @@ fn legacy_postman_api_and_set_next_request_are_accepted() {
 
     passed(&report);
     assert_eq!(report.tests.len(), 1);
+    // The last choice wins, as in Postman.
+    assert_eq!(report.next_request, Some(NextRequest::Stop));
+}
+
+#[test]
+fn set_next_request_reports_the_named_request() {
+    assert_eq!(pre("const nothing = null;").next_request, None);
+    assert_eq!(
+        pre("pm.execution.setNextRequest(42)").next_request,
+        Some(NextRequest::Request("42".into()))
+    );
+}
+
+#[test]
+fn iteration_data_resolves_over_the_scopes_and_under_overrides() {
+    let request = HttpRequest {
+        path: "https://{{host}}/{{name}}/{{user}}".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.test("data", () => {
+                    pm.expect(pm.iterationData.get("user")).to.equal("ada");
+                    pm.expect(pm.iterationData.has("host")).to.be.false;
+                    pm.expect(pm.iterationData.toObject()).to.eql({name: "data", user: "ada"});
+                    pm.expect(pm.variables.get("name")).to.equal("data");
+                    pm.expect(pm.variables.replaceIn("{{host}} {{name}}")).to.equal("env data");
+                    pm.expect(pm.iterationData.replaceIn("{{user}} {{host}}")).to.equal("ada {{host}}");
+                });
+                pm.variables.set("user", "local");
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let variables = RequestVariables::new(
+        HashMap::from([("host".into(), "env".into()), ("name".into(), "env".into())]),
+        None,
+    )
+    .with_iteration_data(
+        [("name", "data"), ("user", "ada")]
+            .map(|(name, value)| (name.to_owned(), value.into()))
+            .into(),
+    );
+
+    let (request, _, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    assert_eq!(reports[0].tests.len(), 1);
+    assert_eq!(request.path, "https://env/data/local");
+}
+
+#[test]
+fn json_data_keeps_its_types_for_scripts_and_is_text_in_requests() {
+    let request = HttpRequest {
+        path: "https://example.com/{{count}}/{{flags}}/{{none}}".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.test("typed", () => {
+                    pm.expect(pm.iterationData.get("shouldRun")).to.equal(false);
+                    pm.expect(pm.iterationData.get("count")).to.equal(2);
+                    pm.expect(pm.variables.get("flags")).to.eql({a: true});
+                    pm.expect(pm.variables.replaceIn("{{count}} {{shouldRun}}")).to.equal("2 false");
+                    // As the request writes it, not as JavaScript would.
+                    pm.expect(pm.variables.replaceIn("{{price}}")).to.equal("1e-6");
+                });
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = serde_json::json!({
+        "shouldRun": false,
+        "count": 2,
+        "flags": {"a": true},
+        "none": null,
+        "price": 0.000001,
+    });
+    let variables = RequestVariables::new(HashMap::new(), None).with_iteration_data(
+        data.as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    );
+
+    let (request, _, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    assert_eq!(reports[0].tests.len(), 1);
+    assert_eq!(request.path, r#"https://example.com/2/{"a":true}/"#);
+}
+
+#[test]
+fn scripts_cannot_change_the_data_text_that_requests_send() {
+    let request = HttpRequest {
+        path: "https://example.com/{{amount}}/{{payload}}/{{gone}}".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.iterationData.get("payload").count = 2;
+                pm.iterationData.unset("gone");
+                pm.variables.set("signed", pm.variables.replaceIn(pm.request.url.toString()));
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = serde_json::json!({
+        "amount": 9007199254740993u64,
+        "payload": {"count": 1},
+        "gone": "row",
+    });
+    let variables = RequestVariables::new(HashMap::from([("gone".into(), "env".into())]), None)
+        .with_iteration_data(
+            data.as_object()
+                .unwrap()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        );
+
+    let (request, state, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    let sent = r#"https://example.com/9007199254740993/{"count":1}/env"#;
+    assert_eq!(request.path, sent);
+    // The script signed the same text the request sends.
+    assert_eq!(state.variables.values["signed"], sent);
+}
+
+#[test]
+fn local_variables_carry_over_to_the_next_request() {
+    let locals = LocalVariables::default();
+    let request = |source: &str| HttpRequest {
+        path: "https://example.com/{{step}}".into(),
+        scripts: RequestScripts {
+            pre_request: source.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let variables = || {
+        RequestVariables::new(HashMap::from([("step".into(), "env".into())]), None)
+            .with_local_variables(locals.clone())
+    };
+
+    let (first, _, _) = send(request(r#"pm.variables.set("step", "one");"#), variables());
+    let (second, _, reports) = send(
+        request(r#"pm.test("kept", () => pm.expect(pm.variables.get("step")).to.equal("one"));"#),
+        variables(),
+    );
+
+    assert_eq!(first.path, "https://example.com/one");
+    assert_eq!(second.path, "https://example.com/one");
+    passed(&reports[0]);
+    // Skipping is not failing, so its values last too.
+    let skipped = smol::block_on(pre_request(
+        request(r#"pm.variables.set("step", "skipped"); pm.execution.skipRequest();"#),
+        variables(),
+        executor(),
+        Arc::new(AtomicBool::new(false)),
+    ));
+    assert!(skipped.is_err());
+    assert_eq!(locals.get()["step"], "skipped");
+    locals.set([("step".to_owned(), "one".to_owned())].into());
+    // A failed phase leaves the values as they were.
+    let failed = smol::block_on(pre_request(
+        request(r#"pm.variables.set("step", "two"); throw new Error("stop");"#),
+        variables(),
+        executor(),
+        Arc::new(AtomicBool::new(false)),
+    ));
+    assert!(failed.is_err());
+    assert_eq!(locals.get()["step"], "one");
+}
+
+#[test]
+fn info_describes_the_request_and_its_iteration() {
+    passed(&pre(r#"
+        pm.test("single send", () => {
+            pm.expect(pm.info).to.include({eventName: "prerequest", iteration: 0, iterationCount: 1});
+        });
+    "#));
+
+    let request = HttpRequest {
+        path: "https://example.com".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.test("run", () => {
+                    pm.expect(pm.info).to.eql({
+                        eventName: "prerequest",
+                        iteration: 2,
+                        iterationCount: 3,
+                        requestName: "Login",
+                        requestId: "login-id",
+                    });
+                });
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let variables = RequestVariables::new(HashMap::new(), None).with_info(ExecutionInfo {
+        request_name: "Login".into(),
+        request_id: "login-id".into(),
+        iteration: 2,
+        iteration_count: 3,
+    });
+
+    let (_, _, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    assert_eq!(reports[0].tests.len(), 1);
 }
 
 #[test]
@@ -256,6 +471,7 @@ fn exchange(
     let execution = Execution {
         elapsed: Duration::from_millis(42),
         scripts: Vec::new(),
+        sent: None,
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,
             version: Version::HTTP_11,
@@ -269,6 +485,8 @@ fn exchange(
         session: None,
         collection_post_response: String::new(),
         response_url: None,
+        info: Default::default(),
+        locals: None,
     };
     let result = smol::block_on(post_response(
         request,
@@ -322,6 +540,10 @@ fn cookies_list_what_the_request_sent_and_the_response_set() {
 
     passed(&report);
     assert_eq!(report.tests.len(), 3);
+    assert_eq!(
+        report.next_request,
+        Some(NextRequest::Request("Next".into()))
+    );
 }
 
 #[test]

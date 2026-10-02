@@ -42,6 +42,9 @@ pub struct CollectionSettings {
 /// Emitted by the page's Save button. The workspace owns collection storage.
 pub struct SaveCollection;
 
+/// Emitted by the page's Run button, to open the collection's runner.
+pub struct RunCollection;
+
 /// A collection's name, variables and scripts, edited in one tab and saved together.
 pub struct CollectionPage {
     pub path: PathBuf,
@@ -59,6 +62,7 @@ pub struct CollectionPage {
 }
 
 impl EventEmitter<SaveCollection> for CollectionPage {}
+impl EventEmitter<RunCollection> for CollectionPage {}
 
 impl CollectionPage {
     /// The authorization's variables resolve from the collection's saved
@@ -304,6 +308,16 @@ impl CollectionPage {
                     .child(Input::new(&name).aria_label("Collection name")),
             )
             .child(div().flex_1())
+            .child(
+                Button::new("run-collection")
+                    .debug_selector(|| "run-collection".into())
+                    .ghost()
+                    .flex_none()
+                    .icon(Icon::default().path("icons/square-play.svg"))
+                    .label("Run")
+                    .tooltip("Run collection")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(RunCollection))),
+            )
             .child(
                 Button::new("save-collection")
                     .debug_selector(|| "save-collection".into())

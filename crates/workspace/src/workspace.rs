@@ -122,6 +122,16 @@ impl Workspace {
                         view.relocate_collection(previous_path, path, name.clone(), window, cx);
                     });
                 }
+                CollectionPanelEvent::FolderRelocated {
+                    previous_path,
+                    path,
+                    name,
+                    collection,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.relocate_runners(previous_path, path, name.clone(), collection, cx);
+                    });
+                }
                 CollectionPanelEvent::RequestRelocated {
                     id,
                     previous_path,
@@ -160,6 +170,23 @@ impl Workspace {
 
                     this.main_view.update(cx, |view, cx| {
                         view.open_request(location, request, cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+                CollectionPanelEvent::RunRequests {
+                    path,
+                    name,
+                    collection,
+                    requests,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_runner(
+                            path.clone(),
+                            name.clone(),
+                            collection.clone(),
+                            requests.clone(),
+                            cx,
+                        );
                         view.prepare_active_tab(window, cx);
                     });
                 }

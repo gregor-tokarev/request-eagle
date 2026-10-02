@@ -4,12 +4,22 @@
     const stringify = JSON.stringify;
     const object = values => Object.assign(Object.create(null), values);
     const variables = object(input.variables.values);
+    // The Collection Runner's data file row, which `{{name}}` prefers to
+    // every scope and `pm.variables` overrides.
+    const data = object(input.variables.data ?? {});
+    // How `{{name}}` writes a row's value, as the request will, so a
+    // signature over replaced text matches what is sent.
+    const dataTexts = object(input.dataText ?? {});
+    const dataText = key => Object.hasOwn(data, key) ? dataTexts[key] : undefined;
     // From lowest to highest: the environment covers the collection's
     // variables, which cover the globals. Null hides a name in its scope and
     // the scopes beneath it.
     const scopes = [input.variables.globals, input.variables.collection, input.variables.environment].map(object);
     const changes = scopes.map(() => Object.create(null));
     let skipReason = null;
+    // Undefined until a script chooses the next request; null ends the iteration.
+    let nextRequest;
+    const setNextRequest = name => { nextRequest = name === null ? null : String(name); };
     const skipSignal = {};
     let pendingTests = 0;
     const generated = object(input.variables.generated);
@@ -89,8 +99,10 @@
             replaceIn: text => substitute(text, read),
         };
     }
-    const visibleValue = key => variables[key] ?? scopeValue(key, 2);
-    const visibleVariables = () => Object.assign(scopeValues(2), variables);
+    const visibleValue = key => variables[key] ?? dataText(key) ?? scopeValue(key, 2);
+    // Reading a row's value gives it as the data file has it, as in Postman.
+    const visibleTyped = key => variables[key] ?? (Object.hasOwn(data, key) ? data[key] : scopeValue(key, 2));
+    const visibleVariables = () => Object.assign(scopeValues(2), data, variables);
     const replaceIn = text => substitute(text, visibleValue);
 
     function entries(pairs, ignoreCase = false) {
@@ -112,14 +124,29 @@
 
     const pm = {
         variables: {
-            get: key => visibleValue(String(key)),
-            has: key => visibleValue(String(key)) !== undefined,
+            get: key => visibleTyped(String(key)),
+            has: key => visibleTyped(String(key)) !== undefined,
             set(key, value) { variables[String(key)] = String(value); },
             unset(key) { delete variables[key]; },
             clear() { for (const key of Object.keys(variables)) delete variables[key]; },
             toObject: visibleVariables,
             replaceIn,
         },
+        iterationData: {
+            get: key => data[String(key)],
+            has: key => Object.hasOwn(data, String(key)),
+            unset(key) { delete data[String(key)]; },
+            toObject: () => ({...data}),
+            toJSON: () => ({...data}),
+            replaceIn: text => substitute(text, dataText),
+        },
+        info: Object.freeze({
+            eventName: input.info?.eventName ?? "",
+            iteration: input.info?.iteration ?? 0,
+            iterationCount: input.info?.iterationCount ?? 1,
+            requestName: input.info?.requestName ?? "",
+            requestId: input.info?.requestId ?? "",
+        }),
         globals: scope(0, 0),
         collectionVariables: scope(1, 1),
         // The environment includes the collection's variables.
@@ -309,15 +336,15 @@
     // The protocol adds pm.request, pm.response and pm.execution, and
     // reports the request changes to send.
     const warn = message => log("warn", message);
-    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip, warn, cookies});
+    const exportRequest = protocol(input, pm, {entries, expect, readBody, responseObject, skip, setNextRequest, warn, cookies});
     globalThis.pm = pm;
     globalThis.console = Object.fromEntries(["log", "info", "warn", "error", "debug"].map(level => [level, (...values) => log(level, values.map(format).join(" "))]));
     globalThis.require = require;
     globalThis.atob = utilities.atob;
     globalThis.btoa = utilities.btoa;
-    // Postman's legacy API. Sending one request has no next request to set.
+    // Postman's legacy API.
     globalThis.postman = {
-        setNextRequest() {},
+        setNextRequest,
         getEnvironmentVariable: key => pm.environment.get(key),
         setEnvironmentVariable: (key, value) => pm.environment.set(key, value),
         clearEnvironmentVariable: key => pm.environment.unset(key),
@@ -334,9 +361,10 @@
             if (pendingTests && skipReason === null) throw new Error("A test is awaiting a promise that cannot settle");
             return stringify({
                 request: exportRequest(),
-                variables: {values: variables, globals: scopes[0], collection: scopes[1], environment: scopes[2], generated},
+                variables: {values: variables, data, globals: scopes[0], collection: scopes[1], environment: scopes[2], generated},
                 changes: {globals: changes[0], collection: changes[1], environment: changes[2]},
                 skip_reason: skipReason,
+                next_request: nextRequest === undefined ? null : {name: nextRequest},
             });
         },
     };

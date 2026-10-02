@@ -193,7 +193,16 @@ impl RequestDraft {
         // sent again from it.
         let request = self.sent_request();
         let url = request.path.clone();
-        let variables = scope.read(cx).request_variables(cx);
+        let info = self
+            .location
+            .as_ref()
+            .map(|location| request::ExecutionInfo {
+                request_name: location.name.to_string(),
+                request_id: location.id.to_string(),
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        let variables = scope.read(cx).request_variables(cx).with_info(info);
         // History keeps the authorization that was sent, also an inherited
         // one, so the request can be sent again from it. Settings that are
         // not sent, such as how OAuth 2.0 gets a token, are left out.

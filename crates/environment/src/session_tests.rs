@@ -313,3 +313,31 @@ fn the_environment_covers_collection_variables_which_cover_globals() {
     assert!(!values.contains_key("region"));
     assert_eq!(values["base_url"], "https://staging");
 }
+
+#[test]
+fn a_fork_starts_with_the_changes_and_keeps_its_own() {
+    let sessions = EnvironmentSessions::default();
+    let session = sessions.for_path(Some(Path::new("/one/environment.toml")));
+    session
+        .apply(&VariableScopes {
+            globals: BTreeMap::from([("shared".into(), Some("before".into()))]),
+            ..environment(BTreeMap::from([("token".into(), Some("before".into()))]))
+        })
+        .unwrap();
+
+    let fork = session.fork();
+    fork.apply(&VariableScopes {
+        globals: BTreeMap::from([("shared".into(), Some("run".into()))]),
+        ..environment(BTreeMap::from([("token".into(), Some("run".into()))]))
+    })
+    .unwrap();
+
+    let values = |session: &EnvironmentSession| session.values(HashMap::new(), HashMap::new());
+    assert_eq!(values(&fork)["token"], "run");
+    assert_eq!(values(&fork)["shared"], "run");
+    assert_eq!(values(&session)["token"], "before");
+    assert_eq!(values(&session)["shared"], "before");
+    // Other collections share the workspace's globals, not the fork's.
+    let other = sessions.for_path(Some(Path::new("/two/environment.toml")));
+    assert_eq!(values(&other)["shared"], "before");
+}

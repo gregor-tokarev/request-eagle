@@ -16,5 +16,5 @@ mod tests;
 
 pub use actions::init;
 pub use lookup::{CollectionMatch, RequestMatch};
-pub use panel::{CollectionPanel, CollectionPanelEvent};
+pub use panel::{CollectionPanel, CollectionPanelEvent, RunnableRequest};
 pub use saving::SaveDestination;

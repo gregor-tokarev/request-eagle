@@ -49,7 +49,10 @@ mod grpcurl_tests;
 #[cfg(test)]
 mod request_url_tests;
 
-pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
+pub use scripts::{
+    ExecutionInfo, GrpcScripts, LocalVariables, NextRequest, RequestScripts, ScriptLog,
+    ScriptPhase, ScriptReport, ScriptTest,
+};
 
 pub use auth::{
     ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm, JwtAuth,

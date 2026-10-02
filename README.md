@@ -13,6 +13,8 @@
   ·
   <a href="docs/scripting.md">Scripting guide</a>
   ·
+  <a href="docs/collection-runner.md">Collection Runner guide</a>
+  ·
   <a href="docs/cli.md">CLI guide</a>
   ·
   <a href="https://github.com/gregor-tokarev/request-eagle/issues">Feedback &amp; ideas</a>
