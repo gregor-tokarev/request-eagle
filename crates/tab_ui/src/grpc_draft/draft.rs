@@ -38,6 +38,8 @@ pub(crate) enum GrpcSection {
 pub struct GrpcDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: GrpcRequest,
     saved_request: GrpcRequest,
     pub(crate) section: GrpcSection,
@@ -147,6 +149,7 @@ impl GrpcDraft {
 
         Self {
             location,
+            name: None,
             saved_request: request.clone(),
             request,
             section: GrpcSection::Message,
@@ -194,8 +197,9 @@ impl GrpcDraft {
         cx.notify();
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -210,7 +214,13 @@ impl GrpcDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.redraw(cx);
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.redraw(cx);
     }
 
     pub fn mark_saved(&mut self, request: GrpcRequest, cx: &mut Context<Self>) {
@@ -528,6 +538,7 @@ impl Render for GrpcAddress {
                                 crate::request_draft::request_header(
                                     "gRPC",
                                     draft.location.as_ref(),
+                                    draft.name.as_ref(),
                                     cx,
                                 ),
                             ))

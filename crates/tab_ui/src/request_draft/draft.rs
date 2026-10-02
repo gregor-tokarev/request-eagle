@@ -61,6 +61,8 @@ impl RequestLocation {
 pub struct RequestDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: HttpRequest,
     saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
@@ -176,6 +178,7 @@ impl RequestDraft {
 
         Self {
             location,
+            name: None,
             generated_headers: super::execution::generated_headers(&request),
             path_values: request.path_variables.clone(),
             saved_request: request.clone(),
@@ -209,8 +212,9 @@ impl RequestDraft {
         }
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// The query parameters and path variables in the URL.
@@ -236,6 +240,14 @@ impl RequestDraft {
         });
 
         self.location = Some(location);
+        self.notify_address(cx);
+        cx.notify();
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.notify_address(cx);
         cx.notify();
     }
 
@@ -682,6 +694,7 @@ impl Render for RequestAddress {
                                     .child(super::controls::request_header(
                                         "HTTP",
                                         draft.location.as_ref(),
+                                        draft.name.as_ref(),
                                         cx,
                                     )),
                             )

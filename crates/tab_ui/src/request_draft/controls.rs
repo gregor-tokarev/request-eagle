@@ -14,12 +14,20 @@ use super::draft::{RequestDraft, RequestLocation, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
 
-/// The request's protocol and where it is saved.
+/// The request's protocol and where it is saved. An unsaved request shows
+/// the name given in its tab.
 pub(crate) fn request_header(
     protocol: &'static str,
     location: Option<&RequestLocation>,
+    name: Option<&SharedString>,
     cx: &App,
 ) -> impl IntoElement + use<> {
+    let name = location
+        .map(|location| &location.name)
+        .or(name)
+        .cloned()
+        .unwrap_or_else(|| "Untitled Request".into());
+
     h_flex()
         .flex_none()
         .h_10()
@@ -84,11 +92,7 @@ pub(crate) fn request_header(
                         .text_ellipsis()
                         .text_base()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(
-                            location.map_or("Untitled Request".into(), |location| {
-                                location.name.clone()
-                            }),
-                        ),
+                        .child(name),
                 ),
         )
 }

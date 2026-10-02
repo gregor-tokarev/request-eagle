@@ -329,6 +329,53 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
 }
 
 #[test]
+fn renaming_request_changes_only_its_name() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+
+    registry
+        .rename_request(&path, "list", "  All users ")
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.contains("# keep this comment"));
+    assert!(content.contains("custom = 'keep'"));
+    assert!(content.contains("path = '/users'"));
+    assert_eq!(registry.file(&path).unwrap().name, "All users");
+    assert_eq!(
+        CollectionRegistry::from_path(root)
+            .unwrap()
+            .file(&path)
+            .unwrap()
+            .name,
+        "All users"
+    );
+}
+
+#[test]
+fn renaming_cannot_rename_a_request_replaced_at_the_same_path() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let original_content = fs::read_to_string(&path).unwrap();
+    let replacement_content = original_content.replace("id = 'list'", "id = 'replacement'");
+    fs::write(&path, &replacement_content).unwrap();
+
+    let result = registry.rename_request(&path, "list", "Renamed");
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), replacement_content);
+    assert_eq!(registry.file(&path).unwrap().name, "List users");
+    assert!(matches!(
+        registry.rename_request(&path, "replacement", " "),
+        Err(CollectionEditError::InvalidName)
+    ));
+}
+
+#[test]
 fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     let fixture = Fixture::new();
     let root = &fixture.0;
