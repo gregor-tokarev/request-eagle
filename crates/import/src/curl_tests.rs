@@ -284,7 +284,7 @@ fn reads_the_files_forms_and_data_send() {
          -F 'files=@a.txt,b.txt;type=text/plain' \
          -F 'named=@c.txt;filename=\"client,copy.txt\"' -F 'quote=@a\"b.txt,b.txt' \
          -F 'spaced=@d.txt;filename= \"e,f.txt\"' -F 'listed=@ \"g,h.txt\" , i.txt' \
-         https://example.com",
+         -F 'unclosed=@j.txt;filename=\"k,l.txt' https://example.com",
     )
     .unwrap();
     assert_eq!(
@@ -301,6 +301,8 @@ fn reads_the_files_forms_and_data_send() {
                 part("spaced", "d.txt", true),
                 part("listed", "g,h.txt", true),
                 part("listed", "i.txt", true),
+                part("unclosed", "j.txt", true),
+                part("unclosed", "l.txt", true),
             ],
         })
     );
