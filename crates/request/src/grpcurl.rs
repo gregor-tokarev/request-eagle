@@ -104,9 +104,17 @@ impl GrpcRequest {
             options.push(("-proto", name.display().to_string()));
         }
 
-        for (name, value) in Field::enabled(&request.metadata) {
-            let name = fill(name);
-            let value = fill(value);
+        let metadata: Vec<Field> = Field::enabled(&request.metadata)
+            .map(|(name, value)| Field::new(fill(name), fill(value)))
+            .collect();
+        // The authorization's credentials, as invoking adds them. One that
+        // cannot be made, such as a JWT without its key, is left out.
+        let mut auth = request.auth.sending();
+        auth.resolve_with(|text| Ok::<_, ()>(fill(text))).ok();
+        let credentials = crate::grpc::auth_metadata(&metadata, &auth).unwrap_or_default();
+        let metadata = Field::pairs(&metadata);
+
+        for (name, value) in metadata.iter().chain(&credentials) {
             let name = name.trim();
             if name.is_empty() {
                 continue;

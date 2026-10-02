@@ -25,6 +25,10 @@ pub enum ExecutionError {
     #[error("{0}")]
     Variables(String),
 
+    /// The request's authorization could not be added.
+    #[error("{0}")]
+    Auth(String),
+
     #[error("request timed out after {timeout:?}")]
     Timeout { timeout: Duration },
 

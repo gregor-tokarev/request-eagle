@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
 use crate::collection::{is_reserved, render};
-use crate::{Collection, CollectionEditError, CollectionRegistry, FileEntry};
-use request::{Request, RequestScripts};
+use crate::{Collection, CollectionEditError, CollectionRegistry, FileEntry, SharedSettings};
+use request::{Auth, Request, RequestScripts};
 
 /// A collection read from another application's export, ready to be written
 /// as a new collection.
@@ -19,6 +19,8 @@ pub struct ImportedCollection {
     pub name: String,
     pub variables: HashMap<String, String>,
     pub scripts: RequestScripts,
+    /// What its requests inherit.
+    pub auth: Auth,
     pub items: Vec<ImportedItem>,
 }
 
@@ -83,8 +85,15 @@ fn write_collection(
             entries: HashMap::new(),
         },
         scripts: RequestScripts::default(),
+        auth: Auth::Inherit,
     };
-    collection.save_settings(imported.variables, imported.scripts)?;
+    collection.save_settings(
+        imported.variables,
+        SharedSettings {
+            scripts: imported.scripts,
+            auth: imported.auth,
+        },
+    )?;
 
     write_items(path, &imported.items, &collection.reserved_paths())?;
 

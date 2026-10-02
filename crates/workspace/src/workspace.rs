@@ -95,14 +95,14 @@ impl Workspace {
                     path,
                     name,
                     variables,
-                    scripts,
+                    shared,
                 } => {
                     this.main_view.update(cx, |view, cx| {
                         view.open_collection(
                             path,
                             name.clone(),
                             variables.clone(),
-                            scripts.clone(),
+                            shared.clone(),
                             window,
                             cx,
                         );

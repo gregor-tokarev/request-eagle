@@ -4,10 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionEditError, FileEntry};
+use collection::{CollectionEditError, FileEntry, SharedSettings};
 
 use gpui_kit::{Context, SharedString, Window};
-use request::{Request, RequestScripts};
+use request::Request;
 
 use super::{CollectionPanel, tree::ItemKind};
 
@@ -51,7 +51,7 @@ impl CollectionPanel {
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
         // Rename first: an invalid or taken name then fails before any file
@@ -73,7 +73,7 @@ impl CollectionPanel {
         };
 
         self.collections
-            .update_collection(&destination, variables, scripts)?;
+            .update_collection(&destination, variables, shared)?;
 
         Ok(destination)
     }

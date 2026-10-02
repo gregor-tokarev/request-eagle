@@ -173,6 +173,7 @@ impl GrpcDraft {
         let definition_failed = matches!(self.definition, DefinitionState::Failed(_));
         let sections = [
             ("Message", GrpcSection::Message, 0),
+            ("Auth", GrpcSection::Auth, 0),
             (
                 "Metadata",
                 GrpcSection::Metadata,

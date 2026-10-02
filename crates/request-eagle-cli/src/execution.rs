@@ -52,8 +52,13 @@ pub async fn run(
                 path,
                 &collection.path,
                 request,
-                collection_values,
-                variables,
+                RequestVariables::with_environment_session(
+                    collection_values,
+                    variables,
+                    None,
+                    Default::default(),
+                )
+                .with_collection_auth(collection.auth().clone()),
                 &settings,
                 jar.as_ref(),
             )
@@ -82,7 +87,8 @@ pub async fn run(
         None,
         Default::default(),
     )
-    .with_collection_scripts(Ok(collection.scripts().clone()));
+    .with_collection_scripts(Ok(collection.scripts().clone()))
+    .with_collection_auth(collection.auth().clone());
     let mut settings = preferences.request_preferences().await?;
     let mut request = request;
     request.body = request
@@ -141,8 +147,7 @@ async fn run_grpc(
     path: &Path,
     collection: &Path,
     request: GrpcRequest,
-    collection_values: HashMap<String, String>,
-    values: HashMap<String, String>,
+    variables: RequestVariables,
     settings: &RequestPreferences,
     jar: Option<&CookieJar>,
 ) -> Result<Value> {
@@ -150,12 +155,6 @@ async fn run_grpc(
     if let Some(jar) = jar {
         client = client.with_cookie_jar(jar.clone());
     }
-    let variables = RequestVariables::with_environment_session(
-        collection_values,
-        values,
-        None,
-        Default::default(),
-    );
     // Before invoke runs first, as it can set variables reflection needs.
     let prepared = client.prepare(&request, variables).await?;
     let definition = client
@@ -231,6 +230,7 @@ impl From<GrpcRequestInput> for GrpcRequest {
             method: input.method,
             message: input.message,
             metadata: input.metadata,
+            auth: input.auth,
             definition: match input.proto_file {
                 Some(path) => GrpcDefinition::ProtoFile {
                     path,
@@ -270,6 +270,7 @@ impl From<&GrpcRequest> for GrpcRequestInput {
             method: request.method.clone(),
             message: request.message.clone(),
             metadata: request.metadata.clone(),
+            auth: request.auth.clone(),
             proto_file,
             import_paths,
             verify_certificates: request.settings.verify_certificates,
@@ -325,6 +326,7 @@ impl From<RequestInput> for HttpRequest {
                 },
                 Body::Typed(TypedBody::Binary { file }) => request::Body::Binary { file },
             }),
+            auth: input.auth,
             scripts: RequestScripts {
                 pre_request: input.pre_request,
                 post_response: input.post_response,
@@ -378,6 +380,7 @@ impl From<&HttpRequest> for RequestInput {
                     request::Body::Binary { file } => TypedBody::Binary { file },
                 })
             }),
+            auth: request.auth.clone(),
             pre_request: request.scripts.pre_request.clone(),
             post_response: request.scripts.post_response.clone(),
             timeout_ms: request.settings.timeout_ms,
