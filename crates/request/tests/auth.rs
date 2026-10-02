@@ -564,4 +564,25 @@ fn curl_snippets_carry_the_authorization() {
             .ends_with("\\\n--aws-sigv4 'aws:amz:us-east-1:execute-api' \\\n--user 'AKID:secret'"),
         "{command}"
     );
+
+    // A presigned URL stays presigned, over the body cURL sends.
+    let command = HttpRequest {
+        method: Method::Post,
+        path: "https://example.com/items".into(),
+        body: Some(Body::UrlEncoded {
+            fields: vec![("a b".into(), "c d".into())],
+        }),
+        auth: Auth::AwsSignature(Box::new(AwsSignatureAuth {
+            access_key: "AKID".into(),
+            secret_key: "secret".into(),
+            region: "us-east-1".into(),
+            service: "execute-api".into(),
+            add_to: AuthLocation::Query,
+            ..AwsSignatureAuth::default()
+        })),
+        ..HttpRequest::default()
+    }
+    .curl_command(&values, None);
+    assert!(command.contains("X-Amz-Signature="), "{command}");
+    assert!(!command.contains("--aws-sigv4"), "{command}");
 }

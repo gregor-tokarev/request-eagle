@@ -443,6 +443,14 @@ fn credentials_become_the_requests_authorization() {
             password: String::new(),
         })
     );
+    // An explicit Digest wins over a bearer token, which wins over Basic.
+    assert_eq!(
+        auth("curl --oauth2-bearer t0ken --digest -u user:pass https://example.com"),
+        Auth::Digest(PasswordAuth {
+            username: "user".into(),
+            password: "pass".into(),
+        })
+    );
     // cURL sends the bearer token, also when it is given a user.
     for command in [
         "curl --oauth2-bearer t0ken https://example.com",

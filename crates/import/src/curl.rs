@@ -581,23 +581,17 @@ impl Options {
             }));
         }
 
-        // cURL sends the bearer token rather than Basic credentials.
-        if let Some(token) = self.bearer.take() {
-            return Auth::Bearer(BearerAuth { token });
-        }
-
-        if user.is_empty() {
-            return Auth::Inherit;
-        }
-
         let credentials = PasswordAuth {
             username: username.to_owned(),
             password: password.to_owned(),
         };
-        if self.digest {
-            Auth::Digest(credentials)
-        } else {
-            Auth::Basic(credentials)
+        // cURL answers a Digest challenge when asked to, and otherwise sends
+        // a bearer token rather than Basic credentials.
+        match self.bearer.take() {
+            _ if !user.is_empty() && self.digest => Auth::Digest(credentials),
+            Some(token) => Auth::Bearer(BearerAuth { token }),
+            None if !user.is_empty() => Auth::Basic(credentials),
+            None => Auth::Inherit,
         }
     }
 }

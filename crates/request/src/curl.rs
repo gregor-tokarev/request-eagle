@@ -3,9 +3,18 @@
 
 use std::collections::HashMap;
 
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Auth, Body, CookieJar, Field, HttpRequest, Method};
+use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
+
+/// What cURL escapes in a `--data-urlencode` value: all but the unreserved
+/// characters.
+const ESCAPED: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -170,11 +179,10 @@ impl HttpRequest {
 }
 
 /// The options that send the request's resolved authorization. cURL
-/// computes Basic, Digest and AWS signatures itself, the latter in a header
-/// even for a request presigned in its query, so it covers the body cURL
-/// sends. The credentials of the others are added to the request as sending
-/// adds them now. One that cannot be made, such as a JWT without its key, is
-/// left out.
+/// computes Basic, Digest and header AWS signatures itself. The credentials
+/// of the others, including a presigned AWS query, are added to the request
+/// as sending adds them now, over the body cURL sends. One that cannot be
+/// made, such as a JWT without its key, is left out.
 fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>)> {
     let auth = std::mem::take(&mut request.auth);
     let own_authorization = Field::enabled(&request.headers)
@@ -192,7 +200,12 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
         Auth::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
         Auth::Basic(auth) => vec![user(&auth.username, &auth.password)],
         Auth::Digest(auth) => vec![("digest", None), user(&auth.username, &auth.password)],
-        Auth::AwsSignature(aws) => {
+        // A presigned query covers the body unless it is S3's, which cURL
+        // reads from files only when it sends them; cURL signs those itself.
+        Auth::AwsSignature(aws)
+            if aws.add_to == AuthLocation::Header
+                || (aws.service.trim() != "s3" && sent_body(request.body.as_ref()).is_none()) =>
+        {
             if !aws.session_token.is_empty() {
                 request.headers.push(Field::new(
                     "X-Amz-Security-Token",
@@ -213,10 +226,7 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
             ]
         }
         auth => {
-            let body = match &request.body {
-                Some(Body::Raw { text, .. }) => text.clone().into_bytes(),
-                _ => Vec::new(),
-            };
+            let body = sent_body(request.body.as_ref()).unwrap_or_default();
             let form = match &request.body {
                 Some(Body::UrlEncoded { fields }) => fields.clone(),
                 _ => Vec::new(),
@@ -233,6 +243,30 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
 
             Vec::new()
         }
+    }
+}
+
+/// The bytes cURL sends for a body that it does not read from files.
+fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
+    match body {
+        None => Some(Vec::new()),
+        Some(Body::Raw { text, .. }) => Some(text.clone().into_bytes()),
+        // `--data-urlencode` joins its fields, escaping each value.
+        Some(Body::UrlEncoded { fields }) => Some(
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    format!(
+                        "{}={}",
+                        form_encode(name),
+                        utf8_percent_encode(value, ESCAPED)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        ),
+        Some(Body::Multipart { .. } | Body::Binary { .. }) => None,
     }
 }
 
