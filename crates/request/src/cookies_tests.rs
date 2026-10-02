@@ -213,3 +213,43 @@ fn the_cookie_url_ends_at_the_query_outside_variable_names() {
     );
     assert_eq!(sent("https://{{unset}}/admin"), None);
 }
+
+#[test]
+fn a_copy_keeps_its_own_changes() {
+    let jar = CookieJar::new();
+    store(&jar, "https://example.com/", &["session=1"]);
+
+    let copy = jar.copy();
+    store(&copy, "https://example.com/", &["session=2", "added=3"]);
+
+    assert_eq!(
+        jar.cookie_header("https://example.com/", &[]).as_deref(),
+        Some("session=1")
+    );
+    assert_eq!(
+        copy.cookie_header("https://example.com/", &[]).as_deref(),
+        Some("session=2; added=3")
+    );
+}
+
+#[test]
+fn extending_replaces_cookies_of_the_same_name_and_keeps_others() {
+    let jar = CookieJar::new();
+    store(&jar, "https://example.com/", &["session=1", "theme=dark"]);
+    let run = CookieJar::new();
+    store(&run, "https://example.com/", &["session=2"]);
+    store(&run, "https://other.example/", &["id=3"]);
+    let revision = jar.revision();
+
+    jar.extend(&run);
+
+    assert!(jar.revision() > revision);
+    assert_eq!(
+        jar.cookie_header("https://example.com/", &[]).as_deref(),
+        Some("session=2; theme=dark")
+    );
+    assert_eq!(
+        jar.cookie_header("https://other.example/", &[]).as_deref(),
+        Some("id=3")
+    );
+}

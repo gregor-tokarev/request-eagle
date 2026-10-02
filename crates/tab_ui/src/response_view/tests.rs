@@ -19,6 +19,7 @@ fn with_headers(body: &[u8], pairs: &[(&str, &str)]) -> ResponseContent {
 
     ResponseContent::new(Execution {
         scripts: Vec::new(),
+        sent: None,
         elapsed: Duration::from_millis(239),
         response: Response::Http(HttpResponse {
             status: StatusCode::OK,

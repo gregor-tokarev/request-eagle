@@ -17,7 +17,7 @@ use rquickjs::{
 use serde::{Deserialize, de::DeserializeOwned};
 
 use super::{
-    ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
+    NextRequest, ScriptLog, ScriptPhase, ScriptReport, ScriptTest,
     network::Network,
     variables::{Variables, dynamic_variable},
 };
@@ -36,6 +36,23 @@ pub(super) struct ScriptOutput<R> {
     /// What the session keeps for later requests.
     pub changes: VariableScopes,
     pub skip_reason: Option<String>,
+    /// Set when the script called `setNextRequest`, with no name for null.
+    #[serde(default)]
+    pub next_request: Option<NextRequestOutput>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct NextRequestOutput {
+    pub name: Option<String>,
+}
+
+impl NextRequestOutput {
+    pub fn into_next_request(self) -> NextRequest {
+        match self.name {
+            Some(name) => NextRequest::Request(name),
+            None => NextRequest::Stop,
+        }
+    }
 }
 
 struct Bodies {
@@ -111,6 +128,7 @@ pub(super) fn run<R: DeserializeOwned>(
         tests: Vec::new(),
         logs: Vec::new(),
         error: None,
+        next_request: None,
     }));
     let started = Instant::now();
     let waiting = Arc::new(AtomicU64::new(0));

@@ -168,7 +168,16 @@ impl RequestDraft {
         // sent again from it.
         let request = self.sent_request();
         let url = request.path.clone();
-        let variables = scope.read(cx).request_variables(cx);
+        let info = self
+            .location
+            .as_ref()
+            .map(|location| request::ExecutionInfo {
+                request_name: location.name.to_string(),
+                request_id: location.id.to_string(),
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        let variables = scope.read(cx).request_variables(cx).with_info(info);
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())

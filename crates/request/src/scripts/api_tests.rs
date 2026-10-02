@@ -105,6 +105,7 @@ fn response_tests(status: StatusCode, body: &[u8], source: &str) -> ScriptReport
     let execution = Execution {
         elapsed: Duration::from_millis(42),
         scripts: Vec::new(),
+        sent: None,
         response: Response::Http(HttpResponse {
             status,
             version: Version::HTTP_11,
@@ -118,6 +119,8 @@ fn response_tests(status: StatusCode, body: &[u8], source: &str) -> ScriptReport
         session: None,
         collection_post_response: String::new(),
         response_url: None,
+        info: Default::default(),
+        locals: None,
     };
     let result = smol::block_on(post_response(
         request,

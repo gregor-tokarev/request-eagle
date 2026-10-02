@@ -44,6 +44,11 @@ impl CollectionPanel {
             .rename
             .as_ref()
             .filter(|rename| rename.path == item.path);
+        let run_label = if item.kind == ItemKind::Collection {
+            "Run collection"
+        } else {
+            "Run folder"
+        };
         let delete_label = match item.kind {
             ItemKind::Collection => "Delete collection",
             ItemKind::Folder => "Delete folder",
@@ -289,6 +294,8 @@ impl CollectionPanel {
                 let copied_path = path.to_string_lossy().into_owned();
 
                 let menu = if branch {
+                    let run_view = view.clone();
+                    let run_path = path.clone();
                     let request_view = view.clone();
                     let request_parent = path.clone();
                     let grpc_view = view.clone();
@@ -301,6 +308,26 @@ impl CollectionPanel {
                     // New requests show their protocol icons, as in the tab
                     // bar's new tab menu, and folders their tree icon.
                     menu.item(
+                        PopupMenuItem::new(run_label)
+                            .icon(Icon::new(IconName::Play).text_color(cx.theme().muted_foreground))
+                            .on_click(move |_, window, cx| {
+                                let view = run_view.clone();
+                                let path = run_path.clone();
+                                window.defer(cx, move |_, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        if let Some(event) = this
+                                            .tree
+                                            .index_of(&path)
+                                            .and_then(|index| this.run_event(index))
+                                        {
+                                            cx.emit(event);
+                                        }
+                                    });
+                                });
+                            }),
+                    )
+                    .separator()
+                    .item(
                         PopupMenuItem::new("New Request")
                             .icon(protocol_icon("HTTP", cx))
                             .on_click(move |_, window, cx| {

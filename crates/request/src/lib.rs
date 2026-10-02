@@ -48,7 +48,10 @@ mod grpcurl_tests;
 #[cfg(test)]
 mod request_url_tests;
 
-pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
+pub use scripts::{
+    ExecutionInfo, GrpcScripts, LocalVariables, NextRequest, RequestScripts, ScriptLog,
+    ScriptPhase, ScriptReport, ScriptTest,
+};
 
 pub use body::{Body, FormPart, RawLanguage};
 pub use certificates::{CertificateFiles, ClientCertificate};

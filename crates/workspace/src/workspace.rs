@@ -163,6 +163,23 @@ impl Workspace {
                         view.prepare_active_tab(window, cx);
                     });
                 }
+                CollectionPanelEvent::RunRequests {
+                    path,
+                    name,
+                    collection,
+                    requests,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_runner(
+                            path.clone(),
+                            name.clone(),
+                            collection.clone(),
+                            requests.clone(),
+                            cx,
+                        );
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
                 CollectionPanelEvent::OpenUnsavedRequest(request) => {
                     this.update_tabs(window, cx, |view, cx| {
                         view.open_unsaved_request(request.clone(), cx)

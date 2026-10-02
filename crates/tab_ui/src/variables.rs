@@ -124,7 +124,9 @@ impl VariableScope {
     }
 }
 
-fn read_entries(path: &Path) -> Result<std::collections::HashMap<String, String>, String> {
+pub(crate) fn read_entries(
+    path: &Path,
+) -> Result<std::collections::HashMap<String, String>, String> {
     Environment::from_file(path)
         .map(|environment| environment.entries)
         .map_err(|error| error.to_string())

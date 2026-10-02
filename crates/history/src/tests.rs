@@ -42,6 +42,7 @@ fn execution(body: Vec<u8>) -> Execution {
         }),
         elapsed: Duration::from_millis(52),
         scripts: Vec::new(),
+        sent: None,
     }
 }
 

@@ -10,6 +10,8 @@ aho-corasick = "1"
 anyhow.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
+# Collection Runner data files.
+csv = "1"
 encoding_rs = "0.8"
 futures = "0.3"
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-bash", "tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-yaml"] }

@@ -7,9 +7,12 @@ use std::{
 use bytes::Bytes;
 
 use crate::{
-    CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
+    Body, CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
     RequestVariables, Response, http::HttpExecutor, scripts,
 };
+
+/// How much of a raw body `Execution::sent` keeps.
+const SENT_TEXT_LIMIT: usize = 64 * 1024;
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
 /// Construct a new executor when request preferences change.
@@ -104,6 +107,14 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
+                // Encoding moved raw text into the body's bytes. Copy back
+                // only its start, so a large upload is not copied again.
+                let mut sent = request.clone();
+                if let (Some(Body::Raw { text, .. }), Some(bytes)) = (&mut sent.body, &body) {
+                    let kept = &bytes[..bytes.len().min(SENT_TEXT_LIMIT)];
+                    *text = String::from_utf8_lossy(kept).into_owned();
+                }
+
                 let (response, url) = executor
                     .http
                     .execute(&request, body, events.as_mut())
@@ -113,6 +124,7 @@ impl RequestExecutor {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
                     scripts: std::mem::take(&mut reports),
+                    sent: Some(sent),
                 };
 
                 Ok((request, post_body, state, execution))

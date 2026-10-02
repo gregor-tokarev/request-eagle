@@ -104,6 +104,7 @@ impl CallScripts {
             variables: values,
             changes,
             skip_reason,
+            ..
         } = output.expect("successful script output");
 
         if let Some(session) = &self.session
