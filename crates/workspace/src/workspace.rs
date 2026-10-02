@@ -752,6 +752,12 @@ impl Render for Workspace {
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
             }))
+            .on_action(
+                cx.listener(|this, _: &OpenEnvironmentSelector, window, cx| {
+                    this.main_view
+                        .update(cx, |view, cx| view.open_environment_picker(window, cx));
+                }),
+            )
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.main_view
                     .update(cx, |view, cx| view.send_request(window, cx));
