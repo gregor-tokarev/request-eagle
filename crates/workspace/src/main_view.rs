@@ -26,6 +26,7 @@ use tab_ui::{
 // Rendering and virtualization share the same relative geometry at every zoom.
 const TAB_WIDTH: Rems = rems(12.);
 const TAB_HEIGHT: Rems = rems(2.);
+pub(crate) const TAB_BAR_HEIGHT: Rems = rems(2.5);
 
 /// The content of a tab. Each tab owns its page entity, preserving page state
 /// when switching tabs.
@@ -1039,6 +1040,11 @@ impl MainView {
         window.focus(&self.focus, cx);
     }
 
+    pub(crate) fn open_environment_picker(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.environment_picker
+            .update(cx, |picker, cx| picker.open(window, cx));
+    }
+
     pub(crate) fn prepare_active_tab(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.selected {
             self.tabs[index].page.prepare(window, cx);
@@ -1355,8 +1361,9 @@ impl Render for MainView {
                 h_flex()
                     .debug_selector(|| "main-tab-bar".into())
                     .flex_none()
-                    .h_10()
-                    .px_1()
+                    .h(TAB_BAR_HEIGHT)
+                    // The environment picker runs to the edge.
+                    .pl_1()
                     .gap_1()
                     .bg(cx.theme().tab_bar)
                     .border_b_1()
