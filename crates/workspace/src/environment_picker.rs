@@ -1,3 +1,4 @@
+use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::{
     searchable_list::{SearchableListItem, SearchableVec},
     select::{Select, SelectEvent, SelectState},
@@ -5,6 +6,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::Environments;
+
+use crate::main_view::TAB_BAR_HEIGHT;
 
 pub(crate) struct CreateEnvironmentRequested;
 
@@ -147,17 +150,43 @@ impl EnvironmentPicker {
 
         cx.notify();
     }
+
+    /// Open the menu the way Enter opens it on the focused picker.
+    pub(crate) fn open(&self, window: &mut Window, cx: &mut App) {
+        self.state.update(cx, |state, cx| state.focus(window, cx));
+        window.dispatch_action(Confirm { secondary: false }.boxed_clone(), cx);
+    }
 }
 
 impl Render for EnvironmentPicker {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The picker is a flush section at the end of the tab bar, so focus
+        // and the open menu show as its background rather than a ring.
+        let active = self
+            .state
+            .read(cx)
+            .focus_handle(cx)
+            .contains_focused(window, cx);
+
+        // The select does not stretch to its container, so it takes the tab
+        // bar's height less the bar's bottom border.
+        let height = TAB_BAR_HEIGHT.to_pixels(window.rem_size()) - px(1.);
+
         div()
             .debug_selector(|| "environment-picker".into())
             .flex_none()
             .w(rems(11.))
+            .h_full()
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .when(active, |this| this.bg(cx.theme().secondary_hover))
+            .hover(|this| this.bg(cx.theme().secondary_hover))
             .child(
                 Select::new(&self.state)
                     .small()
+                    .appearance(false)
+                    .h(height)
+                    .px_3()
                     .accessibility_label("Active environment")
                     .menu_width(rems(18.))
                     .search_placeholder("Search"),

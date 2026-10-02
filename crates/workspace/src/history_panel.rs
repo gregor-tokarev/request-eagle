@@ -13,7 +13,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request_eagle_theme::method_color;
+use request_eagle_theme::method_label;
 use request_history::{Change, Entry, History, Record};
 use tab_ui::RequestSent;
 
@@ -487,14 +487,7 @@ impl HistoryPanel {
                     .when(!selected, |this| {
                         this.hover(|style| style.bg(theme.sidebar_accent.opacity(0.55)))
                     })
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(method_color(&label, cx))
-                            .child(label),
-                    )
+                    .child(div().flex_none().child(method_label(label, cx)))
                     .child(div().flex_1().min_w_0().text_ellipsis().child(address))
                     .child(
                         div()

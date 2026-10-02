@@ -716,7 +716,7 @@ impl Render for WebSocketAddress {
                     .size_full()
                     .gap_2()
                     .child(request_header(
-                        "WebSocket",
+                        "WS",
                         draft.location.as_ref(),
                         draft.name.as_ref(),
                         cx,

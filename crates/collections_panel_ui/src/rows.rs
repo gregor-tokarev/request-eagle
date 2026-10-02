@@ -15,7 +15,7 @@ use super::{
     tree::ItemKind,
 };
 use collection::MovePlacement;
-use request_eagle_theme::method_color;
+use request_eagle_theme::method_label;
 
 impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -125,12 +125,9 @@ impl CollectionPanel {
                         this.bg(theme.info.opacity(0.25))
                     })
                     .child(match item.kind {
-                        ItemKind::Request(method) => div()
-                            .flex_none()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(method_color(method, cx))
-                            .child(method),
+                        ItemKind::Request(method) => {
+                            div().flex_none().child(method_label(method, cx))
+                        }
                         // Collections are the roots of the tree; folders only
                         // group requests inside them.
                         kind => {

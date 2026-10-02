@@ -11,6 +11,7 @@ actions!(
         OpenSettings,
         OpenGeneralSettings,
         OpenCookies,
+        OpenEnvironmentSelector,
         SaveRequest,
         CopyAsCurl,
         CopyAsGrpcurl,
@@ -263,6 +264,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("the cookies action should register");
+
+    keybindings_service::register(
+        OpenEnvironmentSelector,
+        "Open environment selector",
+        "Choose the environment that requests use.",
+        "Environments",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("the environment selector action should register");
 
     keybindings_service::register(
         OpenSettings,
