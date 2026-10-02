@@ -326,6 +326,10 @@ fn constructs_arrays_and_objects() {
     assert_eq!(code("{1: 2}", &input), "T1003");
     assert_eq!(code("Phone{type: 1, 'home': 2}", &input), "D1009");
     assert_eq!(code("[0..10000000]", &input), "D2014");
+    assert_eq!(
+        code("[-100000000000000000000..100000000000000000000]", &input),
+        "D2014"
+    );
 }
 
 #[test]
@@ -563,4 +567,19 @@ fn expressions_are_reusable_and_sendable() {
         expression.evaluate(None, &Bindings::default()).unwrap(),
         None
     );
+}
+
+#[test]
+fn transforms_many_records_quickly() {
+    let items: Vec<Value> = (0..60_000).map(|id| json!({"id": id})).collect();
+    let input = json!({ "items": items });
+    let started = std::time::Instant::now();
+
+    let result = eval("$ ~> |items|{'active': true}|", &input).unwrap();
+
+    assert_eq!(
+        result["items"][59_999],
+        json!({"id": 59_999, "active": true})
+    );
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
 }

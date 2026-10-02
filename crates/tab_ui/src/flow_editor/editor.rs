@@ -206,8 +206,16 @@ impl FlowEditor {
         }
     }
 
-    /// Why the flow cannot be saved as it is, if it cannot.
+    /// Why the flow cannot be saved or run as it is, if it cannot.
     pub fn check(&self) -> Result<(), String> {
+        if let Some((_, error)) = self
+            .inspector
+            .as_ref()
+            .and_then(|inspector| inspector.errors.first())
+        {
+            return Err(format!("Fix the selected block's settings: {error}"));
+        }
+
         self.flow.check()
     }
 
@@ -244,6 +252,14 @@ impl FlowEditor {
             }
         }
 
+        let mut connected: HashMap<&str, Vec<&str>> = HashMap::new();
+        for connection in &self.flow.connections {
+            connected
+                .entry(&connection.to)
+                .or_default()
+                .push(&connection.input);
+        }
+
         for block in &self.flow.blocks {
             let mut inputs: Vec<SharedString> = block
                 .kind
@@ -254,18 +270,21 @@ impl FlowEditor {
             let mut request = None;
 
             if let BlockKind::HttpRequest { request: id } = &block.kind {
+                // Send also fills a `{{send}}` variable, so it is drawn once.
                 if let Some(Some(info)) = self.request_info.get(id) {
-                    inputs.extend(info.variables.iter().cloned());
+                    for variable in &info.variables {
+                        if !inputs.contains(variable) {
+                            inputs.push(variable.clone());
+                        }
+                    }
                     request = Some((info.method, info.name.clone()));
                 }
 
                 // A connected input stays while its variable is out of the
                 // request, so the connection can be seen and removed.
-                for connection in &self.flow.connections {
-                    if connection.to == block.id
-                        && !inputs.iter().any(|input| *input == connection.input)
-                    {
-                        inputs.push(connection.input.clone().into());
+                for &input in connected.get(block.id.as_str()).into_iter().flatten() {
+                    if !inputs.iter().any(|name| name == input) {
+                        inputs.push(SharedString::from(input.to_owned()));
                     }
                 }
             }
@@ -454,6 +473,7 @@ impl FlowEditor {
             y: position.y,
             kind,
         };
+        let mut added = vec![id.clone()];
 
         self.edit(
             None,
@@ -487,6 +507,7 @@ impl FlowEditor {
                 // ends it.
                 if loops {
                     let collect = flow.next_block_id();
+                    added.push(collect.clone());
                     flow.blocks.push(Block {
                         id: collect,
                         title: None,
@@ -498,9 +519,17 @@ impl FlowEditor {
             },
             cx,
         );
+        self.forget_runs(&added);
 
         self.set_selection(vec![id.clone()], window, cx);
         id
+    }
+
+    /// New blocks can take the IDs of deleted ones; they have not run.
+    fn forget_runs(&mut self, blocks: &[String]) {
+        for block in blocks {
+            self.run.blocks.remove(block);
+        }
     }
 
     /// Connect an output to an input, replacing the input's connection.
@@ -571,6 +600,7 @@ impl FlowEditor {
             |flow| pasted = editing::paste(flow, copied, point(32., 32.)),
             cx,
         );
+        self.forget_runs(&pasted);
         self.set_selection(pasted, window, cx);
     }
 

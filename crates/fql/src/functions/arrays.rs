@@ -201,6 +201,9 @@ fn distinct<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
     let Value::Array(array) = &value else {
         return Ok(value);
     };
+    if array.len() <= 1 {
+        return Ok(value);
+    }
 
     let mut unique: Vec<Value<'a>> = Vec::new();
     for item in array.iter() {
@@ -209,7 +212,12 @@ fn distinct<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
         }
     }
 
-    Ok(Value::sequence(unique))
+    // A sequence stays a sequence; an array stays an array.
+    Ok(if array.sequence {
+        Value::sequence(unique)
+    } else {
+        Value::array(unique)
+    })
 }
 
 fn zip<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {

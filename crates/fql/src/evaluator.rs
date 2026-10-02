@@ -2,9 +2,14 @@
 //! jsonata-js: paths map over sequences and flatten them, sequences of one
 //! item collapse to it, and undefined is the empty sequence.
 
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use indexmap::IndexMap;
+use typed_arena::Arena;
 
 use crate::ast::{Group, Kind, Lambda, Node, Operator};
 use crate::error::{Error, Result};
@@ -31,16 +36,31 @@ pub(crate) enum Outcome<'a> {
     TailCall(Value<'a>, Vec<Value<'a>>),
 }
 
-pub(crate) struct Evaluation {
+pub(crate) struct Evaluation<'a> {
     steps: Cell<u64>,
     depth: Cell<usize>,
     /// The time `$now()` and `$millis()` return, the same for the whole evaluation.
     pub now: chrono::DateTime<chrono::Utc>,
     random: Cell<u64>,
+    /// Expressions that `$eval` parsed, which live as long as the evaluation.
+    pub expressions: &'a Arena<Node>,
+    /// The scope of each function call under way, innermost last.
+    scopes: RefCell<Vec<Rc<Frame<'a>>>>,
+    /// Scopes that a function was assigned in. The function holds its scope,
+    /// so they are cleared when the evaluation ends to be freed.
+    assigned: RefCell<Vec<Rc<Frame<'a>>>>,
 }
 
-impl Evaluation {
-    pub fn new() -> Self {
+impl Drop for Evaluation<'_> {
+    fn drop(&mut self) {
+        for frame in self.assigned.take() {
+            frame.clear();
+        }
+    }
+}
+
+impl<'a> Evaluation<'a> {
+    pub fn new(expressions: &'a Arena<Node>) -> Self {
         let now = chrono::Utc::now();
         let seed = {
             use std::hash::{BuildHasher, Hasher};
@@ -54,7 +74,15 @@ impl Evaluation {
             depth: Cell::new(0),
             now,
             random: Cell::new(seed),
+            expressions,
+            scopes: RefCell::new(Vec::new()),
+            assigned: RefCell::new(Vec::new()),
         }
+    }
+
+    /// The scope of the function call under way, where `$eval` evaluates.
+    pub fn scope(&self) -> Option<Rc<Frame<'a>>> {
+        self.scopes.borrow().last().cloned()
     }
 
     /// A random number from 0 up to 1, by xorshift.
@@ -96,7 +124,7 @@ impl Evaluation {
         self.depth.set(self.depth.get() - 1);
     }
 
-    pub fn evaluate<'a>(
+    pub fn evaluate(
         &self,
         node: &'a Node,
         input: &Value<'a>,
@@ -107,7 +135,7 @@ impl Evaluation {
         })
     }
 
-    fn evaluate_node<'a>(
+    fn evaluate_node(
         &self,
         node: &'a Node,
         input: &Value<'a>,
@@ -137,7 +165,7 @@ impl Evaluation {
         Ok(result.collapse())
     }
 
-    fn evaluate_kind<'a>(
+    fn evaluate_kind(
         &self,
         node: &'a Node,
         input: &Value<'a>,
@@ -244,6 +272,9 @@ impl Evaluation {
             }
             Kind::Bind { name, value } => {
                 let value = self.evaluate(value, input, env)?;
+                if value.holds_function() {
+                    self.assigned.borrow_mut().push(env.clone());
+                }
                 env.bind(name, value.clone());
                 value
             }
@@ -269,7 +300,7 @@ impl Evaluation {
 
     /// Evaluate a function's body, returning a call it makes last instead of
     /// making it, so recursion in tail position does not nest.
-    fn evaluate_tail<'a>(
+    fn evaluate_tail(
         &self,
         node: &'a Node,
         input: &Value<'a>,
@@ -334,7 +365,7 @@ impl Evaluation {
         }
     }
 
-    fn path<'a>(
+    fn path(
         &self,
         node: &'a Node,
         steps: &'a [Node],
@@ -417,7 +448,7 @@ impl Evaluation {
         Ok(result)
     }
 
-    fn step<'a>(
+    fn step(
         &self,
         step: &'a Node,
         items: &[Value<'a>],
@@ -462,7 +493,7 @@ impl Evaluation {
         Ok(Value::sequence(flattened))
     }
 
-    fn tuple_step<'a>(
+    fn tuple_step(
         &self,
         step: &'a Node,
         tuples: Vec<Rc<Tuple<'a>>>,
@@ -520,7 +551,7 @@ impl Evaluation {
         self.tuple_stages(step, result, env)
     }
 
-    fn tuple_stages<'a>(
+    fn tuple_stages(
         &self,
         step: &'a Node,
         mut tuples: Vec<Rc<Tuple<'a>>>,
@@ -554,7 +585,7 @@ impl Evaluation {
 
     /// `items[predicate]`: the items at numeric indexes, or those for which
     /// the predicate is true.
-    fn filter<'a>(
+    fn filter(
         &self,
         predicate: &'a Node,
         input: Value<'a>,
@@ -618,7 +649,7 @@ impl Evaluation {
         Ok(result)
     }
 
-    fn range<'a>(
+    fn range(
         &self,
         start: &'a Node,
         end: &'a Node,
@@ -644,7 +675,7 @@ impl Evaluation {
         if from > to {
             return Ok(Vec::new());
         }
-        if to - from >= 10_000_000 {
+        if i128::from(to) - i128::from(from) >= 10_000_000 {
             return Err(Error::at(
                 "D2014",
                 start.position,
@@ -657,12 +688,7 @@ impl Evaluation {
             .collect())
     }
 
-    fn group<'a>(
-        &self,
-        group: &'a Group,
-        input: Value<'a>,
-        env: &Rc<Frame<'a>>,
-    ) -> Result<Value<'a>> {
+    fn group(&self, group: &'a Group, input: Value<'a>, env: &Rc<Frame<'a>>) -> Result<Value<'a>> {
         if let Value::Array(array) = &input
             && array.tuple_stream
         {
@@ -679,7 +705,7 @@ impl Evaluation {
         self.group_pairs(&group.pairs, input, env)
     }
 
-    fn group_pairs<'a>(
+    fn group_pairs(
         &self,
         pairs: &'a [(Node, Node)],
         input: Value<'a>,
@@ -746,7 +772,7 @@ impl Evaluation {
         Ok(Value::object(object))
     }
 
-    fn group_tuples<'a>(
+    fn group_tuples(
         &self,
         group: &'a Group,
         tuples: Vec<Rc<Tuple<'a>>>,
@@ -831,7 +857,7 @@ impl Evaluation {
         Ok(Value::object(object))
     }
 
-    fn binary<'a>(
+    fn binary(
         &self,
         operator: Operator,
         lhs: &'a Node,
@@ -996,7 +1022,7 @@ impl Evaluation {
         }
     }
 
-    fn call<'a>(
+    fn call(
         &self,
         procedure: &'a Node,
         arguments: &'a [Node],
@@ -1010,7 +1036,7 @@ impl Evaluation {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn call_with<'a>(
+    fn call_with(
         &self,
         function: Value<'a>,
         procedure: &'a Node,
@@ -1066,11 +1092,11 @@ impl Evaluation {
             .into_iter()
             .map(|value| value.unwrap_or(Value::Undefined))
             .collect();
-        self.apply(&function, values, input, position)
+        self.apply_in(env, &function, values, input, position)
     }
 
     /// `lhs ~> rhs`: call `rhs` with `lhs` first, or chain two functions.
-    fn apply_operator<'a>(
+    fn apply_operator(
         &self,
         lhs: &'a Node,
         rhs: &'a Node,
@@ -1101,11 +1127,26 @@ impl Evaluation {
         if left.is_function() {
             Ok(Value::function(Function::Chain(left, function)))
         } else {
-            self.apply(&function, vec![left], input, position)
+            self.apply_in(env, &function, vec![left], input, position)
         }
     }
 
-    pub fn apply<'a>(
+    /// Apply a function called in the scope `env`.
+    fn apply_in(
+        &self,
+        env: &Rc<Frame<'a>>,
+        function: &Value<'a>,
+        arguments: Vec<Value<'a>>,
+        input: &Value<'a>,
+        position: usize,
+    ) -> Result<Value<'a>> {
+        self.scopes.borrow_mut().push(env.clone());
+        let result = self.apply(function, arguments, input, position);
+        self.scopes.borrow_mut().pop();
+        result
+    }
+
+    pub fn apply(
         &self,
         function: &Value<'a>,
         arguments: Vec<Value<'a>>,
@@ -1123,7 +1164,7 @@ impl Evaluation {
         }
     }
 
-    fn apply_once<'a>(
+    fn apply_once(
         &self,
         function: &Value<'a>,
         arguments: Vec<Value<'a>>,
@@ -1178,7 +1219,7 @@ impl Evaluation {
         }
     }
 
-    fn lambda<'a>(
+    fn lambda(
         &self,
         definition: &'a Lambda,
         environment: &Rc<Frame<'a>>,
@@ -1219,7 +1260,7 @@ impl Evaluation {
         }
     }
 
-    pub fn sort<'a>(
+    pub fn sort(
         &self,
         terms: &'a [(Node, bool)],
         items: Vec<Value<'a>>,
@@ -1296,7 +1337,7 @@ impl Evaluation {
 
     /// `| pattern | update, delete |` on a copy of `value`: each object the
     /// pattern matches gets the update's fields and loses the deleted ones.
-    fn transform<'a>(
+    fn transform(
         &self,
         node: &'a Node,
         env: &Rc<Frame<'a>>,
@@ -1317,7 +1358,7 @@ impl Evaluation {
         // A deep copy gives every object its own identity to match.
         let copy = deep_copy(&value);
         let matches = self.evaluate(pattern, &copy, env)?;
-        let mut changes: Vec<Change<'a>> = Vec::new();
+        let mut changes: Changes<'a> = HashMap::new();
 
         for matched in matches.items() {
             let Value::Object(Object::Owned(object)) = &matched else {
@@ -1357,21 +1398,22 @@ impl Evaluation {
                     }
                 }
             }
-            changes.push((Rc::as_ptr(object), fields, deletions));
+            changes
+                .entry(Rc::as_ptr(object))
+                .or_default()
+                .push((fields, deletions));
         }
 
         Ok(rebuild(&copy, &changes))
     }
 }
 
-type Change<'a> = (
-    *const IndexMap<String, Value<'a>>,
-    IndexMap<String, Value<'a>>,
-    Vec<String>,
-);
+/// The fields to update and delete in each matched object, by its identity.
+type Changes<'a> =
+    HashMap<*const IndexMap<String, Value<'a>>, Vec<(IndexMap<String, Value<'a>>, Vec<String>)>>;
 
 /// The copy with each matched object changed, children first.
-fn rebuild<'a>(value: &Value<'a>, changes: &[Change<'a>]) -> Value<'a> {
+fn rebuild<'a>(value: &Value<'a>, changes: &Changes<'a>) -> Value<'a> {
     match value {
         Value::Array(array) => {
             let mut rebuilt = array.clone();
@@ -1385,14 +1427,12 @@ fn rebuild<'a>(value: &Value<'a>, changes: &[Change<'a>]) -> Value<'a> {
                 .iter()
                 .map(|(key, value)| (key.clone(), rebuild(value, changes)))
                 .collect();
-            for (target, update, deletions) in changes {
-                if std::ptr::eq(*target, Rc::as_ptr(object)) {
-                    for (key, value) in update {
-                        fields.insert(key.clone(), value.clone());
-                    }
-                    for name in deletions {
-                        fields.shift_remove(name);
-                    }
+            for (update, deletions) in changes.get(&Rc::as_ptr(object)).into_iter().flatten() {
+                for (key, value) in update {
+                    fields.insert(key.clone(), value.clone());
+                }
+                for name in deletions {
+                    fields.shift_remove(name);
                 }
             }
             Value::object(fields)

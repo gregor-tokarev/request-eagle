@@ -144,4 +144,20 @@ fn postman_date_arithmetic() {
     );
     check("$milliSeconds(1510067557121)", json!(121));
     assert_eq!(code("$datePlus(0, 1, 'fortnights')"), "D3154");
+    for unit in [
+        "years",
+        "days",
+        "hours",
+        "minutes",
+        "seconds",
+        "milliseconds",
+    ] {
+        assert_eq!(
+            code(&format!(
+                "$datePlus('2024-01-01', 1000000000000000000, '{unit}')"
+            )),
+            "D3110",
+            "{unit}"
+        );
+    }
 }

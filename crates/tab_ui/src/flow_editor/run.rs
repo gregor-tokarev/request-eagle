@@ -84,7 +84,7 @@ impl FlowEditor {
             return;
         }
 
-        if let Err(error) = self.flow.check() {
+        if let Err(error) = self.check() {
             self.run.error = Some(error.into());
             self.log_open = true;
             cx.notify();
@@ -136,7 +136,7 @@ impl FlowEditor {
     }
 
     /// Stop the run. Requests already sent may still reach their servers.
-    pub fn stop(&mut self, cx: &mut Context<Self>) {
+    pub fn stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.run.task.take().is_none() {
             return;
         }
@@ -151,6 +151,7 @@ impl FlowEditor {
             .unwrap_or_default();
         self.log(at, String::new(), LogKind::Notice, "Run stopped".into());
         Cookies::changed(cx);
+        self.refresh_inspector(window, cx);
         cx.notify();
     }
 
@@ -199,7 +200,7 @@ impl FlowEditor {
                     collection,
                     environment,
                     variables_error,
-                    scripts: scope.collection_scripts().unwrap_or_default(),
+                    scripts: scope.collection_scripts(),
                     session: scope.session,
                 },
             );

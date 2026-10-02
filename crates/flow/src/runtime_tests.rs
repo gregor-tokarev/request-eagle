@@ -587,7 +587,7 @@ fn saved(name: &str, request: HttpRequest) -> SavedRequest {
         collection: HashMap::from([("base".to_owned(), "unused".to_owned())]),
         environment: HashMap::new(),
         variables_error: None,
-        scripts: Default::default(),
+        scripts: Ok(Default::default()),
         session: Default::default(),
     }
 }
@@ -603,7 +603,8 @@ fn http_requests_fill_variables_from_inputs_and_route_by_status() {
                     "Create",
                     HttpRequest {
                         method: Method::Post,
-                        path: format!("{url}/users?name={{{{name}}}}"),
+                        // A `{{send}}` variable is filled by the Send input.
+                        path: format!("{url}/users?name={{{{name}}}}&mode={{{{send}}}}"),
                         body: Some(request::Body::json("{\"id\": {{id}}}")),
                         ..Default::default()
                     },
@@ -642,9 +643,16 @@ fn http_requests_fill_variables_from_inputs_and_route_by_status() {
                     },
                 ),
                 block("b5", output(&["created", "missing"])),
+                block(
+                    "b6",
+                    BlockKind::String {
+                        value: "new".to_owned(),
+                    },
+                ),
             ],
             connections: vec![
                 wire("b1", "value", "b3", "name"),
+                wire("b6", "value", "b3", "send"),
                 wire("b2", "value", "b3", "id"),
                 wire("b3", "success", "b5", "created"),
                 wire("b4", "fail", "b5", "missing"),
@@ -665,7 +673,7 @@ fn http_requests_fill_variables_from_inputs_and_route_by_status() {
         let created = &summary.outputs["created"];
         assert_eq!(created["http"]["status"], 200);
         assert_eq!(created["http"]["headers"]["x-test"], "yes");
-        assert_eq!(created["body"]["target"], "/users?name=Ada");
+        assert_eq!(created["body"]["target"], "/users?name=Ada&mode=new");
         assert_eq!(created["body"]["body"], "{\"id\": 42}");
         assert_eq!(created["binary"], false);
         assert!(created["http"]["time"].as_f64().unwrap() >= 0.);
@@ -809,4 +817,60 @@ fn unknown_requests_and_bad_settings_fail_their_block() {
             .contains("no longer saved")
     );
     assert_eq!(summary.outputs["date"], 1714521600000_i64);
+}
+
+#[test]
+fn an_inner_loop_runs_before_the_next_outer_iteration() {
+    // Each inner item combines with a value of its own outer iteration.
+    let flow = Flow {
+        blocks: vec![
+            block("b1", evaluate(&[], "[[1, 2], [3, 4]]")),
+            block("b2", BlockType::For.block_kind()),
+            block("b3", evaluate(&["group"], "$sum(group)")),
+            block("b4", BlockType::For.block_kind()),
+            block("b5", evaluate(&["n", "sum"], "n * sum")),
+            block("b6", BlockType::Collect.block_kind()),
+            block("b7", BlockType::Collect.block_kind()),
+            block("b8", output(&["products"])),
+        ],
+        connections: vec![
+            wire("b1", "result", "b2", "list"),
+            wire("b2", "item", "b4", "list"),
+            wire("b2", "item", "b3", "group"),
+            wire("b4", "item", "b5", "n"),
+            wire("b3", "result", "b5", "sum"),
+            wire("b5", "result", "b6", "item"),
+            wire("b6", "list", "b7", "item"),
+            wire("b7", "list", "b8", "products"),
+        ],
+    };
+
+    let (summary, _) = run_flow(flow, options());
+
+    assert_eq!(summary.outputs["products"], json!([[3, 6], [21, 28]]));
+}
+
+#[test]
+fn a_loop_inside_a_cycle_still_runs() {
+    // For → OR → Repeat → back to OR: finding the loop's Collect ends.
+    let flow = Flow {
+        blocks: vec![
+            block("b1", evaluate(&[], "[1]")),
+            block("b2", BlockType::For.block_kind()),
+            block("b3", BlockKind::Or),
+            block("b4", BlockType::Repeat.block_kind()),
+            block("b5", evaluate(&["i"], "i")),
+        ],
+        connections: vec![
+            wire("b1", "result", "b2", "list"),
+            wire("b2", "item", "b3", "first"),
+            wire("b3", "data", "b4", "count"),
+            wire("b4", "index", "b5", "i"),
+            wire("b5", "result", "b3", "second"),
+        ],
+    };
+
+    let (summary, _) = run_flow(flow, options());
+
+    assert!(summary.block_runs > 0);
 }

@@ -12,3 +12,5 @@ regex = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 # Grows the stack of deeply nested evaluations instead of overflowing it.
 stacker = "0.1"
+# Keeps expressions that `$eval` parses for as long as their evaluation.
+typed-arena = "2"

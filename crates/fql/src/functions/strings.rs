@@ -5,7 +5,7 @@ use regex::Regex;
 
 use super::registry::{Args, Builtin, stringify};
 use crate::error::{Error, Result};
-use crate::value::Value;
+use crate::value::{Frame, Value};
 
 pub(super) static FUNCTIONS: &[Builtin] = &[
     builtin(
@@ -607,7 +607,7 @@ fn eval<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
     let Some(source) = args.string(0)? else {
         return Ok(Value::Undefined);
     };
-    let expression = crate::Expression::parse(source).map_err(|error| {
+    let expression = crate::parser::parse(source).map_err(|error| {
         args.error(
             "D3120",
             format!(
@@ -616,14 +616,16 @@ fn eval<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
             ),
         )
     })?;
+    let expression = args.evaluation.expressions.alloc(expression);
 
-    // The expression lives only for this call, so its result is copied out.
-    let context = match args.get(1) {
-        Value::Undefined if args.len() < 2 => args.input.to_json(),
-        value => value.to_json(),
+    // The expression sees the variables where `$eval` is called.
+    let input = match args.get(1) {
+        Value::Undefined if args.len() < 2 => args.input.clone(),
+        value => Value::context(value),
     };
-    let result = expression
-        .evaluate(context.as_ref(), &crate::Bindings::default())
+    let scope = args.evaluation.scope().unwrap_or_else(Frame::root);
+    args.evaluation
+        .evaluate(expression, &input, &scope)
         .map_err(|error| {
             args.error(
                 "D3121",
@@ -632,9 +634,7 @@ fn eval<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
                     error.message
                 ),
             )
-        })?;
-
-    Ok(result.map_or(Value::Undefined, |json| owned(&json)))
+        })
 }
 
 /// A value that owns its data, built from JSON.

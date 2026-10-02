@@ -24,6 +24,8 @@ pub(super) struct Picker {
     pub from: Option<PortRef>,
     pub search: Entity<InputState>,
     pub highlighted: usize,
+    /// Keeps the highlighted item in view.
+    scroll: ScrollHandle,
     _subscription: Subscription,
 }
 
@@ -59,6 +61,7 @@ impl Picker {
             from,
             search,
             highlighted: 0,
+            scroll: ScrollHandle::new(),
             _subscription: subscription,
         }
     }
@@ -90,6 +93,11 @@ impl FlowEditor {
             })
             .map(PickerItem::Block)
             .collect();
+        // Blocks named like the search come before those that only describe it.
+        items.sort_by_key(|item| match item {
+            PickerItem::Block(block_type) => !matches(block_type.name()),
+            PickerItem::Request(_) => true,
+        });
 
         if picker.from.as_ref().is_none_or(|from| from.output) {
             items.extend(
@@ -144,11 +152,13 @@ impl FlowEditor {
             "down" if count > 0 => {
                 if let Some(picker) = &mut self.picker {
                     picker.highlighted = (picker.highlighted + 1) % count;
+                    picker.scroll.scroll_to_item(picker.highlighted);
                 }
             }
             "up" if count > 0 => {
                 if let Some(picker) = &mut self.picker {
                     picker.highlighted = (picker.highlighted + count - 1) % count;
+                    picker.scroll.scroll_to_item(picker.highlighted);
                 }
             }
             "enter" => {
@@ -176,12 +186,19 @@ impl FlowEditor {
     ) -> AnyElement {
         let theme = cx.theme();
         let items = self.picker_items(picker, cx);
-        let width = rems(18.).to_pixels(self.rem);
-        let height = rems(24.).to_pixels(self.rem);
-        // Keep the picker inside the canvas.
+        // Keep the picker inside the canvas, however small it is.
+        let margin = px(8.);
+        let width = rems(18.)
+            .to_pixels(self.rem)
+            .min(self.view.size.width - margin * 2.);
+        let height = rems(24.)
+            .to_pixels(self.rem)
+            .min(self.view.size.height - margin * 2.);
         let at = self.viewport.to_view(picker.position, self.rem);
-        let left = at.x.min(self.view.size.width - width).max(px(8.));
-        let top = at.y.min(self.view.size.height - height).max(px(8.));
+        let left = at.x.min(self.view.size.width - width - margin).max(margin);
+        let top =
+            at.y.min(self.view.size.height - height - margin)
+                .max(margin);
         let first_request = items
             .iter()
             .position(|item| matches!(item, PickerItem::Request(_)));
@@ -207,7 +224,6 @@ impl FlowEditor {
             .capture_key_down(cx.listener(Self::on_picker_key_down))
             .child(
                 Input::new(&picker.search)
-                    .small()
                     .prefix(IconName::Search)
                     .aria_label("Search blocks or requests"),
             )
@@ -217,6 +233,7 @@ impl FlowEditor {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
+                    .track_scroll(&picker.scroll)
                     .when(items.is_empty(), |this| {
                         this.child(
                             div()

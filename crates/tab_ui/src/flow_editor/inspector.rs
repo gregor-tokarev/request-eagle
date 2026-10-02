@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use flow::{BlockKind, DisplayFormat, Field, Flow, TemplateFormat};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
@@ -12,6 +14,9 @@ use request_eagle_theme::method_label;
 use serde_json::Value;
 
 use super::{FlowEditor, blocks, preview};
+
+/// How long the FQL preview waits for typing to pause before evaluating.
+const PREVIEW_DELAY: Duration = Duration::from_millis(150);
 
 /// A setting of a block that an editor of the inspector changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,8 +72,14 @@ pub(super) struct Inspector {
     request_search: Option<Entity<InputState>>,
     /// The result of the block's FQL with the inputs of its last run.
     preview: Option<Result<String, String>>,
+    /// Evaluates the preview away from the interface; replacing it drops
+    /// a result that is out of date.
+    preview_task: Option<Task<()>>,
     /// The last run's inputs and outputs.
     run: Option<Entity<EditorState>>,
+    /// Settings whose text cannot apply, such as a number that is not one.
+    /// The block keeps its previous value until they are fixed.
+    pub errors: Vec<(Setting, String)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -105,7 +116,10 @@ impl FlowEditor {
                     .inspector
                     .as_ref()
                     .is_some_and(|inspector| inspector.block == id) => {}
-            Some(id) => self.inspector = Some(self.build_inspector(&id, window, cx)),
+            Some(id) => {
+                self.inspector = Some(self.build_inspector(&id, window, cx));
+                self.update_preview(&id, cx);
+            }
             None => self.inspector = None,
         }
     }
@@ -121,11 +135,10 @@ impl FlowEditor {
         };
 
         let run = self.run_view(&id, window, cx);
-        let preview = self.preview(&id);
         if let Some(inspector) = &mut self.inspector {
             inspector.run = run;
-            inspector.preview = preview;
         }
+        self.update_preview(&id, cx);
     }
 
     /// Edit the selected block's title.
@@ -154,7 +167,9 @@ impl FlowEditor {
             editors: Vec::new(),
             request_search: None,
             preview: None,
+            preview_task: None,
             run: None,
+            errors: Vec::new(),
             _subscriptions: Vec::new(),
         };
         let Some(block) = self.flow.block(id).cloned() else {
@@ -339,7 +354,6 @@ impl FlowEditor {
             inspector.request_search = Some(search);
         }
 
-        inspector.preview = self.preview(id);
         inspector.run = self.run_view(id, window, cx);
         inspector
     }
@@ -382,8 +396,60 @@ impl FlowEditor {
     }
 
     /// Evaluate the block's FQL with the inputs of its last run, or check
-    /// that it parses when it has not run.
-    fn preview(&self, id: &str) -> Option<Result<String, String>> {
+    /// that it parses when it has not run. Evaluating a large input takes a
+    /// while, so it happens in the background once typing pauses.
+    fn update_preview(&mut self, id: &str, cx: &mut Context<Self>) {
+        let job = self.preview_input(id);
+        let Some(inspector) = self
+            .inspector
+            .as_mut()
+            .filter(|inspector| inspector.block == id)
+        else {
+            return;
+        };
+
+        inspector.preview_task = None;
+        let (expression, input) = match job {
+            None => {
+                inspector.preview = None;
+                return;
+            }
+            Some(Err(error)) => {
+                inspector.preview = Some(Err(error));
+                return;
+            }
+            Some(Ok(job)) => job,
+        };
+
+        let id = id.to_owned();
+        inspector.preview_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PREVIEW_DELAY).await;
+            let preview = cx
+                .background_spawn(async move {
+                    match expression.evaluate(Some(&input), &fql::Bindings::default()) {
+                        Ok(Some(value)) => Ok(preview::pretty(&value)),
+                        Ok(None) => Ok("undefined".to_owned()),
+                        Err(error) => Err(error.to_string()),
+                    }
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if let Some(inspector) = this
+                    .inspector
+                    .as_mut()
+                    .filter(|inspector| inspector.block == id)
+                {
+                    inspector.preview = Some(preview);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// The block's parsed FQL and the variables of its last run, or why it
+    /// does not parse. Nothing when it has no FQL or has not run.
+    fn preview_input(&self, id: &str) -> Option<Result<(fql::Expression, Value), String>> {
         let block = self.flow.block(id)?;
         let source = match &block.kind {
             BlockKind::Evaluate { expression, .. } => expression,
@@ -416,13 +482,7 @@ impl FlowEditor {
                 .collect(),
         );
 
-        Some(
-            match expression.evaluate(Some(&input), &fql::Bindings::default()) {
-                Ok(Some(value)) => Ok(preview::pretty(&value)),
-                Ok(None) => Ok("undefined".to_owned()),
-                Err(error) => Err(error.to_string()),
-            },
-        )
+        Some(Ok((expression, input)))
     }
 
     /// Change one setting of a block from its editor.
@@ -435,16 +495,29 @@ impl FlowEditor {
     ) {
         let key = Some(format!("{id}:{setting:?}"));
         let id = id.to_owned();
+        let error = invalid(&self.flow, &id, setting, &value);
 
-        self.edit(key, |flow| apply(flow, &id, setting, value), cx);
-
-        let preview = self.preview(&id);
         if let Some(inspector) = self
             .inspector
             .as_mut()
             .filter(|inspector| inspector.block == id)
         {
-            inspector.preview = preview;
+            inspector.errors.retain(|(other, _)| *other != setting);
+            if let Some(error) = &error {
+                inspector.errors.push((setting, error.clone()));
+            }
+        }
+        if error.is_some() {
+            cx.notify();
+            return;
+        }
+
+        self.edit(key, |flow| apply(flow, &id, setting, value), cx);
+        if matches!(
+            setting,
+            Setting::Expression | Setting::Condition(_) | Setting::Variable(_)
+        ) {
+            self.update_preview(&id, cx);
         }
     }
 
@@ -465,6 +538,26 @@ impl FlowEditor {
             },
             cx,
         );
+    }
+
+    /// Show a Display block's data another way, redrawing what it shows
+    /// without running the flow again.
+    fn set_display_format(&mut self, id: &str, format: DisplayFormat, cx: &mut Context<Self>) {
+        self.set_kind(
+            id,
+            |kind| {
+                if let BlockKind::Display { format: current } = kind {
+                    *current = format;
+                }
+            },
+            cx,
+        );
+
+        if let Some(status) = self.run.blocks.get_mut(id)
+            && let Some((_, data)) = status.last.as_ref().and_then(|run| run.inputs.first())
+        {
+            status.display = Some(preview::Display::new(data, format));
+        }
     }
 
     /// Add an entry to one of a block's lists, or remove one, keeping the
@@ -490,6 +583,8 @@ impl FlowEditor {
             .debug_selector(|| "flow-inspector".into())
             .flex_none()
             .w(rems(22.))
+            // Leave the canvas room in a narrow window.
+            .max_w(relative(0.5))
             .h_full()
             .border_l_1()
             .border_color(theme.border)
@@ -518,7 +613,6 @@ impl FlowEditor {
                     )))
                     .child(
                         Button::new("flow-delete-connection")
-                            .small()
                             .danger()
                             .label("Delete connection")
                             .on_click(
@@ -540,7 +634,6 @@ impl FlowEditor {
                             .gap_2()
                             .child(
                                 Button::new("flow-duplicate-selection")
-                                    .small()
                                     .label("Duplicate")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.duplicate(window, cx)
@@ -548,7 +641,6 @@ impl FlowEditor {
                             )
                             .child(
                                 Button::new("flow-delete-selection")
-                                    .small()
                                     .danger()
                                     .label("Delete")
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -565,21 +657,39 @@ impl FlowEditor {
         let block_type = block.kind.block_type();
         let id = block.id.clone();
 
-        let field = |setting: Setting| -> Option<AnyElement> {
-            match inspector.editor(setting)? {
-                Editing::Line(input) => Some(Input::new(input).small().into_any_element()),
-                Editing::Code(editor) => Some(
-                    div()
-                        .h(rems(8.))
-                        .rounded(theme.radius_tokens().md)
-                        .border_1()
-                        .border_color(theme.border)
-                        .overflow_hidden()
-                        .child(Editor::new(editor).h_full().bordered(false).text_sm())
-                        .into_any_element(),
-                ),
-            }
-        };
+        let field =
+            |setting: Setting| -> Option<AnyElement> {
+                match inspector.editor(setting)? {
+                    Editing::Line(input) => {
+                        let error = inspector
+                            .errors
+                            .iter()
+                            .find(|(other, _)| *other == setting)
+                            .map(|(_, error)| error.clone());
+                        Some(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(Input::new(input))
+                                .children(error.map(|error| {
+                                    div().text_xs().text_color(theme.danger).child(error)
+                                }))
+                                .into_any_element(),
+                        )
+                    }
+                    Editing::Code(editor) => Some(
+                        div()
+                            .h(rems(8.))
+                            .rounded(theme.radius_tokens().md)
+                            .border_1()
+                            .border_color(theme.border)
+                            .overflow_hidden()
+                            .child(Editor::new(editor).h_full().bordered(false).text_sm())
+                            .into_any_element(),
+                    ),
+                }
+            };
 
         let mut panel =
             panel
@@ -681,15 +791,10 @@ impl FlowEditor {
                         .children(DisplayFormat::ALL.into_iter().map(|option| {
                             let id = id.clone();
                             Button::new(SharedString::from(format!("display-format-{}", option.label())))
-                                .xsmall()
                                 .selected(*format == option)
                                 .label(option.label())
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_kind(&id, |kind| {
-                                        if let BlockKind::Display { format } = kind {
-                                            *format = option;
-                                        }
-                                    }, cx);
+                                    this.set_display_format(&id, option, cx);
                                 }))
                         }))
                         .into_any_element(),
@@ -770,7 +875,6 @@ impl FlowEditor {
                                 .children([(TemplateFormat::Text, "Text"), (TemplateFormat::Json, "JSON")].map(|(option, label)| {
                                     let id = id.clone();
                                     Button::new(SharedString::from(format!("template-format-{label}")))
-                                        .xsmall()
                                         .selected(format == option)
                                         .label(label)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -943,7 +1047,7 @@ impl FlowEditor {
                     .child("Success sends 2xx responses, Fail the others. Each {{variable}} is an input; a connected value replaces it."),
             )
             .children(inspector.request_search.as_ref().map(|search| {
-                Input::new(search).small().prefix(IconName::Search)
+                Input::new(search).prefix(IconName::Search)
             }))
             .child(
                 v_flex()
@@ -1021,6 +1125,45 @@ fn subscribe_code(
 
 /// Set a block's setting to text typed into its editor. Renaming a port
 /// keeps its connections.
+/// Why `value` cannot be a setting of a block. The block keeps its previous
+/// value meanwhile, so a port being renamed keeps its connections rather
+/// than sharing another port's name for a keystroke.
+pub(super) fn invalid(flow: &Flow, id: &str, setting: Setting, value: &str) -> Option<String> {
+    let block = flow.block(id)?;
+
+    match setting {
+        Setting::Number => match value.trim().parse::<f64>() {
+            Ok(number) if number.is_finite() => None,
+            _ => Some("Enter a number".to_owned()),
+        },
+        Setting::Milliseconds => value
+            .trim()
+            .parse::<u64>()
+            .is_err()
+            .then(|| "Enter a whole number of milliseconds".to_owned()),
+        Setting::Variable(_) | Setting::FieldKey(_) | Setting::Output(_) => {
+            let name = value.trim();
+            if name.is_empty() {
+                return Some("Name the input".to_owned());
+            }
+
+            let mut renamed = Flow {
+                blocks: vec![block.clone()],
+                connections: Vec::new(),
+            };
+            apply(&mut renamed, id, setting, value.to_owned());
+            let named = renamed.blocks[0]
+                .kind
+                .inputs()
+                .iter()
+                .filter(|input| *input == name)
+                .count();
+            (named > 1).then(|| format!("Another input is named \"{name}\""))
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn apply(flow: &mut Flow, id: &str, setting: Setting, value: String) {
     let mut renamed = None;
     {
@@ -1068,11 +1211,8 @@ pub(super) fn apply(flow: &mut Flow, id: &str, setting: Setting, value: String) 
             (Setting::Path, BlockKind::Select { path }) => *path = value,
             (Setting::FieldKey(index), BlockKind::Record { fields }) => {
                 if let Some(field) = fields.get_mut(index) {
-                    renamed = Some((
-                        false,
-                        std::mem::replace(&mut field.key, value.clone()),
-                        value,
-                    ));
+                    let key = value.trim().to_owned();
+                    renamed = Some((false, std::mem::replace(&mut field.key, key.clone()), key));
                 }
             }
             (Setting::FieldValue(index), BlockKind::Record { fields }) => {
@@ -1091,6 +1231,7 @@ pub(super) fn apply(flow: &mut Flow, id: &str, setting: Setting, value: String) 
             }
             (Setting::Output(index), BlockKind::Output { names }) => {
                 if let Some(name) = names.get_mut(index) {
+                    let value = value.trim().to_owned();
                     renamed = Some((false, std::mem::replace(name, value.clone()), value));
                 }
             }

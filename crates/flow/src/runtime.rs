@@ -5,11 +5,11 @@
 //! Work is taken from a stack, so what a block sends is handled before the
 //! data that was already waiting: each item of a loop reaches the end of the
 //! loop before the next item starts. Loops start, and cycles start their
-//! next pass, once the work under way is done, so the values they combine
-//! with have arrived. Every value remembers the loop iterations and the
-//! passes through cycles it was sent in, and a block only combines values of
-//! the same iteration or pass. Values from outside a loop or cycle combine
-//! with every iteration.
+//! next pass, once the work of the iteration they belong to is done, so the
+//! values they combine with have arrived. Every value remembers the loop
+//! iterations and the passes through cycles it was sent in, and a block only
+//! combines values of the same iteration or pass. Values from outside a loop
+//! or cycle combine with every iteration.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -121,17 +121,20 @@ pub async fn run(
     }
 
     loop {
-        // Once the work under way is done, loops start one at a time, then
-        // the next passes through cycles.
-        if matches!(run.stack.last(), None | Some(Work::LoopEnd { .. })) {
-            if let Some(pending) = run.pending.pop_front() {
-                run.begin_loop(pending);
-                continue;
-            }
-            if !run.deferred.is_empty() {
-                let deferred: Vec<Work> = run.deferred.drain(..).collect();
-                run.stack.extend(deferred.into_iter().rev());
-            }
+        // Once the work of their iteration is done, loops start one at a
+        // time, then the next passes through cycles.
+        if let Some(pending) = run.pending.front()
+            && run.iteration_done(&pending.frames)
+            && let Some(pending) = run.pending.pop_front()
+        {
+            run.begin_loop(pending);
+            continue;
+        }
+        if let Some(Work::Deliver { packet, .. }) = run.deferred.front()
+            && run.iteration_done(&packet.frames)
+        {
+            let deferred: Vec<Work> = run.deferred.drain(..).collect();
+            run.stack.extend(deferred.into_iter().rev());
         }
         let Some(work) = run.stack.pop() else {
             break;
@@ -244,6 +247,24 @@ struct Run<'a, E: FnMut(RunEvent)> {
 type Sent = Result<Vec<(String, Value)>, String>;
 
 impl<E: FnMut(RunEvent)> Run<'_, E> {
+    /// Whether the work of the loop iterations in `frames` is done: the next
+    /// work ends a loop, or belongs to another iteration of one of them.
+    fn iteration_done(&self, frames: &Frames) -> bool {
+        let work = match self.stack.last() {
+            None | Some(Work::LoopEnd { .. }) => return true,
+            Some(Work::Deliver { packet, .. }) => &packet.frames,
+            Some(Work::Fire { frames: work, .. }) => work,
+        };
+
+        frames
+            .iter()
+            .filter(|&&(frame, _)| frame & CYCLE == 0)
+            .any(|&(loop_run, index)| {
+                work.iter()
+                    .any(|&(other, other_index)| other == loop_run && other_index != index)
+            })
+    }
+
     async fn deliver(&mut self, block: usize, input: String, packet: Packet) {
         let flow = self.flow;
         match &flow.blocks[block].kind {
@@ -613,9 +634,14 @@ impl<E: FnMut(RunEvent)> Run<'_, E> {
             .requests
             .get(request)
             .ok_or("The chosen HTTP request is no longer saved")?;
+        // Send only triggers the request, unless the request has a
+        // `{{send}}` variable for it to fill.
+        let fills_send = http::request_variables(&saved.request)
+            .iter()
+            .any(|name| name == "send");
         let variables = inputs
             .iter()
-            .filter(|(name, _)| name != "send")
+            .filter(|(name, _)| name != "send" || fills_send)
             .map(|(name, value)| (name.clone(), http::variable_text(value)))
             .collect();
 

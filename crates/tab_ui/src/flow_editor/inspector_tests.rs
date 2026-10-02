@@ -1,6 +1,6 @@
 use flow::{Block, BlockKind, BlockType, Connection, Flow};
 
-use super::inspector::{List, Setting, apply, change_list};
+use super::inspector::{List, Setting, apply, change_list, invalid};
 
 fn block(id: &str, kind: BlockKind) -> Block {
     Block {
@@ -71,6 +71,53 @@ fn numbers_and_delays_keep_their_last_valid_value() {
 
     assert_eq!(flow.blocks[0].kind, BlockKind::Number { value: 2.5 });
     assert_eq!(flow.blocks[1].kind, BlockKind::Delay { milliseconds: 250 });
+
+    // The inspector reports what it could not apply.
+    assert!(invalid(&flow, "b1", Setting::Number, "2.5x").is_some());
+    assert!(invalid(&flow, "b1", Setting::Number, " 3 ").is_none());
+    assert!(invalid(&flow, "b2", Setting::Milliseconds, "-1").is_some());
+}
+
+#[test]
+fn a_rename_onto_another_ports_name_is_refused() {
+    let flow = Flow {
+        blocks: vec![
+            block("b1", BlockType::String.block_kind()),
+            block(
+                "b2",
+                BlockKind::Record {
+                    fields: vec![
+                        flow::Field {
+                            key: "a".to_owned(),
+                            value: String::new(),
+                        },
+                        flow::Field {
+                            key: "ab".to_owned(),
+                            value: String::new(),
+                        },
+                    ],
+                },
+            ),
+            block(
+                "b3",
+                BlockKind::If {
+                    variables: vec!["value1".to_owned()],
+                    condition: "true".to_owned(),
+                },
+            ),
+        ],
+        connections: vec![
+            wire("b1", "value", "b2", "a"),
+            wire("b1", "value", "b2", "ab"),
+        ],
+    };
+
+    // Typing "abc" over "ab" passes through "a", which is taken.
+    assert!(invalid(&flow, "b2", Setting::FieldKey(1), "a").is_some());
+    assert!(invalid(&flow, "b2", Setting::FieldKey(1), "abc").is_none());
+    assert!(invalid(&flow, "b2", Setting::FieldKey(1), " ").is_some());
+    assert!(invalid(&flow, "b3", Setting::Variable(0), "data").is_some());
+    assert!(invalid(&flow, "b3", Setting::Variable(0), "value1").is_none());
 }
 
 #[test]

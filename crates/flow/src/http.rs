@@ -19,8 +19,9 @@ pub struct SavedRequest {
     pub environment: HashMap<String, String>,
     /// Why the variables could not be read, if they could not.
     pub variables_error: Option<String>,
-    /// The collection's scripts, which run around the request's own.
-    pub scripts: RequestScripts,
+    /// The collection's scripts, which run around the request's own, or
+    /// why they could not be read, which stops the request from sending.
+    pub scripts: Result<RequestScripts, String>,
     pub session: EnvironmentSession,
 }
 
@@ -33,7 +34,7 @@ impl SavedRequest {
             self.variables_error.clone(),
             self.session.clone(),
         )
-        .with_collection_scripts(Ok(self.scripts.clone()))
+        .with_collection_scripts(self.scripts.clone())
         .with_local_values(inputs)
     }
 }

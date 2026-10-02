@@ -110,6 +110,12 @@ impl<'a> Frame<'a> {
         self.bindings.borrow_mut().insert(name.to_owned(), value);
     }
 
+    /// Drop the variables, which frees functions that hold this frame.
+    pub fn clear(&self) {
+        let bindings = self.bindings.take();
+        drop(bindings);
+    }
+
     pub fn lookup(&self, name: &str) -> Option<Value<'a>> {
         if let Some(value) = self.bindings.borrow().get(name) {
             return Some(value.clone());
@@ -254,6 +260,42 @@ impl<'a> Value<'a> {
 
     pub fn is_undefined(&self) -> bool {
         matches!(self, Self::Undefined)
+    }
+
+    /// The context to evaluate `input` with: an array is one item, not a
+    /// sequence of them.
+    pub fn context(input: Self) -> Self {
+        match input {
+            Self::Array(array) if !array.sequence => {
+                let mut wrapper = Self::sequence(vec![Self::Array(array)]);
+                if let Self::Array(wrapper) = &mut wrapper {
+                    wrapper.outer_wrapper = true;
+                }
+                wrapper
+            }
+            input => input,
+        }
+    }
+
+    /// Whether a function is in this value, which a frame holding it may
+    /// be held by in turn. Input JSON holds none.
+    pub fn holds_function(&self) -> bool {
+        match self {
+            Self::Function(_) => true,
+            Self::Array(Array {
+                items: Items::Owned(items),
+                ..
+            }) => items.iter().any(Self::holds_function),
+            Self::Object(Object::Owned(fields)) => fields.values().any(Self::holds_function),
+            Self::Tuple(tuple) => {
+                tuple.context.holds_function()
+                    || tuple
+                        .bindings
+                        .iter()
+                        .any(|(_, value)| value.holds_function())
+            }
+            _ => false,
+        }
     }
 
     pub fn is_function(&self) -> bool {

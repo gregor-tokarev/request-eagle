@@ -325,6 +325,41 @@ fn evaluates_expressions_in_strings() {
     check("$eval('$sum(numbers)')", json!(6));
     check("$eval('a + 1', {'a': 2})", json!(3));
     assert_eq!(code("$eval('1 +')"), "D3120");
+
+    // The expression sees the variables and functions where it is called.
+    check("($x := 5; $eval('$x + 1'))", json!(6));
+    check(
+        "($double := function($n) { $n * 2 }; $eval('$double(4)'))",
+        json!(8),
+    );
+    check("$eval('$$.name', {'name': 'other'})", json!("Hello World"));
+    check("($y := 3; '$y * 2' ~> $eval)", json!(6));
+}
+
+#[test]
+fn the_context_fills_a_first_argument_left_out() {
+    check("name.$substring(0, 5)", json!("Hello"));
+    check("name.$substring(6)", json!("World"));
+    check("name.$split(' ')", json!(["Hello", "World"]));
+    check("name.$replace('World', 'There')", json!("Hello There"));
+    check("name.$contains('World')", json!(true));
+    check("$substring(name, 1, 2)", json!("el"));
+    check("$string(true)", json!("true"));
+    check(
+        "people[0].$sift(function($v) { $type($v) = 'number' })",
+        json!({"age": 36}),
+    );
+}
+
+#[test]
+fn distinct_keeps_arrays() {
+    check("$distinct([1, 1])", json!([1]));
+    check("$distinct([])", json!([]));
+    check("$distinct([1, 2, 1, 3])", json!([1, 2, 3]));
+    check(
+        "$distinct(people.age.$string($ > 20))",
+        json!(["true", "false"]),
+    );
 }
 
 #[test]

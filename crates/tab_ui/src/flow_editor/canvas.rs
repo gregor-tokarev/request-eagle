@@ -361,7 +361,7 @@ impl FlowEditor {
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_by(0.8, cx)))
             .on_action(cx.listener(|this, _: &ZoomToFit, window, cx| this.zoom_to_fit(window, cx)))
             .on_action(cx.listener(|this, _: &ArrangeBlocks, window, cx| this.arrange(window, cx)))
-            .on_action(cx.listener(|this, _: &StopFlow, _, cx| this.stop(cx)))
+            .on_action(cx.listener(|this, _: &StopFlow, window, cx| this.stop(window, cx)))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "escape" => {
@@ -418,6 +418,20 @@ impl FlowEditor {
                     });
                 }),
             )
+            // A click quicker than a frame is released before the listeners
+            // that follow a drag exist.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    this.release(event.position, window, cx)
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    this.release(event.position, window, cx)
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
@@ -436,11 +450,15 @@ impl FlowEditor {
                         let entity = entity.clone();
                         move |bounds, window, cx| {
                             let _ = entity.update(cx, |this, _| {
+                                let resized = this.view.size != bounds.size;
                                 this.view = bounds;
                                 if !this.fitted && bounds.size.width > px(0.) {
                                     this.fitted = true;
                                     this.fit_on_open();
                                     // Changes made while drawing show in the next frame.
+                                    window.request_animation_frame();
+                                } else if resized {
+                                    // What was culled for the old size may now be in view.
                                     window.request_animation_frame();
                                 }
                             });
@@ -496,7 +514,13 @@ impl FlowEditor {
                                 move |event: &MouseMoveEvent, phase, window, cx| {
                                     if phase == DispatchPhase::Bubble {
                                         let _ = moving.update(cx, |this, cx| {
-                                            this.drag_to(event.position, window, cx)
+                                            // The release was missed, such as
+                                            // outside the window.
+                                            if event.pressed_button.is_none() {
+                                                this.release(event.position, window, cx)
+                                            } else {
+                                                this.drag_to(event.position, window, cx)
+                                            }
                                         });
                                     }
                                 },
@@ -618,7 +642,7 @@ impl FlowEditor {
                     .danger()
                     .icon(Icon::default().path("icons/square.svg"))
                     .label("Stop")
-                    .on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
+                    .on_click(cx.listener(|this, _, window, cx| this.stop(window, cx)))
                     .into_any_element()
             } else {
                 Button::new("flow-run")
@@ -671,7 +695,7 @@ impl FlowEditor {
                     .small()
                     .ghost()
                     .icon(Icon::default().path("icons/layout-dashboard.svg"))
-                    .label("Arrange")
+                    .accessibility_label("Arrange blocks")
                     .tooltip_with_action(
                         "Arrange blocks left to right",
                         &ArrangeBlocks,
@@ -687,7 +711,10 @@ impl FlowEditor {
                     this.child(
                         div()
                             .debug_selector(|| "flow-run-summary".into())
-                            .px_2()
+                            // Gives way to the buttons in a narrow window.
+                            .min_w_0()
+                            .truncate()
+                            .px_1()
                             .text_xs()
                             .text_color(if failed {
                                 theme.danger

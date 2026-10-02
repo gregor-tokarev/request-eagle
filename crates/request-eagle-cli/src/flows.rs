@@ -170,7 +170,7 @@ fn blocks() -> Value {
         "blocks": blocks,
         "notes": [
             "A block runs when every connected input has a value, and again whenever one receives another. Blocks that run at start do so when none of their inputs are connected.",
-            "An http_request block also has an input for each {{variable}} of its request (flows.get lists them). Its send input is an optional trigger. It sends {body, http: {status, headers, time}, tests, binary} from success for 2xx statuses and from fail otherwise.",
+            "An http_request block also has an input for each {{variable}} of its request (flows.get lists them). Its send input is an optional trigger, which also fills a {{send}} variable. It sends {body, http: {status, headers, time}, tests, binary} from success for 2xx statuses and from fail otherwise.",
             "evaluate, if and condition expressions are FQL (JSONata); their variables are fields of the input, so write `value1.body.id`, not `$value1`.",
             "for and repeat send each item in its own iteration; a collect block downstream gathers the iteration results into a list once the loop ends.",
             "Variables of condition become outputs condition1, condition2, …; list items become inputs item1, item2, ….",
@@ -200,6 +200,47 @@ fn evaluate(source: &str, input: Option<Value>, values: HashMap<String, Value>) 
 struct BlockState {
     runs: usize,
     run: Option<flow::BlockRun>,
+}
+
+/// What a run reported so far: each block's latest run and the first logs.
+/// Earlier runs are dropped as they are replaced, so long loops keep only
+/// what the result shows.
+#[derive(Default)]
+struct Report {
+    states: HashMap<String, BlockState>,
+    logs: Vec<Value>,
+    logged: usize,
+    outputs: Map<String, Value>,
+}
+
+impl Report {
+    fn record(&mut self, flow: &Flow, event: RunEvent) {
+        match event {
+            RunEvent::Started { .. } => {}
+            RunEvent::Log { block, value, at } => {
+                self.logged += 1;
+                if self.logs.len() < MAX_LOGS {
+                    self.logs.push(
+                        json!({"block": block, "value": value, "at_ms": at.as_secs_f64() * 1000.}),
+                    );
+                }
+            }
+            RunEvent::Finished(run) => {
+                if matches!(
+                    flow.block(&run.block).map(|block| &block.kind),
+                    Some(BlockKind::Output { .. })
+                ) {
+                    for (name, value) in &run.inputs {
+                        self.outputs.insert(name.clone(), (**value).clone());
+                    }
+                }
+
+                let state = self.states.entry(run.block.clone()).or_default();
+                state.runs += 1;
+                state.run = Some(run);
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -251,7 +292,7 @@ async fn run(
                 // like an active environment.
                 environment: variables.clone(),
                 variables_error: None,
-                scripts: collection.scripts().clone(),
+                scripts: Ok(collection.scripts().clone()),
                 session: sessions.entry(collection.path.clone()).or_default().clone(),
             },
         );
@@ -275,9 +316,12 @@ async fn run(
         executor,
     };
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(300_000));
-    let mut events = Vec::new();
+    let mut report = Report::default();
     let summary = smol::future::or(
-        async { Some(flow::run(entry.flow.clone(), options, |event| events.push(event)).await) },
+        async {
+            let flow = entry.flow.clone();
+            Some(flow::run(flow, options, |event| report.record(&entry.flow, event)).await)
+        },
         async {
             smol::Timer::after(timeout).await;
             None
@@ -286,49 +330,16 @@ async fn run(
     .await;
     crate::execution::save(jar.as_ref())?;
 
-    Ok(run_json(path, &entry.flow, summary, events, timeout))
+    Ok(run_json(path, &entry.flow, summary, report, timeout))
 }
 
 fn run_json(
     path: &Path,
     flow: &Flow,
     summary: Option<flow::RunSummary>,
-    events: Vec<RunEvent>,
+    mut report: Report,
     timeout: Duration,
 ) -> Value {
-    let mut states: HashMap<String, BlockState> = HashMap::new();
-    let mut logs = Vec::new();
-    let mut logged = 0;
-    let mut outputs = Map::new();
-
-    for event in events {
-        match event {
-            RunEvent::Started { .. } => {}
-            RunEvent::Log { block, value, at } => {
-                logged += 1;
-                if logs.len() < MAX_LOGS {
-                    logs.push(
-                        json!({"block": block, "value": value, "at_ms": at.as_secs_f64() * 1000.}),
-                    );
-                }
-            }
-            RunEvent::Finished(run) => {
-                if matches!(
-                    flow.block(&run.block).map(|block| &block.kind),
-                    Some(BlockKind::Output { .. })
-                ) {
-                    for (name, value) in &run.inputs {
-                        outputs.insert(name.clone(), (**value).clone());
-                    }
-                }
-
-                let state = states.entry(run.block.clone()).or_default();
-                state.runs += 1;
-                state.run = Some(run);
-            }
-        }
-    }
-
     let values = |values: &[(String, Arc<Value>)]| {
         values
             .iter()
@@ -339,7 +350,7 @@ fn run_json(
         .blocks
         .iter()
         .map(|block| {
-            let state = states.remove(&block.id).unwrap_or_default();
+            let state = report.states.remove(&block.id).unwrap_or_default();
             let run = state.run.as_ref();
 
             json!({
@@ -392,12 +403,12 @@ fn run_json(
         "path": path,
         "status": status,
         "stopped": stopped,
-        "outputs": summary.map(|summary| summary.outputs).unwrap_or(outputs),
+        "outputs": summary.map(|summary| summary.outputs).unwrap_or(report.outputs),
         "elapsed_ms": elapsed.as_secs_f64() * 1000.,
         "block_runs": block_runs,
         "failures": failures,
         "blocks": blocks,
-        "logs": logs,
-        "logs_truncated": logged > MAX_LOGS,
+        "logs": report.logs,
+        "logs_truncated": report.logged > MAX_LOGS,
     })
 }

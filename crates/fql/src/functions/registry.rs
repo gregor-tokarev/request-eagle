@@ -24,7 +24,7 @@ pub struct Builtin {
 
 /// The arguments of a call to a built-in function.
 pub(crate) struct Args<'a, 'e> {
-    pub evaluation: &'e Evaluation,
+    pub evaluation: &'e Evaluation<'a>,
     pub values: Vec<Value<'a>>,
     pub input: &'e Value<'a>,
     pub position: usize,
@@ -180,19 +180,20 @@ pub fn functions() -> Vec<&'static Builtin> {
 }
 
 pub(crate) fn call<'a>(
-    evaluation: &Evaluation,
+    evaluation: &Evaluation<'a>,
     builtin: &'static Builtin,
     mut values: Vec<Value<'a>>,
     input: &Value<'a>,
     position: usize,
 ) -> Result<Value<'a>> {
-    // The context fills a missing first argument.
+    // The context fills a missing first argument: one too few are given,
+    // or they only fit the parameters after the first.
     let missing_first = values.len() < builtin.min
-        || (values.len() < builtin.max
-            && values.first().is_some_and(Value::is_function)
-            && builtin.min >= 1
-            && builtin.max >= 2
-            && matches!(builtin.name, "sift" | "each"));
+        || values.len() < builtin.max
+            && parameters(builtin.name).is_some_and(|parameters| {
+                let symbols: Vec<char> = values.iter().map(symbol).collect();
+                !fits(parameters, &symbols) && fits(&parameters[1..], &symbols)
+            });
     if builtin.context && missing_first {
         let context = match input {
             Value::Array(array) if array.outer_wrapper => array.get(0).unwrap_or(Value::Undefined),
@@ -220,6 +221,60 @@ pub(crate) fn call<'a>(
         position,
         name: builtin.name,
     })
+}
+
+/// The parameters of the functions whose first argument the context can
+/// fill while they take others, from JSONata's signatures: the types each
+/// accepts, with `?` after optional ones.
+fn parameters(name: &str) -> Option<&'static [&'static str]> {
+    Some(match name {
+        "string" | "json" => &["x", "b?"],
+        "substring" => &["s", "n", "n?"],
+        "substringBefore" | "substringAfter" | "parseInteger" => &["s", "s"],
+        "pad" => &["s", "n", "s?"],
+        "contains" => &["s", "sf"],
+        "split" | "match" => &["s", "sf", "n?"],
+        "replace" => &["s", "sf", "sf", "n?"],
+        "round" | "formatBase" => &["n", "n?"],
+        "power" => &["n", "n"],
+        "formatNumber" => &["n", "s", "o?"],
+        "formatInteger" => &["n", "s"],
+        "lookup" => &["x", "s"],
+        "sift" => &["o", "f?"],
+        "each" => &["o", "f"],
+        "fromMillis" => &["n", "s?", "s?"],
+        "toMillis" => &["s", "s?"],
+        _ => return None,
+    })
+}
+
+/// Whether arguments of these types fit the parameters. Undefined fits any.
+fn fits(parameters: &[&str], symbols: &[char]) -> bool {
+    let Some((parameter, rest)) = parameters.split_first() else {
+        return symbols.is_empty();
+    };
+    let (types, optional) = match parameter.strip_suffix('?') {
+        Some(types) => (types, true),
+        None => (*parameter, false),
+    };
+
+    symbols.split_first().is_some_and(|(&symbol, others)| {
+        (symbol == 'm' || types == "x" || types.contains(symbol)) && fits(rest, others)
+    }) || optional && fits(rest, symbols)
+}
+
+/// The type of a value, as JSONata's signatures write it.
+fn symbol(value: &Value) -> char {
+    match value {
+        Value::Undefined => 'm',
+        Value::Null => 'l',
+        Value::Bool(_) => 'b',
+        Value::Number(_) => 'n',
+        Value::String(_) => 's',
+        Value::Array(_) => 'a',
+        Value::Object(_) | Value::Tuple(_) => 'o',
+        Value::Function(_) | Value::Regex(_) => 'f',
+    }
 }
 
 /// A value as text, as `$string` writes it: strings as they are, other

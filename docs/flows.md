@@ -71,7 +71,7 @@ runs, which ends a loop that never does.
 | Block | Inputs → outputs | What it does |
 | --- | --- | --- |
 | Start | → Data | Sends its JSON input when the run starts. The CLI can send other input. |
-| HTTP Request | Send, one per `{{variable}}` → Success, Fail | Sends a saved HTTP request. A connected value fills its variable. Success sends 2xx responses; Fail other statuses and errors. |
+| HTTP Request | Send, one per `{{variable}}` → Success, Fail | Sends a saved HTTP request. A connected value fills its variable; Send also fills a `{{send}}` variable. Success sends 2xx responses; Fail other statuses and errors. |
 | Evaluate | variables → Result | Computes an FQL expression. An undefined result sends nothing. |
 | If | variables, Data → Then, Else | Sends Data, or the variables when Data is not connected, out of Then when the FQL condition holds. |
 | Condition | variables → Condition 1…n, Default | Sends the variables out of the first condition that holds. |

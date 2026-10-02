@@ -92,13 +92,20 @@ impl Graph {
 /// The Collect blocks that close the loop of `start`, pairing loops and
 /// Collect blocks like brackets, so a nested loop's Collect is passed by.
 fn loop_collects(flow: &Flow, successors: &[Vec<usize>], start: usize) -> Vec<usize> {
+    // Loops nest no deeper than there are loops, unless a cycle passes the
+    // same loop again, which nests nothing more.
+    let loops = flow
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.kind, BlockKind::For | BlockKind::Repeat))
+        .count();
     let mut collects = Vec::new();
     let mut visited = HashSet::new();
     let mut pending: Vec<(usize, usize)> =
         successors[start].iter().map(|&block| (block, 0)).collect();
 
     while let Some((block, depth)) = pending.pop() {
-        if block == start || !visited.insert((block, depth)) {
+        if block == start || depth > loops || !visited.insert((block, depth)) {
             continue;
         }
 

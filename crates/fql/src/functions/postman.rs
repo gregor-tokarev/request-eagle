@@ -536,9 +536,13 @@ fn date_plus<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
     let amount = args.number(1)?.ok_or_else(|| args.mismatch(1))?.trunc() as i64;
     let time = date(args, start)?;
 
+    // Amounts too large for a duration are out of range rather than a panic.
+    let add = |duration: Option<Duration>| {
+        duration.and_then(|duration| time.checked_add_signed(duration))
+    };
     let shifted = match unit(args, 2)? {
         Unit::Years | Unit::Months => {
-            let months = amount * if unit(args, 2)? == Unit::Years { 12 } else { 1 };
+            let months = amount.saturating_mul(if unit(args, 2)? == Unit::Years { 12 } else { 1 });
             let months_abs = Months::new(months.unsigned_abs().min(u32::MAX as u64) as u32);
             if months >= 0 {
                 time.checked_add_months(months_abs)
@@ -546,11 +550,11 @@ fn date_plus<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
                 time.checked_sub_months(months_abs)
             }
         }
-        Unit::Days => time.checked_add_signed(Duration::days(amount)),
-        Unit::Hours => time.checked_add_signed(Duration::hours(amount)),
-        Unit::Minutes => time.checked_add_signed(Duration::minutes(amount)),
-        Unit::Seconds => time.checked_add_signed(Duration::seconds(amount)),
-        Unit::Milliseconds => time.checked_add_signed(Duration::milliseconds(amount)),
+        Unit::Days => add(Duration::try_days(amount)),
+        Unit::Hours => add(Duration::try_hours(amount)),
+        Unit::Minutes => add(Duration::try_minutes(amount)),
+        Unit::Seconds => add(Duration::try_seconds(amount)),
+        Unit::Milliseconds => add(Duration::try_milliseconds(amount)),
     }
     .ok_or_else(|| args.error("D3110", "The date is out of range"))?;
 
