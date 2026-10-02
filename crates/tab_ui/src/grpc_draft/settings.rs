@@ -7,7 +7,7 @@ use gpui_kit::*;
 
 use super::draft::GrpcDraft;
 use crate::request_settings::{
-    follow_preference, override_switch, preferences, row, timeout_input, timeout_value,
+    follow_preference, override_switch, preferences, row, rows, timeout_input, timeout_value,
 };
 
 impl GrpcDraft {
@@ -93,11 +93,9 @@ impl GrpcDraft {
         let settings = &self.request.settings;
         let include_defaults = settings.include_default_fields;
 
-        v_flex()
-            .debug_selector(|| "grpc-settings".into())
-            .w_full()
-            .max_w(rems(50.))
-            .child(row(
+        rows(
+            [
+            row(
                 "Enable server certificate verification",
                 "Verify the server certificate when invoking a method over a secure connection. Follows Settings until changed here.",
                 override_switch(
@@ -112,8 +110,8 @@ impl GrpcDraft {
                     }),
                 ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Override server name for certificate verification",
                 "Check the certificate against this name instead of the URL's host.",
                 div()
@@ -121,8 +119,8 @@ impl GrpcDraft {
                     .w_40()
                     .child(Input::new(self.server_name.as_ref().unwrap())),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Request timeout",
                 "How long to wait for a unary call or server reflection, in ms. Streams stay open until they end. To never time out, set to 0. Empty follows Settings.",
                 div()
@@ -133,8 +131,8 @@ impl GrpcDraft {
                             .suffix(div().text_color(cx.theme().muted_foreground).child("ms")),
                     ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Include fields with default values in the response",
                 "Show response fields with default values, such as empty strings and zeros. Turn this off to leave them out.",
                 div().debug_selector(|| "grpc-include-default-fields".into()).child(
@@ -147,8 +145,8 @@ impl GrpcDraft {
                     })),
                 ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Maximum response message size",
                 "The largest message to receive, in MB. To receive messages of any size, set to 0. Empty follows Settings.",
                 div()
@@ -159,7 +157,11 @@ impl GrpcDraft {
                             .suffix(div().text_color(cx.theme().muted_foreground).child("MB")),
                     ),
                 cx,
-            ))
-            .into_any_element()
+            ),
+            ],
+            cx,
+        )
+        .debug_selector(|| "grpc-settings".into())
+        .into_any_element()
     }
 }

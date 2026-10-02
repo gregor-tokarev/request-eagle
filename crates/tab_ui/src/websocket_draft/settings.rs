@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 use super::draft::WebSocketDraft;
 use crate::request_settings::{
-    follow_preference, override_switch, preferences, row, timeout_input, timeout_value,
+    follow_preference, override_switch, preferences, row, rows, timeout_input, timeout_value,
 };
 
 impl WebSocketDraft {
@@ -42,11 +42,9 @@ impl WebSocketDraft {
     pub(super) fn settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let timeout = self.timeout_state(window, cx);
 
-        v_flex()
-            .debug_selector(|| "websocket-settings".into())
-            .w_full()
-            .max_w(rems(50.))
-            .child(row(
+        rows(
+            [
+            row(
                 "Connection timeout",
                 "How long to wait for the server to accept the connection, in ms. To never time out, set to 0. Empty follows Settings.",
                 div()
@@ -57,8 +55,8 @@ impl WebSocketDraft {
                             .suffix(div().text_color(cx.theme().muted_foreground).child("ms")),
                     ),
                 cx,
-            ))
-            .child(row(
+            ),
+            row(
                 "Enable server certificate verification",
                 "Verify the server certificate when connecting over a secure connection. Follows Settings until changed here.",
                 override_switch(
@@ -72,7 +70,11 @@ impl WebSocketDraft {
                     }),
                 ),
                 cx,
-            ))
-            .into_any_element()
+            ),
+            ],
+            cx,
+        )
+        .debug_selector(|| "websocket-settings".into())
+        .into_any_element()
     }
 }

@@ -21,8 +21,6 @@ pub(crate) fn row(
         .justify_between()
         .gap_4()
         .py_3()
-        .border_b_1()
-        .border_color(cx.theme().border)
         .child(
             v_flex()
                 .flex_1()
@@ -36,6 +34,21 @@ pub(crate) fn row(
                 ),
         )
         .child(div().flex_none().child(control))
+}
+
+/// A Settings tab's rows, with a line between each.
+pub(crate) fn rows(rows: impl IntoIterator<Item = Div>, cx: &App) -> Div {
+    let rows = rows.into_iter().collect::<Vec<_>>();
+    let last = rows.len().saturating_sub(1);
+
+    v_flex()
+        .w_full()
+        .max_w(rems(50.))
+        .children(rows.into_iter().enumerate().map(|(index, row)| {
+            row.when(index < last, |row| {
+                row.border_b_1().border_color(cx.theme().border)
+            })
+        }))
 }
 
 /// A switch showing the request's value, or the preference until the request
