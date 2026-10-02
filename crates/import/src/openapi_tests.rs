@@ -2,7 +2,7 @@ use collection::ImportedItem;
 use request::{Body, Field, HttpRequest, Method, Request};
 use serde_json::json;
 
-use crate::{ImportError, parse};
+use crate::{ImportError, document_tests::parse_collection};
 
 fn http(item: &ImportedItem) -> (&str, &HttpRequest) {
     match item {
@@ -150,7 +150,7 @@ components:
 
 #[test]
 fn openapi_operations_are_grouped_by_tag_in_document_order() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let collection = &import.collection;
 
     assert_eq!(collection.name, "Pet Store");
@@ -174,7 +174,7 @@ fn openapi_operations_are_grouped_by_tag_in_document_order() {
 
 #[test]
 fn openapi_parameters_fill_the_url_query_and_headers() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let (_, pets) = folder(&import.collection.items[0]);
     let (_, find) = http(&pets[0]);
 
@@ -213,7 +213,7 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
 
 #[test]
 fn openapi_bodies_are_generated_from_schemas() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let (_, pets) = folder(&import.collection.items[0]);
     let (_, update) = http(&pets[1]);
 
@@ -240,7 +240,7 @@ fn openapi_bodies_are_generated_from_schemas() {
 
 #[test]
 fn swagger_specifications_are_imported() {
-    let import = parse(
+    let import = parse_collection(
         r##"{
             "swagger": "2.0",
             "info": {"title": "Legacy"},
@@ -297,7 +297,9 @@ fn swagger_specifications_are_imported() {
 
 #[test]
 fn unsupported_openapi_versions_are_rejected() {
-    let error = parse("swagger: '1.2'\ninfo: {title: Old}\n").err().unwrap();
+    let error = parse_collection("swagger: '1.2'\ninfo: {title: Old}\n")
+        .err()
+        .unwrap();
 
     assert!(matches!(error, ImportError::UnsupportedOpenApi(version) if version == "1.2"));
 }

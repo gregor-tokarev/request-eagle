@@ -10,12 +10,12 @@ use request::{
 use serde_json::Value;
 
 use crate::{
-    Import, ImportError,
+    CollectionImport, ImportError,
     body::set_content_type,
     document::{clean_name, text},
 };
 
-pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
+pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError> {
     let mut skipped = Vec::new();
     // Collection scripts become the collection's own scripts, so requests
     // inherit only its authorization.
@@ -27,7 +27,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
     let items = items(document, &inherited, &mut skipped);
     let scripts = scripts(document);
 
-    Ok(Import {
+    Ok(CollectionImport {
         collection: ImportedCollection {
             name: clean_name(document["info"]["name"].as_str(), "Postman Collection"),
             variables: variables(document),
