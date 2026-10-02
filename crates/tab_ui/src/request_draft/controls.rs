@@ -3,19 +3,18 @@ use gpui_kit::component::{
     button::*,
     input::{Input, InputGroup, InputGroupAddon},
     menu::{DropdownMenu, PopupMenuItem},
-    tag::Tag,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::Method;
-use request_eagle_theme::method_color;
+use request_eagle_theme::{method_color, protocol_icon};
 
 use super::draft::{RequestDraft, RequestLocation, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
 
-/// The request's protocol and where it is saved. An unsaved request shows
-/// the name given in its tab.
+/// The request's protocol, `HTTP`, `gRPC` or `WS`, and where it is saved. An
+/// unsaved request shows the name given in its tab.
 pub(crate) fn request_header(
     protocol: &'static str,
     location: Option<&RequestLocation>,
@@ -33,11 +32,16 @@ pub(crate) fn request_header(
         .h_10()
         .gap_2()
         .child(
-            Tag::secondary()
-                .small()
+            div()
+                .debug_selector(|| "request-protocol".into())
                 .flex_none()
-                .font_weight(FontWeight::MEDIUM)
-                .child(protocol),
+                .size_7()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(cx.theme().radius_tokens().md)
+                .bg(cx.theme().secondary)
+                .child(protocol_icon(protocol, cx).size_4()),
         )
         .child(
             h_flex()

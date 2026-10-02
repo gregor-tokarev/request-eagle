@@ -7,7 +7,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request_eagle_theme::method_color;
+use request_eagle_theme::method_label;
 
 use super::main_view::MainView;
 use crate::actions::ToggleCommandPalette;
@@ -228,10 +228,7 @@ impl CommandPalette {
                     div()
                         .flex_none()
                         .w(rems(3.5))
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(method_color(request.method, cx))
-                        .child(request.method),
+                        .child(method_label(request.method, cx)),
                 )
                 .child(label(request.name.clone()))
                 .child(detail(request.location.clone(), cx)),
