@@ -6,7 +6,7 @@ use std::{
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
-use request::{Body, HttpRequest, Method};
+use request::{Auth, Body, HttpRequest, Method};
 use request::{EventStream, EventStreamUpdate, RequestExecutor};
 
 use super::draft::RequestDraft;
@@ -31,7 +31,9 @@ fn request_url(path: &str) -> String {
     }
 }
 
-pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
+/// The headers sending adds to the request's own, including those of
+/// `auth`, the authorization it sends.
+pub(super) fn generated_headers(request: &HttpRequest, auth: &Auth) -> Vec<(String, String)> {
     // As sending, which leaves out empty raw text.
     let body = request
         .body
@@ -101,6 +103,26 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         }
     }
 
+    // The authorization replaces credentials written in the URL.
+    let auth_headers = auth.preview_headers();
+    if !auth_headers.is_empty() {
+        headers.retain(|(name, _)| name != "Authorization");
+    }
+    let pending = if auth.kind().computes_credentials() {
+        "Calculated on Send"
+    } else {
+        "Resolved on Send"
+    };
+    for (name, value) in auth_headers {
+        if !request
+            .headers
+            .iter()
+            .any(|(own, _)| own.eq_ignore_ascii_case(&name))
+        {
+            headers.push((name, value.unwrap_or_else(|| pending.into())));
+        }
+    }
+
     headers
 }
 
@@ -140,7 +162,7 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
 
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
-        let mut headers = generated_headers(&self.request);
+        let mut headers = generated_headers(&self.request, &self.effective_auth());
         headers.extend(jar_cookies(&self.request, cx));
 
         if headers == self.generated_headers {
@@ -174,6 +196,11 @@ impl RequestDraft {
         let request = self.sent_request();
         let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
+        // History keeps the authorization that was sent, inherited or not.
+        let recorded = HttpRequest {
+            auth: variables.effective_auth(&request.auth),
+            ..request.clone()
+        };
         let preferences = cx
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
@@ -189,7 +216,7 @@ impl RequestDraft {
         self.stop = Some(stop);
         self.sending = Some((
             RequestSent {
-                record: request_history::Record::sent(request.clone()),
+                record: request_history::Record::sent(recorded),
                 sent_at: SystemTime::now(),
             },
             dispatch.clone(),

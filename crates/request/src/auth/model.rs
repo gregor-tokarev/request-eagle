@@ -387,6 +387,15 @@ impl AuthKind {
         }
     }
 
+    /// Whether sending computes its credentials, such as a signature, rather
+    /// than sending them as written.
+    pub fn computes_credentials(self) -> bool {
+        matches!(
+            self,
+            Self::Digest | Self::OAuth1 | Self::Jwt | Self::AwsSignature
+        )
+    }
+
     /// Whether it can authorize gRPC calls. The others sign or answer
     /// challenges for an HTTP request that a call does not make.
     pub fn supports_grpc(self) -> bool {

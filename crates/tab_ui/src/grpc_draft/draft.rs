@@ -10,10 +10,11 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use request::{GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
+use request::{Auth, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
 
 use super::definition::DefinitionState;
 use super::methods::{MethodList, method_list};
+use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
@@ -27,6 +28,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GrpcSection {
     Message,
+    Auth,
     Metadata,
     Definition,
     Scripts,
@@ -50,6 +52,10 @@ pub struct GrpcDraft {
     pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
     pub(super) message_json_valid: bool,
     pub(super) metadata: Option<Entity<RequestFields>>,
+    pub(super) auth: Option<Entity<AuthEditor>>,
+    /// The collection's authorization, which the call sends while it
+    /// inherits it. Read again when the tab is shown.
+    pub(super) inherited: Option<Inherited>,
     pub(crate) scripts: Option<Entity<ScriptEditor<GrpcScripts>>>,
     pub(super) methods: Option<Entity<SelectState<MethodList>>>,
     pub(super) proto_path: Option<Entity<InputState>>,
@@ -92,8 +98,11 @@ impl SnippetDraft for GrpcDraft {
     }
 
     fn command(&self, values: &HashMap<String, String>, _: &App) -> String {
-        self.request
-            .grpcurl_command(values, self.collection_path().as_deref())
+        GrpcRequest {
+            auth: self.effective_auth(),
+            ..self.request.clone()
+        }
+        .grpcurl_command(values, self.collection_path().as_deref())
     }
 
     fn variables(&self) -> &Entity<VariableScope> {
@@ -160,6 +169,8 @@ impl GrpcDraft {
             message_vim: None,
             message_json_valid: false,
             metadata: None,
+            auth: None,
+            inherited: None,
             scripts: None,
             methods: None,
             proto_path: None,
@@ -195,6 +206,69 @@ impl GrpcDraft {
         self.address.update(cx, |_, cx| cx.notify());
         self.configuration.update(cx, |_, cx| cx.notify());
         cx.notify();
+    }
+
+    /// The authorization the call sends: its own, or its collection's
+    /// while it inherits it.
+    pub(super) fn effective_auth(&self) -> Auth {
+        match (&self.request.auth, &self.inherited) {
+            (Auth::Inherit, Some(inherited)) => inherited.auth.clone(),
+            (auth, _) => auth.clone(),
+        }
+    }
+
+    /// Read the collection's authorization again, which another tab may
+    /// have changed.
+    fn refresh_inherited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inherited = self.location.as_ref().map(|location| Inherited {
+            name: location.collection.clone(),
+            auth: self.variables.read(cx).collection_auth(),
+        });
+        if inherited == self.inherited {
+            return;
+        }
+
+        let previous = std::mem::replace(&mut self.inherited, inherited);
+        if let Some(auth) = &self.auth {
+            let inherited = self.inherited.clone();
+            auth.update(cx, |auth, cx| auth.set_inherited(inherited, cx));
+        }
+        // Servers may require credentials to answer reflection. A tab shown
+        // for the first time loads its services right away instead.
+        if previous.is_some() && self.request.auth.is_inherit() {
+            self.schedule_reflection(window, cx);
+        }
+    }
+
+    pub(super) fn auth_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<AuthEditor> {
+        if let Some(auth) = &self.auth {
+            return auth.clone();
+        }
+
+        let inherited = self.inherited.clone();
+        let auth = cx.new(|cx| {
+            let mut editor =
+                AuthEditor::new(self.request.auth.clone(), AuthTarget::Grpc, self.variables.clone());
+            editor.set_inherited(inherited, cx);
+            editor
+        });
+        self._subscriptions.push(cx.subscribe_in(
+            &auth,
+            window,
+            |this, _, event: &AuthChanged, window, cx| {
+                this.request.auth = event.0.clone();
+                // Servers may require credentials to answer reflection.
+                this.schedule_reflection(window, cx);
+                cx.notify();
+            },
+        ));
+        self.auth = Some(auth.clone());
+
+        auth
     }
 
     /// A name given before the request is saved is an unsaved change too.
@@ -253,6 +327,7 @@ impl GrpcDraft {
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.variables.update(cx, |scope, cx| scope.changed(cx));
+        self.refresh_inherited(window, cx);
 
         // Initialize newly activated controls before drawing, as the HTTP
         // draft does, so their setup does not schedule another frame.
@@ -265,6 +340,10 @@ impl GrpcDraft {
             }
             GrpcSection::Metadata => {
                 self.metadata_state(window, cx);
+            }
+            GrpcSection::Auth => {
+                self.auth_editor(window, cx)
+                    .update(cx, |auth, cx| auth.prepare(window, cx));
             }
             GrpcSection::Definition => self.definition_inputs(window, cx),
             GrpcSection::Scripts => {
@@ -573,6 +652,7 @@ impl Render for GrpcConfiguration {
                 let content = match draft.section {
                     GrpcSection::Message => draft.message_editor(window, cx),
                     GrpcSection::Metadata => draft.metadata_state(window, cx).into_any_element(),
+                    GrpcSection::Auth => draft.auth_editor(window, cx).into_any_element(),
                     GrpcSection::Definition => draft.definition_tab(window, cx),
                     GrpcSection::Scripts => draft.script_editor(cx).into_any_element(),
                     GrpcSection::Settings => draft.settings_tab(window, cx),

@@ -92,13 +92,16 @@ pub fn websocket_handshake_headers(
     if !auth_headers.is_empty() {
         generated.retain(|(name, _)| name != "Authorization");
     }
+    let pending = if auth.kind().computes_credentials() {
+        "Calculated on connect"
+    } else {
+        "Resolved on connect"
+    };
     generated.extend(
         auth_headers
             .into_iter()
             .filter(|(name, _)| !has(name))
-            .map(|(name, value)| {
-                (name, value.unwrap_or_else(|| "Calculated on connect".into()))
-            }),
+            .map(|(name, value)| (name, value.unwrap_or_else(|| pending.into()))),
     );
 
     generated.extend(

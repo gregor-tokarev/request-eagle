@@ -261,6 +261,7 @@ impl RequestDraft {
     pub(super) fn section_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let sections = [
             ("Params", Some(RequestSection::Params)),
+            ("Auth", Some(RequestSection::Auth)),
             ("Headers", Some(RequestSection::Headers)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
             ("Scripts", Some(RequestSection::Scripts)),

@@ -256,7 +256,7 @@ impl AuthEditor {
             .selected(&self.auth)
             .and_then(|label| options.iter().position(|option| *option == label))
             .map(IndexPath::new);
-        let labels = options.into_iter().map(SharedString::from).collect();
+        let labels: Vec<SharedString> = options.into_iter().map(SharedString::from).collect();
         let select = cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx));
         self._subscriptions.push(cx.subscribe_in(
             &select,

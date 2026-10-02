@@ -32,6 +32,7 @@ pub(crate) enum DefinitionSource {
         url: String,
         tls: bool,
         metadata: Vec<(String, String)>,
+        auth: request::Auth,
         verify_certificates: Option<bool>,
         server_name: String,
     },
@@ -47,6 +48,7 @@ impl GrpcDraft {
                     url: self.request.url.trim().to_owned(),
                     tls: self.request.uses_tls(),
                     metadata: self.request.metadata.clone(),
+                    auth: self.effective_auth(),
                     verify_certificates: self.request.settings.verify_certificates,
                     server_name: self.request.settings.server_name.clone(),
                 })

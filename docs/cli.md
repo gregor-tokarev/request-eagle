@@ -68,6 +68,12 @@ script results.
 - HTTP requests can set their own `timeout_ms`, `follow_redirects` and
   `verify_certificates`. Fields left out follow `settings.request`, and the
   `timeout_ms` of `requests.run` replaces both for that run.
+- Requests can set an `auth`, such as `{"type": "bearer", "token":
+  "{{token}}"}`. Without one, a request inherits its collection's, which
+  `collections.get` shows; `{"type": "none"}` sends none. Kinds are `api_key`,
+  `bearer`, `basic`, `digest`, `oauth1`, `oauth2`, `jwt` and `aws_signature`;
+  gRPC requests cannot use `digest`, `oauth1` or `aws_signature`. OAuth 2.0
+  sends its saved `access_token`; get a new one in the app.
 - `settings.request` takes `ca_certificates`, a PEM file of certificate
   authorities trusted in addition to the system's.
   `settings.client_certificates.add` checks a client certificate's files and
