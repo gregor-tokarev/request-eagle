@@ -12,7 +12,7 @@ mod macos_credentials;
 mod store;
 
 pub use appearance::{AppearanceMode, AppearancePreferences};
-pub use file::{Preferences, PreferencesFile};
+pub use file::{Preferences, PreferencesFile, UpdateChannel};
 pub use request::{
     CertificateFiles, ClientCertificate, HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol,
     RequestPreferences,

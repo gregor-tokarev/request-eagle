@@ -2,9 +2,11 @@
 name = "collections_panel_ui"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 collection = { path = "../collection" }
+environment = { path = "../environment" }
 gpui-kit = { workspace = true, features = ["component"] }
 import = { path = "../import" }
 keybindings_service = { path = "../keybindings_service" }

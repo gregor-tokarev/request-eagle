@@ -14,8 +14,8 @@ use http_client::{Request, Url};
 use smol::io::AsyncReadExt;
 
 use crate::{
-    CookieJar, EventStream, ExecutionError, HttpMetrics, HttpRequest, HttpResponse, HttpVersion,
-    RequestPreferences, event_stream, tls::Tls,
+    CookieJar, EventStream, ExecutionError, Field, HttpMetrics, HttpRequest, HttpResponse,
+    HttpVersion, RequestPreferences, event_stream, tls::Tls,
 };
 
 type Client = Arc<reqwest_client::ReqwestClient>;
@@ -130,8 +130,9 @@ impl HttpExecutor {
         // the editor's pairs with URL encoding. Fragments are never sent.
         url.set_fragment(None);
 
-        if !request.query.is_empty() {
-            url.query_pairs_mut().extend_pairs(&request.query);
+        let query: Vec<_> = Field::enabled(&request.query).collect();
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
         }
 
         let request_body_bytes = body.as_ref().map_or(0, Bytes::len);
@@ -147,8 +148,11 @@ impl HttpExecutor {
         );
         let generated_host = generated.iter().any(|(name, _)| name == "Host");
 
-        for (name, value) in request.headers.iter().chain(&generated) {
-            builder = builder.header(name.as_str(), value.as_str());
+        let generated_pairs = generated
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()));
+        for (name, value) in Field::enabled(&request.headers).chain(generated_pairs) {
+            builder = builder.header(name, value);
         }
 
         let mut request = builder.body(body).map_err(ExecutionError::InvalidRequest)?;

@@ -9,8 +9,8 @@ use bytes::Bytes;
 use http_client::http::header::WWW_AUTHENTICATE;
 
 use crate::{
-    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
-    RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
+    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, Field, HttpRequest,
+    RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
@@ -118,7 +118,7 @@ impl RequestExecutor {
                     // Answer the server that challenged, after any redirects.
                     request.path = url.to_string();
                     request.query.clear();
-                    request.headers.push(("Authorization".into(), answer));
+                    request.headers.push(Field::new("Authorization", answer));
                     (response, url) = executor
                         .http
                         .execute(&request, body, events.as_mut())
@@ -209,9 +209,7 @@ fn answer_digest(
         return None;
     };
     if response.status != StatusCode::UNAUTHORIZED
-        || request
-            .headers
-            .iter()
+        || Field::enabled(&request.headers)
             .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
     {
         return None;

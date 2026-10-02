@@ -10,6 +10,6 @@ mod tests;
 pub use collection::{Collection, CollectionLoadError, CollectionSaveError, SharedSettings};
 pub use entry::{DirEntry, Entry, FileEntry};
 pub use registry::{
-    CollectionEditError, CollectionRegistry, CollectionRegistryLoadError, ImportedCollection,
-    ImportedItem, MovePlacement,
+    CollectionEditError, CollectionRegistry, ImportedCollection, ImportedItem, MovePlacement,
+    SkippedPath,
 };

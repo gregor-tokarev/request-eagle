@@ -5,7 +5,7 @@
 //! HTTP requests, folders and authorizations are rewritten in the shape of
 //! v2.1, so they convert as they do in an exported collection.
 
-use std::{ffi::OsStr, fs, path::Path};
+use std::{ffi::OsStr, fs, io, path::Path};
 
 use collection::{ImportedCollection, ImportedItem};
 use request::{
@@ -15,7 +15,7 @@ use request::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Import, ImportError,
+    CollectionImport, ImportError,
     document::{clean_name, text},
     postman::{self, Behavior, Inherited, Scripts},
 };
@@ -24,16 +24,12 @@ use crate::{
 /// authorization.
 const DEFINITION: &str = ".resources/definition.yaml";
 
-pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
-    // A collection's definition is optional, so a folder without one is a
-    // collection when it holds requests.
-    let has_requests = fs::read_dir(directory)
-        .map_err(|source| ImportError::Read {
-            path: directory.to_owned(),
-            source,
-        })?
-        .any(|entry| entry.is_ok_and(|entry| request_name(&entry.path()).is_some()));
-    if !directory.join(DEFINITION).is_file() && !has_requests {
+pub(crate) fn convert(directory: &Path) -> Result<CollectionImport, ImportError> {
+    let is_collection = is_collection(directory).map_err(|source| ImportError::Read {
+        path: directory.to_owned(),
+        source,
+    })?;
+    if !is_collection {
         return Err(ImportError::NotPostmanFolder);
     }
 
@@ -55,7 +51,7 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
     )?;
     let scripts = postman::scripts(&group);
 
-    Ok(Import {
+    Ok(CollectionImport {
         collection: ImportedCollection {
             name: clean_name(
                 definition["name"].as_str().or(file_name(directory)),
@@ -73,6 +69,17 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
         },
         skipped,
     })
+}
+
+/// Whether the folder is a collection. Its definition is optional, so a
+/// folder without one is a collection when it holds requests.
+pub(crate) fn is_collection(directory: &Path) -> io::Result<bool> {
+    if directory.join(DEFINITION).is_file() {
+        return Ok(true);
+    }
+
+    Ok(fs::read_dir(directory)?
+        .any(|entry| entry.is_ok_and(|entry| request_name(&entry.path()).is_some())))
 }
 
 /// A folder or request file in a collection.
@@ -186,7 +193,7 @@ fn request(
         // Postman keeps a connection's saved messages in separate files.
         "websocket-request" => Some(Request::WebSocket(WebSocketRequest {
             url: text(request.get("url")),
-            headers: postman::pairs(&entries(&request["headers"])),
+            headers: postman::fields(&entries(&request["headers"])),
             ..WebSocketRequest::default()
         })),
         _ => None,
@@ -219,7 +226,7 @@ fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> Grp
         tls: settings["secureConnection"].as_bool().unwrap_or_default(),
         method: method(request["methodPath"].as_str().unwrap_or_default()),
         message: text(request["message"].get("content")),
-        metadata: postman::pairs(&entries(&request["metadata"])),
+        metadata: postman::fields(&entries(&request["metadata"])),
         auth: postman::request_auth(postman::own_auth(&own), inherited),
         definition: service_definition(&request["schema"], path.parent().unwrap_or(path)),
         settings: GrpcSettings {

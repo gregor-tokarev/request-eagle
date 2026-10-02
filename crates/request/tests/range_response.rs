@@ -2,8 +2,8 @@ use std::io::Write;
 
 use flate2::{Compression, write::GzEncoder};
 use request::{
-    Execution, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences, RequestVariables,
-    Response,
+    Execution, Field, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
+    RequestVariables, Response,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -12,7 +12,7 @@ use smol::{
 use std::collections::HashMap;
 
 async fn execute_range(
-    headers: Vec<(String, String)>,
+    headers: Vec<Field>,
     representation: &[u8],
     encoding: Option<&str>,
 ) -> (Execution, String) {
@@ -71,7 +71,7 @@ fn range_requests_do_not_advertise_gzip_and_receive_selected_plain_bytes() {
     smol::block_on(async {
         let representation = b"abcdefghijklmnopqrstuvwxyz";
         let (execution, head) = execute_range(
-            vec![("rAnGe".into(), "bytes=3-14".into())],
+            vec![Field::new("rAnGe", "bytes=3-14")],
             representation,
             None,
         )
@@ -97,8 +97,8 @@ fn explicit_gzip_range_preserves_partial_encoded_bytes_and_received_headers() {
         let representation = encoder.finish().unwrap();
         let (execution, head) = execute_range(
             vec![
-                ("Range".into(), "bytes=3-14".into()),
-                ("Accept-Encoding".into(), "gzip".into()),
+                Field::new("Range", "bytes=3-14"),
+                Field::new("Accept-Encoding", "gzip"),
             ],
             &representation,
             Some("gzip"),

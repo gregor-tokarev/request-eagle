@@ -1,8 +1,8 @@
 use std::{net::TcpListener, sync::Arc};
 
 use request::{
-    ExecutionError, HttpRequest, ProxyMode, ProxyPreferences, ProxyProtocol, RequestExecutor,
-    RequestPreferences, RequestVariables, Response,
+    ExecutionError, Field, HttpRequest, ProxyMode, ProxyPreferences, ProxyProtocol,
+    RequestExecutor, RequestPreferences, RequestVariables, Response,
 };
 use std::collections::HashMap;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -68,7 +68,7 @@ async fn send(proxy: ProxyPreferences, url: String, override_host: bool) {
             HttpRequest {
                 path: url,
                 headers: if override_host {
-                    vec![("Host".into(), "virtual.invalid".into())]
+                    vec![Field::new("Host", "virtual.invalid")]
                 } else {
                     vec![]
                 },

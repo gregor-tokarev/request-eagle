@@ -18,7 +18,7 @@ pub struct GrpcRequest {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub message: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub metadata: Vec<(String, String)>,
+    pub metadata: Vec<crate::Field>,
     #[serde(default, skip_serializing_if = "crate::Auth::is_inherit")]
     pub auth: crate::Auth,
     #[serde(default, skip_serializing_if = "GrpcDefinition::is_reflection")]

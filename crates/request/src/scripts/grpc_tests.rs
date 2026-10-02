@@ -8,7 +8,7 @@ use futures::{StreamExt as _, channel::mpsc::unbounded};
 
 use super::{CallScripts, GrpcScripts, ScriptPhase, ScriptReport};
 use crate::{
-    GrpcError, GrpcEvent, GrpcMessage, GrpcRequest, GrpcStatus, RequestExecutor,
+    Field, GrpcError, GrpcEvent, GrpcMessage, GrpcRequest, GrpcStatus, RequestExecutor,
     RequestPreferences, RequestVariables,
 };
 
@@ -32,7 +32,7 @@ fn request() -> GrpcRequest {
         url: "localhost:50051".into(),
         method: "echo.v1.EchoService/Say".into(),
         message: r#"{"text": "hi"}"#.into(),
-        metadata: vec![("authorization".into(), "Bearer t".into())],
+        metadata: vec![Field::new("authorization", "Bearer t")],
         ..GrpcRequest::default()
     }
 }
@@ -123,7 +123,7 @@ fn before_invoke_changes_the_call_and_the_variables_it_resolves_with() {
 
     // The generated value is the same in the script, metadata and message.
     let (resolved, _) = variables.resolve_grpc(&request, true).unwrap();
-    let id = &resolved.metadata[0].1;
+    let id = &resolved.metadata[0].value;
     let message: serde_json::Value = serde_json::from_str(&resolved.message).unwrap();
     assert_eq!(message, serde_json::json!({"text": "hi eagle", "id": id}));
     assert_eq!(id.len(), 36);

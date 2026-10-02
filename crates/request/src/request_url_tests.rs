@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::request_url::{
     append_encoded_query, fill_path_variables, path_variables, query_params, with_query_params,
 };
-use crate::{HttpRequest, RequestVariables};
+use crate::{Field, HttpRequest, RequestVariables};
 
 fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs
@@ -209,7 +209,10 @@ fn appended_query_params_are_encoded_around_variables() {
 fn query_params_moved_into_the_url_resolve_as_they_were_sent() {
     let mut request = HttpRequest {
         path: "https://example.com/pets ".into(),
-        query: pairs(&[("q", "{{term}} &"), ("{{key}}", "1")]),
+        query: pairs(&[("q", "{{term}} &"), ("{{key}}", "1")])
+            .into_iter()
+            .map(Field::from)
+            .collect(),
         ..Default::default()
     };
     let values = [("term", "a&b+c d%"), ("key", "k=v")];
@@ -219,7 +222,7 @@ fn query_params_moved_into_the_url_resolve_as_they_were_sent() {
     let pairs: Vec<_> = sent
         .query
         .iter()
-        .map(|(key, value)| (resolve_text(key, &values), resolve_text(value, &values)))
+        .map(|Field { key, value, .. }| (resolve_text(key, &values), resolve_text(value, &values)))
         .collect();
     separate.query_pairs_mut().extend_pairs(&pairs);
 

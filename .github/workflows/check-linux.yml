@@ -1,4 +1,4 @@
-name: Check Linux
+name: Checks
 
 on:
   pull_request:
@@ -13,8 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cli-macos:
+  macos:
     runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -22,15 +25,15 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: macos-cli-${{ hashFiles('Cargo.lock') }}
-          restore-keys: macos-cli-
-      - name: Test standalone CLI and macOS credential backend
-        run: cargo test --locked -p request-eagle-cli
+          key: macos-test-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-test-
+      - name: Test every crate, including the macOS credential backend
+        run: cargo test --locked --workspace --no-fail-fast
 
   arch:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -66,8 +69,8 @@ jobs:
       - name: Build Linux app and native credential check
         run: cargo build --locked -p request-eagle -p preferences --all-targets
 
-      - name: Test proxy, preferences, and settings
-        run: cargo test --locked -p preferences -p settings_ui -p request -p theme
+      - name: Test every crate
+        run: cargo test --locked --workspace --no-fail-fast
 
       - name: Save Cargo cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'
@@ -104,3 +107,47 @@ jobs:
             cat "$runtime/weston.log" "$runtime/app.log"
             exit 1
           fi
+
+  lint:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman --disable-sandbox -Syu --noconfirm --needed rust cmake clang git fontconfig \
+            freetype2 libxcb libxkbcommon-x11 wayland openssl vulkan-headers dbus
+
+      - uses: actions/checkout@v7
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Restore Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arch-lint-${{ hashFiles('Cargo.lock') }}
+          restore-keys: arch-lint-
+
+      - name: Lint every crate
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Save Cargo cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arch-lint-${{ hashFiles('Cargo.lock') }}

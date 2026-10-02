@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use request::{
-    Auth, AwsSignatureAuth, BearerAuth, Body, FormPart, HttpRequest, HttpSettings, Method,
+    Auth, AwsSignatureAuth, BearerAuth, Body, Field, FormPart, HttpRequest, HttpSettings, Method,
     PasswordAuth, RawLanguage,
 };
 
@@ -23,10 +23,10 @@ fn part(name: &str, value: &str, file: bool) -> FormPart {
     }
 }
 
-fn headers(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+fn headers(pairs: &[(&str, &str)]) -> Vec<Field> {
     pairs
         .iter()
-        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .map(|(name, value)| Field::new(*name, *value))
         .collect()
 }
 

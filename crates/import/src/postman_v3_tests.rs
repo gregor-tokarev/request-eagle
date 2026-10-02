@@ -2,11 +2,11 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    Auth, BearerAuth, Body, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest,
-    Method, PasswordAuth, Request, WebSocketRequest,
+    Auth, BearerAuth, Body, Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings,
+    HttpRequest, Method, PasswordAuth, Request, WebSocketRequest,
 };
 
-use crate::{ImportError, read};
+use crate::{ImportError, document_tests::read_collection};
 
 fn write(root: &Path, path: &str, content: &str) {
     let path = root.join(path);
@@ -107,7 +107,7 @@ order: 1000
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
 
     assert_eq!(import.collection.name, "Shop API");
     assert_eq!(import.collection.variables["host"], "localhost:50051");
@@ -129,7 +129,13 @@ order: 1000
             tls: true,
             method: "shop.v1.ProductService/GetProduct".into(),
             message: "{\n  \"id\": \"7\"\n}".into(),
-            metadata: vec![("x-request-id".into(), "{{$guid}}".into())],
+            metadata: vec![
+                Field::new("x-request-id", "{{$guid}}"),
+                Field {
+                    enabled: false,
+                    ..Field::new("x-debug", "1")
+                },
+            ],
             // The request inherits the collection's authorization.
             auth: Auth::Inherit,
             definition: GrpcDefinition::ProtoFile {
@@ -187,7 +193,7 @@ order: 2000
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let (_, orders) = folder(&import.collection.items[0]);
 
     let list = grpc(&orders[0]);
@@ -287,7 +293,7 @@ order: 2000
         "$kind: mqtt-request\nurl: mqtt://pets.test\norder: 500\n",
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let items = &import.collection.items;
 
     assert_eq!(import.collection.name, "Pet Store");
@@ -303,7 +309,13 @@ order: 2000
     assert_eq!(add.method, Method::Post);
     assert_eq!(add.body, Some(Body::json(r#"{"name": "Rex"}"#)));
     // JSON bodies are sent as JSON without a header of their own.
-    assert!(add.headers.is_empty());
+    assert_eq!(
+        add.headers,
+        [Field {
+            enabled: false,
+            ..Field::new("X-Debug", "1")
+        }]
+    );
     assert_eq!(
         add.auth,
         Auth::Basic(PasswordAuth {
@@ -315,10 +327,7 @@ order: 2000
     let find = http(&pets[1]);
     assert_eq!(find.path, "{{base_url}}/pets/:id?expand=owner");
     assert_eq!(find.path_variables, [("id".to_owned(), "7".to_owned())]);
-    assert_eq!(
-        find.headers,
-        [("Accept".to_owned(), "application/json".to_owned())]
-    );
+    assert_eq!(find.headers, [Field::new("Accept", "application/json")]);
     assert_eq!(
         find.scripts.post_response,
         "{\npm.test('folder', () => {});\n}\n\n{\npm.response.to.have.status(200);\n}"
@@ -332,7 +341,7 @@ order: 2000
         *updates,
         WebSocketRequest {
             url: "wss://pets.test/updates".into(),
-            headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+            headers: vec![Field::new("Authorization", "Bearer {{token}}")],
             ..WebSocketRequest::default()
         }
     );
@@ -394,7 +403,7 @@ auth:
 "#,
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
     let items = &import.collection.items;
     let bearer = |token: &str| {
         Auth::Bearer(BearerAuth {
@@ -421,7 +430,7 @@ fn collection_folders_without_a_definition_are_named_after_the_folder() {
         "$kind: http-request\nurl: https://pets.test/pets\n",
     );
 
-    let import = read(&collection).unwrap();
+    let import = read_collection(&collection).unwrap();
 
     assert_eq!(import.collection.name, "Pet Store");
     assert_eq!(
@@ -441,11 +450,13 @@ fn folders_that_are_not_postman_collections_are_explained() {
     );
 
     assert!(matches!(
-        read(directory.path()).err().unwrap(),
+        read_collection(directory.path()).err().unwrap(),
         ImportError::NotPostmanFolder
     ));
     assert!(matches!(
-        read(&directory.path().join("missing.json")).err().unwrap(),
+        read_collection(&directory.path().join("missing.json"))
+            .err()
+            .unwrap(),
         ImportError::Read { .. }
     ));
 }

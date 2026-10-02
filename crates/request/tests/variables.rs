@@ -1,5 +1,5 @@
 use environment::VariableScopes;
-use request::{Body, HttpRequest, Method};
+use request::{Body, Field, HttpRequest, Method};
 use std::collections::HashMap;
 
 fn environment(changes: &[(&str, &str)]) -> VariableScopes {
@@ -21,7 +21,7 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         .unwrap();
     let draft = HttpRequest {
         path: "https://example.com".into(),
-        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         ..Default::default()
     };
 
@@ -32,7 +32,7 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         session.clone(),
     );
     assert_eq!(
-        first.resolve(&draft).unwrap().headers[0].1,
+        first.resolve(&draft).unwrap().headers[0].value,
         "Bearer response token"
     );
     session
@@ -45,10 +45,10 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         session,
     );
     assert_eq!(
-        next.resolve(&draft).unwrap().headers[0].1,
+        next.resolve(&draft).unwrap().headers[0].value,
         "Bearer refreshed token"
     );
-    assert_eq!(draft.headers[0].1, "Bearer {{token}}");
+    assert_eq!(draft.headers[0].value, "Bearer {{token}}");
     assert_eq!(file_values["token"], "saved value");
 }
 
@@ -66,15 +66,15 @@ fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
     );
     let mut draft = HttpRequest {
         path: "https://example.com".into(),
-        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         ..Default::default()
     };
 
     assert_eq!(
-        variables.resolve(&draft).unwrap().headers[0].1,
+        variables.resolve(&draft).unwrap().headers[0].value,
         "Bearer session token"
     );
-    draft.headers[0].1 = "{{missing}}".into();
+    draft.headers[0].value = "{{missing}}".into();
     assert_eq!(
         variables.resolve(&draft).unwrap_err(),
         "Invalid environment file"
@@ -87,8 +87,8 @@ fn escaped_references_remain_literal_in_every_request_field() {
     let draft = HttpRequest {
         method: Method::Post,
         path: "https://example.com/{{!customer}}".into(),
-        headers: vec![("X-{{!customer}}".into(), "{{!missing}}".into())],
-        query: vec![("{{!customer}}".into(), "{{!$guid}}".into())],
+        headers: vec![Field::new("X-{{!customer}}", "{{!missing}}")],
+        query: vec![Field::new("{{!customer}}", "{{!$guid}}")],
         body: Some(Body::json(r#"{"template":"Hello {{!customer}}"}"#)),
         ..Default::default()
     };
@@ -96,12 +96,9 @@ fn escaped_references_remain_literal_in_every_request_field() {
     assert_eq!(resolved.path, "https://example.com/{{customer}}");
     assert_eq!(
         resolved.headers[0],
-        ("X-{{customer}}".into(), "{{missing}}".into())
+        Field::new("X-{{customer}}", "{{missing}}")
     );
-    assert_eq!(
-        resolved.query[0],
-        ("{{customer}}".into(), "{{$guid}}".into())
-    );
+    assert_eq!(resolved.query[0], Field::new("{{customer}}", "{{$guid}}"));
     assert_eq!(
         resolved.body,
         Some(Body::json(r#"{"template":"Hello {{customer}}"}"#))
@@ -119,10 +116,10 @@ fn resolves_every_request_field_in_a_snapshot() {
         method: Method::Post,
         path: "{{base_url}}/echo?id={{$guid}}".into(),
         headers: vec![
-            ("X-{{key}}".into(), "{{value}}".into()),
-            ("X-Request-ID".into(), "{{$guid}}".into()),
+            Field::new("X-{{key}}", "{{value}}"),
+            Field::new("X-Request-ID", "{{$guid}}"),
         ],
-        query: vec![("{{key}}".into(), "{{$guid}}".into())],
+        query: vec![Field::new("{{key}}", "{{$guid}}")],
         body: Some(Body::json(r#"{"value":"{{value}}","id":"{{$guid}}"}"#)),
         ..Default::default()
     };
@@ -130,10 +127,10 @@ fn resolves_every_request_field_in_a_snapshot() {
     let outgoing = draft.resolve_variables(&values).unwrap();
     assert_eq!(draft, before);
     assert!(outgoing.path.starts_with("https://example.com/echo?id="));
-    assert_eq!(outgoing.headers[0], ("X-message".into(), "🦅 hello".into()));
-    let id = &outgoing.query[0].1;
+    assert_eq!(outgoing.headers[0], Field::new("X-message", "🦅 hello"));
+    let id = &outgoing.query[0].value;
     assert!(outgoing.path.ends_with(id));
-    assert_eq!(&outgoing.headers[1].1, id);
+    assert_eq!(&outgoing.headers[1].value, id);
     assert_eq!(
         outgoing.body,
         Some(Body::json(format!(r#"{{"value":"🦅 hello","id":"{id}"}}"#)))
@@ -179,11 +176,11 @@ fn url_fragments_do_not_resolve_or_validate_unsent_references() {
     }
     let request = request::HttpRequest {
         path: "https://example.com/".into(),
-        headers: vec![("X-Value".into(), "#{{host}}".into())],
+        headers: vec![Field::new("X-Value", "#{{host}}")],
         body: Some(Body::json("#{{host}}")),
         ..Default::default()
     };
     let resolved = request.resolve_variables(&values).unwrap();
-    assert_eq!(resolved.headers[0].1, "#example.com");
+    assert_eq!(resolved.headers[0].value, "#example.com");
     assert_eq!(resolved.body, Some(Body::json("#example.com")));
 }

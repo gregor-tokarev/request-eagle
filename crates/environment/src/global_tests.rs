@@ -72,3 +72,40 @@ fn renames_without_replacing_another_environment() {
     environments.delete("QA").unwrap();
     assert_eq!(environments.names().unwrap(), ["Production"]);
 }
+
+#[test]
+fn imports_environments_under_names_that_fit() {
+    let directory = tempfile::tempdir().unwrap();
+    let environments = GlobalEnvironments::new(directory.path().join("environments"));
+    let entries = HashMap::from([("tm_url".into(), "tm.prod.test:443".into())]);
+
+    assert_eq!(
+        environments.import("tm:prod", entries.clone()).unwrap(),
+        "tm-prod"
+    );
+    assert_eq!(
+        environments.import("tm:prod", HashMap::new()).unwrap(),
+        "tm-prod 2"
+    );
+    assert_eq!(
+        environments.import(" ../a\\b ", HashMap::new()).unwrap(),
+        "-a-b"
+    );
+    assert_eq!(
+        environments.import(".", HashMap::new()).unwrap(),
+        "Imported"
+    );
+    let long = environments
+        .import(&"é".repeat(200), HashMap::new())
+        .unwrap();
+    assert_eq!(long, "é".repeat(60));
+    assert_eq!(
+        environments
+            .import(&"é".repeat(200), HashMap::new())
+            .unwrap(),
+        format!("{long} 2")
+    );
+
+    let imported = Environment::from_file(environments.path("tm-prod")).unwrap();
+    assert_eq!(imported.entries, entries);
+}

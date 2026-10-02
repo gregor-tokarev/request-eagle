@@ -1,8 +1,8 @@
 use collection::ImportedItem;
-use request::{Body, HttpRequest, Method, Request};
+use request::{Body, Field, HttpRequest, Method, Request};
 use serde_json::json;
 
-use crate::{ImportError, parse};
+use crate::{ImportError, document_tests::parse_collection};
 
 fn http(item: &ImportedItem) -> (&str, &HttpRequest) {
     match item {
@@ -150,7 +150,7 @@ components:
 
 #[test]
 fn openapi_operations_are_grouped_by_tag_in_document_order() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let collection = &import.collection;
 
     assert_eq!(collection.name, "Pet Store");
@@ -174,7 +174,7 @@ fn openapi_operations_are_grouped_by_tag_in_document_order() {
 
 #[test]
 fn openapi_parameters_fill_the_url_query_and_headers() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let (_, pets) = folder(&import.collection.items[0]);
     let (_, find) = http(&pets[0]);
 
@@ -184,21 +184,18 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
     assert_eq!(
         find.query,
         [
-            ("fields".to_owned(), "name".to_owned()),
-            ("ids".to_owned(), "1".to_owned()),
-            ("ids".to_owned(), "2".to_owned()),
-            ("filter[color]".to_owned(), "red".to_owned()),
+            Field::new("fields", "name"),
+            Field::new("ids", "1"),
+            Field::new("ids", "2"),
+            Field::new("filter[color]", "red"),
         ]
     );
     assert_eq!(
         find.headers,
         [
-            ("X-Trace".to_owned(), "{{X-Trace}}".to_owned()),
-            ("X-Tags".to_owned(), "a,b".to_owned()),
-            (
-                "Authorization".to_owned(),
-                "Bearer {{bearerAuth}}".to_owned()
-            ),
+            Field::new("X-Trace", "{{X-Trace}}"),
+            Field::new("X-Tags", "a,b"),
+            Field::new("Authorization", "Bearer {{bearerAuth}}"),
         ]
     );
 
@@ -206,10 +203,7 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
     let (_, order) = http(&store[0]);
     assert_eq!(order.path, "{{base_url}}/stores/{{storeId}}/orders");
     // JSON bodies are sent as JSON without a header of their own.
-    assert_eq!(
-        order.headers,
-        [("X-API-Key".to_owned(), "{{apiKey}}".to_owned())]
-    );
+    assert_eq!(order.headers, [Field::new("X-API-Key", "{{apiKey}}")]);
     assert_eq!(json_body(order), json!({"quantity": 2}));
 
     // Path values cannot end or split their segment.
@@ -219,7 +213,7 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
 
 #[test]
 fn openapi_bodies_are_generated_from_schemas() {
-    let import = parse(PET_STORE).unwrap();
+    let import = parse_collection(PET_STORE).unwrap();
     let (_, pets) = folder(&import.collection.items[0]);
     let (_, update) = http(&pets[1]);
 
@@ -228,7 +222,7 @@ fn openapi_bodies_are_generated_from_schemas() {
         !update
             .headers
             .iter()
-            .any(|(name, _)| name == "Content-Type")
+            .any(|field| field.key == "Content-Type")
     );
 
     let body = json_body(update);
@@ -246,7 +240,7 @@ fn openapi_bodies_are_generated_from_schemas() {
 
 #[test]
 fn swagger_specifications_are_imported() {
-    let import = parse(
+    let import = parse_collection(
         r##"{
             "swagger": "2.0",
             "info": {"title": "Legacy"},
@@ -288,7 +282,7 @@ fn swagger_specifications_are_imported() {
 
     let (_, update) = http(&collection.items[0]);
     assert_eq!(update.path, "{{base_url}}/users/{{id}}");
-    assert_eq!(update.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
+    assert_eq!(update.query, [Field::new("api_key", "{{key}}")]);
     assert_eq!(json_body(update), json!({"age": 0}));
 
     let (name, login) = http(&collection.items[1]);
@@ -303,7 +297,9 @@ fn swagger_specifications_are_imported() {
 
 #[test]
 fn unsupported_openapi_versions_are_rejected() {
-    let error = parse("swagger: '1.2'\ninfo: {title: Old}\n").err().unwrap();
+    let error = parse_collection("swagger: '1.2'\ninfo: {title: Old}\n")
+        .err()
+        .unwrap();
 
     assert!(matches!(error, ImportError::UnsupportedOpenApi(version) if version == "1.2"));
 }

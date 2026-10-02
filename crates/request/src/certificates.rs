@@ -127,15 +127,14 @@ impl ClientCertificate {
         let host = normalize(host);
         let exact = if pattern == host {
             true
-        } else if let Some(domain) = pattern.strip_prefix("*.") {
+        } else {
+            let domain = pattern.strip_prefix("*.")?;
             let subdomain = host.strip_suffix(domain)?.strip_suffix('.')?;
             if subdomain.is_empty() {
                 return None;
             }
 
             false
-        } else {
-            return None;
         };
 
         Some(u8::from(exact) * 2 + u8::from(pattern_port.is_some()))

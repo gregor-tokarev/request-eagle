@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    Body, ExecutionError, FormPart, GrpcDefinition, GrpcRequest, HttpRequest, Method, RawLanguage,
-    Request,
+    Body, ExecutionError, Field, FormPart, GrpcDefinition, GrpcRequest, HttpRequest, Method,
+    RawLanguage, Request,
 };
 
 fn post(body: Body) -> HttpRequest {
@@ -18,8 +18,8 @@ fn content_type(request: &HttpRequest) -> Option<&str> {
     request
         .headers
         .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-        .map(|(_, value)| value.as_str())
+        .find(|Field { key: name, .. }| name.eq_ignore_ascii_case("content-type"))
+        .map(|Field { value, .. }| value.as_str())
 }
 
 #[test]
@@ -121,8 +121,7 @@ fn raw_bodies_are_sent_with_their_language_unless_a_header_names_a_type() {
         language: RawLanguage::Text,
         text: "hello".into(),
     });
-    text.headers
-        .push(("content-type".into(), "text/csv".into()));
+    text.headers.push(Field::new("content-type", "text/csv"));
     text.encode_body().unwrap();
     assert_eq!(text.headers.len(), 1);
     assert_eq!(content_type(&text), Some("text/csv"));
@@ -179,7 +178,7 @@ fn a_multipart_type_written_without_a_boundary_gets_the_one_sent() {
     let mut request = post(Body::Multipart { parts: Vec::new() });
     request
         .headers
-        .push(("Content-Type".into(), "multipart/mixed".into()));
+        .push(Field::new("Content-Type", "multipart/mixed"));
 
     let body = String::from_utf8(request.encode_body().unwrap().unwrap()).unwrap();
     let boundary = content_type(&request)

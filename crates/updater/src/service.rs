@@ -4,19 +4,43 @@ use std::sync::Arc;
 
 use gpui_kit::{
     App, AppContext, Context, Entity,
-    http_client::{AsyncBody, HttpClient},
+    http_client::{self, AsyncBody, HttpClient, Request, Response},
 };
+use preferences::{Preferences, UpdateChannel};
 use semver::Version;
 use serde::Deserialize;
 use smol::io::AsyncReadExt;
 
-const UPDATE_MANIFEST_URL: &str = "https://github.com/gregor-tokarev/request-eagle/releases/latest/download/request-eagle-update.json";
+const STABLE_MANIFEST_URL: &str = "https://github.com/gregor-tokarev/request-eagle/releases/latest/download/request-eagle-update.json";
+// GitHub lists releases newest first, so the first page holds the newest build.
+const RELEASES_URL: &str =
+    "https://api.github.com/repos/gregor-tokarev/request-eagle/releases?per_page=20";
+const MANIFEST_NAME: &str = "request-eagle-update.json";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct UpdateManifest {
     pub version: String,
     pub(super) url: String,
     pub(super) sha256: String,
+}
+
+/// The parts of a GitHub release that tell whether it can update the app.
+#[derive(Deserialize)]
+pub(super) struct Release {
+    tag_name: String,
+    draft: bool,
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubError {
+    message: String,
 }
 
 #[derive(Clone, Debug)]
@@ -71,15 +95,23 @@ impl Updater {
 
         let http_client = cx.http_client();
         let current_version = self.current_version;
+        let channel = update_channel(cx);
 
         cx.spawn(async move |this, cx| {
-            let status = match check_for_update(http_client, current_version).await {
+            let status = match check_for_update(http_client, current_version, channel).await {
                 Ok(Some(manifest)) => UpdateStatus::Available(manifest),
                 Ok(None) => UpdateStatus::UpToDate,
                 Err(error) => UpdateStatus::Error(error),
             };
 
-            let _ = this.update(cx, |this, cx| this.set_status(status, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.set_status(status, cx);
+
+                // The channel changed in Settings while this check ran.
+                if update_channel(cx) != channel {
+                    this.check(cx);
+                }
+            });
         })
         .detach();
     }
@@ -158,32 +190,41 @@ pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
     updater
 }
 
+fn update_channel(cx: &App) -> UpdateChannel {
+    cx.try_global::<Preferences>()
+        .map(|preferences| preferences.update_channel)
+        .unwrap_or_default()
+}
+
 pub(super) async fn check_for_update(
     http_client: Arc<dyn HttpClient>,
     current_version: &str,
+    channel: UpdateChannel,
 ) -> Result<Option<UpdateManifest>, String> {
-    let mut response = http_client
-        .get(UPDATE_MANIFEST_URL, AsyncBody::empty(), true)
-        .await
-        .map_err(|error| format!("Could not check for updates: {error}"))?;
-    let status = response.status();
+    let manifest_url = match channel {
+        UpdateChannel::Stable => STABLE_MANIFEST_URL.to_owned(),
+        UpdateChannel::Daily => {
+            let request = Request::get(RELEASES_URL)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", format!("RequestEagle/{current_version}"))
+                .body(AsyncBody::empty())
+                .map_err(|error| format!("Could not check for updates: {error}"))?;
 
-    let mut body = Vec::new();
-    response
-        .body_mut()
-        .read_to_end(&mut body)
-        .await
-        .map_err(|error| format!("Could not read the update manifest: {error}"))?;
+            let body = fetch(http_client.send(request), "the release list").await?;
+            let releases: Vec<Release> = serde_json::from_slice(&body)
+                .map_err(|error| format!("The release list is invalid: {error}"))?;
 
-    if !status.is_success() {
-        let detail = String::from_utf8_lossy(&body).trim().to_string();
+            newest_manifest_url(&releases)
+                .ok_or_else(|| "No published release has an update manifest.".to_string())?
+                .to_owned()
+        }
+    };
 
-        return Err(if detail.is_empty() {
-            format!("GitHub returned {status} for the update manifest.")
-        } else {
-            detail
-        });
-    }
+    let body = fetch(
+        http_client.get(&manifest_url, AsyncBody::empty(), true),
+        "the update manifest",
+    )
+    .await?;
 
     let manifest: UpdateManifest = serde_json::from_slice(&body)
         .map_err(|error| format!("The update manifest is invalid: {error}"))?;
@@ -194,4 +235,55 @@ pub(super) async fn check_for_update(
         .map_err(|error| format!("The released version is invalid: {error}"))?;
 
     Ok((released > installed).then_some(manifest))
+}
+
+/// The manifest of the highest published version, whether that is a daily
+/// pre-release or a stable release.
+pub(super) fn newest_manifest_url(releases: &[Release]) -> Option<&str> {
+    releases
+        .iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| {
+            let version = Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
+            let manifest = release
+                .assets
+                .iter()
+                .find(|asset| asset.name == MANIFEST_NAME)?;
+
+            Some((version, manifest.browser_download_url.as_str()))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, url)| url)
+}
+
+async fn fetch(
+    response: impl Future<Output = http_client::Result<Response<AsyncBody>>>,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    let mut response = response
+        .await
+        .map_err(|error| format!("Could not check for updates: {error}"))?;
+    let status = response.status();
+
+    let mut body = Vec::new();
+    response
+        .body_mut()
+        .read_to_end(&mut body)
+        .await
+        .map_err(|error| format!("Could not read {what}: {error}"))?;
+
+    if !status.is_success() {
+        // GitHub's API explains failures such as rate limits in JSON.
+        let detail = serde_json::from_slice::<GitHubError>(&body)
+            .map(|error| error.message)
+            .unwrap_or_else(|_| String::from_utf8_lossy(&body).trim().to_string());
+
+        return Err(if detail.is_empty() {
+            format!("GitHub returned {status} for {what}.")
+        } else {
+            detail
+        });
+    }
+
+    Ok(body)
 }

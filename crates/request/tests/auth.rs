@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use md5::{Digest as _, Md5};
 use request::{
-    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, Body, HttpRequest,
-    Method, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth, RequestExecutor,
-    RequestPreferences, RequestVariables, Response,
+    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, Body, Field,
+    HttpRequest, Method, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth,
+    RequestExecutor, RequestPreferences, RequestVariables, Response,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -142,7 +142,7 @@ fn a_header_set_in_the_request_replaces_the_authorizations() {
         let (url, server) = serve(vec![OK]).await;
         let request = HttpRequest {
             path: url,
-            headers: vec![("Authorization".into(), "Token own".into())],
+            headers: vec![Field::new("Authorization", "Token own")],
             auth: Auth::Basic(PasswordAuth {
                 username: "user".into(),
                 password: "pass".into(),

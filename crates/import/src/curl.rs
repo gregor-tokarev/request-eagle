@@ -3,7 +3,7 @@
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use request::{
-    Auth, AwsSignatureAuth, BearerAuth, Body, FormPart, HttpRequest, HttpSettings, Method,
+    Auth, AwsSignatureAuth, BearerAuth, Body, Field, FormPart, HttpRequest, HttpSettings, Method,
     PasswordAuth, RawLanguage,
 };
 use thiserror::Error;
@@ -527,7 +527,7 @@ impl Options {
         Ok(HttpRequest {
             method,
             path: url,
-            headers: self.headers,
+            headers: self.headers.into_iter().map(Field::from).collect(),
             body,
             auth,
             settings: HttpSettings {

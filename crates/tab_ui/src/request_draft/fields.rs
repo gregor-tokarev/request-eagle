@@ -13,7 +13,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::FormPart;
+use request::{Field, FormPart};
 
 struct FieldRow {
     enabled: bool,
@@ -26,8 +26,8 @@ struct FieldRow {
     _subscriptions: Vec<Subscription>,
 }
 
-/// The rows that are sent, in table order.
-pub(crate) struct FieldsChanged(pub Vec<(String, String)>);
+/// Every row with a name, including those switched off, in table order.
+pub(crate) struct FieldsChanged(pub Vec<Field>);
 
 /// Asks for a file to send from a row, whose value input takes its path.
 pub(crate) struct ChooseFile(pub Entity<InputState>);
@@ -52,7 +52,7 @@ impl EventEmitter<ChooseFile> for RequestFields {}
 impl RequestFields {
     pub(crate) fn new(
         id: &'static str,
-        values: &[(String, String)],
+        values: &[Field],
         generated_headers: &[(String, String)],
         scope: Entity<VariableScope>,
         window: &mut Window,
@@ -71,10 +71,10 @@ impl RequestFields {
             file_rows: false,
         };
 
-        for (key, value) in values {
-            fields.append_row(key, value, window, cx);
+        for field in values {
+            fields.append_row(field, window, cx);
         }
-        fields.append_row("", "", window, cx);
+        fields.append_row(&Field::new("", ""), window, cx);
 
         fields
     }
@@ -94,7 +94,7 @@ impl RequestFields {
     ) -> Self {
         let values: Vec<_> = parts
             .iter()
-            .map(|part| (part.name.clone(), part.value.clone()))
+            .map(|part| Field::new(part.name.clone(), part.value.clone()))
             .collect();
         let mut fields = Self::new(id, &values, &[], scope, window, cx).with_keyless_rows();
         fields.file_rows = true;
@@ -111,16 +111,17 @@ impl RequestFields {
         fields
     }
 
-    /// The rows that are sent, as `FieldsChanged` lists them.
-    pub(crate) fn values(&self, cx: &App) -> Vec<(String, String)> {
+    /// Every row with a name, including those switched off, as
+    /// `FieldsChanged` lists them.
+    pub(crate) fn values(&self, cx: &App) -> Vec<Field> {
         self.rows
             .iter()
-            .filter(|row| self.is_sent(row, cx))
-            .map(|row| {
-                (
-                    row.key.read(cx).value().to_string(),
-                    row.value.read(cx).value().to_string(),
-                )
+            .filter(|row| self.is_named(row, cx))
+            .map(|row| Field {
+                key: row.key.read(cx).value().to_string(),
+                value: row.value.read(cx).value().to_string(),
+                enabled: row.enabled,
+                description: row.description.read(cx).value().to_string(),
             })
             .collect()
     }
@@ -173,17 +174,21 @@ impl RequestFields {
         self.emit_change(cx);
     }
 
-    /// Enabled rows with a name are sent. With `keyless_rows`, any row with a
-    /// key or a value is, as the URL's query keeps them.
+    /// Enabled rows with a name are sent.
     fn is_sent(&self, row: &FieldRow, cx: &App) -> bool {
+        row.enabled && self.is_named(row, cx)
+    }
+
+    /// Whether a row has a name. With `keyless_rows`, any row with a key or a
+    /// value has, as the URL's query keeps them.
+    fn is_named(&self, row: &FieldRow, cx: &App) -> bool {
         let key = row.key.read(cx).value();
-        let named = if self.keyless_rows {
+
+        if self.keyless_rows {
             !key.is_empty() || !row.value.read(cx).value().is_empty()
         } else {
             !key.trim().is_empty()
-        };
-
-        row.enabled && named
+        }
     }
 
     pub(crate) fn set_generated_headers(
@@ -241,7 +246,7 @@ impl RequestFields {
         }
 
         for (key, value) in values {
-            let row = self.new_row(key, value, window, cx);
+            let row = self.new_row(&Field::new(key.clone(), value.clone()), window, cx);
             let empty = self.rows.len().saturating_sub(1);
             self.rows.insert(empty, row);
         }
@@ -249,29 +254,27 @@ impl RequestFields {
         cx.notify();
     }
 
-    fn append_row(&mut self, key: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let row = self.new_row(key, value, window, cx);
+    fn append_row(&mut self, field: &Field, window: &mut Window, cx: &mut Context<Self>) {
+        let row = self.new_row(field, window, cx);
         self.rows.push(row);
     }
 
-    fn new_row(
-        &mut self,
-        key: &str,
-        value: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> FieldRow {
+    fn new_row(&mut self, field: &Field, window: &mut Window, cx: &mut Context<Self>) -> FieldRow {
         let key = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Key")
-                .default_value(key.to_owned())
+                .default_value(field.key.clone())
         });
         let value = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Value")
-                .default_value(value.to_owned())
+                .default_value(field.value.clone())
         });
-        let description = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
+        let description = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Description")
+                .default_value(field.description.clone())
+        });
         let completions = [&key, &value].map(|input| {
             cx.new(|cx| {
                 VariableInput::new(
@@ -282,7 +285,7 @@ impl RequestFields {
                 )
             })
         });
-        let subscriptions = [&key, &value]
+        let mut subscriptions: Vec<_> = [&key, &value]
             .into_iter()
             .map(|input| {
                 cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| {
@@ -291,7 +294,7 @@ impl RequestFields {
                             !row.key.read(cx).value().is_empty()
                                 || !row.value.read(cx).value().is_empty()
                         }) {
-                            this.append_row("", "", window, cx);
+                            this.append_row(&Field::new("", ""), window, cx);
                         }
 
                         this.emit_change(cx);
@@ -299,9 +302,16 @@ impl RequestFields {
                 })
             })
             .collect();
+        subscriptions.push(
+            cx.subscribe(&description, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.emit_change(cx);
+                }
+            }),
+        );
 
         FieldRow {
-            enabled: true,
+            enabled: field.enabled,
             file: false,
             key,
             value,

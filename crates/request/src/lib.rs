@@ -71,7 +71,9 @@ pub use grpc::{
     ServiceDefinition,
 };
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
-pub use model::{HttpRequest, HttpSettings, Method, Request, WebSocketRequest, WebSocketSettings};
+pub use model::{
+    Field, HttpRequest, HttpSettings, Method, Request, WebSocketRequest, WebSocketSettings,
+};
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
 pub use request_url::{fill_path_variables, path_variables, query_params, with_query_params};

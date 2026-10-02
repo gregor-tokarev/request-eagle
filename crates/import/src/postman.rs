@@ -4,19 +4,20 @@ use std::collections::HashMap;
 
 use collection::{ImportedCollection, ImportedItem};
 use request::{
-    ApiKeyAuth, Auth, AuthLocation, AwsSignatureAuth, BearerAuth, Body, FormPart, HttpRequest,
-    HttpSettings, JwtAlgorithm, JwtAuth, Method, OAuth1Auth, OAuth1Signature, OAuth2Auth,
-    OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth, RawLanguage, Request, RequestScripts,
+    ApiKeyAuth, Auth, AuthLocation, AwsSignatureAuth, BearerAuth, Body, Field, FormPart,
+    HttpRequest, HttpSettings, JwtAlgorithm, JwtAuth, Method, OAuth1Auth, OAuth1Signature,
+    OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth, RawLanguage, Request,
+    RequestScripts,
 };
 use serde_json::Value;
 
 use crate::{
-    Import, ImportError,
+    CollectionImport, ImportError,
     body::set_content_type,
     document::{clean_name, text},
 };
 
-pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
+pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError> {
     let mut skipped = Vec::new();
     // The collection's scripts and authorization become its own, which its
     // requests run and inherit.
@@ -28,7 +29,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
     let items = items(document, &inherited, &mut skipped);
     let scripts = scripts(document);
 
-    Ok(Import {
+    Ok(CollectionImport {
         collection: ImportedCollection {
             name: clean_name(document["info"]["name"].as_str(), "Postman Collection"),
             variables: variables(document),
@@ -154,7 +155,13 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         _ => url(&request["url"]),
     };
 
-    let mut headers = pairs(&request["header"]);
+    let mut headers = fields(&request["header"]);
+    // The URL holds the parameters that are sent; those switched off stay
+    // beside it.
+    let query: Vec<_> = fields(&request["url"]["query"])
+        .into_iter()
+        .filter(|field| !field.enabled)
+        .collect();
     let scripts = inherited.scripts.then(scripts(item));
     let body = body(&request["body"], &mut headers);
 
@@ -166,7 +173,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         path,
         headers,
         body,
-        query: Vec::new(),
+        query,
         path_variables,
         auth: request_auth(own_auth(request), inherited),
         scripts: RequestScripts {
@@ -243,7 +250,7 @@ fn assemble_url(url: &Value) -> String {
     assembled
 }
 
-fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Body> {
+fn body(body: &Value, headers: &mut Vec<Field>) -> Option<Body> {
     if body["disabled"].as_bool() == Some(true) {
         return None;
     }
@@ -487,7 +494,28 @@ fn auth_value(auth: &Value, kind: &str, key: &str) -> String {
     }
 }
 
-/// Enabled key–value pairs, such as headers or form fields.
+/// Header or metadata rows, including those switched off, with their
+/// descriptions.
+pub(crate) fn fields(fields: &Value) -> Vec<Field> {
+    fields
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|field| {
+            let description = &field["description"];
+
+            Some(Field {
+                key: field["key"].as_str()?.to_owned(),
+                value: text(field.get("value")),
+                enabled: field["disabled"].as_bool() != Some(true),
+                // A description is text, or an object with its text as content.
+                description: text(description.get("content").or(Some(description))),
+            })
+        })
+        .collect()
+}
+
+/// Enabled key–value pairs, such as form fields.
 pub(crate) fn pairs(pairs: &Value) -> Vec<(String, String)> {
     pairs
         .as_array()

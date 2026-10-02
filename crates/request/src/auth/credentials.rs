@@ -4,6 +4,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use url::Url;
 
 use super::{Auth, AuthLocation};
+use crate::Field;
 
 /// A header or query parameter that authorizes a request.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,14 +162,14 @@ impl Auth {
 }
 
 /// Add a resolved authorization's credentials to a request's headers and
-/// query, unless the request already sets the one it would add. A URL
+/// query, unless the request already sends the one it would add. A URL
 /// that cannot be read is left for sending to report.
 pub(crate) fn authorize(
     auth: &Auth,
     method: &str,
     url: &str,
-    query: &mut Vec<(String, String)>,
-    headers: &mut Vec<(String, String)>,
+    query: &mut Vec<Field>,
+    headers: &mut Vec<Field>,
     body: &[u8],
     form: &[(String, String)],
 ) -> Result<(), String> {
@@ -180,14 +181,15 @@ pub(crate) fn authorize(
     };
 
     url.set_fragment(None);
-    if !query.is_empty() {
-        url.query_pairs_mut().extend_pairs(query.iter());
+    let sent = Field::pairs(query);
+    if !sent.is_empty() {
+        url.query_pairs_mut().extend_pairs(sent);
     }
 
     let overridden = match location {
-        AuthLocation::Header => headers
-            .iter()
-            .any(|(header, _)| header.eq_ignore_ascii_case(name)),
+        AuthLocation::Header => {
+            Field::enabled(headers).any(|(header, _)| header.eq_ignore_ascii_case(name))
+        }
         AuthLocation::Query => url.query_pairs().any(|(key, _)| key == name),
     };
     if overridden {
@@ -202,8 +204,8 @@ pub(crate) fn authorize(
     };
     for credential in auth.credentials(Some(&request), SystemTime::now())? {
         match credential {
-            Credential::Header(name, value) => headers.push((name, value)),
-            Credential::Query(name, value) => query.push((name, value)),
+            Credential::Header(name, value) => headers.push(Field::new(name, value)),
+            Credential::Query(name, value) => query.push(Field::new(name, value)),
         }
     }
 

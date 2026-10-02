@@ -22,7 +22,7 @@ use url::{Host, Url};
 use super::credentials::basic;
 use super::crypto::{random_token, sha256};
 use super::{Auth, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant};
-use crate::{Body, HttpRequest, Method, RequestExecutor, RequestVariables, StatusCode};
+use crate::{Body, Field, HttpRequest, Method, RequestExecutor, RequestVariables, StatusCode};
 
 /// How long to wait for the browser to return after signing in.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -152,7 +152,7 @@ async fn request_token(
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value))
         .collect();
-    let mut headers = vec![("Accept".to_owned(), "application/json".to_owned())];
+    let mut headers = vec![Field::new("Accept", "application/json")];
     let client_id = auth.client_id.trim();
 
     if scoped && !auth.scope.trim().is_empty() {
@@ -161,8 +161,8 @@ async fn request_token(
     if auth.client_authentication == OAuth2ClientAuthentication::Header
         && !auth.client_secret.is_empty()
     {
-        headers.push((
-            "Authorization".into(),
+        headers.push(Field::new(
+            "Authorization",
             basic(client_id, &auth.client_secret),
         ));
     } else {

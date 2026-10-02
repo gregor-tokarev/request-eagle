@@ -18,8 +18,9 @@ latest_tag="$(git tag --merged HEAD --sort=-version:refname |
   awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ && !found { print; found = 1 }')"
 
 if [[ -n "$latest_tag" && "$(git rev-parse "$latest_tag^{commit}")" == "$(git rev-parse HEAD)" ]]; then
+  # Daily builds are published as pre-releases, so count those as published.
   published_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-    --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+    --jq '.[] | select(.draft == false) | .tag_name')"
 
   if grep -Fxq "$latest_tag" <<< "$published_tags"; then
     echo 'No new commits on main; skipping release'

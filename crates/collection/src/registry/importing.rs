@@ -9,11 +9,8 @@ use environment::Environment;
 use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
-use crate::collection::is_reserved;
-use crate::{
-    Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, FileEntry,
-    SharedSettings,
-};
+use crate::collection::{is_reserved, render};
+use crate::{Collection, CollectionEditError, CollectionRegistry, FileEntry, SharedSettings};
 use request::{Auth, Request, RequestScripts};
 
 /// A collection read from another application's export, ready to be written
@@ -27,6 +24,8 @@ pub struct ImportedCollection {
     pub items: Vec<ImportedItem>,
 }
 
+// Most items are requests, so boxing them would not make imports smaller.
+#[allow(clippy::large_enum_variant)]
 pub enum ImportedItem {
     Folder {
         name: String,
@@ -98,8 +97,17 @@ fn write_collection(
 
     write_items(path, &imported.items, &collection.reserved_paths())?;
 
-    // Loading what was written keeps the registry identical to a restart.
-    Ok(Collection::from_path(path, collection.local_env)?)
+    // Loading what was written keeps the registry identical to a restart,
+    // and all of it must load.
+    let mut skipped = Vec::new();
+    let collection = Collection::from_path(path, collection.local_env, &mut skipped)?;
+    if let Some(skipped) = skipped.first() {
+        return Err(
+            io::Error::other(format!("{}: {}", skipped.path.display(), skipped.error)).into(),
+        );
+    }
+
+    Ok(collection)
 }
 
 fn write_items(
@@ -134,18 +142,13 @@ fn write_items(
             ImportedItem::Request { name, request } => {
                 let entry = FileEntry {
                     raw_content: String::new(),
-                    path: PathBuf::new(),
+                    path: parent.join(name),
                     id: Uuid::new_v4().to_string(),
                     name: name.clone(),
                     schema_version: 1,
                     request: request.clone(),
                 };
-                let content = toml::to_string_pretty(&entry).map_err(|source| {
-                    CollectionSaveError::Serialize {
-                        path: parent.join(name),
-                        source,
-                    }
-                })?;
+                let content = render(&entry)?.to_string();
 
                 create_unique(parent, &stem, ".toml", *next_number, reserved, |path| {
                     fs::File::create_new(path)?.write_all(content.as_bytes())

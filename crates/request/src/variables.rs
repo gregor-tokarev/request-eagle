@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 use url::form_urlencoded;
 
-use crate::{Auth, Body, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{Auth, Body, Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -124,12 +124,7 @@ impl RequestVariables {
         // Servers may require credentials to answer reflection.
         let auth = self.effective_auth(&request.auth).texts();
         let texts = std::iter::once(request.url.as_str())
-            .chain(
-                request
-                    .metadata
-                    .iter()
-                    .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
-            )
+            .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]))
             .chain(auth.iter().map(String::as_str));
         let mut resolver = self.resolver();
 
@@ -165,10 +160,11 @@ impl RequestVariables {
         };
         let mut request = request.clone();
         request.url = resolve(&request.url)?;
+        request.metadata.retain(|field| field.enabled);
 
-        for (key, value) in &mut request.metadata {
-            *key = resolve(key)?;
-            *value = resolve(value)?;
+        for field in &mut request.metadata {
+            field.key = resolve(&field.key)?;
+            field.value = resolve(&field.value)?;
         }
 
         request.auth = self.effective_auth(&request.auth);
@@ -211,13 +207,15 @@ impl RequestVariables {
     ) -> Result<WebSocketRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
         let mut request = request.clone();
+        request.headers.retain(|field| field.enabled);
+        request.query.retain(|field| field.enabled);
         request.auth = self.effective_auth(&request.auth);
         let mut resolve = || {
             request.url = resolve_url(&request.url, &mut resolver)?;
 
-            for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-                *key = resolver.resolve(key)?;
-                *value = resolver.resolve(value)?;
+            for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+                field.key = resolver.resolve(&field.key)?;
+                field.value = resolver.resolve(&field.value)?;
             }
 
             request.auth.resolve_with(|text| resolver.resolve(text))
@@ -369,10 +367,12 @@ impl HttpRequest {
             crate::request_url::fill_path_variables(&path, &request.path_variables, |value| {
                 resolver.resolve(value)
             })?;
+        request.headers.retain(|field| field.enabled);
+        request.query.retain(|field| field.enabled);
 
-        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-            *key = resolver.resolve(key)?;
-            *value = resolver.resolve(value)?;
+        for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+            field.key = resolver.resolve(&field.key)?;
+            field.value = resolver.resolve(&field.value)?;
         }
 
         request.auth.resolve_with(|text| resolver.resolve(text))?;

@@ -2,7 +2,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use percent_encoding::percent_decode_str;
 use url::{Position, Url};
 
-use crate::Method;
+use crate::{Field, Method};
 
 /// Defaults shared by request execution and the header editor's preview.
 /// Host is conveyed as :authority on HTTP/2. Explicit header names take
@@ -10,14 +10,10 @@ use crate::Method;
 pub fn generated_headers(
     method: Method,
     path: &str,
-    headers: &[(String, String)],
+    headers: &[Field],
     body_bytes: usize,
 ) -> Vec<(String, String)> {
-    let has = |name: &str| {
-        headers
-            .iter()
-            .any(|(key, _)| key.eq_ignore_ascii_case(name))
-    };
+    let has = |name: &str| Field::enabled(headers).any(|(key, _)| key.eq_ignore_ascii_case(name));
     let mut generated = Vec::new();
 
     if let Ok(url) = Url::parse(path)

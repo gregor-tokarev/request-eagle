@@ -20,7 +20,7 @@ use super::{
     transport::{self, Target},
 };
 use crate::{
-    Auth, CookieJar, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
+    Auth, CookieJar, Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
     auth::Credential, scripts::CallScripts,
 };
 
@@ -126,7 +126,7 @@ impl GrpcClient {
                 .map_err(GrpcError::Variables)
                 .and_then(|request| {
                     Ok(Definition::Reflection(
-                        self.target(&request)?,
+                        Box::new(self.target(&request)?),
                         metadata(&request.metadata, &request.auth)?,
                     ))
                 }),
@@ -444,7 +444,7 @@ fn message_limit(megabytes: u64) -> usize {
 
 enum Definition {
     ProtoFile(PathBuf, Vec<PathBuf>),
-    Reflection(Target, MetadataMap),
+    Reflection(Box<Target>, MetadataMap),
 }
 
 fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcError> {
@@ -464,11 +464,12 @@ fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcE
 
 /// The request's metadata, with the credentials of its resolved
 /// authorization.
-fn metadata(pairs: &[(String, String)], auth: &Auth) -> Result<MetadataMap, GrpcError> {
+fn metadata(fields: &[Field], auth: &Auth) -> Result<MetadataMap, GrpcError> {
     let mut headers = HeaderMap::new();
-    let credentials = auth_metadata(pairs, auth).map_err(GrpcError::Auth)?;
+    let credentials = auth_metadata(fields, auth).map_err(GrpcError::Auth)?;
 
-    for (name, value) in pairs.iter().cloned().chain(credentials) {
+    let sent = Field::enabled(fields).map(|(name, value)| (name.to_owned(), value.to_owned()));
+    for (name, value) in sent.chain(credentials) {
         let name = name.trim();
 
         if name.is_empty() {
@@ -477,7 +478,7 @@ fn metadata(pairs: &[(String, String)], auth: &Auth) -> Result<MetadataMap, Grpc
 
         let key = HeaderName::try_from(name.to_ascii_lowercase())
             .map_err(|_| GrpcError::InvalidMetadata(format!("{name} is not a valid key")))?;
-        let value = HeaderValue::try_from(value.as_str())
+        let value = HeaderValue::try_from(value)
             .map_err(|_| GrpcError::InvalidMetadata(format!("the value of {name} is invalid")))?;
         headers.append(key, value);
     }
@@ -488,13 +489,11 @@ fn metadata(pairs: &[(String, String)], auth: &Auth) -> Result<MetadataMap, Grpc
 /// The credentials of a resolved authorization as metadata, unless the
 /// request's own metadata sets them.
 pub(crate) fn auth_metadata(
-    metadata: &[(String, String)],
+    metadata: &[Field],
     auth: &Auth,
 ) -> Result<Vec<(String, String)>, String> {
     let overridden = auth.credential_name().is_some_and(|(_, credential)| {
-        metadata
-            .iter()
-            .any(|(name, _)| name.trim().eq_ignore_ascii_case(credential))
+        Field::enabled(metadata).any(|(name, _)| name.trim().eq_ignore_ascii_case(credential))
     });
     if overridden {
         return Ok(Vec::new());

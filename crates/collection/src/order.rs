@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::Entry;
 
-const FILE_NAME: &str = ".request-eagle-order.json";
+pub(crate) const FILE_NAME: &str = ".request-eagle-order.json";
 
 pub(crate) fn apply(parent: &Path, entries: &mut [Entry]) -> io::Result<()> {
     let Some(bytes) = read(parent)? else {
@@ -31,6 +31,10 @@ pub(crate) fn apply(parent: &Path, entries: &mut [Entry]) -> io::Result<()> {
 }
 
 pub(crate) fn save(parent: &Path, paths: &[PathBuf]) -> io::Result<()> {
+    if unreadable(parent) {
+        return Ok(());
+    }
+
     let names: Vec<_> = paths
         .iter()
         .map(|path| path.file_name().unwrap().to_string_lossy())
@@ -46,6 +50,11 @@ pub(crate) fn with_saved_order<T>(
     paths: &[PathBuf],
     operation: impl FnOnce() -> io::Result<T>,
 ) -> io::Result<T> {
+    // An unreadable order is not saved over, so there is nothing to restore.
+    if unreadable(parent) {
+        return operation();
+    }
+
     let previous = read(parent)?;
     save(parent, paths)?;
     match operation() {
@@ -69,10 +78,14 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
     let parent = old
         .parent()
         .ok_or_else(|| io::Error::other("Cannot rename the filesystem root."))?;
-    let Some(bytes) = read(parent)? else {
+    // Without a readable order, there are no names to update.
+    let Some(names) = read(parent)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+    else {
         return fs::rename(old, new);
     };
-    let names: Vec<String> = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
     let paths = names
         .iter()
         .map(|name| {
@@ -84,6 +97,16 @@ pub(crate) fn rename_directory(old: &Path, new: &Path) -> io::Result<()> {
         })
         .collect::<Vec<_>>();
     with_saved_order(parent, &paths, || fs::rename(old, new))
+}
+
+/// Whether there is an order that loading left out because it cannot be
+/// read. It is never saved over, so that it can still be repaired.
+fn unreadable(parent: &Path) -> bool {
+    match read(parent) {
+        Ok(Some(bytes)) => serde_json::from_slice::<Vec<String>>(&bytes).is_err(),
+        Ok(None) => false,
+        Err(_) => true,
+    }
 }
 
 fn read(parent: &Path) -> io::Result<Option<Vec<u8>>> {

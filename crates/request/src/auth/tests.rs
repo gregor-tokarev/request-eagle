@@ -10,6 +10,7 @@ use url::Url;
 
 use super::credentials::{Credential, Outgoing};
 use super::*;
+use crate::Field;
 
 /// A 2048-bit RSA key made for these tests.
 const RSA_KEY: &str = include_str!("test_rsa_key.pem");
@@ -126,25 +127,41 @@ fn simple_credentials_go_where_they_are_configured() {
 }
 
 #[test]
-fn a_header_or_parameter_the_request_sets_itself_takes_precedence() {
+fn a_header_or_parameter_the_request_sends_itself_takes_precedence() {
     let bearer = Auth::Bearer(BearerAuth {
         token: "from-auth".into(),
     });
-    let mut query = Vec::new();
-    let mut headers = vec![("authorization".to_owned(), "Bearer own".to_owned())];
-    authorize(
-        &bearer,
-        "GET",
-        "https://example.com/",
-        &mut query,
-        &mut headers,
-        &[],
-        &[],
-    )
-    .unwrap();
+    let authorize_bearer = |headers: &mut Vec<Field>| {
+        authorize(
+            &bearer,
+            "GET",
+            "https://example.com/",
+            &mut Vec::new(),
+            headers,
+            &[],
+            &[],
+        )
+        .unwrap()
+    };
+
+    let own = Field::new("authorization", "Bearer own");
+    let mut headers = vec![own.clone()];
+    authorize_bearer(&mut headers);
+    assert_eq!(headers, [own.clone()]);
+
+    // A header that is switched off is not sent, so it does not count.
+    let switched_off = Field {
+        enabled: false,
+        ..own
+    };
+    let mut headers = vec![switched_off.clone()];
+    authorize_bearer(&mut headers);
     assert_eq!(
         headers,
-        [("authorization".to_owned(), "Bearer own".to_owned())]
+        [
+            switched_off,
+            Field::new("Authorization", "Bearer from-auth")
+        ]
     );
 
     let api_key = Auth::ApiKey(ApiKeyAuth {
@@ -152,13 +169,13 @@ fn a_header_or_parameter_the_request_sets_itself_takes_precedence() {
         value: "from-auth".into(),
         add_to: AuthLocation::Query,
     });
-    let mut headers = Vec::new();
+    let mut query = Vec::new();
     authorize(
         &api_key,
         "GET",
         "https://example.com/?key=own",
         &mut query,
-        &mut headers,
+        &mut Vec::new(),
         &[],
         &[],
     )
@@ -170,12 +187,12 @@ fn a_header_or_parameter_the_request_sets_itself_takes_precedence() {
         "GET",
         "https://example.com/?other=1",
         &mut query,
-        &mut headers,
+        &mut Vec::new(),
         &[],
         &[],
     )
     .unwrap();
-    assert_eq!(query, [("key".to_owned(), "from-auth".to_owned())]);
+    assert_eq!(query, [Field::new("key", "from-auth")]);
 }
 
 #[test]
