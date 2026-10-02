@@ -125,7 +125,7 @@ pub(super) fn generated_headers(request: &HttpRequest, auth: &Auth) -> Vec<(Stri
 }
 
 /// The jar that requests store and send cookies in, while it is on.
-pub(super) fn active_jar(cx: &App) -> Option<request::CookieJar> {
+pub(crate) fn active_jar(cx: &App) -> Option<request::CookieJar> {
     cx.try_global::<Preferences>()
         .is_none_or(|preferences| preferences.request.cookie_jar)
         .then(|| Cookies::jar(cx))

@@ -52,6 +52,21 @@ impl RequestVariables {
         self
     }
 
+    /// Fill `{{name}}` with these values for this send, over every scope,
+    /// as a pre-request script's `pm.variables.set` does. A flow fills a
+    /// request's variables from its block's inputs this way.
+    pub fn with_local_values(mut self, values: impl IntoIterator<Item = (String, String)>) -> Self {
+        let locals = self.locals.get_or_insert_with(LocalVariables::default);
+        let mut current = locals.get();
+        for (name, value) in values {
+            self.values.insert(name.clone(), value.clone());
+            current.insert(name, value);
+        }
+        locals.set(current);
+
+        self
+    }
+
     /// Values of a Collection Runner's data file row. `{{name}}` prefers them
     /// to every scope, and scripts read them with `pm.iterationData`, typed
     /// as a JSON file gives them.

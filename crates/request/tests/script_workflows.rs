@@ -146,6 +146,49 @@ fn response_tokens_survive_execution_and_locals_do_not() {
 }
 
 #[test]
+fn local_values_fill_variables_over_every_scope_for_one_send() {
+    let server = Server::new();
+    let executor = server.executor();
+    let session = EnvironmentSession::default();
+    session
+        .apply(&VariableScopes {
+            environment: [("token".to_owned(), Some("environment".to_owned()))].into(),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut request = server.request(
+        "pm.expect(pm.variables.get('token')).to.equal('from a flow');",
+        "",
+    );
+    request.headers.push(("X-Token", "{{token}}").into());
+
+    let execution = smol::block_on(executor.execute(
+        request.clone(),
+        variables(&session).with_local_values([("token".to_owned(), "from a flow".to_owned())]),
+    ))
+    .unwrap();
+    assert!(
+        execution.scripts[0].error.is_none(),
+        "{:?}",
+        execution.scripts
+    );
+    assert!(
+        server.requests.lock().unwrap()[0]
+            .to_lowercase()
+            .contains("x-token: from a flow")
+    );
+
+    // The value lasts for that send only.
+    request.scripts.pre_request.clear();
+    smol::block_on(executor.execute(request, variables(&session))).unwrap();
+    assert!(
+        server.requests.lock().unwrap()[1]
+            .to_lowercase()
+            .contains("x-token: environment")
+    );
+}
+
+#[test]
 fn postman_scopes_carry_values_to_later_requests_and_other_collections() {
     let server = Server::new();
     let executor = server.executor();

@@ -313,6 +313,122 @@ pub(crate) fn init(cx: &mut App) {
     )
     .expect("default settings keybinding should be valid");
 
+    register_flow_actions(cx);
     collections_panel_ui::init(cx);
     settings_ui::init(cx);
+}
+
+/// Flow canvas shortcuts apply while the canvas has focus, not while typing
+/// in a block's settings.
+fn register_flow_action<A: Action>(
+    action: A,
+    label: &'static str,
+    description: &'static str,
+    shortcut: &str,
+    cx: &mut App,
+) {
+    keybindings_service::register(
+        action,
+        label,
+        description,
+        "Flows",
+        Some(shortcut),
+        Some("FlowCanvas && !Input"),
+        cx,
+    )
+    .expect("default flow keybinding should be valid");
+}
+
+fn register_flow_actions(cx: &mut App) {
+    register_flow_action(
+        tab_ui::DeleteSelection,
+        "Delete flow selection",
+        "Delete the selected blocks or connection.",
+        "backspace",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::SelectAllBlocks,
+        "Select all blocks",
+        "Select every block of the flow.",
+        "secondary-a",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::CopyBlocks,
+        "Copy blocks",
+        "Copy the selected blocks and the connections between them.",
+        "secondary-c",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::PasteBlocks,
+        "Paste blocks",
+        "Paste copied blocks into the flow.",
+        "secondary-v",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::DuplicateBlocks,
+        "Duplicate blocks",
+        "Copy the selected blocks next to themselves.",
+        "secondary-d",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::UndoFlowEdit,
+        "Undo flow edit",
+        "Undo the last change to the flow.",
+        "secondary-z",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::RedoFlowEdit,
+        "Redo flow edit",
+        "Redo the last undone change to the flow.",
+        "secondary-shift-z",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::AddBlock,
+        "Add block",
+        "Choose a block to add to the flow.",
+        "a",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::ZoomIn,
+        "Zoom in",
+        "Zoom the flow canvas in.",
+        "secondary-=",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::ZoomOut,
+        "Zoom out",
+        "Zoom the flow canvas out.",
+        "secondary--",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::ZoomToFit,
+        "Show the whole flow",
+        "Zoom the flow canvas to fit every block.",
+        "secondary-0",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::ArrangeBlocks,
+        "Arrange blocks",
+        "Place the flow's blocks in columns, left to right.",
+        "shift-a",
+        cx,
+    );
+    register_flow_action(
+        tab_ui::StopFlow,
+        "Stop flow",
+        "Stop the running flow.",
+        "secondary-.",
+        cx,
+    );
 }

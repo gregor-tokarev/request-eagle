@@ -1,6 +1,6 @@
 ---
 name: request-eagle-cli
-description: Load when the user asks to use request-eagle-cli or to inspect, edit, or run saved requests, manage collections, or change settings in Request Eagle. Do not load merely because a task involves developing Request Eagle or automating its desktop UI.
+description: Load when the user asks to use request-eagle-cli or to inspect, edit, or run saved requests or flows, manage collections, or change settings in Request Eagle. Do not load merely because a task involves developing Request Eagle or automating its desktop UI.
 ---
 
 # Request Eagle CLI
@@ -21,3 +21,6 @@ If the binary is missing, see [installation instructions](../../docs/cli.md#inst
 - Check the JSON result, HTTP or gRPC status, and script test results. Exit
   code 0 means execution completed; error statuses and failed assertions can
   still occur.
+- For flows, read `flows.blocks` before building one and `flows.get` before
+  updating one. Try FQL with `fql.evaluate`. After `flows.run`, check its
+  `status` and each block's `error`.

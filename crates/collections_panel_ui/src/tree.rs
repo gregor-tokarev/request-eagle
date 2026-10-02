@@ -14,6 +14,7 @@ pub(super) enum ItemKind {
     Collection,
     Folder,
     Request(&'static str),
+    Flow,
 }
 
 #[derive(Clone)]
@@ -29,7 +30,7 @@ pub(super) struct TreeItem {
 
 impl TreeItem {
     pub fn is_branch(&self) -> bool {
-        !matches!(self.kind, ItemKind::Request(_))
+        matches!(self.kind, ItemKind::Collection | ItemKind::Folder)
     }
 }
 
@@ -197,6 +198,19 @@ fn add_entries(
                 });
                 add_entries(items, &folder.entries, index, search_texts);
                 items[parent].request_count += items[index].request_count;
+            }
+            Entry::Flow(flow) => {
+                search_texts.push(format!("flow {}", flow.name));
+                items.push(TreeItem {
+                    label: flow.name.clone().into(),
+                    path: flow.path.clone(),
+                    kind: ItemKind::Flow,
+                    depth,
+                    parent: Some(parent),
+                    end: index + 1,
+                    request_count: 1,
+                });
+                items[parent].request_count += 1;
             }
             Entry::File(file) => {
                 let (method, search_text) = request_row(file);

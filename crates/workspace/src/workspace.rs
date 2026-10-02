@@ -173,6 +173,27 @@ impl Workspace {
                         view.prepare_active_tab(window, cx);
                     });
                 }
+                CollectionPanelEvent::OpenFlow {
+                    id,
+                    path,
+                    name,
+                    collection,
+                    folders,
+                    flow,
+                } => {
+                    let location = RequestLocation {
+                        path: path.clone(),
+                        id: id.clone(),
+                        name: name.clone(),
+                        collection: collection.clone(),
+                        folders: folders.clone(),
+                    };
+
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_flow(location, flow.clone(), cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
                 CollectionPanelEvent::RunRequests {
                     path,
                     name,

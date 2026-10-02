@@ -13,6 +13,8 @@ collection = { path = "../collection" }
 # Collection Runner data files.
 csv = "1"
 encoding_rs = "0.8"
+flow = { path = "../flow" }
+fql = { path = "../fql" }
 futures = "0.3"
 gpui-kit = { workspace = true, features = ["component", "tree-sitter", "tree-sitter-bash", "tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-yaml"] }
 # PDF responses render to page bitmaps, which GPUI shows as image frames.

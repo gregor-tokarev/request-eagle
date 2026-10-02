@@ -1,8 +1,8 @@
 # Request Eagle CLI
 
 `request-eagle-cli` is an optional standalone binary for AI agents. It manages
-saved collections and requests, runs them, and edits settings, without the
-desktop app or a display.
+saved collections, requests and flows, runs them, and edits settings, without
+the desktop app or a display.
 
 ## Install
 
@@ -96,5 +96,17 @@ script results.
   the same sites, as the app does. `cookies.list` shows them and
   `cookies.delete` removes a domain's cookies, or one by name. Turn the jar off
   with `settings.request` and `"cookie_jar": false`.
+- Flows have their own commands. `flows.blocks` describes every block type
+  with its inputs, outputs and settings; `flows.get` also lists the variables
+  of each request a flow's HTTP Request blocks send, which are their inputs.
+  `flows.update` replaces the complete flow and checks its connections.
+  `flows.run` takes `input` for its Start blocks and returns what its Output
+  blocks received, each block's last run and the Log blocks' values. A flow
+  whose requests have scripts runs only with `trust_scripts: true`. A run that
+  completes exits 0 with `status` `succeeded`, `failed` when a block failed,
+  or `stopped` at its `timeout_ms` (5 minutes by default). See the
+  [flows guide](flows.md).
+- `fql.evaluate` evaluates FQL, the JSONata-based language of Evaluate
+  blocks, against JSON `input`, to try an expression before saving it.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 28] = [
+const LOCAL_ICONS: [(&str, &[u8]); 54] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -120,6 +120,96 @@ const LOCAL_ICONS: [(&str, &[u8]); 28] = [
         "icons/protocol-websocket.svg",
         include_bytes!("../assets/icons/protocol-websocket.svg"),
     ),
+    // Flows: the flow item and its block types, and the canvas controls.
+    (
+        "icons/workflow.svg",
+        include_bytes!("../assets/icons/workflow.svg"),
+    ),
+    (
+        "icons/square-function.svg",
+        include_bytes!("../assets/icons/square-function.svg"),
+    ),
+    (
+        "icons/split.svg",
+        include_bytes!("../assets/icons/split.svg"),
+    ),
+    (
+        "icons/git-branch.svg",
+        include_bytes!("../assets/icons/git-branch.svg"),
+    ),
+    (
+        "icons/timer.svg",
+        include_bytes!("../assets/icons/timer.svg"),
+    ),
+    (
+        "icons/merge.svg",
+        include_bytes!("../assets/icons/merge.svg"),
+    ),
+    (
+        "icons/repeat.svg",
+        include_bytes!("../assets/icons/repeat.svg"),
+    ),
+    (
+        "icons/list-ordered.svg",
+        include_bytes!("../assets/icons/list-ordered.svg"),
+    ),
+    (
+        "icons/combine.svg",
+        include_bytes!("../assets/icons/combine.svg"),
+    ),
+    (
+        "icons/monitor.svg",
+        include_bytes!("../assets/icons/monitor.svg"),
+    ),
+    (
+        "icons/scroll-text.svg",
+        include_bytes!("../assets/icons/scroll-text.svg"),
+    ),
+    ("icons/type.svg", include_bytes!("../assets/icons/type.svg")),
+    ("icons/hash.svg", include_bytes!("../assets/icons/hash.svg")),
+    (
+        "icons/toggle-left.svg",
+        include_bytes!("../assets/icons/toggle-left.svg"),
+    ),
+    (
+        "icons/circle-off.svg",
+        include_bytes!("../assets/icons/circle-off.svg"),
+    ),
+    (
+        "icons/clock.svg",
+        include_bytes!("../assets/icons/clock.svg"),
+    ),
+    (
+        "icons/mouse-pointer-click.svg",
+        include_bytes!("../assets/icons/mouse-pointer-click.svg"),
+    ),
+    (
+        "icons/braces.svg",
+        include_bytes!("../assets/icons/braces.svg"),
+    ),
+    ("icons/list.svg", include_bytes!("../assets/icons/list.svg")),
+    (
+        "icons/log-in.svg",
+        include_bytes!("../assets/icons/log-in.svg"),
+    ),
+    (
+        "icons/log-out.svg",
+        include_bytes!("../assets/icons/log-out.svg"),
+    ),
+    ("icons/flag.svg", include_bytes!("../assets/icons/flag.svg")),
+    (
+        "icons/sticky-note.svg",
+        include_bytes!("../assets/icons/sticky-note.svg"),
+    ),
+    (
+        "icons/zoom-in.svg",
+        include_bytes!("../assets/icons/zoom-in.svg"),
+    ),
+    (
+        "icons/zoom-out.svg",
+        include_bytes!("../assets/icons/zoom-out.svg"),
+    ),
+    ("icons/scan.svg", include_bytes!("../assets/icons/scan.svg")),
 ];
 
 impl AssetSource for Assets {

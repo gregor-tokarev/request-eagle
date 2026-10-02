@@ -87,7 +87,7 @@ impl LocalVariables {
             .clone()
     }
 
-    pub(super) fn set(&self, values: BTreeMap<String, String>) {
+    pub(crate) fn set(&self, values: BTreeMap<String, String>) {
         *self.0.lock().unwrap_or_else(|error| error.into_inner()) = values;
     }
 }

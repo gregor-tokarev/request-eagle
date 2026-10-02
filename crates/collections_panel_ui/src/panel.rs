@@ -62,6 +62,14 @@ pub enum CollectionPanelEvent {
         folders: Vec<SharedString>,
         request: Request,
     },
+    OpenFlow {
+        id: SharedString,
+        path: PathBuf,
+        name: SharedString,
+        collection: SharedString,
+        folders: Vec<SharedString>,
+        flow: flow::Flow,
+    },
     /// A request imported without saving it, such as a pasted cURL command.
     OpenUnsavedRequest(HttpRequest),
     /// Imported environments were added to the environments directory.
@@ -260,7 +268,13 @@ impl CollectionPanel {
         }
     }
 
-    /// Open a collection or request row in a tab; folder rows have no page.
+    /// The saved collections, for pages that read them, such as flows
+    /// choosing the requests they send.
+    pub fn registry(&self) -> &CollectionRegistry {
+        &self.collections
+    }
+
+    /// Open a collection, request or flow row in a tab; folder rows have no page.
     pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
         if let Some(event) = self.open_event(index) {
             cx.emit(event);
@@ -290,6 +304,19 @@ impl CollectionPanel {
                 })
             }
             ItemKind::Folder => None,
+            ItemKind::Flow => {
+                let entry = self.collections.flow(&item.path)?;
+                let (collection, folders) = self.tree.location(index);
+
+                Some(CollectionPanelEvent::OpenFlow {
+                    id: entry.id.clone().into(),
+                    path: item.path.clone(),
+                    name: item.label.clone(),
+                    collection,
+                    folders,
+                    flow: entry.flow.clone(),
+                })
+            }
             ItemKind::Request(_) => {
                 let file = self.collections.file(&item.path)?;
                 let (collection, folders) = self.tree.location(index);

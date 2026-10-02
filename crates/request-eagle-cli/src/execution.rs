@@ -126,14 +126,14 @@ pub async fn run(
 }
 
 /// The app's cookie jar, unless the settings turn it off.
-fn cookie_jar(path: &Path, settings: &RequestPreferences) -> Result<Option<CookieJar>> {
+pub(crate) fn cookie_jar(path: &Path, settings: &RequestPreferences) -> Result<Option<CookieJar>> {
     settings
         .cookie_jar
         .then(|| crate::cookies::open(path))
         .transpose()
 }
 
-fn save(jar: Option<&CookieJar>) -> Result<()> {
+pub(crate) fn save(jar: Option<&CookieJar>) -> Result<()> {
     if let Some(jar) = jar {
         jar.save().context("Could not save cookies")?;
     }
