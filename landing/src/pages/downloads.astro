@@ -1,0 +1,47 @@
+---
+import AppleLogo from "../components/AppleLogo.astro";
+import Page from "../layouts/Page.astro";
+
+import "../styles/base.css";
+---
+
+<Page
+  title="Download — Request Eagle"
+  description="Download the latest build of Request Eagle for Apple Silicon Macs, as a disk image or a ZIP archive."
+  socialDescription="The latest build of Request Eagle, ready to download."
+  download={false}
+>
+  <main>
+
+    <div class="hero hero--short">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <h1 class="display">
+          <span class="line"><span>Download</span></span>
+        </h1>
+
+        <div class="hero__row">
+          <p class="lede">
+            The latest build of Request Eagle, for Apple Silicon Macs.
+          </p>
+
+          <!-- Without the script both lead to the latest release on GitHub; the script points them at its files. -->
+          <div class="actions" data-boost>
+            <a class="button" href="https://github.com/gregor-tokarev/request-eagle/releases/latest" data-image>
+              <AppleLogo />
+              <span>Download for macOS</span>
+            </a>
+
+            <a class="button button--outline" href="https://github.com/gregor-tokarev/request-eagle/releases/latest" data-archive><span>Download ZIP</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</Page>
+
+<script>
+  import "../scripts/downloads.js";
+</script>
