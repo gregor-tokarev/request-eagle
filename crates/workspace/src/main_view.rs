@@ -739,18 +739,7 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for tab in &mut self.tabs {
-            if let Page::Runner(runner) = &tab.page {
-                let renamed = runner.update(cx, |runner, cx| {
-                    let renamed = runner.path == previous_path;
-                    runner.relocate(previous_path, path, cx);
-                    renamed
-                });
-                if renamed {
-                    tab.title = name.clone();
-                }
-            }
-        }
+        self.relocate_runners(previous_path, path, name.clone(), path, cx);
 
         let Some(index) = self.collection_tab(previous_path, cx) else {
             return;
@@ -762,6 +751,28 @@ impl MainView {
             page.update(cx, |page, cx| {
                 page.relocate(path.to_path_buf(), name.to_string(), window, cx)
             });
+        }
+        cx.notify();
+    }
+
+    /// Follow a collection or folder renamed or moved in the sidebar in the
+    /// runners of it and of what it contains. `collection` is the directory
+    /// of the collection it is in now.
+    pub(crate) fn relocate_runners(
+        &mut self,
+        previous_path: &Path,
+        path: &Path,
+        name: SharedString,
+        collection: &Path,
+        cx: &mut Context<Self>,
+    ) {
+        for tab in &mut self.tabs {
+            if let Page::Runner(runner) = &tab.page {
+                tab.title = runner.update(cx, |runner, cx| {
+                    runner.relocate(previous_path, path, name.clone(), collection, cx);
+                    runner.name().clone()
+                });
+            }
         }
         cx.notify();
     }

@@ -2,10 +2,10 @@ use std::path::Path;
 
 use super::data_file::{DataRow, parse};
 
-fn row(values: &[(&str, &str)]) -> DataRow {
+fn row(values: &[(&str, serde_json::Value)]) -> DataRow {
     values
         .iter()
-        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .map(|(name, value)| ((*name).to_owned(), value.clone()))
         .collect()
 }
 
@@ -21,29 +21,32 @@ fn csv_rows_are_named_by_the_header() {
     assert_eq!(
         rows,
         [
-            row(&[("name", "Ada"), ("email", "ada@example.com")]),
-            row(&[("name", "Lovelace, A"), ("email", "say \"hi\"")]),
-            row(&[("name", "Short"), ("email", "")]),
+            row(&[("name", "Ada".into()), ("email", "ada@example.com".into())]),
+            row(&[
+                ("name", "Lovelace, A".into()),
+                ("email", "say \"hi\"".into())
+            ]),
+            row(&[("name", "Short".into()), ("email", "".into())]),
         ]
     );
 }
 
 #[test]
-fn json_values_become_text() {
+fn json_values_keep_their_types() {
     let rows = parse(
         Path::new("data.txt"),
-        br#" [{"id": 7, "active": true, "name": "Ada", "tags": ["a"], "none": null}]"#,
+        br#" [{"id": 7, "active": false, "name": "Ada", "tags": ["a"], "none": null}]"#,
     )
     .unwrap();
 
     assert_eq!(
         rows,
         [row(&[
-            ("id", "7"),
-            ("active", "true"),
-            ("name", "Ada"),
-            ("tags", "[\"a\"]"),
-            ("none", ""),
+            ("id", 7.into()),
+            ("active", false.into()),
+            ("name", "Ada".into()),
+            ("tags", serde_json::json!(["a"])),
+            ("none", serde_json::Value::Null),
         ])]
     );
 }

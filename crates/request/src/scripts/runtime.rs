@@ -190,6 +190,10 @@ pub(crate) async fn pre_request(
                 ));
             }
             if let Some(reason) = output.skip_reason {
+                // Skipping is not failing: the script's pm.variables last.
+                if let Some(locals) = &state.locals {
+                    locals.set(output.variables.values.clone());
+                }
                 return Err(after_earlier_scripts(
                     reports,
                     ExecutionError::Skipped {

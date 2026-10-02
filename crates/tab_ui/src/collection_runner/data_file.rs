@@ -1,7 +1,8 @@
 use std::{collections::BTreeMap, path::Path};
 
-/// One iteration's values from a data file, by column or key name.
-pub(crate) type DataRow = BTreeMap<String, String>;
+/// One iteration's values from a data file, by column or key name. CSV
+/// values are text; JSON values keep their types for scripts.
+pub(crate) type DataRow = BTreeMap<String, serde_json::Value>;
 
 /// The rows of a Collection Runner data file: a JSON array of objects, or
 /// CSV whose first row names the columns. A `.json` file is JSON; other
@@ -39,25 +40,13 @@ fn json_rows(text: &str) -> Result<Vec<DataRow>, String> {
         .into_iter()
         .enumerate()
         .map(|(index, item)| match item {
-            serde_json::Value::Object(fields) => Ok(fields
-                .into_iter()
-                .map(|(name, value)| (name, json_text(value)))
-                .collect()),
+            serde_json::Value::Object(fields) => Ok(fields.into_iter().collect()),
             _ => Err(format!(
                 "Item {} of the JSON data file is not an object.",
                 index + 1
             )),
         })
         .collect()
-}
-
-/// Variables are text: strings stay as they are, other values as JSON.
-fn json_text(value: serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(text) => text,
-        serde_json::Value::Null => String::new(),
-        value => value.to_string(),
-    }
 }
 
 fn csv_rows(text: &str) -> Result<Vec<DataRow>, String> {
@@ -82,12 +71,7 @@ fn csv_rows(text: &str) -> Result<Vec<DataRow>, String> {
                 .iter()
                 .enumerate()
                 .filter(|(_, name)| !name.is_empty())
-                .map(|(column, name)| {
-                    (
-                        name.clone(),
-                        record.get(column).unwrap_or_default().to_owned(),
-                    )
-                })
+                .map(|(column, name)| (name.clone(), record.get(column).unwrap_or_default().into()))
                 .collect())
         })
         .collect()

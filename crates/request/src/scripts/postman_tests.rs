@@ -215,7 +215,7 @@ fn iteration_data_resolves_over_the_scopes_and_under_overrides() {
     )
     .with_iteration_data(
         [("name", "data"), ("user", "ada")]
-            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .map(|(name, value)| (name.to_owned(), value.into()))
             .into(),
     );
 
@@ -224,6 +224,41 @@ fn iteration_data_resolves_over_the_scopes_and_under_overrides() {
     passed(&reports[0]);
     assert_eq!(reports[0].tests.len(), 1);
     assert_eq!(request.path, "https://env/data/local");
+}
+
+#[test]
+fn json_data_keeps_its_types_for_scripts_and_is_text_in_requests() {
+    let request = HttpRequest {
+        path: "https://example.com/{{count}}/{{flags}}/{{none}}".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.test("typed", () => {
+                    pm.expect(pm.iterationData.get("shouldRun")).to.equal(false);
+                    pm.expect(pm.iterationData.get("count")).to.equal(2);
+                    pm.expect(pm.variables.get("flags")).to.eql({a: true});
+                    pm.expect(pm.variables.replaceIn("{{count}} {{shouldRun}}")).to.equal("2 false");
+                });
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data =
+        serde_json::json!({"shouldRun": false, "count": 2, "flags": {"a": true}, "none": null});
+    let variables = RequestVariables::new(HashMap::new(), None).with_iteration_data(
+        data.as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    );
+
+    let (request, _, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    assert_eq!(reports[0].tests.len(), 1);
+    assert_eq!(request.path, r#"https://example.com/2/{"a":true}/"#);
 }
 
 #[test]
@@ -251,6 +286,16 @@ fn local_variables_carry_over_to_the_next_request() {
     assert_eq!(first.path, "https://example.com/one");
     assert_eq!(second.path, "https://example.com/one");
     passed(&reports[0]);
+    // Skipping is not failing, so its values last too.
+    let skipped = smol::block_on(pre_request(
+        request(r#"pm.variables.set("step", "skipped"); pm.execution.skipRequest();"#),
+        variables(),
+        executor(),
+        Arc::new(AtomicBool::new(false)),
+    ));
+    assert!(skipped.is_err());
+    assert_eq!(locals.get()["step"], "skipped");
+    locals.set([("step".to_owned(), "one".to_owned())].into());
     // A failed phase leaves the values as they were.
     let failed = smol::block_on(pre_request(
         request(r#"pm.variables.set("step", "two"); throw new Error("stop");"#),

@@ -37,6 +37,14 @@ pub enum CollectionPanelEvent {
     CollectionDeleted {
         path: PathBuf,
     },
+    /// A folder was renamed or moved. Its requests' relocations follow.
+    FolderRelocated {
+        previous_path: PathBuf,
+        path: PathBuf,
+        name: SharedString,
+        /// The directory of the collection it is in now.
+        collection: PathBuf,
+    },
     RequestRelocated {
         id: SharedString,
         previous_path: PathBuf,

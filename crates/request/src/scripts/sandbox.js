@@ -7,6 +7,13 @@
     // The Collection Runner's data file row, which `{{name}}` prefers to
     // every scope and `pm.variables` overrides.
     const data = object(input.variables.data ?? {});
+    // How `{{name}}` writes a row's value: text as it is, other JSON values
+    // as JSON.
+    const dataText = key => {
+        if (!Object.hasOwn(data, key)) return undefined;
+        const value = data[key];
+        return typeof value === "string" ? value : value === null ? "" : stringify(value);
+    };
     // From lowest to highest: the environment covers the collection's
     // variables, which cover the globals. Null hides a name in its scope and
     // the scopes beneath it.
@@ -95,7 +102,9 @@
             replaceIn: text => substitute(text, read),
         };
     }
-    const visibleValue = key => variables[key] ?? data[key] ?? scopeValue(key, 2);
+    const visibleValue = key => variables[key] ?? dataText(key) ?? scopeValue(key, 2);
+    // Reading a row's value gives it as the data file has it, as in Postman.
+    const visibleTyped = key => variables[key] ?? (Object.hasOwn(data, key) ? data[key] : scopeValue(key, 2));
     const visibleVariables = () => Object.assign(scopeValues(2), data, variables);
     const replaceIn = text => substitute(text, visibleValue);
 
@@ -118,8 +127,8 @@
 
     const pm = {
         variables: {
-            get: key => visibleValue(String(key)),
-            has: key => visibleValue(String(key)) !== undefined,
+            get: key => visibleTyped(String(key)),
+            has: key => visibleTyped(String(key)) !== undefined,
             set(key, value) { variables[String(key)] = String(value); },
             unset(key) { delete variables[key]; },
             clear() { for (const key of Object.keys(variables)) delete variables[key]; },
@@ -132,7 +141,7 @@
             unset(key) { delete data[String(key)]; },
             toObject: () => ({...data}),
             toJSON: () => ({...data}),
-            replaceIn: text => substitute(text, key => data[key]),
+            replaceIn: text => substitute(text, dataText),
         },
         info: Object.freeze({
             eventName: input.info?.eventName ?? "",

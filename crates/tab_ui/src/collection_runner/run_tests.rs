@@ -1,6 +1,6 @@
 use request::{ExecutionError, NextRequest, ScriptLog, ScriptPhase, ScriptReport};
 
-use super::run::{Cursor, Outcome, Position, RunRequest, RunResult, chosen_request};
+use super::run::{Cursor, Kept, Outcome, Position, RunRequest, RunResult, Totals, chosen_request};
 
 fn requests(names: &[&str]) -> Vec<RunRequest> {
     names
@@ -104,8 +104,10 @@ fn skipped_and_failed_requests_keep_their_scripts() {
         iteration: 0,
         index: 0,
     };
+    let mut kept = usize::MAX;
     let skipped = RunResult::new(
         position,
+        request::Method::Get,
         Err(ExecutionError::ScriptedRequest {
             source: Box::new(ExecutionError::Skipped {
                 reason: "No token".into(),
@@ -113,7 +115,7 @@ fn skipped_and_failed_requests_keep_their_scripts() {
             }),
             reports: vec![report(None), report(None)],
         }),
-        true,
+        Some(&mut kept),
         false,
     );
 
@@ -125,14 +127,141 @@ fn skipped_and_failed_requests_keep_their_scripts() {
 
     let failed = RunResult::new(
         position,
+        request::Method::Get,
         Err(ExecutionError::Variables(
             "Unknown variable {{host}}".into(),
         )),
-        true,
+        Some(&mut kept),
         true,
     );
 
     assert!(matches!(&failed.outcome, Outcome::Failed(message) if message.contains("{{host}}")));
     assert!(failed.scripts.is_empty());
     assert!(failed.is_error());
+}
+
+fn response(body: &[u8], method: request::Method) -> request::Execution {
+    request::Execution {
+        response: request::Response::Http(request::HttpResponse {
+            status: request::StatusCode::OK,
+            version: request::Version::HTTP_11,
+            headers: Default::default(),
+            body: body.to_vec(),
+            metrics: Default::default(),
+        }),
+        elapsed: std::time::Duration::from_millis(10),
+        scripts: vec![report(None)],
+        sent: Some(request::HttpRequest {
+            method,
+            path: "https://example.com/sent".into(),
+            ..Default::default()
+        }),
+    }
+}
+
+#[test]
+fn responses_are_kept_within_the_run_limit_with_the_method_sent() {
+    let position = Position {
+        iteration: 0,
+        index: 0,
+    };
+    let mut remaining = 5;
+
+    let kept = RunResult::new(
+        position,
+        request::Method::Get,
+        Ok(response(b"1234", request::Method::Post)),
+        Some(&mut remaining),
+        true,
+    );
+    let over = RunResult::new(
+        position,
+        request::Method::Get,
+        Ok(response(b"56", request::Method::Get)),
+        Some(&mut remaining),
+        true,
+    );
+    let off = RunResult::new(
+        position,
+        request::Method::Get,
+        Ok(response(b"7", request::Method::Get)),
+        None,
+        true,
+    );
+
+    // The pre-request script's method, not the saved one.
+    assert_eq!(kept.method, request::Method::Post);
+    assert_eq!(kept.url.as_deref(), Some("https://example.com/sent"));
+    assert_eq!(kept.scripts.len(), 1);
+    assert!(matches!(
+        &kept.outcome,
+        Outcome::Response { response: Kept::Response(execution), .. } if execution.scripts.is_empty()
+    ));
+    assert_eq!(remaining, 1);
+    assert!(matches!(
+        over.outcome,
+        Outcome::Response {
+            response: Kept::OverLimit,
+            ..
+        }
+    ));
+    assert!(matches!(
+        off.outcome,
+        Outcome::Response {
+            response: Kept::Off,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn totals_count_tests_skips_errors_and_response_times() {
+    let position = Position {
+        iteration: 0,
+        index: 0,
+    };
+    let mut passing = report(None);
+    passing.tests = vec![
+        request::ScriptTest {
+            name: "ok".into(),
+            error: None,
+        },
+        request::ScriptTest {
+            name: "bad".into(),
+            error: Some("expected".into()),
+        },
+    ];
+    let mut execution = response(b"", request::Method::Get);
+    execution.scripts = vec![passing];
+    let mut totals = Totals::default();
+
+    totals.add(&RunResult::new(
+        position,
+        request::Method::Get,
+        Ok(execution),
+        None,
+        true,
+    ));
+    totals.add(&RunResult::new(
+        position,
+        request::Method::Get,
+        Err(ExecutionError::Skipped {
+            reason: "No token".into(),
+            report: Box::new(report(None)),
+        }),
+        None,
+        true,
+    ));
+    totals.add(&RunResult::new(
+        position,
+        request::Method::Get,
+        Err(ExecutionError::Variables("Unknown variable".into())),
+        None,
+        true,
+    ));
+
+    assert_eq!((totals.passed, totals.failed, totals.tests()), (1, 1, 2));
+    assert_eq!((totals.skipped, totals.errors), (1, 1));
+    assert_eq!(totals.average(), Some(std::time::Duration::from_millis(10)));
+    assert_eq!(Totals::default().average(), None);
 }

@@ -21,7 +21,7 @@ pub struct RequestVariables {
     /// Values `{{$name}}` resolves to instead of generating new ones, set by
     /// a gRPC call's Before invoke script for the whole call.
     pub(crate) generated: BTreeMap<String, String>,
-    pub(crate) iteration_data: BTreeMap<String, String>,
+    pub(crate) iteration_data: BTreeMap<String, serde_json::Value>,
     pub(crate) info: ExecutionInfo,
     pub(crate) locals: Option<LocalVariables>,
 }
@@ -51,8 +51,9 @@ impl RequestVariables {
     }
 
     /// Values of a Collection Runner's data file row. `{{name}}` prefers them
-    /// to every scope, and scripts read them with `pm.iterationData`.
-    pub fn with_iteration_data(mut self, data: BTreeMap<String, String>) -> Self {
+    /// to every scope, and scripts read them with `pm.iterationData`, typed
+    /// as a JSON file gives them.
+    pub fn with_iteration_data(mut self, data: BTreeMap<String, serde_json::Value>) -> Self {
         self.iteration_data = data;
         self
     }

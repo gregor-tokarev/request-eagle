@@ -2,13 +2,15 @@ use gpui_kit::base::SelectableText;
 use gpui_kit::component::{
     button::*,
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
+    scroll::ScrollableElement as _,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::{Execution, HttpResponse, Response, ScriptReport};
 use request_eagle_theme::method_label;
 
 use super::results::request_title;
-use super::run::Outcome;
+use super::run::{KEPT_BODY_LIMIT, Kept, Outcome};
 use super::runner::{CollectionRunner, Run};
 use crate::response_view::{ResponseContent, ResponseView};
 
@@ -37,7 +39,7 @@ impl CollectionRunner {
         self.detail_task = None;
 
         let Outcome::Response {
-            response: Some(response),
+            response: Kept::Response(execution),
             ..
         } = &result.outcome
         else {
@@ -46,9 +48,8 @@ impl CollectionRunner {
             return;
         };
 
-        let mut execution = response.clone().into_execution();
-        execution.scripts = result.scripts.clone();
-        execution.sent = result.sent.clone();
+        let execution = execution.clone();
+        let scripts = result.scripts.clone();
         let url = result.url.clone().unwrap_or_default();
         let view = self
             .detail
@@ -56,9 +57,11 @@ impl CollectionRunner {
             .clone();
         view.update(cx, |view, cx| view.start(cx));
 
-        // Formatting a large body takes a while, as it does after sending.
-        let content =
-            cx.background_spawn(async move { ResponseContent::new(execution).named_after(&url) });
+        // Copying and formatting a large body takes a while, as it does
+        // after sending.
+        let content = cx.background_spawn(async move {
+            ResponseContent::new(shown(&execution, scripts)).named_after(&url)
+        });
         self.detail_task = Some(cx.spawn_in(window, async move |_, cx| {
             let content = content.await;
             let _ = view.update_in(cx, |view, window, cx| view.finish(Ok(content), window, cx));
@@ -112,9 +115,25 @@ impl CollectionRunner {
             (
                 Some(view),
                 Outcome::Response {
-                    response: Some(_), ..
+                    response: Kept::Response(_),
+                    ..
                 },
             ) => view.clone().into_any_element(),
+            (
+                _,
+                Outcome::Response {
+                    response: Kept::OverLimit,
+                    ..
+                },
+            ) => unavailable(
+                IconName::Inbox,
+                "Response not kept",
+                format!(
+                    "A run keeps {} MB of responses, and earlier responses used it up.",
+                    KEPT_BODY_LIMIT / (1024 * 1024)
+                ),
+                cx,
+            ),
             (_, Outcome::Response { .. }) => unavailable(
                 IconName::Inbox,
                 "Response not kept",
@@ -139,9 +158,11 @@ impl CollectionRunner {
             .border_color(theme.border)
             .child(
                 v_flex()
+                    .id("run-detail-iterations")
                     .flex_none()
                     .h_full()
                     .w_10()
+                    .overflow_y_scrollbar()
                     .pt_1()
                     .gap_1()
                     .items_center()
@@ -174,7 +195,7 @@ impl CollectionRunner {
                             .child(
                                 div()
                                     .flex_none()
-                                    .child(method_label(request.request.method.as_str(), cx)),
+                                    .child(method_label(result.method.as_str(), cx)),
                             )
                             .child(
                                 div()
@@ -238,4 +259,22 @@ fn unavailable(
             ),
         )
         .into_any_element()
+}
+
+/// A kept response to show, with the result's scripts' reports.
+fn shown(execution: &Execution, scripts: Vec<ScriptReport>) -> Execution {
+    let Response::Http(response) = &execution.response;
+
+    Execution {
+        response: Response::Http(HttpResponse {
+            status: response.status,
+            version: response.version,
+            headers: response.headers.clone(),
+            body: response.body.clone(),
+            metrics: response.metrics,
+        }),
+        elapsed: execution.elapsed,
+        scripts,
+        sent: execution.sent.clone(),
+    }
 }

@@ -1,7 +1,9 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use gpui_kit::SharedString;
-use request::{Execution, ExecutionError, HttpRequest, NextRequest, Response, ScriptReport};
+use request::{
+    Execution, ExecutionError, HttpRequest, Method, NextRequest, Response, ScriptReport,
+};
 
 /// A saved HTTP request that a run can send.
 #[derive(Clone, Debug)]
@@ -111,20 +113,19 @@ pub(crate) fn chosen_request(scripts: &[ScriptReport]) -> Option<&NextRequest> {
 /// What one request of a run did.
 pub(crate) struct RunResult {
     pub position: Position,
+    /// The method it went out with, which a pre-request script can change.
+    pub method: Method,
     pub outcome: Outcome,
     pub scripts: Vec<ScriptReport>,
     /// Where the request went, once its variables resolved.
     pub url: Option<String>,
-    /// The request as it went out, kept with the response.
-    pub sent: Option<HttpRequest>,
 }
 
 pub(crate) enum Outcome {
     Response {
         status: request::StatusCode,
         elapsed: Duration,
-        /// Kept while responses persist for the session.
-        response: Option<request_history::Response>,
+        response: Kept,
     },
     /// A pre-request script skipped the request.
     Skipped(String),
@@ -132,32 +133,61 @@ pub(crate) enum Outcome {
     Failed(String),
 }
 
+/// Whether a result keeps its response to show after the run.
+pub(crate) enum Kept {
+    /// The response and the request as it went out. Its scripts' reports
+    /// are the result's.
+    Response(Arc<Execution>),
+    /// Persist responses for a session is off.
+    Off,
+    /// The run keeps no more response bodies.
+    OverLimit,
+}
+
+/// How many bytes of response bodies a run keeps, so a long run cannot fill
+/// the memory with them.
+pub(crate) const KEPT_BODY_LIMIT: usize = 256 * 1024 * 1024;
+
 impl RunResult {
-    /// `persist` keeps the response's headers and body to show later; `logs`
-    /// keeps the scripts' console output.
+    /// `method` is the saved request's. `kept` is how many more response
+    /// body bytes the run keeps, or None while responses are not kept;
+    /// `logs` keeps the scripts' console output.
     pub fn new(
         position: Position,
+        method: Method,
         result: Result<Execution, ExecutionError>,
-        persist: bool,
+        kept: Option<&mut usize>,
         logs: bool,
     ) -> Self {
+        let mut method = method;
         let mut url = None;
-        let mut sent = None;
         let (outcome, mut scripts) = match result {
             Ok(mut execution) => {
-                url = execution.sent.as_ref().map(crate::response_view::sent_url);
-                if persist {
-                    sent = execution.sent.take();
+                if let Some(sent) = &execution.sent {
+                    url = Some(crate::response_view::sent_url(sent));
+                    method = sent.method;
                 }
-
+                let scripts = std::mem::take(&mut execution.scripts);
                 let Response::Http(response) = &execution.response;
-                let outcome = Outcome::Response {
-                    status: response.status,
-                    elapsed: execution.elapsed,
-                    response: persist.then(|| request_history::Response::new(&execution)),
+                let (status, elapsed, size) =
+                    (response.status, execution.elapsed, response.body.len());
+                let response = match kept {
+                    None => Kept::Off,
+                    Some(remaining) if size > *remaining => Kept::OverLimit,
+                    Some(remaining) => {
+                        *remaining -= size;
+                        Kept::Response(Arc::new(execution))
+                    }
                 };
 
-                (outcome, std::mem::take(&mut execution.scripts))
+                (
+                    Outcome::Response {
+                        status,
+                        elapsed,
+                        response,
+                    },
+                    scripts,
+                )
             }
             Err(error) => {
                 // Earlier scripts' reports wrap a failure or skip in a later script.
@@ -192,10 +222,10 @@ impl RunResult {
 
         Self {
             position,
+            method,
             outcome,
             scripts,
             url,
-            sent,
         }
     }
 
@@ -207,5 +237,50 @@ impl RunResult {
     pub fn is_error(&self) -> bool {
         matches!(self.outcome, Outcome::Failed(_))
             || self.scripts.iter().any(|report| report.error.is_some())
+    }
+}
+
+/// A run's counts so far, kept as results arrive, so showing them does not
+/// take longer as the run grows.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Totals {
+    pub passed: usize,
+    pub failed: usize,
+    /// Requests that a pre-request script skipped.
+    pub skipped: usize,
+    /// Requests that could not be sent or whose scripts failed.
+    pub errors: usize,
+    responses: u32,
+    elapsed: Duration,
+}
+
+impl Totals {
+    pub fn add(&mut self, result: &RunResult) {
+        for test in result.tests() {
+            match test.error {
+                None => self.passed += 1,
+                Some(_) => self.failed += 1,
+            }
+        }
+
+        match result.outcome {
+            Outcome::Response { elapsed, .. } => {
+                self.responses += 1;
+                self.elapsed += elapsed;
+            }
+            Outcome::Skipped(_) => self.skipped += 1,
+            Outcome::Failed(_) => {}
+        }
+
+        self.errors += usize::from(result.is_error());
+    }
+
+    pub fn tests(&self) -> usize {
+        self.passed + self.failed
+    }
+
+    /// The average response time.
+    pub fn average(&self) -> Option<Duration> {
+        (self.responses > 0).then(|| self.elapsed / self.responses)
     }
 }

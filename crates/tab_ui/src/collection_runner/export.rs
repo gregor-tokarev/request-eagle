@@ -27,7 +27,7 @@ fn report(name: &str, run: &Run) -> Value {
                 "id": request.id,
                 "name": request.name,
                 "folders": request.folders,
-                "method": request.request.method.as_str(),
+                "method": result.method.as_str(),
                 "url": result.url.as_deref().unwrap_or(&request.request.path),
                 "status": status,
                 "time": time,

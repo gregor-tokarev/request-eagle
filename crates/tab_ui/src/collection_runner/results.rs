@@ -5,7 +5,7 @@ use gpui_kit::component::{button::*, scroll::Scrollbar, tag::Tag, tooltip::Toolt
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_label;
 
-use super::run::{Outcome, RunRequest, RunResult};
+use super::run::{Outcome, RunRequest, RunResult, Totals};
 use super::runner::{CollectionRunner, Run, RunStatus};
 use crate::response_view::status_color;
 
@@ -106,55 +106,6 @@ impl ResultsState {
     }
 }
 
-/// The run's counts, as the summary and the filters show them.
-struct Summary {
-    tests: usize,
-    passed: usize,
-    failed: usize,
-    skipped: usize,
-    errors: usize,
-    average: Option<Duration>,
-}
-
-impl Summary {
-    fn new(run: &Run) -> Self {
-        let (passed, failed) =
-            run.results
-                .iter()
-                .flat_map(RunResult::tests)
-                .fold((0, 0), |(passed, failed), test| match test.error {
-                    None => (passed + 1, failed),
-                    Some(_) => (passed, failed + 1),
-                });
-        let times = run
-            .results
-            .iter()
-            .filter_map(|result| match result.outcome {
-                Outcome::Response { elapsed, .. } => Some(elapsed),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        Self {
-            tests: passed + failed,
-            passed,
-            failed,
-            skipped: run
-                .results
-                .iter()
-                .filter(|result| matches!(result.outcome, Outcome::Skipped(_)))
-                .count(),
-            errors: run
-                .results
-                .iter()
-                .filter(|result| result.is_error())
-                .count(),
-            average: (!times.is_empty())
-                .then(|| times.iter().sum::<Duration>() / times.len() as u32),
-        }
-    }
-}
-
 /// A run's duration as Postman writes it, such as `1s 458ms`.
 fn duration_label(duration: Duration) -> String {
     let milliseconds = duration.as_millis();
@@ -252,7 +203,7 @@ impl CollectionRunner {
         let Some(run) = &self.run else {
             return div().into_any_element();
         };
-        let summary = Summary::new(run);
+        let summary = &run.totals;
 
         v_flex()
             .debug_selector(|| "runner-results".into())
@@ -263,9 +214,9 @@ impl CollectionRunner {
             .pb_2()
             .gap_3()
             .text_sm()
-            .child(self.results_header(run, &summary, cx))
-            .child(summary_band(run, &summary, cx))
-            .child(self.filters(&summary, cx))
+            .child(self.results_header(run, summary, cx))
+            .child(summary_band(run, summary, cx))
+            .child(self.filters(summary, cx))
             .child(
                 h_flex()
                     .flex_1()
@@ -283,7 +234,7 @@ impl CollectionRunner {
     fn results_header(
         &self,
         run: &Run,
-        summary: &Summary,
+        summary: &Totals,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let theme = cx.theme();
@@ -366,6 +317,8 @@ impl CollectionRunner {
                                 .small()
                                 .icon(IconName::Play)
                                 .label("Run Again")
+                                .loading(self.preparing.is_some())
+                                .disabled(self.preparing.is_some())
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.run_again(window, cx)),
                                 ),
@@ -445,10 +398,10 @@ impl CollectionRunner {
             )
     }
 
-    fn filters(&self, summary: &Summary, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn filters(&self, summary: &Totals, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let filters = [
-            (ResultFilter::All, "All", Some((summary.tests, None))),
+            (ResultFilter::All, "All", Some((summary.tests(), None))),
             (
                 ResultFilter::Passed,
                 "Passed",
@@ -475,6 +428,7 @@ impl CollectionRunner {
         Tabs::new("run-result-filters")
             .flex()
             .flex_none()
+            .flex_wrap()
             .gap_1()
             .children(filters.into_iter().map(|(filter, label, count)| {
                 let selected = self.results.filter == filter;
@@ -772,7 +726,7 @@ impl CollectionRunner {
                     .child(
                         div()
                             .flex_none()
-                            .child(method_label(request.request.method.as_str(), cx)),
+                            .child(method_label(result.method.as_str(), cx)),
                     )
                     .child(request_title(request, cx)),
             )
@@ -840,14 +794,14 @@ fn line(label: Div, text: impl Into<SharedString>, error: Option<String>, cx: &A
         .into_any_element()
 }
 
-fn summary_band(run: &Run, summary: &Summary, cx: &App) -> impl IntoElement + use<> {
+fn summary_band(run: &Run, summary: &Totals, cx: &App) -> impl IntoElement + use<> {
     let theme = cx.theme();
     let values = [
         ("Source", "Runner".to_owned(), None),
         ("Environment", run.environment.to_string(), None),
         ("Iterations", run.iterations.to_string(), None),
         ("Duration", duration_label(run.duration()), None),
-        ("All tests", summary.tests.to_string(), None),
+        ("All tests", summary.tests().to_string(), None),
         (
             "Errors",
             summary.errors.to_string(),
@@ -855,7 +809,7 @@ fn summary_band(run: &Run, summary: &Summary, cx: &App) -> impl IntoElement + us
         ),
         (
             "Avg. Resp. Time",
-            summary.average.map_or_else(
+            summary.average().map_or_else(
                 || "–".to_owned(),
                 |average| format!("{} ms", average.as_millis()),
             ),
