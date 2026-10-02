@@ -288,12 +288,22 @@ jobs:
         timeout-minutes: 30
         run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p collection -p environment -p history -p request --lib
 
-      # One at a time, so the log names a test that hangs. A step timeout
-      # keeps the log, unlike a job timeout.
+      # One at a time, so the log names a test that hangs. Windows does not
+      # stop a hung test at a step timeout, so this stops it and keeps the log.
       - name: Test sending requests
         if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        run: cargo test --locked --no-fail-fast -p request --tests -- --test-threads=1
+        run: |
+          cargo test --locked --no-run -p request --tests
+          $log = "$env:RUNNER_TEMP\request-tests.log"
+          $tests = Start-Process cargo -NoNewWindow -PassThru `
+            -ArgumentList 'test', '--locked', '--no-fail-fast', '-p', 'request', '--tests', '--', '--test-threads=1' `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+
+          $finished = $tests.WaitForExit(15 * 60 * 1000)
+          if (-not $finished) { taskkill /T /F /PID $tests.Id | Out-Null }
+          Get-Content "$log.err", $log
+          if (-not $finished) { throw 'A request test hung' }
+          if ($tests.ExitCode -ne 0) { throw "Request tests failed with code $($tests.ExitCode)" }
 
       - name: Store credentials in Windows Credential Manager
         if: ${{ !cancelled() }}
