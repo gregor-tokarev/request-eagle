@@ -2,10 +2,11 @@
 //! snippets: long option names, single quotes and one option per line.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Body, CookieJar, Field, HttpRequest, Method};
+use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -20,6 +21,7 @@ impl HttpRequest {
         cookies: Option<&CookieJar>,
     ) -> String {
         let mut request = self.clone();
+        request.auth = request.auth.sending();
         // Sending leaves these bodies out before it resolves anything.
         if matches!(request.method, Method::Get | Method::Head) {
             request.body = None;
@@ -29,6 +31,9 @@ impl HttpRequest {
         for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
             field.key = keep_unknown(&field.key, values);
             field.value = keep_unknown(&field.value, values);
+        }
+        for text in request.auth.texts_mut() {
+            *text = keep_unknown(text, values);
         }
         match &mut request.body {
             Some(Body::Raw { text, .. }) => *text = keep_unknown(text, values),
@@ -71,6 +76,7 @@ impl HttpRequest {
                 .path
                 .replace(&format!("\u{E000}{index}\u{E000}"), reference);
         }
+        let auth = authorization(&mut request);
         // Rows that are switched off are not sent, also when the request is
         // written as it is.
         let mut headers = Field::pairs(&request.headers);
@@ -144,6 +150,15 @@ impl HttpRequest {
             command.push_str(&quote(&header));
         }
 
+        for (option, value) in auth {
+            command.push_str(" \\\n--");
+            command.push_str(option);
+            if let Some(value) = value {
+                command.push(' ');
+                command.push_str(&quote(&value));
+            }
+        }
+
         for (option, value) in data {
             command.push_str(" \\\n--");
             command.push_str(option);
@@ -152,6 +167,121 @@ impl HttpRequest {
         }
 
         command
+    }
+}
+
+/// The options that send the request's resolved authorization. cURL
+/// computes Basic, Digest and header AWS signatures itself. The credentials
+/// of the others, including a presigned AWS query, are added to the request
+/// as sending adds them now, over the body cURL sends. One that cannot be
+/// made, such as a JWT without its key, is left out.
+fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>)> {
+    let auth = std::mem::take(&mut request.auth);
+    let own_authorization = Field::enabled(&request.headers)
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
+    let user = |username: &str, password: &str| ("user", Some(format!("{username}:{password}")));
+
+    match &auth {
+        _ if own_authorization
+            && auth
+                .credential_name()
+                .is_some_and(|(_, name)| name == "Authorization") =>
+        {
+            Vec::new()
+        }
+        Auth::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
+        Auth::Basic(auth) => vec![user(&auth.username, &auth.password)],
+        Auth::Digest(auth) => vec![("digest", None), user(&auth.username, &auth.password)],
+        // A presigned query covers the body unless it is S3's, which cURL
+        // reads from files only when it sends them; cURL signs those itself.
+        Auth::AwsSignature(aws)
+            if aws.add_to == AuthLocation::Header
+                || (aws.service.trim() != "s3"
+                    && matches!(
+                        request.body,
+                        Some(Body::Multipart { .. } | Body::Binary { .. })
+                    )) =>
+        {
+            if !aws.session_token.is_empty() {
+                request.headers.push(Field::new(
+                    "X-Amz-Security-Token",
+                    aws.session_token.clone(),
+                ));
+            }
+
+            vec![
+                (
+                    "aws-sigv4",
+                    Some(format!(
+                        "aws:amz:{}:{}",
+                        aws.region.trim(),
+                        aws.service.trim()
+                    )),
+                ),
+                user(aws.access_key.trim(), aws.secret_key.trim()),
+            ]
+        }
+        auth => {
+            // Only a presigned AWS query signs the body.
+            let body = match auth {
+                Auth::AwsSignature(_) => sent_body(request.body.as_ref()).unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            let form = match &request.body {
+                Some(Body::UrlEncoded { fields }) => fields.clone(),
+                _ => Vec::new(),
+            };
+            let _ = crate::auth::authorize(
+                auth,
+                request.method.as_str(),
+                &request.path,
+                &mut request.query,
+                &mut request.headers,
+                &body,
+                &form,
+            );
+
+            Vec::new()
+        }
+    }
+}
+
+/// The bytes cURL sends for a body that it does not read from files.
+pub(crate) fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
+    // `--data-urlencode` keeps the unreserved characters of a value, writes
+    // a space as `+` and escapes the rest. A field without a name sends its
+    // value alone.
+    let escape = |value: &str| {
+        let mut escaped = String::with_capacity(value.len());
+        for byte in value.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    escaped.push(char::from(byte));
+                }
+                b' ' => escaped.push('+'),
+                byte => {
+                    let _ = write!(escaped, "%{byte:02X}");
+                }
+            }
+        }
+        escaped
+    };
+
+    match body {
+        None => Some(Vec::new()),
+        Some(Body::Raw { text, .. }) => Some(text.clone().into_bytes()),
+        Some(Body::UrlEncoded { fields }) => Some(
+            fields
+                .iter()
+                .map(|(name, value)| match name.as_str() {
+                    "" => escape(value),
+                    name => format!("{}={}", form_encode(name), escape(value)),
+                })
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        ),
+        Some(Body::Multipart { .. } | Body::Binary { .. }) => None,
     }
 }
 

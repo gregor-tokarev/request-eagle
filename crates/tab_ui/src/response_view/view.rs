@@ -21,6 +21,7 @@ enum Section {
     Body,
     Cookies,
     Headers,
+    Request,
     Tests,
     Console,
 }
@@ -49,6 +50,8 @@ pub struct ResponseView {
     /// the response it saved.
     pub(super) responses: u64,
     pub(super) save_task: Option<Task<()>>,
+    /// Whether a section shows the request as it went out.
+    request_section: bool,
 }
 
 impl ResponseView {
@@ -72,7 +75,15 @@ impl ResponseView {
             saved: None,
             responses: 0,
             save_task: None,
+            request_section: false,
         }
+    }
+
+    /// Add a section that shows the request as it went out, as the
+    /// Collection Runner does for each request it sends.
+    pub(crate) fn with_request_section(mut self) -> Self {
+        self.request_section = true;
+        self
     }
 
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
@@ -108,6 +119,7 @@ impl ResponseView {
             }),
             elapsed: std::time::Duration::ZERO,
             scripts: Vec::new(),
+            sent: None,
         });
 
         self.headers_list.reset(content.headers.len());
@@ -262,6 +274,7 @@ impl ResponseView {
                             ),
                             (Section::Cookies, "Cookies", cookies),
                             (Section::Headers, "Headers", headers),
+                            (Section::Request, "Request", 0),
                             (
                                 Section::Tests,
                                 "Test Results",
@@ -274,6 +287,9 @@ impl ResponseView {
                             ),
                         ]
                         .into_iter()
+                        .filter(|(section, _, _)| {
+                            *section != Section::Request || self.request_section
+                        })
                         .map(|(section, label, count)| {
                             let selected = self.section == section;
 
@@ -388,6 +404,7 @@ impl Render for ResponseView {
             },
             Section::Headers if has_response => self.headers(false, cx),
             Section::Cookies if has_response => self.headers(true, cx),
+            Section::Request if has_response => self.sent_request(cx),
             _ => self.empty_state(window, cx),
         };
 

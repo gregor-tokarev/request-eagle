@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use environment::EnvironmentSession;
-use request::{Body, Execution, Field, HttpRequest, RequestScripts, RequestVariables, Response};
+use request::{
+    Auth, Body, Execution, Field, HttpRequest, RequestScripts, RequestVariables, Response,
+};
 use serde_json::{Map, Value, json};
 
 /// A saved request an HTTP Request block sends, with what its variables
@@ -22,6 +24,8 @@ pub struct SavedRequest {
     /// The collection's scripts, which run around the request's own, or
     /// why they could not be read, which stops the request from sending.
     pub scripts: Result<RequestScripts, String>,
+    /// What the request sends when it inherits its collection's authorization.
+    pub auth: Auth,
     pub session: EnvironmentSession,
 }
 
@@ -35,6 +39,7 @@ impl SavedRequest {
             self.session.clone(),
         )
         .with_collection_scripts(self.scripts.clone())
+        .with_collection_auth(self.auth.clone())
         .with_local_values(inputs)
     }
 }

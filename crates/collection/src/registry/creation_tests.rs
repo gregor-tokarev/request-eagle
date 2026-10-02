@@ -4,7 +4,10 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Body, Field, Method, Request, WebSocketRequest, WebSocketSettings};
+use request::{
+    Auth, Body, Field, Method, OAuth2Auth, PasswordAuth, Request, WebSocketRequest,
+    WebSocketSettings,
+};
 
 struct Fixture(PathBuf);
 
@@ -183,6 +186,11 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
         url: "wss://{{host}}/feed".into(),
         headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         query: vec![Field::new("room", "42")],
+        auth: Auth::OAuth2(Box::new(OAuth2Auth {
+            access_token: "{{token}}".into(),
+            client_id: "app".into(),
+            ..OAuth2Auth::default()
+        })),
         message: "{\"subscribe\":\"prices\"}".into(),
         settings: WebSocketSettings {
             timeout_ms: Some(0),
@@ -208,12 +216,25 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
     request.query.clear();
     request.message.clear();
     request.settings.timeout_ms = None;
+    // Another kind of authorization keeps none of the previous one's fields.
+    request.auth = Auth::Basic(PasswordAuth {
+        username: "user".into(),
+        password: String::new(),
+    });
     registry
         .update_request(&path, &file.id, request.clone().into())
         .unwrap();
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains("verify_certificates = false"), "{content}");
-    for field in ["headers", "query", "message", "timeout_ms"] {
+    assert!(content.contains("type = \"basic\""), "{content}");
+    for field in [
+        "headers",
+        "query",
+        "message",
+        "timeout_ms",
+        "access_token",
+        "client_id",
+    ] {
         assert!(!content.contains(field), "{field} remained in {content}");
     }
     let Request::WebSocket(saved) = crate::FileEntry::from_path(&path).unwrap().request else {

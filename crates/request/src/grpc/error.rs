@@ -22,6 +22,10 @@ pub enum GrpcError {
     #[error("{0}")]
     Variables(String),
 
+    /// The request's authorization could not be added.
+    #[error("{0}")]
+    Auth(String),
+
     #[error("invalid metadata: {0}")]
     InvalidMetadata(String),
 

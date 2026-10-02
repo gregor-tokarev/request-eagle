@@ -1,5 +1,9 @@
 use collection::ImportedItem;
-use request::{Body, Field, FormPart, HttpRequest, Method, Request};
+use request::{
+    ApiKeyAuth, Auth, AuthLocation, AwsSignatureAuth, BearerAuth, Body, Field, FormPart,
+    HttpRequest, JwtAlgorithm, JwtAuth, Method, OAuth1Auth, OAuth1Signature, OAuth2Auth,
+    OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth, Request,
+};
 
 use crate::document_tests::parse_collection;
 
@@ -133,9 +137,16 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
                 description: "Server traces".into(),
                 ..Field::new("X-Debug", "1")
             },
-            Field::new("Authorization", "Bearer {{token}}"),
         ]
     );
+    // The collection's authorization is its own, which requests inherit.
+    assert_eq!(
+        collection.auth,
+        Auth::Bearer(BearerAuth {
+            token: "{{token}}".into()
+        })
+    );
+    assert_eq!(find.auth, Auth::Inherit);
     // Folder scripts run before the request's own, each in its own block.
     assert_eq!(
         find.scripts.post_response,
@@ -147,6 +158,7 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     assert_eq!(add.body, Some(Body::json(r#"{"name": "Rex"}"#)));
     // JSON bodies are sent as JSON without a header of their own.
     assert!(add.headers.is_empty());
+    assert_eq!(add.auth, Auth::None);
 }
 
 #[test]
@@ -191,7 +203,7 @@ fn postman_request_settings_keep_redirects_and_certificate_checks() {
 }
 
 #[test]
-fn postman_forms_and_basic_auth_are_encoded() {
+fn postman_forms_and_basic_auth_are_kept() {
     let import = parse_collection(COLLECTION).unwrap();
     let (name, login) = http(&import.collection.items[1]);
 
@@ -209,38 +221,134 @@ fn postman_forms_and_basic_auth_are_encoded() {
         })
     );
     assert!(login.scripts.pre_request.is_empty());
+    assert!(login.headers.is_empty());
     assert_eq!(
-        login.headers,
-        [Field::new("Authorization", "Basic YWRtaW46c2VjcmV0")]
+        login.auth,
+        Auth::Basic(PasswordAuth {
+            username: "admin".into(),
+            password: "secret".into(),
+        })
     );
 }
 
 #[test]
-fn postman_basic_auth_with_variables_is_encoded_when_sending() {
+fn postman_authorizations_keep_their_settings() {
     let import = parse_collection(
         r#"{
             "info": {"name": "Auth"},
-            "item": [{
-                "name": "Me",
-                "event": [{"listen": "prerequest", "script": {"exec": "console.log('me')"}}],
-                "request": {
-                    "auth": {"type": "basic", "basic": {"username": "{{user}}", "password": "{{password}}"}},
-                    "url": "https://example.com/me"
-                }
-            }]
+            "item": [
+                {"name": "Folder", "auth": {"type": "digest", "digest": {"username": "{{user}}", "password": "{{password}}"}}, "item": [
+                    {"name": "Inherits the folder's", "request": {"url": "https://example.com/digest"}}
+                ]},
+                {"name": "OAuth 1.0", "request": {"url": "https://example.com", "auth": {"type": "oauth1", "oauth1": [
+                    {"key": "signatureMethod", "value": "HMAC-SHA256"},
+                    {"key": "consumerKey", "value": "key"},
+                    {"key": "consumerSecret", "value": "secret"},
+                    {"key": "token", "value": "token"},
+                    {"key": "tokenSecret", "value": "{{tokenSecret}}"},
+                    {"key": "addParamsToHeader", "value": false}
+                ]}}},
+                {"name": "OAuth 2.0", "request": {"url": "https://example.com", "auth": {"type": "oauth2", "oauth2": [
+                    {"key": "accessToken", "value": "{{access}}"},
+                    {"key": "addTokenTo", "value": "queryParams"},
+                    {"key": "grant_type", "value": "authorization_code_with_pkce"},
+                    {"key": "authUrl", "value": "https://id.example.com/authorize"},
+                    {"key": "accessTokenUrl", "value": "https://id.example.com/token"},
+                    {"key": "redirect_uri", "value": "https://oauth.pstmn.io/v1/callback"},
+                    {"key": "clientId", "value": "app"},
+                    {"key": "scope", "value": "openid"},
+                    {"key": "client_authentication", "value": "body"}
+                ]}}},
+                {"name": "JWT", "request": {"url": "https://example.com", "auth": {"type": "jwt", "jwt": [
+                    {"key": "algorithm", "value": "RS256"},
+                    {"key": "privateKey", "value": "{{key}}"},
+                    {"key": "payload", "value": "{\"sub\": \"me\"}"},
+                    {"key": "header", "value": "{}"},
+                    {"key": "addTokenTo", "value": "queryParam"},
+                    {"key": "queryParamKey", "value": "jwt"}
+                ]}}},
+                {"name": "AWS", "request": {"url": "https://example.com", "auth": {"type": "awsv4", "awsv4": [
+                    {"key": "accessKey", "value": "AKID"},
+                    {"key": "secretKey", "value": "{{secret}}"},
+                    {"key": "region", "value": "eu-west-1"},
+                    {"key": "service", "value": "execute-api"}
+                ]}}},
+                {"name": "API key", "request": {"url": "https://example.com", "auth": {"type": "apikey", "apikey": {"key": "X-Key", "value": "{{key}}"}}}},
+                {"name": "NTLM", "request": {"url": "https://example.com", "auth": {"type": "ntlm", "ntlm": []}}}
+            ]
         }"#,
     )
     .unwrap();
-    let (_, me) = http(&import.collection.items[0]);
+    let items = &import.collection.items;
 
-    assert!(me.headers.is_empty());
-    // Authorization follows the scripts that may set its credentials.
+    // Request Eagle has no folder authorization, so requests take their
+    // folder's as their own.
+    let (_, folder_items) = folder(&items[0]);
     assert_eq!(
-        me.scripts.pre_request,
-        "{\nconsole.log('me')\n}\n\n{\n\
-         pm.request.headers.upsert({key: \"Authorization\", value: \"Basic \" + \
-         pm.encoding.base64Encode(pm.variables.replaceIn(\"{{user}}:{{password}}\"))});\n}"
+        http(&folder_items[0]).1.auth,
+        Auth::Digest(PasswordAuth {
+            username: "{{user}}".into(),
+            password: "{{password}}".into(),
+        })
     );
+    assert_eq!(
+        http(&items[1]).1.auth,
+        Auth::OAuth1(Box::new(OAuth1Auth {
+            signature_method: OAuth1Signature::HmacSha256,
+            consumer_key: "key".into(),
+            consumer_secret: "secret".into(),
+            access_token: "token".into(),
+            token_secret: "{{tokenSecret}}".into(),
+            add_to: AuthLocation::Query,
+            ..OAuth1Auth::default()
+        }))
+    );
+    assert_eq!(
+        http(&items[2]).1.auth,
+        Auth::OAuth2(Box::new(OAuth2Auth {
+            access_token: "{{access}}".into(),
+            add_to: AuthLocation::Query,
+            grant_type: OAuth2Grant::AuthorizationCode,
+            pkce: true,
+            auth_url: "https://id.example.com/authorize".into(),
+            token_url: "https://id.example.com/token".into(),
+            client_id: "app".into(),
+            scope: "openid".into(),
+            client_authentication: OAuth2ClientAuthentication::Body,
+            // Postman's callback page returns to Postman.
+            ..OAuth2Auth::default()
+        }))
+    );
+    assert_eq!(
+        http(&items[3]).1.auth,
+        Auth::Jwt(Box::new(JwtAuth {
+            algorithm: JwtAlgorithm::Rs256,
+            private_key: "{{key}}".into(),
+            payload: "{\"sub\": \"me\"}".into(),
+            add_to: AuthLocation::Query,
+            query_param: "jwt".into(),
+            ..JwtAuth::default()
+        }))
+    );
+    assert_eq!(
+        http(&items[4]).1.auth,
+        Auth::AwsSignature(Box::new(AwsSignatureAuth {
+            access_key: "AKID".into(),
+            secret_key: "{{secret}}".into(),
+            region: "eu-west-1".into(),
+            service: "execute-api".into(),
+            ..AwsSignatureAuth::default()
+        }))
+    );
+    assert_eq!(
+        http(&items[5]).1.auth,
+        Auth::ApiKey(ApiKeyAuth {
+            key: "X-Key".into(),
+            value: "{{key}}".into(),
+            add_to: AuthLocation::Header,
+        })
+    );
+    assert_eq!(http(&items[6]).1.auth, Auth::None);
 }
 
 #[test]
@@ -360,5 +468,12 @@ fn postman_form_data_files_and_graphql_bodies_are_kept() {
 
     let (_, key) = http(&import.collection.items[4]);
     assert_eq!(key.method, Method::Get);
-    assert_eq!(key.query, [Field::new("api_key", "{{key}}")]);
+    assert_eq!(
+        key.auth,
+        Auth::ApiKey(ApiKeyAuth {
+            key: "api_key".into(),
+            value: "{{key}}".into(),
+            add_to: AuthLocation::Query,
+        })
+    );
 }

@@ -12,10 +12,13 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use preferences::Preferences;
-use request::{Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest};
+use request::{
+    Auth, Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest,
+};
 
 use super::message_log::MessageLog;
 use crate::actions::SendRequest;
+use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited};
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation, request_header};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
@@ -42,6 +45,7 @@ pub(crate) enum ConnectionState {
 pub(crate) enum WebSocketSection {
     Message,
     Params,
+    Auth,
     Headers,
     Settings,
 }
@@ -61,6 +65,10 @@ pub struct WebSocketDraft {
     params: Option<Entity<RequestFields>>,
     headers: Option<Entity<RequestFields>>,
     handshake_headers: Vec<(String, String)>,
+    auth: Option<Entity<AuthEditor>>,
+    /// The collection's authorization, which the request sends while it
+    /// inherits it. Read again when the tab is shown.
+    inherited: Option<Inherited>,
     pub(crate) message: Option<Entity<EditorState>>,
     message_vim: Option<Entity<crate::vim::Vim>>,
     message_completion: Option<Entity<VariableInput>>,
@@ -122,7 +130,13 @@ impl WebSocketDraft {
         Self {
             location,
             name: None,
-            handshake_headers: request::websocket_handshake_headers(&request.url, &request.headers),
+            handshake_headers: request::websocket_handshake_headers(
+                &request.url,
+                &request.headers,
+                &request.auth,
+            ),
+            auth: None,
+            inherited: None,
             saved_request: request.clone(),
             request,
             section: WebSocketSection::Message,
@@ -150,6 +164,61 @@ impl WebSocketDraft {
         }
     }
 
+    /// The authorization the request sends: its own, or its collection's
+    /// while it inherits it.
+    fn effective_auth(&self) -> Auth {
+        match (&self.request.auth, &self.inherited) {
+            (Auth::Inherit, Some(inherited)) => inherited.auth.clone(),
+            (auth, _) => auth.clone(),
+        }
+    }
+
+    /// Read the collection's authorization again, which another tab may
+    /// have changed.
+    fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
+        let inherited = self.location.as_ref().map(|location| Inherited {
+            name: location.collection.clone(),
+            auth: self.variables.read(cx).collection_auth(),
+        });
+        if inherited == self.inherited {
+            return;
+        }
+
+        self.inherited = inherited;
+        if let Some(auth) = &self.auth {
+            let inherited = self.inherited.clone();
+            auth.update(cx, |auth, cx| auth.set_inherited(inherited, cx));
+        }
+        self.refresh_handshake_headers(cx);
+    }
+
+    fn auth_editor(&mut self, cx: &mut Context<Self>) -> Entity<AuthEditor> {
+        if let Some(auth) = &self.auth {
+            return auth.clone();
+        }
+
+        let inherited = self.inherited.clone();
+        let auth = cx.new(|cx| {
+            let mut editor = AuthEditor::new(
+                self.request.auth.clone(),
+                AuthTarget::WebSocket,
+                self.variables.clone(),
+            );
+            editor.set_inherited(inherited, cx);
+            editor
+        });
+        self._subscriptions
+            .push(cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
+                this.request.auth = event.0.clone();
+                this.refresh_handshake_headers(cx);
+                // The Headers tab counts the handshake's headers.
+                this.notify_controls(cx);
+            }));
+        self.auth = Some(auth.clone());
+
+        auth
+    }
+
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
@@ -167,6 +236,7 @@ impl WebSocketDraft {
         });
 
         self.location = Some(location);
+        self.refresh_inherited(cx);
         self.notify_controls(cx);
     }
 
@@ -183,6 +253,7 @@ impl WebSocketDraft {
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.variables.update(cx, |scope, cx| scope.changed(cx));
+        self.refresh_inherited(cx);
 
         // Initialize newly shown controls before drawing, as request drafts do.
         self.url_state(window, cx);
@@ -193,6 +264,10 @@ impl WebSocketDraft {
             }
             WebSocketSection::Params | WebSocketSection::Headers => {
                 self.fields_state(window, cx);
+            }
+            WebSocketSection::Auth => {
+                self.auth_editor(cx)
+                    .update(cx, |auth, cx| auth.prepare(window, cx));
             }
             WebSocketSection::Settings => {
                 self.timeout_state(window, cx);
@@ -223,10 +298,15 @@ impl WebSocketDraft {
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
             .unwrap_or_default();
+        // History keeps the authorization that was sent, as for HTTP.
+        let recorded = WebSocketRequest {
+            auth: variables.effective_auth(&self.request.auth),
+            ..self.request.clone()
+        };
         let (connection, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
         self.connecting = Some(RequestSent {
-            record: request_history::Record::sent(self.request.clone()),
+            record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
         });
 
@@ -329,8 +409,11 @@ impl WebSocketDraft {
     }
 
     fn refresh_handshake_headers(&mut self, cx: &mut Context<Self>) {
-        self.handshake_headers =
-            request::websocket_handshake_headers(&self.request.url, &self.request.headers);
+        self.handshake_headers = request::websocket_handshake_headers(
+            &self.request.url,
+            &self.request.headers,
+            &self.effective_auth(),
+        );
 
         if let Some(headers) = &self.headers {
             headers.update(cx, |headers, cx| {
@@ -563,6 +646,7 @@ impl WebSocketDraft {
                 WebSocketSection::Params,
                 Field::enabled(&self.request.query).count(),
             ),
+            ("Auth", WebSocketSection::Auth, 0),
             (
                 "Headers",
                 WebSocketSection::Headers,
@@ -753,6 +837,7 @@ impl Render for WebSocketConfiguration {
                     WebSocketSection::Params | WebSocketSection::Headers => {
                         draft.fields_state(window, cx).into_any_element()
                     }
+                    WebSocketSection::Auth => draft.auth_editor(cx).into_any_element(),
                     WebSocketSection::Settings => draft.settings(window, cx),
                 };
 

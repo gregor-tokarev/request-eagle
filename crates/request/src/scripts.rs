@@ -22,5 +22,8 @@ mod tests;
 mod utilities_tests;
 
 pub(crate) use grpc::CallScripts;
-pub use model::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
+pub use model::{
+    ExecutionInfo, GrpcScripts, LocalVariables, NextRequest, RequestScripts, ScriptLog,
+    ScriptPhase, ScriptReport, ScriptTest,
+};
 pub(crate) use runtime::{Cancellation, post_response, pre_request};

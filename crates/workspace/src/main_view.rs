@@ -1,4 +1,8 @@
-use std::{collections::HashMap, mem, path::Path};
+use std::{
+    collections::HashMap,
+    mem,
+    path::{Path, PathBuf},
+};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
@@ -14,11 +18,12 @@ use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
-use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
+use collections_panel_ui::{CollectionPanel, CollectionPanelEvent, RunnableRequest};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
-    CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, FlowEditor,
-    GrpcDraft, RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
+    CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
+    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestLocation, RequestSent,
+    RunCollection, SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -35,6 +40,7 @@ pub(crate) enum Page {
     WebSocket(Entity<WebSocketDraft>),
     Flow(Entity<FlowEditor>),
     Collection(Entity<CollectionPage>),
+    Runner(Entity<CollectionRunner>),
     Environment(Entity<EnvironmentEditor>),
     Cookies(Entity<CookiePage>),
 }
@@ -48,7 +54,8 @@ impl Page {
             Page::Flow(editor) => editor.read(cx).is_dirty(),
             Page::Collection(page) => page.read(cx).is_dirty(),
             Page::Environment(editor) => editor.read(cx).is_dirty(),
-            Page::Cookies(_) => false,
+            // A run's results are not saved.
+            Page::Runner(_) | Page::Cookies(_) => false,
         }
     }
 
@@ -58,7 +65,11 @@ impl Page {
             Page::Request(draft) => Some(draft.read(cx).request.method.as_str()),
             Page::Grpc(_) => Some("gRPC"),
             Page::WebSocket(_) => Some("WS"),
-            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => None,
         }
     }
 
@@ -69,7 +80,7 @@ impl Page {
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
             Page::Flow(editor) => Some(&editor.read(cx).location),
-            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Collection(_) | Page::Runner(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
@@ -95,7 +106,11 @@ impl Page {
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             // Flows are always saved, so they are renamed in their collection.
-            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => {}
         }
     }
 
@@ -141,6 +156,9 @@ impl Page {
             Page::Collection(page) => SavedTab::Collection {
                 path: page.read(cx).path.clone(),
             },
+            Page::Runner(runner) => SavedTab::Runner {
+                path: runner.read(cx).path.clone(),
+            },
             Page::Environment(editor) => SavedTab::Environment {
                 name: editor.read(cx).name.to_string(),
             },
@@ -153,6 +171,7 @@ impl Page {
             Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
             Page::Flow(_) => Some("icons/workflow.svg"),
             Page::Collection(_) => Some("icons/package.svg"),
+            Page::Runner(_) => Some("icons/square-play.svg"),
             Page::Environment(_) => Some("icons/globe.svg"),
             Page::Cookies(_) => Some("icons/cookie.svg"),
         }
@@ -180,6 +199,7 @@ impl Page {
             Page::WebSocket(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Flow(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
             Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
+            Page::Runner(runner) => cx.observe(runner, move |this, _, cx| on_change(this, cx)),
             Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
             Page::Cookies(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
         }
@@ -205,7 +225,11 @@ impl Page {
             Page::Request(draft) => Some(record(draft, history, cx)),
             Page::Grpc(draft) => Some(record(draft, history, cx)),
             Page::WebSocket(draft) => Some(record(draft, history, cx)),
-            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => None,
         }
     }
 
@@ -216,6 +240,7 @@ impl Page {
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Flow(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
             Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
+            Page::Runner(runner) => runner.update(cx, |runner, cx| runner.prepare(window, cx)),
             Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
             Page::Cookies(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
         }
@@ -232,6 +257,10 @@ impl Page {
             // The canvas redraws while it is dragged or runs.
             Page::Flow(editor) => editor.clone().into_any_element(),
             Page::Collection(page) => page
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            Page::Runner(runner) => runner
                 .clone()
                 .cached(StyleRefinement::default().size_full())
                 .into_any_element(),
@@ -419,13 +448,26 @@ impl MainView {
                     path,
                     name,
                     variables,
-                    scripts,
+                    shared,
                 }) = self.sidebar.read(cx).open_event_at(&path)
                 else {
                     return false;
                 };
 
-                self.open_collection(&path, name, variables, scripts, window, cx);
+                self.open_collection(&path, name, variables, shared, window, cx);
+            }
+            SavedTab::Runner { path } => {
+                let Some(CollectionPanelEvent::RunRequests {
+                    path,
+                    name,
+                    collection,
+                    requests,
+                }) = self.sidebar.read(cx).run_event_at(&path)
+                else {
+                    return false;
+                };
+
+                self.open_runner(path, name, collection, requests, cx);
             }
             SavedTab::Environment { name } => {
                 let Some(name) = self
@@ -579,6 +621,20 @@ impl MainView {
         location: RequestLocation,
         cx: &mut Context<Self>,
     ) {
+        for tab in &self.tabs {
+            if let Page::Runner(runner) = &tab.page {
+                runner.update(cx, |runner, cx| {
+                    runner.relocate_request(
+                        &location.id,
+                        &location.path,
+                        location.name.clone(),
+                        location.folders.clone(),
+                        cx,
+                    )
+                });
+            }
+        }
+
         if let Some(index) = self.request_tab(previous_path, &location.id, cx) {
             self.set_request_location(index, location, cx);
             cx.notify();
@@ -609,7 +665,7 @@ impl MainView {
                 draft.update(cx, |draft, cx| draft.set_location(location, cx))
             }
             Page::Flow(editor) => editor.update(cx, |editor, cx| editor.set_location(location, cx)),
-            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
+            Page::Collection(_) | Page::Runner(_) | Page::Environment(_) | Page::Cookies(_) => {}
         }
     }
 
@@ -642,7 +698,7 @@ impl MainView {
         path: &Path,
         name: SharedString,
         variables: HashMap<String, String>,
-        scripts: request::RequestScripts,
+        shared: collection::SharedSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -651,8 +707,19 @@ impl MainView {
             return;
         }
 
-        let page = cx
-            .new(|_| CollectionPage::new(path.to_path_buf(), name.to_string(), variables, scripts));
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let page = cx.new(|cx| {
+            CollectionPage::new(
+                path.to_path_buf(),
+                name.to_string(),
+                variables,
+                shared,
+                sessions,
+                Some(environments),
+                cx,
+            )
+        });
         let index = self.open_tab(name, Page::Collection(page.clone()), cx);
         let id = self.tabs[index].id;
         let subscription = cx.subscribe_in(
@@ -664,7 +731,82 @@ impl MainView {
                 }
             },
         );
-        self.tabs[index]._subscriptions.push(subscription);
+        let run_subscription = cx.subscribe_in(
+            &page,
+            window,
+            |this, page, _: &RunCollection, window, cx| {
+                let path = page.read(cx).path.clone();
+                this.run_collection(&path, cx);
+                this.prepare_active_tab(window, cx);
+            },
+        );
+        self.tabs[index]
+            ._subscriptions
+            .extend([subscription, run_subscription]);
+    }
+
+    /// Show the Collection Runner for a collection's or folder's requests,
+    /// reusing its tab when it is open.
+    pub(crate) fn open_runner(
+        &mut self,
+        path: PathBuf,
+        name: SharedString,
+        collection: PathBuf,
+        requests: Vec<RunnableRequest>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self.runner_tab(&path, cx) {
+            if let Page::Runner(runner) = &self.tabs[index].page {
+                runner.update(cx, |runner, cx| {
+                    runner.refresh(
+                        requests
+                            .into_iter()
+                            .map(|request| (request.file, request.folders)),
+                        cx,
+                    )
+                });
+            }
+            self.select_tab(index, cx);
+            return;
+        }
+
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let runner = cx.new(|cx| {
+            CollectionRunner::new(
+                path,
+                name.clone(),
+                collection,
+                requests
+                    .into_iter()
+                    .map(|request| (request.file, request.folders)),
+                sessions,
+                environments,
+                cx,
+            )
+        });
+
+        self.open_tab(name, Page::Runner(runner), cx);
+    }
+
+    /// Run the collection whose page is in the tab, as the sidebar does.
+    fn run_collection(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if let Some(CollectionPanelEvent::RunRequests {
+            path,
+            name,
+            collection,
+            requests,
+        }) = self.sidebar.read(cx).run_event_at(path)
+        {
+            self.open_runner(path, name, collection, requests, cx);
+        }
+    }
+
+    fn runner_tab(&self, path: &Path, cx: &App) -> Option<usize> {
+        self.tabs.iter().position(|tab| match &tab.page {
+            Page::Runner(runner) => runner.read(cx).path == path,
+            _ => false,
+        })
     }
 
     fn collection_tab(&self, path: &Path, cx: &App) -> Option<usize> {
@@ -680,6 +822,14 @@ impl MainView {
         if let Some(index) = self.collection_tab(path, cx) {
             self.remove_tab(index, cx);
         }
+
+        // Its runners and those of its folders end with it.
+        while let Some(index) = self.tabs.iter().position(|tab| match &tab.page {
+            Page::Runner(runner) => runner.read(cx).path.starts_with(path),
+            _ => false,
+        }) {
+            self.remove_tab(index, cx);
+        }
     }
 
     /// Follow a collection renamed in the sidebar.
@@ -691,6 +841,8 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.relocate_runners(previous_path, path, name.clone(), path, cx);
+
         let Some(index) = self.collection_tab(previous_path, cx) else {
             return;
         };
@@ -701,6 +853,28 @@ impl MainView {
             page.update(cx, |page, cx| {
                 page.relocate(path.to_path_buf(), name.to_string(), window, cx)
             });
+        }
+        cx.notify();
+    }
+
+    /// Follow a collection or folder renamed or moved in the sidebar in the
+    /// runners of it and of what it contains. `collection` is the directory
+    /// of the collection it is in now.
+    pub(crate) fn relocate_runners(
+        &mut self,
+        previous_path: &Path,
+        path: &Path,
+        name: SharedString,
+        collection: &Path,
+        cx: &mut Context<Self>,
+    ) {
+        for tab in &mut self.tabs {
+            if let Page::Runner(runner) = &tab.page {
+                tab.title = runner.update(cx, |runner, cx| {
+                    runner.relocate(previous_path, path, name.clone(), collection, cx);
+                    runner.name().clone()
+                });
+            }
         }
         cx.notify();
     }
@@ -1024,7 +1198,10 @@ impl MainView {
                                 &path,
                                 &settings.name,
                                 settings.variables.iter().cloned().collect(),
-                                settings.scripts.clone(),
+                                collection::SharedSettings {
+                                    scripts: settings.scripts.clone(),
+                                    auth: settings.auth.clone(),
+                                },
                                 cx,
                             )
                         })
@@ -1044,7 +1221,7 @@ impl MainView {
                 }
             }
             // The jar saves itself whenever it changes.
-            Page::Cookies(_) => {}
+            Page::Runner(_) | Page::Cookies(_) => {}
             Page::Flow(editor) => {
                 let (location, flow, check) = {
                     let editor = editor.read(cx);

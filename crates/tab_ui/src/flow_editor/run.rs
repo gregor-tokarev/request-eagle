@@ -187,6 +187,7 @@ impl FlowEditor {
                 names: None,
             };
             let (collection, environment, variables_error) = scope.file_values(cx);
+            let settings = scope.collection_settings();
             let mut request = saved.request.clone();
             request.body = request
                 .body
@@ -200,7 +201,11 @@ impl FlowEditor {
                     collection,
                     environment,
                     variables_error,
-                    scripts: scope.collection_scripts(),
+                    scripts: settings
+                        .as_ref()
+                        .map(|settings| settings.scripts.clone())
+                        .map_err(Clone::clone),
+                    auth: settings.map(|settings| settings.auth).unwrap_or_default(),
                     session: scope.session,
                 },
             );

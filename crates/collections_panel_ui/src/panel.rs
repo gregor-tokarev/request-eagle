@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionRegistry, MovePlacement};
+use collection::{CollectionRegistry, FileEntry, MovePlacement, SharedSettings};
 
 use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
@@ -12,7 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{HttpRequest, Request, RequestScripts};
+use request::{HttpRequest, Request};
 
 use super::{
     actions::{DeleteItem, RenameItem},
@@ -27,7 +27,8 @@ pub enum CollectionPanelEvent {
         path: PathBuf,
         name: SharedString,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        /// The scripts and authorization it shares with its requests.
+        shared: SharedSettings,
     },
     CollectionRenamed {
         previous_path: PathBuf,
@@ -36,6 +37,14 @@ pub enum CollectionPanelEvent {
     },
     CollectionDeleted {
         path: PathBuf,
+    },
+    /// A folder was renamed or moved. Its requests' relocations follow.
+    FolderRelocated {
+        previous_path: PathBuf,
+        path: PathBuf,
+        name: SharedString,
+        /// The directory of the collection it is in now.
+        collection: PathBuf,
     },
     RequestRelocated {
         id: SharedString,
@@ -65,6 +74,24 @@ pub enum CollectionPanelEvent {
     OpenUnsavedRequest(HttpRequest),
     /// Imported environments were added to the environments directory.
     EnvironmentsImported,
+    /// Open the Collection Runner for a collection's or folder's requests.
+    RunRequests {
+        /// The collection or folder.
+        path: PathBuf,
+        name: SharedString,
+        /// The directory of the collection that stores the requests.
+        collection: PathBuf,
+        /// In tree order.
+        requests: Vec<RunnableRequest>,
+    },
+}
+
+/// A saved request of a collection or folder that is run.
+#[derive(Clone)]
+pub struct RunnableRequest {
+    pub file: FileEntry,
+    /// The folders between the collection and the request.
+    pub folders: Vec<SharedString>,
 }
 
 /// The collections tree and its search, editing, and drag interactions.
@@ -270,7 +297,10 @@ impl CollectionPanel {
                     path: item.path.clone(),
                     name: item.label.clone(),
                     variables: collection.local_env().entries.clone(),
-                    scripts: collection.scripts().clone(),
+                    shared: SharedSettings {
+                        scripts: collection.scripts().clone(),
+                        auth: collection.auth().clone(),
+                    },
                 })
             }
             ItemKind::Folder => None,
@@ -301,6 +331,38 @@ impl CollectionPanel {
                 })
             }
         }
+    }
+
+    /// The event that runs a collection or folder row's requests.
+    pub(super) fn run_event(&self, index: usize) -> Option<CollectionPanelEvent> {
+        let item = &self.tree.items[index];
+        if !item.is_branch() {
+            return None;
+        }
+
+        let mut root = index;
+        while let Some(parent) = self.tree.items[root].parent {
+            root = parent;
+        }
+
+        let requests = (index + 1..item.end)
+            .filter(|&child| matches!(self.tree.items[child].kind, ItemKind::Request(_)))
+            .filter_map(|child| {
+                let file = self.collections.file(&self.tree.items[child].path)?;
+
+                Some(RunnableRequest {
+                    file: file.clone(),
+                    folders: self.tree.location(child).1,
+                })
+            })
+            .collect();
+
+        Some(CollectionPanelEvent::RunRequests {
+            path: item.path.clone(),
+            name: item.label.clone(),
+            collection: self.tree.items[root].path.clone(),
+            requests,
+        })
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {

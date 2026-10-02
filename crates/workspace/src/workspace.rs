@@ -95,14 +95,14 @@ impl Workspace {
                     path,
                     name,
                     variables,
-                    scripts,
+                    shared,
                 } => {
                     this.main_view.update(cx, |view, cx| {
                         view.open_collection(
                             path,
                             name.clone(),
                             variables.clone(),
-                            scripts.clone(),
+                            shared.clone(),
                             window,
                             cx,
                         );
@@ -120,6 +120,16 @@ impl Workspace {
                 } => {
                     this.main_view.update(cx, |view, cx| {
                         view.relocate_collection(previous_path, path, name.clone(), window, cx);
+                    });
+                }
+                CollectionPanelEvent::FolderRelocated {
+                    previous_path,
+                    path,
+                    name,
+                    collection,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.relocate_runners(previous_path, path, name.clone(), collection, cx);
                     });
                 }
                 CollectionPanelEvent::RequestRelocated {
@@ -181,6 +191,23 @@ impl Workspace {
 
                     this.main_view.update(cx, |view, cx| {
                         view.open_flow(location, flow.clone(), cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+                CollectionPanelEvent::RunRequests {
+                    path,
+                    name,
+                    collection,
+                    requests,
+                } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_runner(
+                            path.clone(),
+                            name.clone(),
+                            collection.clone(),
+                            requests.clone(),
+                            cx,
+                        );
                         view.prepare_active_tab(window, cx);
                     });
                 }

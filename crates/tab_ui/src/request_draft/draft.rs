@@ -7,6 +7,7 @@ use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
     Environments, RequestSent,
+    auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited},
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
@@ -20,11 +21,12 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Field, HttpRequest, Method};
+use request::{Auth, Field, HttpRequest, Method};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {
     Params,
+    Auth,
     Headers,
     Body,
     Scripts,
@@ -75,6 +77,10 @@ pub struct RequestDraft {
     path_values: Vec<(String, String)>,
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
+    pub(super) auth: Option<Entity<AuthEditor>>,
+    /// The collection's authorization, which the request sends while it
+    /// inherits it. Read again when the tab is shown.
+    pub(super) inherited: Option<Inherited>,
     /// The editors of each body type, kept while another type is chosen.
     pub(super) body: Option<Entity<EditorState>>,
     pub(super) form: Option<Entity<RequestFields>>,
@@ -118,8 +124,11 @@ impl SnippetDraft for RequestDraft {
     }
 
     fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
-        self.sent_request()
-            .curl_command(values, super::execution::active_jar(cx).as_ref())
+        HttpRequest {
+            auth: self.effective_auth(),
+            ..self.sent_request()
+        }
+        .curl_command(values, super::execution::active_jar(cx).as_ref())
     }
 
     fn variables(&self) -> &Entity<VariableScope> {
@@ -183,7 +192,9 @@ impl RequestDraft {
         Self {
             location,
             name: None,
-            generated_headers: super::execution::generated_headers(&request),
+            generated_headers: super::execution::generated_headers(&request, &request.auth),
+            auth: None,
+            inherited: None,
             path_values: request.path_variables.clone(),
             saved_request: request.clone(),
             request,
@@ -234,6 +245,60 @@ impl RequestDraft {
         request
     }
 
+    /// The authorization the request sends: its own, or its collection's
+    /// while it inherits it.
+    pub(super) fn effective_auth(&self) -> Auth {
+        match (&self.request.auth, &self.inherited) {
+            (Auth::Inherit, Some(inherited)) => inherited.auth.clone(),
+            (auth, _) => auth.clone(),
+        }
+    }
+
+    /// Read the collection's authorization again, which another tab may
+    /// have changed.
+    fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
+        let inherited = self.location.as_ref().map(|location| Inherited {
+            name: location.collection.clone(),
+            auth: self.variables.read(cx).collection_auth(),
+        });
+        if inherited == self.inherited {
+            return;
+        }
+
+        self.inherited = inherited;
+        if let Some(auth) = &self.auth {
+            let inherited = self.inherited.clone();
+            auth.update(cx, |auth, cx| auth.set_inherited(inherited, cx));
+        }
+        self.refresh_generated_headers(cx);
+    }
+
+    pub(super) fn auth_editor(&mut self, cx: &mut Context<Self>) -> Entity<AuthEditor> {
+        if let Some(auth) = &self.auth {
+            return auth.clone();
+        }
+
+        let inherited = self.inherited.clone();
+        let auth = cx.new(|cx| {
+            let mut editor = AuthEditor::new(
+                self.request.auth.clone(),
+                AuthTarget::Http,
+                self.variables.clone(),
+            );
+            editor.set_inherited(inherited, cx);
+            editor
+        });
+        self._subscriptions
+            .push(cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
+                this.request.auth = event.0.clone();
+                this.refresh_generated_headers(cx);
+                cx.notify();
+            }));
+        self.auth = Some(auth.clone());
+
+        auth
+    }
+
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
@@ -262,6 +327,7 @@ impl RequestDraft {
         });
 
         self.location = Some(location);
+        self.refresh_inherited(cx);
         self.notify_address(cx);
         cx.notify();
     }
@@ -328,8 +394,15 @@ impl RequestDraft {
             }
         };
 
+        // The request keeps its scripts, and its authorization unless the
+        // command has credentials.
+        let auth = match request.auth {
+            Auth::Inherit => std::mem::take(&mut self.request.auth),
+            auth => auth,
+        };
         self.request = HttpRequest {
             scripts: std::mem::take(&mut self.request.scripts),
+            auth,
             ..request
         };
 
@@ -347,6 +420,7 @@ impl RequestDraft {
         self.params = None;
         self.path_variables = None;
         self.headers = None;
+        self.auth = None;
         self.body = None;
         self.form = None;
         self.parts = None;
@@ -368,6 +442,7 @@ impl RequestDraft {
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.variables.update(cx, |scope, cx| scope.changed(cx));
+        self.refresh_inherited(cx);
 
         // Initialize newly activated controls before drawing. Their setup can
         // notify GPUI; doing it inside render schedules an unnecessary frame.
@@ -376,6 +451,10 @@ impl RequestDraft {
         match self.section {
             RequestSection::Params => {
                 self.params_state(window, cx);
+            }
+            RequestSection::Auth => {
+                self.auth_editor(cx)
+                    .update(cx, |auth, cx| auth.prepare(window, cx));
             }
             RequestSection::Headers => {
                 self.headers_state(window, cx);
@@ -769,6 +848,7 @@ impl Render for RequestConfiguration {
                     // The selected section tab already names the table.
                     RequestSection::Headers => draft.headers_state(window, cx).into_any_element(),
                     RequestSection::Params => draft.params(window, cx),
+                    RequestSection::Auth => draft.auth_editor(cx).into_any_element(),
                     RequestSection::Body => draft.body(window, cx),
                     RequestSection::Scripts => draft.script_editor(cx).into_any_element(),
                     RequestSection::Settings => draft.settings(window, cx),

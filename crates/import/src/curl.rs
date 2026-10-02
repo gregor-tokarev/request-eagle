@@ -1,9 +1,11 @@
 //! cURL commands, as browsers' "Copy as cURL" and API documentation write
 //! them for a POSIX shell. A command becomes the request cURL would send.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use request::{Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
+use request::{
+    Auth, AwsSignatureAuth, BearerAuth, Body, Field, FormPart, HttpRequest, HttpSettings, Method,
+    PasswordAuth, RawLanguage,
+};
 use thiserror::Error;
 
 /// Characters `--data-urlencode` leaves as they are.
@@ -283,6 +285,11 @@ struct Options {
     json: bool,
     form: Vec<FormPart>,
     user: Option<String>,
+    /// Whether `--user` answers a Digest challenge instead of sending Basic.
+    digest: bool,
+    /// `--aws-sigv4`'s `aws:amz:region:service`.
+    aws_sigv4: Option<String>,
+    bearer: Option<String>,
     cookies: Vec<String>,
     insecure: bool,
     timeout_ms: Option<u64>,
@@ -295,6 +302,7 @@ impl Options {
                 "get" => self.get = true,
                 "head" => self.head = true,
                 "insecure" => self.insecure = true,
+                "digest" => self.digest = true,
                 _ => {}
             }
             return Ok(());
@@ -319,9 +327,8 @@ impl Options {
             // Without `=`, the value names a cookie file to read.
             "cookie" if value.contains('=') => self.cookies.push(value),
             "user" => self.user = Some(value),
-            "oauth2-bearer" => self
-                .headers
-                .push(("Authorization".into(), format!("Bearer {value}"))),
+            "aws-sigv4" => self.aws_sigv4 = Some(value),
+            "oauth2-bearer" => self.bearer = Some(value),
             // Only `--data-binary` sends a file as it is.
             "data-binary" if value.starts_with('@') => {
                 if self.file.is_some() || self.data.is_some() {
@@ -464,19 +471,7 @@ impl Options {
             return Err(CurlError::FormAndData);
         }
 
-        if let Some(user) = self.user.take()
-            && !self.has_header("authorization")
-        {
-            let credentials = if user.contains(':') {
-                user
-            } else {
-                format!("{user}:")
-            };
-            self.headers.push((
-                "Authorization".into(),
-                format!("Basic {}", STANDARD.encode(credentials)),
-            ));
-        }
+        let auth = self.auth(&url);
 
         if !self.cookies.is_empty() {
             self.headers
@@ -534,6 +529,7 @@ impl Options {
             path: url,
             headers: self.headers.into_iter().map(Field::from).collect(),
             body,
+            auth,
             settings: HttpSettings {
                 timeout_ms: self.timeout_ms,
                 follow_redirects: None,
@@ -541,6 +537,62 @@ impl Options {
             },
             ..HttpRequest::default()
         })
+    }
+}
+
+impl Options {
+    /// The authorization of `--user`, `--digest`, `--aws-sigv4` and
+    /// `--oauth2-bearer`. Without them, the request inherits its collection's.
+    fn auth(&mut self, url: &str) -> Auth {
+        let user = self.user.take().unwrap_or_default();
+        let (username, password) = user.split_once(':').unwrap_or((&user, ""));
+
+        if let Some(provider) = self.aws_sigv4.take() {
+            let mut parts = provider.split(':').skip(2);
+            // Like cURL, a region and service left out come from a host such
+            // as `ec2.us-east-1.amazonaws.com`.
+            let host = url
+                .split_once("://")
+                .map_or(url, |(_, rest)| rest)
+                .split(['/', '?', '#'])
+                .next()
+                .and_then(|authority| authority.rsplit('@').next())
+                .and_then(|host| host.split(':').next())
+                .unwrap_or_default();
+            let mut labels = host.split('.').filter(|_| host.matches('.').count() >= 2);
+            let (service, region) = (labels.next(), labels.next());
+
+            return Auth::AwsSignature(Box::new(AwsSignatureAuth {
+                access_key: username.to_owned(),
+                secret_key: password.to_owned(),
+                region: parts
+                    .next()
+                    .filter(|region| !region.is_empty())
+                    .or(region)
+                    .unwrap_or_default()
+                    .to_owned(),
+                service: parts
+                    .next()
+                    .filter(|service| !service.is_empty())
+                    .or(service)
+                    .unwrap_or_default()
+                    .to_owned(),
+                ..AwsSignatureAuth::default()
+            }));
+        }
+
+        let credentials = PasswordAuth {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        };
+        // cURL answers a Digest challenge when asked to, and otherwise sends
+        // a bearer token rather than Basic credentials.
+        match self.bearer.take() {
+            _ if !user.is_empty() && self.digest => Auth::Digest(credentials),
+            Some(token) => Auth::Bearer(BearerAuth { token }),
+            None if !user.is_empty() => Auth::Basic(credentials),
+            None => Auth::Inherit,
+        }
     }
 }
 

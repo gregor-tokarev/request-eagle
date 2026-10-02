@@ -293,6 +293,7 @@ async fn run(
                 environment: variables.clone(),
                 variables_error: None,
                 scripts: Ok(collection.scripts().clone()),
+                auth: collection.auth().clone(),
                 session: sessions.entry(collection.path.clone()).or_default().clone(),
             },
         );

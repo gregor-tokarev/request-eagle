@@ -32,6 +32,7 @@ pub(crate) enum DefinitionSource {
         url: String,
         tls: bool,
         metadata: Vec<(String, String)>,
+        auth: request::Auth,
         verify_certificates: Option<bool>,
         server_name: String,
     },
@@ -49,6 +50,8 @@ impl GrpcDraft {
                     metadata: Field::enabled(&self.request.metadata)
                         .map(|(key, value)| (key.to_owned(), value.to_owned()))
                         .collect(),
+                    // Getting a new OAuth 2.0 token changes nothing sent.
+                    auth: self.effective_auth().sending(),
                     verify_certificates: self.request.settings.verify_certificates,
                     server_name: self.request.settings.server_name.clone(),
                 })

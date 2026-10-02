@@ -588,6 +588,7 @@ fn saved(name: &str, request: HttpRequest) -> SavedRequest {
         environment: HashMap::new(),
         variables_error: None,
         scripts: Ok(Default::default()),
+        auth: Default::default(),
         session: Default::default(),
     }
 }

@@ -8,7 +8,11 @@ use environment::EnvironmentSession;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
+use super::{
+    ExecutionInfo, LocalVariables, ScriptPhase, ScriptReport,
+    engine::{NextRequestOutput, run},
+    variables::Variables,
+};
 use crate::{
     Body, Execution, ExecutionError, Field, FormPart, HttpRequest, Method, RequestExecutor,
     RequestVariables, Response,
@@ -54,6 +58,9 @@ pub(crate) struct ScriptState {
     pub collection_post_response: String,
     /// Where the response came from, after redirects.
     pub response_url: Option<String>,
+    pub info: ExecutionInfo,
+    /// Where `pm.variables` carry over to the next request of a run.
+    pub locals: Option<LocalVariables>,
 }
 
 pub(crate) async fn pre_request(
@@ -67,6 +74,8 @@ pub(crate) async fn pre_request(
         session,
         collection_scripts,
         environment_error,
+        iteration_data,
+        info,
         locals,
         ..
     } = variables;
@@ -81,6 +90,7 @@ pub(crate) async fn pre_request(
                 tests: Vec::new(),
                 logs: Vec::new(),
                 error: Some(message.clone()),
+                next_request: None,
             };
             return Err(ExecutionError::Script {
                 message,
@@ -104,13 +114,16 @@ pub(crate) async fn pre_request(
         let mut reports = Vec::new();
         let mut state = ScriptState {
             variables: Variables {
-                values: locals,
+                values: locals.as_ref().map(LocalVariables::get).unwrap_or_default(),
                 scopes,
+                data: iteration_data,
                 ..Default::default()
             },
             session,
             collection_post_response: collection.post_response,
             response_url: None,
+            info,
+            locals,
         };
 
         // Scripts have no access to files, so they can keep or remove the
@@ -126,7 +139,7 @@ pub(crate) async fn pre_request(
 
         let mut body_changed = false;
         for (collection, source) in scripts {
-            let input = input(&request, &state.variables);
+            let input = input(&request, &state, "prerequest");
             // Scripts read raw text only when they ask for it.
             let mut text = match &mut request.body {
                 Some(Body::Raw { text, .. }) => Some(Bytes::from(std::mem::take(text))),
@@ -159,7 +172,11 @@ pub(crate) async fn pre_request(
                 ));
             }
 
-            let output = output.expect("successful script output");
+            let mut output = output.expect("successful script output");
+            report.next_request = output
+                .next_request
+                .take()
+                .map(NextRequestOutput::into_next_request);
             if let Some(session) = &state.session
                 && let Err(message) = session.apply(&output.changes)
             {
@@ -173,6 +190,10 @@ pub(crate) async fn pre_request(
                 ));
             }
             if let Some(reason) = output.skip_reason {
+                // Skipping is not failing: the script's pm.variables last.
+                if let Some(locals) = &state.locals {
+                    locals.set(output.variables.values.clone());
+                }
                 return Err(after_earlier_scripts(
                     reports,
                     ExecutionError::Skipped {
@@ -186,7 +207,7 @@ pub(crate) async fn pre_request(
             request.path = changes.url;
             request.query = changes.query.into_iter().map(Field::from).collect();
             request.headers = changes.headers.into_iter().map(Field::from).collect();
-            state.variables = output.variables;
+            state.variables.update(output.variables);
 
             if changes.body_changed {
                 body_changed = true;
@@ -238,7 +259,12 @@ pub(crate) async fn pre_request(
         );
 
         match resolved {
-            Ok(request) => Ok((request.prepare_for_send(), state, reports)),
+            Ok(request) => {
+                if let Some(locals) = &state.locals {
+                    locals.set(state.variables.values.clone());
+                }
+                Ok((request.prepare_for_send(), state, reports))
+            }
             Err(message) => {
                 let message: String = message.chars().take(4096).collect();
                 let Some(mut report) = reports.pop() else {
@@ -296,7 +322,7 @@ pub(crate) async fn post_response(
     smol::unblock(move || {
         // A failing collection script does not prevent the request's own tests.
         for (collection, source) in scripts {
-            let mut input = input(&request, &state.variables);
+            let mut input = input(&request, &state, "test");
             let Response::Http(response) = &mut execution.response;
             input["response"] = json!({
                 "code": response.status.as_u16(),
@@ -321,24 +347,33 @@ pub(crate) async fn post_response(
                 report.error = Some("Script cancelled".into());
             }
             if report.error.is_none()
-                && let Some(output) = output
+                && let Some(mut output) = output
             {
+                report.next_request = output
+                    .next_request
+                    .take()
+                    .map(NextRequestOutput::into_next_request);
                 if let Some(session) = &state.session
                     && let Err(message) = session.apply(&output.changes)
                 {
                     report.error = Some(message.into());
                 } else {
-                    state.variables = output.variables;
+                    state.variables.update(output.variables);
                 }
             }
             execution.scripts.push(report);
+        }
+        if let Some(locals) = &state.locals {
+            locals.set(state.variables.values.clone());
         }
         execution
     })
     .await
 }
 
-fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
+/// `event` names the phase as `pm.info.eventName` does.
+fn input(request: &HttpRequest, state: &ScriptState, event: &str) -> serde_json::Value {
+    let variables = &state.variables;
     // Raw text is read through the body reader instead.
     let body = match &request.body {
         None | Some(Body::Raw { .. }) => json!({ "mode": "raw" }),
@@ -361,5 +396,7 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
         "headers": Field::enabled(&request.headers).collect::<Vec<_>>(),
         "body": body,
         "variables": variables,
+        "dataText": variables.data_texts(),
+        "info": state.info.input(event),
     })
 }

@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use collection::Collection;
+use collection::{Collection, SharedSettings};
 
 use environment::{Environment, EnvironmentSession};
 use gpui_kit::{App, Context, Entity};
-use request::RequestScripts;
+use request::Auth;
 
 use crate::Environments;
 
@@ -123,27 +123,45 @@ impl VariableScope {
             Err(error) => (Default::default(), Some(error)),
         };
 
+        let settings = self.collection_settings();
+
         request::RequestVariables::with_environment_session(
             collection,
             environment,
             error,
             self.session.clone(),
         )
-        .with_collection_scripts(self.collection_scripts())
+        .with_collection_auth(
+            settings
+                .as_ref()
+                .map(|settings| settings.auth.clone())
+                .unwrap_or_default(),
+        )
+        .with_collection_scripts(settings.map(|settings| settings.scripts))
     }
 
-    /// Reload the collection's scripts so saved edits apply to the next send.
-    pub fn collection_scripts(&self) -> Result<RequestScripts, String> {
+    /// The authorization that requests inheriting it send, as saved.
+    pub fn collection_auth(&self) -> Auth {
+        self.collection_settings()
+            .map(|settings| settings.auth)
+            .unwrap_or_default()
+    }
+
+    /// Reload the collection's scripts and authorization so saved edits
+    /// apply to the next send.
+    pub(crate) fn collection_settings(&self) -> Result<SharedSettings, String> {
         match self.path.as_deref().and_then(Path::parent) {
             Some(collection) => {
-                Collection::load_scripts(collection).map_err(|error| error.to_string())
+                Collection::load_settings(collection).map_err(|error| error.to_string())
             }
-            None => Ok(RequestScripts::default()),
+            None => Ok(SharedSettings::default()),
         }
     }
 }
 
-fn read_entries(path: &Path) -> Result<std::collections::HashMap<String, String>, String> {
+pub(crate) fn read_entries(
+    path: &Path,
+) -> Result<std::collections::HashMap<String, String>, String> {
     Environment::from_file(path)
         .map(|environment| environment.entries)
         .map_err(|error| error.to_string())

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 52] = [
+const LOCAL_ICONS: [(&str, &[u8]); 54] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -76,6 +76,19 @@ const LOCAL_ICONS: [(&str, &[u8]); 52] = [
     (
         "icons/download.svg",
         include_bytes!("../assets/icons/download.svg"),
+    ),
+    // The Collection Runner: its tab, run sequence handles and Stop.
+    (
+        "icons/square-play.svg",
+        include_bytes!("../assets/icons/square-play.svg"),
+    ),
+    (
+        "icons/grip-vertical.svg",
+        include_bytes!("../assets/icons/grip-vertical.svg"),
+    ),
+    (
+        "icons/square.svg",
+        include_bytes!("../assets/icons/square.svg"),
     ),
     // gRPC method kinds: a doubled arrow marks the side that streams.
     (
@@ -187,10 +200,6 @@ const LOCAL_ICONS: [(&str, &[u8]); 52] = [
     (
         "icons/sticky-note.svg",
         include_bytes!("../assets/icons/sticky-note.svg"),
-    ),
-    (
-        "icons/square.svg",
-        include_bytes!("../assets/icons/square.svg"),
     ),
     (
         "icons/zoom-in.svg",

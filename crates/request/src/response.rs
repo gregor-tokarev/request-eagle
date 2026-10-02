@@ -11,6 +11,10 @@ pub struct Execution {
     pub elapsed: Duration,
     /// Results from request-level scripts, in execution order.
     pub scripts: Vec<crate::ScriptReport>,
+    /// The request as it went out, with its variables resolved and the
+    /// pre-request scripts' changes. A raw body keeps its first 64 KiB.
+    /// None for a response shown again from history.
+    pub sent: Option<crate::HttpRequest>,
 }
 
 #[derive(Debug)]

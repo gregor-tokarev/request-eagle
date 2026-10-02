@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use collection::{ImportedCollection, ImportedItem};
 use request::{
-    Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage, Request, RequestScripts,
+    ApiKeyAuth, Auth, AuthLocation, AwsSignatureAuth, BearerAuth, Body, Field, FormPart,
+    HttpRequest, HttpSettings, JwtAlgorithm, JwtAuth, Method, OAuth1Auth, OAuth1Signature,
+    OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth, RawLanguage, Request,
+    RequestScripts,
 };
 use serde_json::Value;
 
@@ -17,10 +19,10 @@ use crate::{
 
 pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError> {
     let mut skipped = Vec::new();
-    // Collection scripts become the collection's own scripts, so requests
-    // inherit only its authorization.
+    // The collection's scripts and authorization become its own, which its
+    // requests run and inherit.
     let inherited = Inherited {
-        auth: own_auth(document),
+        auth: None,
         scripts: Scripts::default(),
         behavior: Behavior::default().then(document),
     };
@@ -35,6 +37,7 @@ pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError>
                 pre_request: join_scripts(&scripts.pre_request),
                 post_response: join_scripts(&scripts.post_response),
             },
+            auth: own_auth(document).map_or(Auth::Inherit, auth),
             items,
         },
         skipped,
@@ -43,6 +46,8 @@ pub(crate) fn convert(document: &Value) -> Result<CollectionImport, ImportError>
 
 /// What a folder passes to the items inside it.
 pub(crate) struct Inherited<'a> {
+    /// The authorization of the nearest folder that has one. Request Eagle
+    /// has no folder authorization, so its requests take it as their own.
     pub(crate) auth: Option<&'a Value>,
     /// Request Eagle has no folder scripts, so each request runs its folders'
     /// scripts before its own, in the order Postman runs them.
@@ -153,20 +158,12 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     let mut headers = fields(&request["header"]);
     // The URL holds the parameters that are sent; those switched off stay
     // beside it.
-    let mut query: Vec<_> = fields(&request["url"]["query"])
+    let query: Vec<_> = fields(&request["url"]["query"])
         .into_iter()
         .filter(|field| !field.enabled)
         .collect();
-    let mut scripts = inherited.scripts.then(scripts(item));
+    let scripts = inherited.scripts.then(scripts(item));
     let body = body(&request["body"], &mut headers);
-    // Postman applies authorization after the pre-request scripts, which may
-    // set the credentials it uses.
-    authorize(
-        own_auth(request).or(inherited.auth),
-        &mut headers,
-        &mut query,
-        &mut scripts,
-    );
 
     // The request's Settings tab in Postman.
     let behavior = inherited.behavior.then(item);
@@ -178,6 +175,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         body,
         query,
         path_variables,
+        auth: request_auth(own_auth(request), inherited),
         scripts: RequestScripts {
             pre_request: join_scripts(&scripts.pre_request),
             post_response: join_scripts(&scripts.post_response),
@@ -352,57 +350,134 @@ pub(crate) fn own_auth(item: &Value) -> Option<&Value> {
         .filter(|auth| !auth.is_null() && auth["type"].as_str() != Some("inherit"))
 }
 
-/// Applies an authorization as the headers or query parameters Postman sends.
-pub(crate) fn authorize(
-    auth: Option<&Value>,
-    headers: &mut Vec<Field>,
-    query: &mut Vec<Field>,
-    scripts: &mut Scripts,
-) {
-    let Some(auth) = auth else { return };
+/// The authorization a request sends: its own, or else its folder's. Without
+/// either, it inherits the collection's.
+pub(crate) fn request_auth(own: Option<&Value>, inherited: &Inherited) -> Auth {
+    own.or(inherited.auth).map_or(Auth::Inherit, auth)
+}
+
+/// A Postman authorization as Request Eagle's. Kinds it does not have, such
+/// as NTLM and Hawk, send nothing.
+pub(crate) fn auth(auth: &Value) -> Auth {
     let kind = auth["type"].as_str().unwrap_or_default();
     let value = |key: &str| auth_value(auth, kind, key);
-    let has_authorization =
-        Field::enabled(headers).any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
+    let flag = |key: &str| value(key) == "true";
+    let password = || PasswordAuth {
+        username: value("username"),
+        password: value("password"),
+    };
+    // Postman's own defaults, for parameters an export leaves out.
+    let or = |key: &str, default: &str| match value(key) {
+        value if value.is_empty() => default.to_owned(),
+        value => value,
+    };
 
     match kind {
-        // Postman sends no token when it is empty.
-        "bearer" if !has_authorization && !value("token").is_empty() => {
-            headers.push(Field::new(
-                "Authorization",
-                format!("Bearer {}", value("token")),
-            ));
-        }
-        "oauth2" if !has_authorization && !value("accessToken").is_empty() => {
-            headers.push(Field::new(
-                "Authorization",
-                format!("Bearer {}", value("accessToken")),
-            ));
-        }
-        "basic" if !has_authorization => {
-            let credentials = format!("{}:{}", value("username"), value("password"));
-            if credentials.contains("{{") {
-                // Variables are resolved when sending, so encode them then.
-                let credentials = serde_json::to_string(&credentials).unwrap_or_default();
-                scripts.pre_request.push(format!(
-                    "pm.request.headers.upsert({{key: \"Authorization\", value: \"Basic \" + pm.encoding.base64Encode(pm.variables.replaceIn({credentials}))}});"
-                ));
+        "apikey" => Auth::ApiKey(ApiKeyAuth {
+            key: value("key"),
+            value: value("value"),
+            add_to: if value("in") == "query" {
+                AuthLocation::Query
             } else {
-                headers.push(Field::new(
-                    "Authorization",
-                    format!("Basic {}", STANDARD.encode(credentials)),
-                ));
-            }
-        }
-        "apikey" => {
-            let field = Field::new(value("key"), value("value"));
-            if value("in") == "query" {
-                query.push(field);
+                AuthLocation::Header
+            },
+        }),
+        "bearer" => Auth::Bearer(BearerAuth {
+            token: value("token"),
+        }),
+        "basic" => Auth::Basic(password()),
+        "digest" => Auth::Digest(password()),
+        "oauth1" => Auth::OAuth1(Box::new(OAuth1Auth {
+            signature_method: OAuth1Signature::ALL
+                .into_iter()
+                .find(|method| method.label() == value("signatureMethod"))
+                .unwrap_or_default(),
+            consumer_key: value("consumerKey"),
+            consumer_secret: value("consumerSecret"),
+            access_token: value("token"),
+            token_secret: value("tokenSecret"),
+            private_key: value("privateKey"),
+            callback_url: value("callback"),
+            verifier: value("verifier"),
+            realm: value("realm"),
+            add_to: if value("addParamsToHeader") == "false" {
+                AuthLocation::Query
             } else {
-                headers.push(field);
-            }
+                AuthLocation::Header
+            },
+        })),
+        "oauth2" => {
+            let grant = value("grant_type");
+            let callback = value("redirect_uri");
+
+            Auth::OAuth2(Box::new(OAuth2Auth {
+                access_token: value("accessToken"),
+                header_prefix: or("headerPrefix", "Bearer"),
+                add_to: if value("addTokenTo") == "queryParams" {
+                    AuthLocation::Query
+                } else {
+                    AuthLocation::Header
+                },
+                grant_type: match grant.as_str() {
+                    "client_credentials" => OAuth2Grant::ClientCredentials,
+                    "password_credentials" => OAuth2Grant::Password,
+                    _ => OAuth2Grant::AuthorizationCode,
+                },
+                auth_url: value("authUrl"),
+                token_url: value("accessTokenUrl"),
+                // Postman's own callback page returns to Postman, not here.
+                callback_url: if callback.is_empty() || callback.contains("oauth.pstmn.io") {
+                    OAuth2Auth::default().callback_url
+                } else {
+                    callback
+                },
+                client_id: value("clientId"),
+                client_secret: value("clientSecret"),
+                scope: value("scope"),
+                username: value("username"),
+                password: value("password"),
+                pkce: grant == "authorization_code_with_pkce",
+                client_authentication: if value("client_authentication") == "body" {
+                    OAuth2ClientAuthentication::Body
+                } else {
+                    OAuth2ClientAuthentication::Header
+                },
+            }))
         }
-        _ => {}
+        "jwt" => Auth::Jwt(Box::new(JwtAuth {
+            algorithm: JwtAlgorithm::ALL
+                .into_iter()
+                .find(|algorithm| algorithm.label() == value("algorithm"))
+                .unwrap_or_default(),
+            secret: value("secret"),
+            secret_base64: flag("isSecretBase64Encoded"),
+            private_key: value("privateKey"),
+            payload: or("payload", "{}"),
+            headers: match value("header").trim() {
+                "{}" => String::new(),
+                headers => headers.to_owned(),
+            },
+            add_to: if value("addTokenTo") == "queryParam" {
+                AuthLocation::Query
+            } else {
+                AuthLocation::Header
+            },
+            header_prefix: or("headerPrefix", "Bearer"),
+            query_param: or("queryParamKey", "token"),
+        })),
+        "awsv4" => Auth::AwsSignature(Box::new(AwsSignatureAuth {
+            access_key: value("accessKey"),
+            secret_key: value("secretKey"),
+            session_token: value("sessionToken"),
+            region: value("region"),
+            service: value("service"),
+            add_to: if flag("addAuthDataToQuery") {
+                AuthLocation::Query
+            } else {
+                AuthLocation::Header
+            },
+        })),
+        _ => Auth::None,
     }
 }
 

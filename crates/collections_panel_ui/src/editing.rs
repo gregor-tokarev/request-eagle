@@ -12,7 +12,7 @@ use gpui_kit::{
 
 use super::{
     panel::{CollectionPanel, CollectionPanelEvent},
-    tree::CollectionTree,
+    tree::{CollectionTree, ItemKind},
 };
 
 pub(super) struct RenameEditor {
@@ -389,6 +389,20 @@ impl CollectionPanel {
                     previous_path: previous.to_path_buf(),
                     path: destination.to_path_buf(),
                     name: collection.label.clone(),
+                });
+            } else if let Some(index) = self.tree.index_of(destination)
+                && self.tree.items[index].kind == ItemKind::Folder
+            {
+                let mut root = index;
+                while let Some(parent) = self.tree.items[root].parent {
+                    root = parent;
+                }
+
+                cx.emit(CollectionPanelEvent::FolderRelocated {
+                    previous_path: previous.to_path_buf(),
+                    path: destination.to_path_buf(),
+                    name: self.tree.items[index].label.clone(),
+                    collection: self.tree.items[root].path.clone(),
                 });
             }
 

@@ -183,6 +183,11 @@ pub(crate) enum SavedTab {
     Collection {
         path: PathBuf,
     },
+    /// The Collection Runner of a collection or folder opens with its
+    /// default configuration and no results.
+    Runner {
+        path: PathBuf,
+    },
     Environment {
         name: String,
     },
