@@ -2,6 +2,7 @@
 //! snippets: long option names, single quotes and one option per line.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
@@ -195,7 +196,11 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
         // reads from files only when it sends them; cURL signs those itself.
         Auth::AwsSignature(aws)
             if aws.add_to == AuthLocation::Header
-                || (aws.service.trim() != "s3" && sent_body(request.body.as_ref()).is_none()) =>
+                || (aws.service.trim() != "s3"
+                    && matches!(
+                        request.body,
+                        Some(Body::Multipart { .. } | Body::Binary { .. })
+                    )) =>
         {
             if !aws.session_token.is_empty() {
                 request.headers.push(Field::new(
@@ -217,7 +222,11 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
             ]
         }
         auth => {
-            let body = sent_body(request.body.as_ref()).unwrap_or_default();
+            // Only a presigned AWS query signs the body.
+            let body = match auth {
+                Auth::AwsSignature(_) => sent_body(request.body.as_ref()).unwrap_or_default(),
+                _ => Vec::new(),
+            };
             let form = match &request.body {
                 Some(Body::UrlEncoded { fields }) => fields.clone(),
                 _ => Vec::new(),
@@ -242,17 +251,20 @@ pub(crate) fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
     // `--data-urlencode` keeps the unreserved characters of a value, writes
     // a space as `+` and escapes the rest. A field without a name sends its
     // value alone.
-    let escape = |value: &str| -> String {
-        value
-            .bytes()
-            .map(|byte| match byte {
+    let escape = |value: &str| {
+        let mut escaped = String::with_capacity(value.len());
+        for byte in value.bytes() {
+            match byte {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                    char::from(byte).to_string()
+                    escaped.push(char::from(byte));
                 }
-                b' ' => "+".to_owned(),
-                byte => format!("%{byte:02X}"),
-            })
-            .collect()
+                b' ' => escaped.push('+'),
+                byte => {
+                    let _ = write!(escaped, "%{byte:02X}");
+                }
+            }
+        }
+        escaped
     };
 
     match body {
