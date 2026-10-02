@@ -222,8 +222,8 @@ jobs:
           key: windows-${{ hashFiles('Cargo.lock') }}
           restore-keys: windows-
 
-      - name: Test preferences, updates, and settings
-        run: cargo test --locked -p preferences -p settings_ui -p updater
+      - name: Test storage, preferences, updates, and settings
+        run: cargo test --locked -p preferences -p settings_ui -p updater -p request -p collection -p environment -p history
 
       - name: Store credentials in Windows Credential Manager
         run: cargo test --locked -p preferences --test native_keyring -- --round-trip

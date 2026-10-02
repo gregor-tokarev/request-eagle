@@ -128,8 +128,10 @@ impl CookieJar {
         fs::create_dir_all(directory)?;
 
         let lock = fs::OpenOptions::new()
+            // Windows only locks files opened for writing; appending is not enough.
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(false)
             .open(file.path.with_extension("lock"))?;
         lock.lock()?;
 

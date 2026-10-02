@@ -53,8 +53,13 @@ async function releasesOn(track) {
   return [await load(`${API}/latest`), ...recent.filter((release) => !release.prerelease)];
 }
 
+let chosen;
+
 async function offer(track) {
   const candidates = await releasesOn(track);
+
+  // A slower lookup for the track chosen before must not replace these links.
+  if (track !== chosen) return;
 
   for (const link of files) {
     const asset = candidates
@@ -68,6 +73,7 @@ async function offer(track) {
 
 // The address remembers the track, so a link can lead straight to the nightly builds.
 function choose(track) {
+  chosen = track;
   trackButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.track === track)));
   note.textContent = note.dataset[track];
   history.replaceState(null, "", track === "nightly" ? "#nightly" : location.pathname);

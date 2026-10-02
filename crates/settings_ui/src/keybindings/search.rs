@@ -157,9 +157,6 @@ fn search_text(value: &str) -> String {
         .replace('⌘', " cmd ")
         .replace("command", "cmd")
         .replace("super", "cmd")
-        // Windows names the platform key, but "win" alone is also in "window".
-        .replace("win-", "cmd-")
-        .replace("win+", "cmd+")
         .replace('⌃', " ctrl ")
         .replace("control", "ctrl")
         .replace('⌥', " alt ")
@@ -167,6 +164,11 @@ fn search_text(value: &str) -> String {
         .replace('⇧', " shift ")
         .replace('⎋', " escape ")
         .replace(['-', '+'], " ")
+        .split_whitespace()
+        // Windows calls the platform key Win, but "win" is also part of "window".
+        .map(|word| if word == "win" { "cmd" } else { word })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(super) fn matches_search(command: &Command, query: &str) -> bool {
