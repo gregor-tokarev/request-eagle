@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{
     variable_input::{VariableInput, VariableTarget, with_variables},
     variables::VariableScope,
@@ -136,25 +138,20 @@ impl RequestFields {
             .collect()
     }
 
-    /// Show the paths of the files `parts` sends in the rows that send them.
-    pub(crate) fn set_files(
+    /// Store the paths of files inside `collection` relative to it, in every
+    /// row that sends a file, including those that are not sent.
+    pub(crate) fn relative_files(
         &mut self,
-        parts: &[FormPart],
+        collection: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let sent: Vec<_> = self
-            .rows
-            .iter()
-            .filter(|row| self.is_sent(row, cx))
-            .map(|row| (row.file, row.value.clone()))
-            .collect();
-
-        for ((file, input), part) in sent.into_iter().zip(parts) {
-            if file && part.file && input.read(cx).value() != part.value.as_str() {
-                input.update(cx, |input, cx| {
-                    input.set_value(part.value.clone(), window, cx)
-                });
+        for row in self.rows.iter().filter(|row| row.file) {
+            let value = row.value.read(cx).value();
+            if let Ok(relative) = Path::new(value.as_ref()).strip_prefix(collection) {
+                let relative = relative.to_string_lossy().into_owned();
+                row.value
+                    .update(cx, |input, cx| input.set_value(relative, window, cx));
             }
         }
     }

@@ -282,7 +282,8 @@ fn reads_the_files_forms_and_data_send() {
     let request = parse_curl(
         "curl -F 'avatar=@\"my;photo,1.jpg\";type=image/jpeg' -F 'doc=@notes.txt;filename=n' \
          -F 'files=@a.txt,b.txt;type=text/plain' \
-         -F 'named=@c.txt;filename=\"client,copy.txt\"' https://example.com",
+         -F 'named=@c.txt;filename=\"client,copy.txt\"' -F 'quote=@a\"b.txt,b.txt' \
+         https://example.com",
     )
     .unwrap();
     assert_eq!(
@@ -294,6 +295,8 @@ fn reads_the_files_forms_and_data_send() {
                 part("files", "a.txt", true),
                 part("files", "b.txt", true),
                 part("named", "c.txt", true),
+                part("quote", "a\"b.txt", true),
+                part("quote", "b.txt", true),
             ],
         })
     );

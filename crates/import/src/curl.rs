@@ -360,7 +360,7 @@ impl Options {
                 };
 
                 // `@a.txt,b.txt` sends both files in the field.
-                for file in split_outside_quotes(files, ',') {
+                for file in form_files(files) {
                     self.form.push(FormPart {
                         name: field.to_owned(),
                         value: form_value(file),
@@ -584,28 +584,32 @@ fn form_value(content: &str) -> String {
     unquoted()
 }
 
-/// Splits `text` at each `separator` outside double quotes, in which `\"`
-/// and `\\` stand for a quote and a backslash.
-fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
+/// Splits the files of a `--form` field at commas, as cURL does. A file
+/// name or attribute value that starts with a double quote can contain
+/// commas; other quotes are part of the name.
+fn form_files(files: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut quoted = false;
-    let mut chars = text.char_indices();
+    let mut previous = None;
+    let mut chars = files.char_indices();
 
     while let Some((index, char)) = chars.next() {
         match char {
             '\\' if quoted => {
                 chars.next();
             }
-            '"' => quoted = !quoted,
-            char if char == separator && !quoted => {
-                parts.push(&text[start..index]);
-                start = index + char.len_utf8();
+            '"' if quoted => quoted = false,
+            '"' if index == start || previous == Some('=') => quoted = true,
+            ',' if !quoted => {
+                parts.push(&files[start..index]);
+                start = index + 1;
             }
             _ => {}
         }
+        previous = Some(char);
     }
-    parts.push(&text[start..]);
+    parts.push(&files[start..]);
 
     parts
 }

@@ -95,31 +95,34 @@ impl RequestDraft {
         }
     }
 
-    /// Show the file paths of the body as saved, which saving can make
-    /// relative to the collection. The editors keep everything else.
+    /// Show the body as first saved, which stores files inside the
+    /// collection relative to it. The paths in the editors of other body
+    /// types become relative too, so a later save stores them that way.
     pub fn set_saved_files(
         &mut self,
         body: Option<Body>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.request.body == body {
+        let Some(collection) = self
+            .location
+            .as_ref()
+            .and_then(RequestLocation::collection_path)
+        else {
             return;
-        }
+        };
 
-        match &body {
-            Some(Body::Binary { file }) => {
-                if let Some(input) = &self.body_file {
-                    let path = file.to_string_lossy().into_owned();
-                    input.update(cx, |input, cx| input.set_value(path, window, cx));
-                }
+        if let Some(input) = &self.body_file {
+            let path = input.read(cx).value();
+            if let Ok(relative) = Path::new(path.as_ref()).strip_prefix(&collection) {
+                let relative = relative.to_string_lossy().into_owned();
+                input.update(cx, |input, cx| input.set_value(relative, window, cx));
             }
-            Some(Body::Multipart { parts }) => {
-                if let Some(table) = &self.parts {
-                    table.update(cx, |table, cx| table.set_files(parts, window, cx));
-                }
-            }
-            _ => {}
+        }
+        if let Some(table) = &self.parts {
+            table.update(cx, |table, cx| {
+                table.relative_files(&collection, window, cx)
+            });
         }
         self.request.body = body;
 
