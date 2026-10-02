@@ -33,6 +33,12 @@ that repeats its parent's role and exports is redundant even when the parent
 also contains supporting types. Keep the core implementation and its tests at
 the parent level; reserve nested modules for distinct responsibilities.
 
+# Testing
+
+Do not write UI unit tests: tests marked `#[gpui_kit::test]` that open windows,
+render views or simulate input. Check interface changes in the running app
+instead. Unit-test logic that runs without a window with plain `#[test]`.
+
 # Language
 
 **Tab**: An open page in the workspace. Tabs can show a collection or a request; a tab is not necessarily an HTTP request.

@@ -2,18 +2,23 @@ use anyhow::{Context as _, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::StreamExt as _;
 use request::{
-    GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest,
-    Method, RequestExecutor, RequestPreferences, RequestScripts, RequestVariables, Response,
-    ScriptPhase, ScriptReport,
+    CookieJar, GrpcClient, GrpcDefinition, GrpcEvent, GrpcRequest, GrpcScripts, GrpcSettings,
+    HttpRequest, HttpSettings, Method, RawLanguage, RequestExecutor, RequestPreferences,
+    RequestScripts, RequestVariables, Response, ScriptPhase, ScriptReport,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
-use crate::commands::{Body, GrpcProtocol, GrpcRequestInput, Method as InputMethod, RequestInput};
+use crate::commands::{
+    Body, FormPart, GrpcProtocol, GrpcRequestInput, Language, Method as InputMethod, RequestInput,
+    TypedBody,
+};
 
+/// `cookies` is the app's cookie jar file.
 pub async fn run(
     root: &Path,
     preferences: &preferences::PreferencesFile,
+    cookies: &Path,
     path: &Path,
     trust_scripts: bool,
     variables: HashMap<String, String>,
@@ -28,21 +33,34 @@ pub async fn run(
         .context("Unknown collection")?;
     let request = match file.request.clone() {
         request::Request::Http(request) => request,
-        request::Request::Grpc(request) => {
+        request::Request::Grpc(mut request) => {
             if !request.scripts.is_empty() && !trust_scripts {
                 bail!(
                     "Read the saved request's scripts, then set trust_scripts=true to approve this run"
                 );
             }
 
-            let mut values = collection.local_env().entries.clone();
-            values.extend(variables);
+            let collection_values = collection.local_env().entries.clone();
             let mut settings = preferences.request_preferences().await?;
             if let Some(timeout) = timeout_ms {
                 settings.timeout_ms = timeout;
+                request.settings.timeout_ms = None;
             }
 
-            return run_grpc(path, &collection.path, request, values, &settings).await;
+            let jar = cookie_jar(cookies, &settings)?;
+            let result = run_grpc(
+                path,
+                &collection.path,
+                request,
+                collection_values,
+                variables,
+                &settings,
+                jar.as_ref(),
+            )
+            .await;
+            save(jar.as_ref())?;
+
+            return result;
         }
         request::Request::WebSocket(_) => {
             bail!(
@@ -56,17 +74,34 @@ pub async fn run(
         );
     }
 
-    let mut values = collection.local_env().entries.clone();
-    values.extend(variables);
-    let variables = RequestVariables::with_environment_session(values, None, Default::default())
-        .with_collection_scripts(Ok(collection.scripts().clone()));
+    // Variables passed to the command override the collection's, like an
+    // active environment.
+    let variables = RequestVariables::with_environment_session(
+        collection.local_env().entries.clone(),
+        variables,
+        None,
+        Default::default(),
+    )
+    .with_collection_scripts(Ok(collection.scripts().clone()));
     let mut settings = preferences.request_preferences().await?;
+    let mut request = request;
+    request.body = request
+        .body
+        .map(|body| body.resolved_from(&collection.path));
     if let Some(timeout) = timeout_ms {
         settings.timeout_ms = timeout;
+        request.settings.timeout_ms = None;
     }
 
-    let executor = RequestExecutor::new(&settings)?;
-    let execution = executor.execute(request, variables).await?;
+    let jar = cookie_jar(cookies, &settings)?;
+    let mut executor = RequestExecutor::new(&settings)?;
+    if let Some(jar) = &jar {
+        executor = executor.with_cookie_jar(jar.clone());
+    }
+    // Keep the cookies that redirects set, also when the request then fails.
+    let execution = executor.execute(request, variables).await;
+    save(jar.as_ref())?;
+    let execution = execution?;
     let Response::Http(response) = execution.response;
     let headers = response.headers.iter().map(|(name, value)| json!({
         "name": name.as_str(), "value": value.to_str().ok(), "value_base64": STANDARD.encode(value.as_bytes()),
@@ -84,17 +119,43 @@ pub async fn run(
     }))
 }
 
+/// The app's cookie jar, unless the settings turn it off.
+fn cookie_jar(path: &Path, settings: &RequestPreferences) -> Result<Option<CookieJar>> {
+    settings
+        .cookie_jar
+        .then(|| crate::cookies::open(path))
+        .transpose()
+}
+
+fn save(jar: Option<&CookieJar>) -> Result<()> {
+    if let Some(jar) = jar {
+        jar.save().context("Could not save cookies")?;
+    }
+
+    Ok(())
+}
+
 /// Invoke a saved gRPC method, sending its message once, and collect the
-/// stream until the server's status.
+/// stream until the server's status. Its scripts' requests use `jar`.
 async fn run_grpc(
     path: &Path,
     collection: &Path,
     request: GrpcRequest,
+    collection_values: HashMap<String, String>,
     values: HashMap<String, String>,
     settings: &RequestPreferences,
+    jar: Option<&CookieJar>,
 ) -> Result<Value> {
-    let client = GrpcClient::new(settings);
-    let variables = RequestVariables::with_environment_session(values, None, Default::default());
+    let mut client = GrpcClient::new(settings);
+    if let Some(jar) = jar {
+        client = client.with_cookie_jar(jar.clone());
+    }
+    let variables = RequestVariables::with_environment_session(
+        collection_values,
+        values,
+        None,
+        Default::default(),
+    );
     // Before invoke runs first, as it can set variables reflection needs.
     let prepared = client.prepare(&request, variables).await?;
     let definition = client
@@ -111,10 +172,12 @@ async fn run_grpc(
     let mut metadata = Vec::new();
     let mut scripts = Vec::new();
     // Streams have no deadline in the app; here the command must return.
-    let deadline = std::time::Duration::from_millis(match settings.timeout_ms {
-        0 => 60_000,
-        timeout => timeout,
-    });
+    let deadline = std::time::Duration::from_millis(
+        match request.settings.timeout_ms.unwrap_or(settings.timeout_ms) {
+            0 => 60_000,
+            timeout => timeout,
+        },
+    );
     let ends_at = std::time::Instant::now() + deadline;
 
     while let Some(event) = smol::future::or(events.next(), async {
@@ -180,6 +243,7 @@ impl From<GrpcRequestInput> for GrpcRequest {
                 server_name: input.server_name,
                 include_default_fields: input.include_default_fields.unwrap_or(true),
                 max_response_message_mb: input.max_response_message_mb,
+                timeout_ms: input.timeout_ms,
             },
             scripts: GrpcScripts {
                 before_invoke: input.before_invoke,
@@ -212,6 +276,7 @@ impl From<&GrpcRequest> for GrpcRequestInput {
             server_name: request.settings.server_name.clone(),
             include_default_fields: (!request.settings.include_default_fields).then_some(false),
             max_response_message_mb: request.settings.max_response_message_mb,
+            timeout_ms: request.settings.timeout_ms,
             before_invoke: request.scripts.before_invoke.clone(),
             on_message: request.scripts.on_message.clone(),
             after_response: request.scripts.after_response.clone(),
@@ -234,13 +299,40 @@ impl From<RequestInput> for HttpRequest {
             path: input.url,
             headers: input.headers,
             query: input.query,
+            path_variables: input.path_variables,
             body: input.body.map(|body| match body {
-                Body::Text(text) => text.into_bytes(),
-                Body::Bytes(bytes) => bytes,
+                Body::Text(text) => request::Body::json(text),
+                Body::Typed(TypedBody::Raw { language, text }) => request::Body::Raw {
+                    language: match language {
+                        Language::Json => RawLanguage::Json,
+                        Language::Xml => RawLanguage::Xml,
+                        Language::Text => RawLanguage::Text,
+                    },
+                    text,
+                },
+                Body::Typed(TypedBody::UrlEncoded { fields }) => {
+                    request::Body::UrlEncoded { fields }
+                }
+                Body::Typed(TypedBody::Multipart { parts }) => request::Body::Multipart {
+                    parts: parts
+                        .into_iter()
+                        .map(|part| request::FormPart {
+                            name: part.name,
+                            value: part.value,
+                            file: part.file,
+                        })
+                        .collect(),
+                },
+                Body::Typed(TypedBody::Binary { file }) => request::Body::Binary { file },
             }),
             scripts: RequestScripts {
                 pre_request: input.pre_request,
                 post_response: input.post_response,
+            },
+            settings: HttpSettings {
+                timeout_ms: input.timeout_ms,
+                follow_redirects: input.follow_redirects,
+                verify_certificates: input.verify_certificates,
             },
         }
     }
@@ -261,15 +353,36 @@ impl From<&HttpRequest> for RequestInput {
             url: request.path.clone(),
             headers: request.headers.clone(),
             query: request.query.clone(),
-            body: request
-                .body
-                .as_ref()
-                .map(|bytes| match String::from_utf8(bytes.clone()) {
-                    Ok(text) => Body::Text(text),
-                    Err(_) => Body::Bytes(bytes.clone()),
-                }),
+            path_variables: request.path_variables.clone(),
+            body: request.body.clone().map(|body| {
+                Body::Typed(match body {
+                    request::Body::Raw { language, text } => TypedBody::Raw {
+                        language: match language {
+                            RawLanguage::Json => Language::Json,
+                            RawLanguage::Xml => Language::Xml,
+                            RawLanguage::Text => Language::Text,
+                        },
+                        text,
+                    },
+                    request::Body::UrlEncoded { fields } => TypedBody::UrlEncoded { fields },
+                    request::Body::Multipart { parts } => TypedBody::Multipart {
+                        parts: parts
+                            .into_iter()
+                            .map(|part| FormPart {
+                                name: part.name,
+                                value: part.value,
+                                file: part.file,
+                            })
+                            .collect(),
+                    },
+                    request::Body::Binary { file } => TypedBody::Binary { file },
+                })
+            }),
             pre_request: request.scripts.pre_request.clone(),
             post_response: request.scripts.post_response.clone(),
+            timeout_ms: request.settings.timeout_ms,
+            follow_redirects: request.settings.follow_redirects,
+            verify_certificates: request.settings.verify_certificates,
         }
     }
 }

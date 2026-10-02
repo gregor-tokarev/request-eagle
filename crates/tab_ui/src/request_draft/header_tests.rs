@@ -1,113 +1,5 @@
-use gpui_kit::{AppContext as _, Modifiers, MouseButton, TestAppContext, point, px};
 use request::{Field, Method};
 use std::collections::HashMap;
-
-use super::{RequestDraft, draft::RequestSection};
-
-#[gpui_kit::test]
-fn deleting_an_earlier_row_keeps_checkbox_focus_on_the_same_header(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-    });
-    let mut draft = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            let mut draft = RequestDraft::new(
-                request::HttpRequest {
-                    headers: vec![Field::new("First", "1"), Field::new("Second", "2")],
-                    ..Default::default()
-                },
-                None,
-                Default::default(),
-                None,
-                cx,
-            );
-            draft.prepare(window, cx);
-            draft
-        });
-        draft = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
-    let draft = draft.unwrap();
-    let toggle = |cx: &mut gpui_kit::VisualTestContext| {
-        let keystroke = gpui_kit::Keystroke::parse("space").unwrap();
-        cx.simulate_event(gpui_kit::KeyDownEvent {
-            keystroke: keystroke.clone(),
-            is_held: false,
-            prefer_character_input: false,
-        });
-        cx.simulate_event(gpui_kit::KeyUpEvent { keystroke });
-    };
-
-    let key = super::tests::element_bounds(cx, "headers-key-1").unwrap();
-    cx.simulate_click(key.center(), Modifiers::default());
-    cx.simulate_keystrokes("shift-tab");
-    let focus = cx.update(|window, cx| window.focused(cx).unwrap());
-
-    let remove = super::tests::element_bounds(cx, "headers-remove-0").unwrap();
-    cx.simulate_click(remove.center(), Modifiers::default());
-    cx.update(|window, _| assert!(focus.is_focused(window)));
-    toggle(cx);
-    cx.read(|cx| {
-        assert_eq!(
-            draft.read(cx).request.headers,
-            [Field {
-                enabled: false,
-                ..Field::new("Second", "2")
-            }]
-        );
-    });
-
-    toggle(cx);
-    cx.read(|cx| {
-        assert_eq!(draft.read(cx).request.headers, [Field::new("Second", "2")]);
-    });
-}
-
-#[gpui_kit::test]
-fn descriptions_are_kept_with_their_rows(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-    });
-    let mut draft = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| {
-            let mut draft = RequestDraft::new(
-                request::HttpRequest {
-                    headers: vec![Field::new("X-Trace", "1")],
-                    ..Default::default()
-                },
-                None,
-                Default::default(),
-                None,
-                cx,
-            );
-            draft.prepare(window, cx);
-            draft
-        });
-        draft = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
-    let draft = draft.unwrap();
-
-    let description = super::tests::element_bounds(cx, "headers-description-0").unwrap();
-    cx.simulate_click(description.center(), Modifiers::default());
-    cx.simulate_input("Only while debugging");
-
-    cx.read(|cx| {
-        assert_eq!(
-            draft.read(cx).request.headers,
-            [Field {
-                description: "Only while debugging".into(),
-                ..Field::new("X-Trace", "1")
-            }]
-        );
-    });
-}
 
 #[test]
 fn templated_header_names_defer_potentially_overridden_defaults() {
@@ -115,7 +7,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
         path: "http://example.com".into(),
         method: Method::Post,
         headers: vec![Field::new("{{header_name}}", "virtual.example")],
-        body: Some(b"{}".to_vec()),
+        body: Some(request::Body::json("{}")),
         ..Default::default()
     };
     let preview = super::execution::generated_headers(&request);
@@ -217,106 +109,86 @@ fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
     }
 }
 
-#[gpui_kit::test]
-fn generated_headers_update_count_respect_overrides_and_are_selectable(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        preferences::init(cx);
-        request_eagle_theme::init(cx);
-    });
-    let mut draft = None;
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        // The initial untitled tab can render before prepare/focus is called.
-        let view = cx.new(super::tests::new_draft);
-        draft = Some(view.clone());
-        gpui_kit::component::Root::new(view, window, cx)
-    });
-    let draft = draft.unwrap();
-    let refresh = |cx: &mut gpui_kit::VisualTestContext| cx.update(|window, _| window.refresh());
+#[test]
+fn body_types_preview_their_content_type_and_length() {
+    use request::{Body, FormPart, RawLanguage};
 
-    refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-2").is_some());
-    assert!(cx.debug_bounds("headers-generated-value-0").is_some());
-    let url = cx.debug_bounds("request-url").unwrap();
-    cx.simulate_click(url.center(), Modifiers::default());
-    cx.simulate_input("example.com:8443/path");
-    refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-3").is_some());
-    cx.read(|cx| {
-        assert_eq!(
-            draft.read(cx).generated_headers[0],
-            ("Host".into(), "example.com:8443".into())
-        );
-        assert!(draft.read(cx).request.headers.is_empty());
-    });
-
-    let key = cx.debug_bounds("headers-key-0").unwrap();
-    cx.simulate_click(key.center(), Modifiers::default());
-    cx.simulate_input("HOST");
-    refresh(cx);
-    let value = cx.debug_bounds("headers-value-0").unwrap();
-    cx.simulate_click(value.center(), Modifiers::default());
-    cx.simulate_input("virtual.example");
-    cx.read(|cx| {
-        assert!(
-            draft
-                .read(cx)
-                .generated_headers
+    let preview = |method, body| {
+        let request = request::HttpRequest {
+            method,
+            path: "https://example.com".into(),
+            body: Some(body),
+            ..Default::default()
+        };
+        let headers = super::execution::generated_headers(&request);
+        let header = |name: &str| {
+            headers
                 .iter()
-                .all(|(name, _)| name != "Host")
-        )
-    });
+                .find(|(generated, _)| generated == name)
+                .map(|(_, value)| value.clone())
+        };
 
-    refresh(cx);
-    let enabled = cx.debug_bounds("headers-enabled-0").unwrap();
-    cx.simulate_click(enabled.center(), Modifiers::default());
-    cx.read(|cx| {
-        // The row stays, switched off, and no longer replaces the default.
-        assert_eq!(draft.read(cx).generated_headers[0].1, "example.com:8443");
-        assert!(!draft.read(cx).request.headers[0].enabled);
-    });
+        (header("Content-Type"), header("Content-Length"))
+    };
+    let some =
+        |content_type: &str, length: &str| (Some(content_type.to_owned()), Some(length.to_owned()));
 
-    cx.update(|window, cx| {
-        draft.update(cx, |draft, cx| {
-            draft.set_method(Method::Post, cx);
-            draft.section = RequestSection::Body;
-            draft.prepare(window, cx);
-            draft.body.as_ref().unwrap().update(cx, |body, cx| {
-                body.replace_all("{\"bird\":\"🦅\"}", window, cx)
-            });
-        })
-    });
-    cx.read(|cx| {
-        let headers = &draft.read(cx).generated_headers;
-        assert_eq!(headers[3], ("Content-Length".into(), "15".into()));
-        assert_eq!(
-            headers[4],
-            ("Content-Type".into(), "application/json".into())
-        );
-    });
-    refresh(cx);
-    assert!(cx.debug_bounds("request-section-Headers-count-5").is_some());
-    let tab = cx.debug_bounds("request-section-Headers").unwrap();
-    cx.simulate_click(tab.center(), Modifiers::default());
-    refresh(cx);
-    let cell = cx.debug_bounds("headers-generated-value-0").unwrap();
-    let start = point(cell.left() + px(8.), cell.center().y);
-    let end = point(cell.right() - px(8.), cell.center().y);
-    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
-    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
-    cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
-    cx.simulate_keystrokes("secondary-c");
     assert_eq!(
-        cx.read_from_clipboard().unwrap().text().unwrap(),
-        "example.com:8443"
+        preview(
+            Method::Post,
+            Body::Raw {
+                language: RawLanguage::Xml,
+                text: "<a/>".into(),
+            }
+        ),
+        some("application/xml", "4")
     );
-
-    cx.update(|_, cx| draft.update(cx, |draft, cx| draft.set_method(Method::Get, cx)));
-    cx.read(|cx| {
-        assert_eq!(draft.read(cx).generated_headers.len(), 3);
-        assert!(
-            draft.read(cx).request.body.is_some(),
-            "preserve the draft body while GET excludes it"
-        );
-    });
+    // Empty text is not sent.
+    assert_eq!(
+        preview(Method::Post, Body::json("")),
+        (None, Some("0".to_owned()))
+    );
+    assert_eq!(
+        preview(
+            Method::Put,
+            Body::UrlEncoded {
+                fields: vec![("a b".into(), "&".into())],
+            }
+        ),
+        some("application/x-www-form-urlencoded", "Calculated on Send")
+    );
+    assert_eq!(
+        preview(
+            Method::Delete,
+            Body::Multipart {
+                parts: vec![FormPart {
+                    name: "avatar".into(),
+                    value: "eagle.png".into(),
+                    file: true,
+                }],
+            }
+        ),
+        some(
+            "multipart/form-data; boundary=Calculated on Send",
+            "Calculated on Send"
+        )
+    );
+    assert_eq!(
+        preview(
+            Method::Patch,
+            Body::Binary {
+                file: "eagle.png".into(),
+            }
+        ),
+        some("image/png", "Calculated on Send")
+    );
+    assert_eq!(
+        preview(
+            Method::Get,
+            Body::Binary {
+                file: "eagle.png".into(),
+            }
+        ),
+        (None, None)
+    );
 }

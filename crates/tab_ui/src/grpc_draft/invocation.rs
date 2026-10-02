@@ -1,4 +1,5 @@
 use std::task::Poll;
+use std::time::SystemTime;
 
 use futures::StreamExt as _;
 use gpui_kit::*;
@@ -7,6 +8,8 @@ use request::{GrpcCall, GrpcClient, GrpcError, GrpcEvent, GrpcEvents, RequestVar
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
+use crate::RequestSent;
+use crate::cookies::Cookies;
 
 /// Events handled in one update, so fast streams do not redraw per message.
 const EVENT_BATCH: usize = 256;
@@ -22,7 +25,7 @@ impl GrpcDraft {
         match &self.client {
             Some((settings, client)) if *settings == preferences => client.clone(),
             _ => {
-                let client = GrpcClient::new(&preferences);
+                let client = GrpcClient::new(&preferences).with_cookie_jar(Cookies::jar(cx));
                 self.client = Some((preferences, client.clone()));
                 client
             }
@@ -102,6 +105,7 @@ impl GrpcDraft {
         let definition = definition.clone();
         let client = self.client(cx);
         let server: SharedString = self.request.url.trim().to_owned().into();
+        let sent = self.sent();
         // The HTTP client scripts use starts off the main thread. Dropping
         // the task cancels the call.
         let invoke =
@@ -110,7 +114,7 @@ impl GrpcDraft {
 
         self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = invoke.await;
-            Self::follow(this, result, server, cx).await;
+            Self::follow(this, result, server, sent, cx).await;
         }));
         self.redraw(cx);
     }
@@ -127,6 +131,7 @@ impl GrpcDraft {
         let client = self.client(cx);
         let collection = self.collection_path();
         let source = self.current_source();
+        let sent = self.sent();
         let loaded = match &self.definition {
             DefinitionState::Loaded(definition) if self.definition_is_current() => {
                 Some((definition.clone(), self.reflected_target.clone()))
@@ -144,7 +149,7 @@ impl GrpcDraft {
         self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
             let prepared = match prepare.await {
                 Ok(prepared) => prepared,
-                Err(error) => return Self::follow(this, Err(error), "".into(), cx).await,
+                Err(error) => return Self::follow(this, Err(error), "".into(), sent, cx).await,
             };
             let server: SharedString = prepared.request().url.trim().to_owned().into();
             let target = reflected_target(prepared.request(), prepared.variables());
@@ -184,9 +189,25 @@ impl GrpcDraft {
                 Err(error) => Err(prepared.fail(error)),
             };
 
-            Self::follow(this, result, server, cx).await;
+            Self::follow(this, result, server, sent, cx).await;
         }));
         self.redraw(cx);
+    }
+
+    /// The call history keeps once it starts: the request as it is now.
+    fn sent(&self) -> RequestSent {
+        let mut request = self.request.clone();
+
+        // History keeps the request outside its collection, where relative
+        // `.proto` paths would not resolve.
+        if let Some(collection) = self.collection_path() {
+            request.definition = request.definition.resolved_from(&collection);
+        }
+
+        RequestSent {
+            record: request_history::Record::sent(request),
+            sent_at: SystemTime::now(),
+        }
     }
 
     /// Show the call that `result` started, or why it did not, then its
@@ -195,11 +216,16 @@ impl GrpcDraft {
         this: WeakEntity<Self>,
         result: Result<(GrpcCall, GrpcEvents), GrpcError>,
         server: SharedString,
+        sent: RequestSent,
         cx: &mut AsyncWindowContext,
     ) {
         let opened = this.update_in(cx, |this, window, cx| {
+            // Requests that a Before invoke script sent may have set cookies.
+            Cookies::changed(cx);
+
             let events = match result {
                 Ok((call, events)) => {
+                    cx.emit(sent);
                     let kind = call.kind;
                     this.response
                         .update(cx, |response, cx| response.start(kind, server, window, cx));
@@ -240,6 +266,8 @@ impl GrpcDraft {
             let updated = this.update_in(cx, |this, window, cx| {
                 this.response
                     .update(cx, |response, cx| response.receive(batch, window, cx));
+                // Requests that the call's scripts sent may have set cookies.
+                Cookies::changed(cx);
 
                 // Messages redraw only the response; the draft changes
                 // when the call ends.

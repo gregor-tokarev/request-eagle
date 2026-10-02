@@ -140,6 +140,7 @@ impl Render for RequestSettings {
             .request
             .ssl_certificate_verification;
         let follow_all_redirects = cx.global::<Preferences>().request.follow_all_redirects;
+        let cookie_jar = cx.global::<Preferences>().request.cookie_jar;
 
         section("Request")
             .child(row(
@@ -154,7 +155,7 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "Request timeout",
-                "Set how long a request should wait for a response before timing out. To never time out, set to 0.",
+                "Set how long a request should wait for a response before timing out. To never time out, set to 0. A request can change this in its Settings tab.",
                 div().w_40().flex_shrink_0().child(
                     Input::new(&self.timeout)
                         .suffix(div().text_color(cx.theme().muted_foreground).child("ms"))
@@ -174,7 +175,7 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "SSL certificate verification",
-                "Verify the server certificate before sending requests. Disabling this allows untrusted certificates.",
+                "Verify the server certificate before sending requests. Disabling this allows untrusted certificates. A request can change this in its Settings tab.",
                 h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("ssl-certificate-verification")
                         .accessibility_label("SSL certificate verification")
@@ -187,13 +188,26 @@ impl Render for RequestSettings {
             ))
             .child(row(
                 "Follow all redirects",
-                "Automatically follow HTTP redirects to the final response.",
+                "Automatically follow HTTP redirects to the final response. A request can change this in its Settings tab.",
                 h_flex().w_40().flex_shrink_0().justify_end().child(
                     Switch::new("follow-all-redirects")
                         .accessibility_label("Follow all redirects")
                         .checked(follow_all_redirects)
                         .on_click(cx.listener(|this, checked, _, cx| {
                             this.save(|request| request.follow_all_redirects = *checked, cx);
+                        })),
+                ),
+                cx,
+            ))
+            .child(row(
+                "Cookie jar",
+                "Keep the cookies that responses set and send them with later requests to the same sites.",
+                h_flex().w_40().flex_shrink_0().justify_end().child(
+                    Switch::new("cookie-jar")
+                        .accessibility_label("Cookie jar")
+                        .checked(cookie_jar)
+                        .on_click(cx.listener(|this, checked, _, cx| {
+                            this.save(|request| request.cookie_jar = *checked, cx);
                         })),
                 ),
                 cx,

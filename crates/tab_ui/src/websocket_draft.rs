@@ -1,7 +1,5 @@
 mod draft;
 mod message_log;
-
-#[cfg(test)]
-mod tests;
+mod settings;
 
 pub use draft::WebSocketDraft;

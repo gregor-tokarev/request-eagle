@@ -7,8 +7,8 @@ use std::{
 use bytes::Bytes;
 
 use crate::{
-    EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences, RequestVariables,
-    Response, http::HttpExecutor, scripts,
+    CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
+    RequestVariables, Response, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
@@ -26,6 +26,15 @@ impl RequestExecutor {
             timeout: (preferences.timeout_ms != 0)
                 .then(|| Duration::from_millis(preferences.timeout_ms)),
         })
+    }
+
+    /// Store the cookies that responses set in `jar` and send them with later
+    /// requests to the same sites, including script requests. Executors that
+    /// share a jar share its cookies. Ignored when the preferences turn the
+    /// cookie jar off.
+    pub fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.http = self.http.with_cookie_jar(jar);
+        self
     }
 
     /// Run the request's scripts and send it, resolving variables after the
@@ -60,12 +69,17 @@ impl RequestExecutor {
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
         let executor = self.clone();
         let opened = events.as_ref().map(|events| events.opened.clone());
+        let timeout = match request.settings.timeout_ms {
+            Some(0) => None,
+            Some(timeout) => Some(Duration::from_millis(timeout)),
+            None => self.timeout,
+        };
 
         async move {
             let cancellation = scripts::Cancellation::new();
             let mut reports = Vec::new();
             let run = async {
-                let (mut request, state, pre_reports) = scripts::pre_request(
+                let (mut request, mut state, pre_reports) = scripts::pre_request(
                     request,
                     variables,
                     executor.clone(),
@@ -74,8 +88,15 @@ impl RequestExecutor {
                 .await?;
                 reports = pre_reports;
 
+                // Reading the body's files blocks.
+                let (request, body) = smol::unblock(move || {
+                    let body = request.encode_body();
+                    (request, body)
+                })
+                .await;
+                let body = body?.map(Bytes::from);
+
                 let sent_at = Instant::now();
-                let body = request.body.take().map(Bytes::from);
 
                 // Only a post-response script reads the sent body. Otherwise
                 // HTTP owns the upload and releases it before the download.
@@ -83,10 +104,11 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
-                let response = executor
+                let (response, url) = executor
                     .http
                     .execute(&request, body, events.as_mut())
                     .await?;
+                state.response_url = Some(url.into());
                 let execution = Execution {
                     response: Response::Http(response),
                     elapsed: sent_at.elapsed(),
@@ -96,7 +118,7 @@ impl RequestExecutor {
                 Ok((request, post_body, state, execution))
             };
 
-            let (request, body, state, execution) = match executor.timeout {
+            let (request, body, state, execution) = match timeout {
                 Some(timeout) => {
                     smol::future::or(run, async {
                         smol::Timer::after(timeout).await;

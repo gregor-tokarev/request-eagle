@@ -7,7 +7,7 @@ use std::{
 
 use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
 
-use request::{Field, HttpRequest, Method, Request};
+use request::{Body, Field, HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -156,10 +156,12 @@ request_custom = 'keep the request metadata'
     let updated = HttpRequest {
         scripts: Default::default(),
         method: Method::Post,
-        path: "https://example.com/v2/users".into(),
+        path: "https://example.com/v2/users/:team".into(),
         headers: vec![Field::new("Accept", "application/json")],
-        body: Some(b"new body".to_vec()),
+        body: Some(Body::json("new body")),
         query: vec![Field::new("page", "2")],
+        path_variables: vec![("team".into(), "core".into())],
+        settings: Default::default(),
     };
 
     registry
@@ -179,6 +181,7 @@ request_custom = 'keep the request metadata'
     assert_eq!(saved.headers, updated.headers);
     assert_eq!(saved.body, updated.body);
     assert_eq!(saved.query, updated.query);
+    assert_eq!(saved.path_variables, updated.path_variables);
     let content = fs::read_to_string(&path).unwrap();
     for preserved in [
         "# externally edited request",
@@ -197,6 +200,7 @@ request_custom = 'keep the request metadata'
     let cleared = HttpRequest {
         body: None,
         query: Vec::new(),
+        path_variables: Vec::new(),
         ..updated
     };
     registry
@@ -207,6 +211,12 @@ request_custom = 'keep the request metadata'
     };
     assert_eq!(reloaded.body, None);
     assert!(reloaded.query.is_empty());
+    assert!(reloaded.path_variables.is_empty());
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("path_variables")
+    );
 }
 
 #[test]
@@ -313,6 +323,52 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
 }
 
 #[test]
+fn renaming_request_changes_only_its_name() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+
+    registry
+        .rename_request(&path, "list", "  All users ")
+        .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.contains("# keep this comment"));
+    assert!(content.contains("custom = 'keep'"));
+    assert!(content.contains("path = '/users'"));
+    assert_eq!(registry.file(&path).unwrap().name, "All users");
+    assert_eq!(
+        CollectionRegistry::from_path(root)
+            .file(&path)
+            .unwrap()
+            .name,
+        "All users"
+    );
+}
+
+#[test]
+fn renaming_cannot_rename_a_request_replaced_at_the_same_path() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let original_content = fs::read_to_string(&path).unwrap();
+    let replacement_content = original_content.replace("id = 'list'", "id = 'replacement'");
+    fs::write(&path, &replacement_content).unwrap();
+
+    let result = registry.rename_request(&path, "list", "Renamed");
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), replacement_content);
+    assert_eq!(registry.file(&path).unwrap().name, "List users");
+    assert!(matches!(
+        registry.rename_request(&path, "replacement", " "),
+        Err(CollectionEditError::InvalidName)
+    ));
+}
+
+#[test]
 fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     let fixture = Fixture::new();
     let root = &fixture.0;
@@ -344,6 +400,78 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     };
     assert_eq!(reloaded.path, "https://example.com/edited");
     assert_eq!(reloaded.body, None);
+}
+
+#[test]
+fn saving_a_body_of_another_type_keeps_none_of_its_fields() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let mut save = |body| {
+        let request = HttpRequest {
+            method: Method::Post,
+            path: "https://example.com/users".into(),
+            body: Some(body),
+            ..HttpRequest::default()
+        };
+        registry
+            .update_request(&path, "list", request.clone().into())
+            .unwrap();
+        let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+            panic!("expected an HTTP request");
+        };
+        assert_eq!(reloaded, request);
+
+        fs::read_to_string(&path).unwrap()
+    };
+
+    let content = save(Body::json("{}"));
+    assert!(content.contains("language = \"json\""), "{content}");
+
+    let content = save(Body::Multipart {
+        parts: vec![request::FormPart {
+            name: "avatar".into(),
+            value: "eagle.png".into(),
+            file: true,
+        }],
+    });
+    assert!(!content.contains("language"), "{content}");
+
+    let content = save(Body::Binary {
+        file: "eagle.png".into(),
+    });
+    assert!(!content.contains("parts"), "{content}");
+}
+
+#[test]
+fn saving_an_inline_request_writes_its_body_inline() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    fs::write(
+        &path,
+        "id = 'list'\nname = 'List users'\nschema_version = 1\nrequest = { type = 'http', method = 'POST', path = '/users', body = [65] }\n",
+    )
+    .unwrap();
+    let mut registry = CollectionRegistry::from_path(root);
+    let request = HttpRequest {
+        method: Method::Post,
+        path: "/users".into(),
+        body: Some(Body::UrlEncoded {
+            fields: vec![("name".into(), "Rex".into())],
+        }),
+        ..HttpRequest::default()
+    };
+
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded, request);
 }
 
 #[test]
@@ -747,44 +875,4 @@ headers = [
     };
     assert_eq!(reloaded.headers, request.headers);
     assert_eq!(reloaded.query, request.query);
-}
-
-#[test]
-fn bodies_are_saved_as_text_unless_they_are_not_utf8() {
-    let fixture = Fixture::new();
-    let root = &fixture.0;
-    let path = root.join("API/Users/list.toml");
-    let mut registry = CollectionRegistry::from_path(root);
-    let mut request = HttpRequest {
-        method: Method::Post,
-        path: "https://example.com/users".into(),
-        body: Some(b"{\n  \"name\": \"Ada\"\n}".to_vec()),
-        ..Default::default()
-    };
-
-    registry
-        .update_request(&path, "list", request.clone().into())
-        .unwrap();
-
-    let content = fs::read_to_string(&path).unwrap();
-    assert!(
-        content.contains("body = \"\"\"\n{\n  \"name\": \"Ada\"\n}\"\"\""),
-        "{content}"
-    );
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
-        panic!("expected an HTTP request");
-    };
-    assert_eq!(reloaded.body, request.body);
-
-    request.body = Some(vec![0xff, 0x00, b'a']);
-    registry
-        .update_request(&path, "list", request.clone().into())
-        .unwrap();
-
-    let content = fs::read_to_string(&path).unwrap();
-    assert!(content.contains("body = ["), "{content}");
-    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
-        panic!("expected an HTTP request");
-    };
-    assert_eq!(reloaded.body, request.body);
 }

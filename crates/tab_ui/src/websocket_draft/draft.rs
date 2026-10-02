@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use environment::EnvironmentSessions;
 use futures::{FutureExt as _, StreamExt as _};
@@ -15,11 +15,11 @@ use preferences::Preferences;
 use request::{Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest};
 
 use super::message_log::MessageLog;
-use crate::Environments;
 use crate::actions::SendRequest;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation, request_header};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
+use crate::{Environments, RequestSent};
 
 /// The most events shown per update. A fast stream is drawn in batches
 /// instead of once for every message.
@@ -43,12 +43,15 @@ pub(crate) enum WebSocketSection {
     Message,
     Params,
     Headers,
+    Settings,
 }
 
 /// An editable WebSocket request owned by one tab, and its connection.
 pub struct WebSocketDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: WebSocketRequest,
     saved_request: WebSocketRequest,
     pub(crate) section: WebSocketSection,
@@ -63,16 +66,22 @@ pub struct WebSocketDraft {
     message_completion: Option<Entity<VariableInput>>,
     message_json_valid: bool,
     message_task: Option<Task<()>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     variables: Entity<VariableScope>,
     variable_sessions: EnvironmentSessions,
     pub(crate) log: Entity<MessageLog>,
     split: Entity<ResizableState>,
     connection: Option<WebSocketConnection>,
+    /// The request as it was when it started connecting. History keeps it
+    /// once it connects.
+    connecting: Option<RequestSent>,
     events: Option<Task<()>>,
     address: Entity<WebSocketAddress>,
     configuration: Entity<WebSocketConfiguration>,
-    _subscriptions: Vec<Subscription>,
+    pub(super) _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<RequestSent> for WebSocketDraft {}
 
 impl WebSocketDraft {
     /// Variables resolve from the request's collection environment, its
@@ -112,6 +121,7 @@ impl WebSocketDraft {
 
         Self {
             location,
+            name: None,
             handshake_headers: request::websocket_handshake_headers(&request.url, &request.headers),
             saved_request: request.clone(),
             request,
@@ -126,11 +136,13 @@ impl WebSocketDraft {
             message_completion: None,
             message_json_valid: false,
             message_task: None,
+            timeout: None,
             variables,
             variable_sessions: sessions,
             log,
             split,
             connection: None,
+            connecting: None,
             events: None,
             address,
             configuration,
@@ -138,8 +150,9 @@ impl WebSocketDraft {
         }
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -154,7 +167,13 @@ impl WebSocketDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.notify_controls(cx);
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.notify_controls(cx);
     }
 
     pub fn mark_saved(&mut self, request: WebSocketRequest, cx: &mut Context<Self>) {
@@ -174,6 +193,9 @@ impl WebSocketDraft {
             }
             WebSocketSection::Params | WebSocketSection::Headers => {
                 self.fields_state(window, cx);
+            }
+            WebSocketSection::Settings => {
+                self.timeout_state(window, cx);
             }
         }
 
@@ -203,6 +225,10 @@ impl WebSocketDraft {
             .unwrap_or_default();
         let (connection, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
+        self.connecting = Some(RequestSent {
+            record: request_history::Record::sent(self.request.clone()),
+            sent_at: SystemTime::now(),
+        });
 
         self.connection = Some(connection);
         self.set_state(ConnectionState::Connecting, cx);
@@ -230,6 +256,7 @@ impl WebSocketDraft {
         match self.state {
             ConnectionState::Connecting => {
                 self.connection = None;
+                self.connecting = None;
                 self.events = None;
                 self.set_state(ConnectionState::Disconnected, cx);
             }
@@ -263,9 +290,14 @@ impl WebSocketDraft {
             match event.kind {
                 WebSocketEventKind::Connected(_) if state == ConnectionState::Connecting => {
                     state = ConnectionState::Connected;
+
+                    if let Some(sent) = self.connecting.take() {
+                        cx.emit(sent);
+                    }
                 }
                 WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
                     state = ConnectionState::Disconnected;
+                    self.connecting = None;
                 }
                 _ => {}
             }
@@ -305,6 +337,17 @@ impl WebSocketDraft {
                 headers.set_generated_headers(&self.handshake_headers, cx)
             });
         }
+    }
+
+    /// Puts the cursor in the URL with its text selected, as a browser's
+    /// address bar does.
+    pub fn focus_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.url_state(window, cx);
+
+        url.update(cx, |url, cx| {
+            url.select_all(window, cx);
+            url.focus(window, cx);
+        });
     }
 
     pub(crate) fn url_state(
@@ -525,6 +568,7 @@ impl WebSocketDraft {
                 WebSocketSection::Headers,
                 Field::enabled(&self.request.headers).count() + self.handshake_headers.len(),
             ),
+            ("Settings", WebSocketSection::Settings, 0),
         ];
 
         Tabs::new("websocket-sections")
@@ -633,13 +677,6 @@ impl WebSocketDraft {
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
-impl WebSocketDraft {
-    pub fn is_connecting_for_test(&self) -> bool {
-        self.state == ConnectionState::Connecting
-    }
-}
-
 impl Render for WebSocketDraft {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         v_flex()
@@ -693,7 +730,12 @@ impl Render for WebSocketAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(request_header("WebSocket", draft.location.as_ref(), cx))
+                    .child(request_header(
+                        "WS",
+                        draft.location.as_ref(),
+                        draft.name.as_ref(),
+                        cx,
+                    ))
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())
@@ -711,6 +753,7 @@ impl Render for WebSocketConfiguration {
                     WebSocketSection::Params | WebSocketSection::Headers => {
                         draft.fields_state(window, cx).into_any_element()
                     }
+                    WebSocketSection::Settings => draft.settings(window, cx),
                 };
 
                 v_flex()

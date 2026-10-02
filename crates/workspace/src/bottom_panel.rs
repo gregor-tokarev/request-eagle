@@ -1,7 +1,7 @@
-use gpui_kit::component::{ActiveTheme as _, IconNamed, Sizable as _, button::*};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconNamed, Sizable as _, button::*};
 use gpui_kit::*;
 
-use crate::actions::{OpenSettings, ToggleLeftSidebar};
+use crate::actions::{OpenCookies, OpenSettings, ToggleLeftSidebar};
 
 pub(crate) const TOGGLE_SIDEBAR_BUTTON: &str = "toggle-sidebar";
 
@@ -71,6 +71,18 @@ impl Render for BottomPanel {
                     ),
             )
             .child(div().flex_1())
+            .child(
+                Button::new("open-cookies")
+                    .debug_selector(|| "open-cookies".into())
+                    .ghost()
+                    .small()
+                    .icon(Icon::default().path("icons/cookie.svg"))
+                    .accessibility_label("Cookies")
+                    .tooltip_with_action("Cookies", &OpenCookies, None)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(OpenCookies.boxed_clone(), cx);
+                    }),
+            )
             .child(
                 Button::new("open-settings")
                     .ghost()

@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 18] = [
+const LOCAL_ICONS: [(&str, &[u8]); 25] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -38,6 +38,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 18] = [
     // Lucide icons that GPUI Kit does not bundle by default.
     ("icons/lock.svg", include_bytes!("../assets/icons/lock.svg")),
     (
+        "icons/shield-check.svg",
+        include_bytes!("../assets/icons/shield-check.svg"),
+    ),
+    (
         "icons/lock-open.svg",
         include_bytes!("../assets/icons/lock-open.svg"),
     ),
@@ -50,6 +54,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 18] = [
         include_bytes!("../assets/icons/trash.svg"),
     ),
     (
+        "icons/cookie.svg",
+        include_bytes!("../assets/icons/cookie.svg"),
+    ),
+    (
         "icons/refresh-cw.svg",
         include_bytes!("../assets/icons/refresh-cw.svg"),
     ),
@@ -60,6 +68,14 @@ const LOCAL_ICONS: [(&str, &[u8]); 18] = [
     (
         "icons/file-code.svg",
         include_bytes!("../assets/icons/file-code.svg"),
+    ),
+    (
+        "icons/code-xml.svg",
+        include_bytes!("../assets/icons/code-xml.svg"),
+    ),
+    (
+        "icons/download.svg",
+        include_bytes!("../assets/icons/download.svg"),
     ),
     // gRPC method kinds: a doubled arrow marks the side that streams.
     (
@@ -77,6 +93,19 @@ const LOCAL_ICONS: [(&str, &[u8]); 18] = [
     (
         "icons/grpc-bidi-streaming.svg",
         include_bytes!("../assets/icons/grpc-bidi-streaming.svg"),
+    ),
+    // Request protocols, shown where a request has no HTTP method to show.
+    (
+        "icons/protocol-http.svg",
+        include_bytes!("../assets/icons/protocol-http.svg"),
+    ),
+    (
+        "icons/protocol-grpc.svg",
+        include_bytes!("../assets/icons/protocol-grpc.svg"),
+    ),
+    (
+        "icons/protocol-websocket.svg",
+        include_bytes!("../assets/icons/protocol-websocket.svg"),
     ),
 ];
 

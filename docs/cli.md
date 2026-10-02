@@ -66,11 +66,29 @@ script results.
 - Saved scripts run only with `trust_scripts: true`. Read them first, including
   the collection's scripts from `collections.get`, which run before the request's.
 - Response bodies and raw header values are Base64.
+- An HTTP request's `body` has a `type`: `raw` with a `language` (`json`,
+  `xml` or `text`) and its `text`, `url_encoded` with `fields`, `multipart`
+  with `parts`, or `binary` with a `file`. A string alone is raw JSON. A
+  multipart part with `"file": true` sends the file at its `value`. Relative
+  file paths start at the collection's directory.
+- HTTP requests can set their own `timeout_ms`, `follow_redirects` and
+  `verify_certificates`. Fields left out follow `settings.request`, and the
+  `timeout_ms` of `requests.run` replaces both for that run.
+- `settings.request` takes `ca_certificates`, a PEM file of certificate
+  authorities trusted in addition to the system's.
+  `settings.client_certificates.add` checks a client certificate's files and
+  saves it for mutual TLS with one host; its passphrase goes to the OS
+  credential store, so pass it through stdin.
 - Saved gRPC requests have `"protocol": "grpc"`, a `url`, a `method` such as
   `package.Service/Method` and a JSON `message`. Without `proto_file` their
   services come from server reflection. `requests.run` sends the message once,
   also on client streams, and returns every message with the final status;
   non-OK gRPC statuses exit 0 like HTTP errors. Their `before_invoke`,
   `on_message` and `after_response` scripts also need `trust_scripts: true`.
+- `requests.run` keeps the cookies that responses set in the app's cookie
+  jar, `cookies.json` in the data directory, and sends them with later runs to
+  the same sites, as the app does. `cookies.list` shows them and
+  `cookies.delete` removes a domain's cookies, or one by name. Turn the jar off
+  with `settings.request` and `"cookie_jar": false`.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

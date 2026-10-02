@@ -1061,6 +1061,12 @@ fn definitions_store_paths_inside_the_collection_relative_to_it() {
             import_paths: vec!["shared".into(), "/usr/include".into()],
         }
     );
+    assert_eq!(
+        definition
+            .relative_to(Path::new("/collections/Demo"))
+            .resolved_from(Path::new("/collections/Demo")),
+        definition
+    );
 }
 
 #[test]

@@ -1,12 +1,23 @@
-use request::{Field, HttpRequest, Method};
+use environment::VariableScopes;
+use request::{Body, Field, HttpRequest, Method};
 use std::collections::HashMap;
+
+fn environment(changes: &[(&str, &str)]) -> VariableScopes {
+    VariableScopes {
+        environment: changes
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), Some((*value).to_owned())))
+            .collect(),
+        ..Default::default()
+    }
+}
 
 #[test]
 fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
     let session = environment::EnvironmentSession::default();
     let file_values = HashMap::from([("token".into(), "saved value".into())]);
     session
-        .apply(&[("token".into(), Some("response token".into()))].into())
+        .apply(&environment(&[("token", "response token")]))
         .unwrap();
     let draft = HttpRequest {
         path: "https://example.com".into(),
@@ -16,6 +27,7 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
 
     let first = request::RequestVariables::with_environment_session(
         file_values.clone(),
+        HashMap::new(),
         None,
         session.clone(),
     );
@@ -24,10 +36,14 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
         "Bearer response token"
     );
     session
-        .apply(&[("token".into(), Some("refreshed token".into()))].into())
+        .apply(&environment(&[("token", "refreshed token")]))
         .unwrap();
-    let next =
-        request::RequestVariables::with_environment_session(file_values.clone(), None, session);
+    let next = request::RequestVariables::with_environment_session(
+        file_values.clone(),
+        HashMap::new(),
+        None,
+        session,
+    );
     assert_eq!(
         next.resolve(&draft).unwrap().headers[0].value,
         "Bearer refreshed token"
@@ -40,9 +56,10 @@ fn session_values_resolve_across_request_snapshots_without_changing_drafts() {
 fn session_can_supply_values_when_the_environment_file_cannot_be_read() {
     let session = environment::EnvironmentSession::default();
     session
-        .apply(&[("token".into(), Some("session token".into()))].into())
+        .apply(&environment(&[("token", "session token")]))
         .unwrap();
     let variables = request::RequestVariables::with_environment_session(
+        HashMap::new(),
         HashMap::new(),
         Some("Invalid environment file".into()),
         session,
@@ -72,7 +89,7 @@ fn escaped_references_remain_literal_in_every_request_field() {
         path: "https://example.com/{{!customer}}".into(),
         headers: vec![Field::new("X-{{!customer}}", "{{!missing}}")],
         query: vec![Field::new("{{!customer}}", "{{!$guid}}")],
-        body: Some(br#"{"template":"Hello {{!customer}}"}"#.to_vec()),
+        body: Some(Body::json(r#"{"template":"Hello {{!customer}}"}"#)),
         ..Default::default()
     };
     let resolved = draft.resolve_variables(&values).unwrap();
@@ -83,8 +100,8 @@ fn escaped_references_remain_literal_in_every_request_field() {
     );
     assert_eq!(resolved.query[0], Field::new("{{customer}}", "{{$guid}}"));
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&resolved.body.unwrap()).unwrap()["template"],
-        "Hello {{customer}}"
+        resolved.body,
+        Some(Body::json(r#"{"template":"Hello {{customer}}"}"#))
     );
 }
 
@@ -103,7 +120,7 @@ fn resolves_every_request_field_in_a_snapshot() {
             Field::new("X-Request-ID", "{{$guid}}"),
         ],
         query: vec![Field::new("{{key}}", "{{$guid}}")],
-        body: Some(br#"{"value":"{{value}}","id":"{{$guid}}"}"#.to_vec()),
+        body: Some(Body::json(r#"{"value":"{{value}}","id":"{{$guid}}"}"#)),
         ..Default::default()
     };
     let before = draft.clone();
@@ -115,8 +132,8 @@ fn resolves_every_request_field_in_a_snapshot() {
     assert!(outgoing.path.ends_with(id));
     assert_eq!(&outgoing.headers[1].value, id);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(outgoing.body.as_ref().unwrap()).unwrap()["id"],
-        *id
+        outgoing.body,
+        Some(Body::json(format!(r#"{{"value":"🦅 hello","id":"{id}"}}"#)))
     );
 }
 #[test]
@@ -160,10 +177,10 @@ fn url_fragments_do_not_resolve_or_validate_unsent_references() {
     let request = request::HttpRequest {
         path: "https://example.com/".into(),
         headers: vec![Field::new("X-Value", "#{{host}}")],
-        body: Some(b"#{{host}}".to_vec()),
+        body: Some(Body::json("#{{host}}")),
         ..Default::default()
     };
     let resolved = request.resolve_variables(&values).unwrap();
     assert_eq!(resolved.headers[0].value, "#example.com");
-    assert_eq!(resolved.body.as_deref(), Some(b"#example.com".as_slice()));
+    assert_eq!(resolved.body, Some(Body::json("#example.com")));
 }

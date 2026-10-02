@@ -37,13 +37,24 @@ environment selected in the tab bar. The selected environment's values take
 precedence. Global environments are stored in
 `~/.request-eagle/environments/<name>.toml`.
 
-| API | Behavior |
+Scripts read and change values in these scopes. A `{{name}}` reference uses
+the first one that has the name:
+
+| API | Scope |
 | --- | --- |
-| `pm.environment.get(name)` / `.has(name)` | Read the environment file values plus session changes. |
-| `pm.environment.set(name, value)` | Set a session value, converted to a string. |
-| `pm.environment.unset(name)` / `.clear()` | Hide values for this session, including file values. |
-| `pm.environment.toObject()` / `.replaceIn(text)` | Copy the visible values, or substitute them in text. |
-| `pm.variables.*` | The same methods, with overrides that last for the current execution only. |
+| `pm.variables` | Overrides that last for the current execution only. |
+| `pm.environment` | The selected environment, then the collection's variables. |
+| `pm.collectionVariables` | The collection's `environment.toml`. |
+| `pm.globals` | Values every collection shares. They start empty when the workspace opens. |
+
+Each scope has the same methods:
+
+| Method | Behavior |
+| --- | --- |
+| `get(name)` / `has(name)` | Read the file values plus session changes. |
+| `set(name, value)` | Set a value for the scope's lifetime, converted to a string. |
+| `unset(name)` / `clear()` | Hide values for this session, including file values and those of the scopes below. `pm.variables` only removes its overrides. |
+| `toObject()` / `replaceIn(text)` | Copy the visible values, or substitute them in text. |
 
 Use `{{!name}}` to send a literal `{{name}}`.
 
@@ -68,7 +79,21 @@ pm.request.headers.upsert({key: "Authorization", value: "Bearer {{token}}"});
 reject.
 
 Subrequests use the primary request's settings and do not run saved scripts.
-Timers, package imports, filesystem access, and `fetch` are not provided.
+Like the primary request, they store and send cookies in the cookie jar, so a
+login subrequest's session cookie goes with the request that follows.
+Timers, filesystem access, and `fetch` are not provided.
+
+## Read and change the body
+
+`pm.request.body.mode` names the body's type, as in Postman: `raw`,
+`urlencoded`, `formdata` or `file`.
+
+| API | Body |
+| --- | --- |
+| `pm.request.body.raw` | Raw text. Setting it, or calling `update(text)`, makes any body raw text. After the response, it is what was sent. |
+| `pm.request.body.urlencoded` | A URL-encoded form's fields: `get`, `has`, `add`, `remove`, `upsert`, `clear` and `toJSON`, like headers. |
+| `pm.request.body.formdata` | A multipart form's parts, with the same methods. Text parts have a `value`; file parts have `type: "file"` and the file's path in `src`. |
+| `pm.request.body.file.src` | The path of the file a binary body sends. |
 
 ## Sign and encode values
 
@@ -85,6 +110,65 @@ pm.request.headers.upsert({key: "X-Signature", value: signature});
 | `pm.crypto.randomBytes(count)` | Secure random bytes, hexadecimal. |
 | `pm.encoding.base64Encode(text)` / `.base64Decode(text)` | Standard padded Base64. |
 | `pm.encoding.base64UrlEncode(text)` / `.base64UrlDecode(text)` | URL-safe Base64 without padding. |
+
+## Use Postman's libraries
+
+```js
+const CryptoJS = require("crypto-js");
+const moment = require("moment");
+
+const timestamp = moment().utc().format();
+const signature = CryptoJS.HmacSHA256(timestamp, pm.environment.get("secret"));
+pm.request.headers.upsert({key: "X-Timestamp", value: timestamp});
+pm.request.headers.upsert({key: "X-Signature", value: CryptoJS.enc.Base64.stringify(signature)});
+```
+
+`require` loads these libraries, as Postman does:
+
+| Name | Library |
+| --- | --- |
+| `crypto-js` | crypto-js 4.2.0, also available as `CryptoJS`. |
+| `lodash` | Lodash 4.17.21, also available as `_`. |
+| `moment` | Moment.js 2.30.1. |
+| `uuid` | `uuid()` and `uuid.v4()` return a random UUID. |
+| `atob` / `btoa` | Base64 for text with one byte per character, also available as globals. |
+
+Other names throw an error.
+
+## Read and change cookies
+
+```js
+pm.environment.set("session", pm.cookies.get("session"));
+```
+
+`pm.cookies` lists the cookies of the current exchange: those the request
+sends, from its `Cookie` header and the cookie jar, and after the response,
+with the response's `Set-Cookie` headers applied. `pm.response.cookies` lists
+only the cookies the response set, with their attributes. Both have
+`get(name)`, `has(name)`, `one(name)`, `all()`, `count()` and `toObject()`.
+
+`pm.cookies.jar()` reads and changes the cookie jar. As in Postman, its
+methods report through a callback:
+
+```js
+const jar = pm.cookies.jar();
+jar.set("https://api.example.com", "session", "abc", error => {
+    if (error) throw error;
+});
+jar.get("https://api.example.com", "session", (error, value) => console.log(value));
+```
+
+| Method | Behavior |
+| --- | --- |
+| `get(url, name, callback)` | The value of the cookie named `name` that a request to `url` sends. |
+| `getAll(url, callback)` | Every cookie a request to `url` sends, with its attributes. |
+| `set(url, name, value, callback)` | Keep a cookie as if a response from `url` set it. Instead of `name` and `value`, an object can also give `path`, `domain`, `expires`, `maxAge`, `secure`, `httpOnly` and `sameSite`. |
+| `unset(url, name, callback)` | Delete the cookies named `name` that a request to `url` sends. |
+| `clear(url, callback)` | Delete every cookie a request to `url` sends. |
+
+Changes made before sending apply to the request. When the cookie jar is
+off in Settings, `pm.cookies` lists only the cookies of the exchange and each
+jar method reports an error; without a callback, the error is logged.
 
 ## Validate response structure
 
@@ -114,6 +198,13 @@ if (!pm.environment.get("token")) {
 ```
 
 The primary request and post-response script do not run.
+
+Request Eagle sends one request at a time, so
+`pm.execution.setNextRequest(name)` and `postman.setNextRequest(name)` have
+no effect, as in Postman outside the Collection Runner. The legacy `postman`
+object also has `getEnvironmentVariable`, `setEnvironmentVariable`,
+`clearEnvironmentVariable`, `getGlobalVariable`, `setGlobalVariable` and
+`clearGlobalVariable`.
 
 ## gRPC scripts
 

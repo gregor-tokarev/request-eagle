@@ -40,6 +40,10 @@ pub enum GrpcError {
     #[error("could not connect to the server: {0}")]
     Connect(String),
 
+    /// A certificate from Settings could not be used.
+    #[error("{0}")]
+    Certificate(String),
+
     #[error("the server requires TLS. Turn on TLS or use a grpcs:// URL")]
     TlsRequired,
 

@@ -55,7 +55,9 @@ pub enum Command {
     /// Execute a saved request and return the completed response. Script changes
     /// to environment variables last for this invocation and are never persisted.
     /// A gRPC request sends its saved message once, including on client streams,
-    /// and returns every response message with the final status.
+    /// and returns every response message with the final status. Requests store
+    /// and send cookies in the app's cookie jar unless cookie_jar is off.
+    /// timeout_ms replaces the request's and the setting's timeout for this run.
     #[serde(rename = "requests.run")]
     RequestsRun {
         path: PathBuf,
@@ -74,7 +76,42 @@ pub enum Command {
         max_response_size_mb: Option<u64>,
         ssl_certificate_verification: Option<bool>,
         follow_all_redirects: Option<bool>,
+        /// Keep the cookies that responses set and send them with later requests.
+        cookie_jar: Option<bool>,
+        /// A PEM file of certificate authorities to trust in addition to the
+        /// system's. An empty path stops trusting them.
+        ca_certificates: Option<PathBuf>,
     },
+    /// The cookies in the app's cookie jar, optionally of one domain. Each has
+    /// its domain, path, name, value, attributes and expiry in Unix seconds,
+    /// or null for a session cookie.
+    #[serde(rename = "cookies.list")]
+    CookiesList { domain: Option<String> },
+    /// Delete a domain's cookies, or only the one with this name.
+    #[serde(rename = "cookies.delete")]
+    CookiesDelete {
+        domain: String,
+        name: Option<String>,
+    },
+    /// Present a certificate to the servers of a host that ask for one (mutual
+    /// TLS). Supply PEM files, or a PKCS #12 file. The passphrase is kept in the
+    /// OS credential store. The result lists the certificate with its ID.
+    #[serde(rename = "settings.client_certificates.add")]
+    SettingsClientCertificatesAdd {
+        /// `api.example.com`, optionally with a port. `*.example.com` matches
+        /// its subdomains. Without a port, any port matches.
+        host: String,
+        /// A PEM certificate, followed by any intermediates. It may hold the key.
+        certificate: Option<PathBuf>,
+        /// A PEM private key, if it is not in the certificate file.
+        key: Option<PathBuf>,
+        /// A PKCS #12 file (.p12 or .pfx), instead of PEM files.
+        pkcs12: Option<PathBuf>,
+        /// Decrypts an encrypted key or the PKCS #12 file.
+        passphrase: Option<String>,
+    },
+    #[serde(rename = "settings.client_certificates.remove")]
+    SettingsClientCertificatesRemove { id: String },
     #[serde(rename = "settings.appearance")]
     SettingsAppearance {
         mode: Option<AppearanceMode>,
@@ -144,6 +181,10 @@ pub struct GrpcRequestInput {
     /// MiB, or 0 for any size. Unset follows max_response_size_mb.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_response_message_mb: Option<u64>,
+    /// Milliseconds for unary calls and server reflection, or 0 for no
+    /// deadline. Unset follows the timeout_ms setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
     /// JavaScript run before the method is invoked.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub before_invoke: String,
@@ -161,7 +202,7 @@ pub enum GrpcProtocol {
     Grpc,
 }
 
-/// Complete saved HTTP request. Body accepts UTF-8 text or an array of bytes.
+/// Complete saved HTTP request.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestInput {
@@ -173,11 +214,24 @@ pub struct RequestInput {
     #[serde(default)]
     #[schemars(with = "Vec<FieldSchema>")]
     pub query: Vec<Field>,
+    /// Values for `:name` segments of the URL's path, such as `id` in
+    /// `/pets/:id`. A variable without a value is sent as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_variables: Vec<(String, String)>,
     pub body: Option<Body>,
     #[serde(default)]
     pub pre_request: String,
     #[serde(default)]
     pub post_response: String,
+    /// Milliseconds, or 0 for no deadline. Unset follows the timeout_ms setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// Unset follows the follow_all_redirects setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<bool>,
+    /// Unset follows the ssl_certificate_verification setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_certificates: Option<bool>,
 }
 
 /// A header, query parameter or metadata row as `[key, value]`, or as an
@@ -197,11 +251,46 @@ enum FieldSchema {
     },
 }
 
+/// A request body. Text alone is a raw JSON body.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Body {
     Text(String),
-    Bytes(Vec<u8>),
+    Typed(TypedBody),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TypedBody {
+    /// Text sent as written. The language sets the default Content-Type.
+    Raw { language: Language, text: String },
+    /// An application/x-www-form-urlencoded form. Sending encodes each name
+    /// and value after filling in its variables.
+    UrlEncoded { fields: Vec<(String, String)> },
+    /// A multipart/form-data form.
+    Multipart { parts: Vec<FormPart> },
+    /// The contents of a file, read when the request runs. A relative path
+    /// starts at the collection's directory.
+    Binary { file: PathBuf },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    Json,
+    Xml,
+    Text,
+}
+
+/// A text field, or with `file: true` a file whose path is `value`. A
+/// relative path starts at the collection's directory.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FormPart {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub file: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

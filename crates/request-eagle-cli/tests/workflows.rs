@@ -127,7 +127,15 @@ fn saved_collection_lifecycle_uses_the_backend_without_an_app() {
     .unwrap();
 
     let mut request = created["request"].clone();
-    request["body"] = json!([0, 255, 128]);
+    // Text alone is raw JSON.
+    assert_eq!(
+        request["body"],
+        json!({"type":"raw","language":"json","text":"old"})
+    );
+    request["body"] = json!({"type":"multipart","parts":[
+        {"name":"title","value":"Hi"},
+        {"name":"avatar","value":"files/eagle.png","file":true},
+    ]});
     request["headers"] = json!([["X-Test", "one"], ["X-Test", "two"]]);
     let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":request}));
     assert_eq!(updated["id"], created["id"]);
@@ -305,6 +313,61 @@ fn collection_scripts_are_listed_and_need_trust_to_run() {
 }
 
 #[test]
+fn runs_share_the_cookie_jar_and_cookie_commands_manage_it() {
+    let cli = Cli::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let mut heads = Vec::new();
+
+        for _ in 0..3 {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut received = Vec::new();
+            let mut buffer = [0; 1024];
+            while !received.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                received.extend_from_slice(&buffer[..count]);
+            }
+            heads.push(String::from_utf8(received).unwrap());
+            socket
+                .write_all(b"HTTP/1.1 204 No Content\r\nSet-Cookie: session=abc; Max-Age=3600\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        }
+
+        heads
+    });
+    let collection = cli.collection();
+    let created = cli.create(&collection, json!({"method":"GET","url":url}));
+    let run = json!({"command":"requests.run","path":created["path"],"timeout_ms":5000});
+
+    cli.call(run.clone());
+    cli.call(run.clone());
+    let cookies = cli.call(json!({"command":"cookies.list","domain":"127.0.0.1"}));
+    assert_eq!(cookies.as_array().unwrap().len(), 1);
+    assert_eq!(cookies[0]["name"], "session");
+    assert_eq!(cookies[0]["value"], "abc");
+    assert!(cookies[0]["expires"].is_u64());
+
+    let deleted = cli.call(json!({"command":"cookies.delete","domain":"127.0.0.1"}));
+    assert_eq!(deleted["deleted"][0]["name"], "session");
+    assert_eq!(cli.call(json!({"command":"cookies.list"})), json!([]));
+
+    let settings = cli.call(json!({"command":"settings.request","cookie_jar":false}));
+    assert_eq!(settings["request"]["cookie_jar"], false);
+    cli.call(run);
+    assert_eq!(cli.call(json!({"command":"cookies.list"})), json!([]));
+
+    let heads = server.join().unwrap();
+    assert!(!heads[0].contains("\r\ncookie:"));
+    assert!(heads[1].contains("\r\ncookie: session=abc\r\n"));
+    assert!(!heads[2].contains("\r\ncookie:"));
+}
+
+#[test]
 fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
     let cli = Cli::new();
     cli.call(json!({"command":"settings.request","timeout_ms":1200,"follow_all_redirects":false}));
@@ -340,6 +403,92 @@ fn settings_patch_preserves_other_fields_and_rejects_invalid_input() {
         1
     );
     assert_eq!(fs::read_to_string(path).unwrap(), "malformed");
+}
+
+#[test]
+fn request_settings_are_saved_with_the_request() {
+    let cli = Cli::new();
+    let collection = cli.collection();
+    let created = cli.create(
+        &collection,
+        json!({"method":"GET","url":"https://example.invalid","timeout_ms":0,"follow_redirects":false,"verify_certificates":false}),
+    );
+    let path = created["path"].as_str().unwrap();
+    assert_eq!(created["request"]["timeout_ms"], 0);
+    assert_eq!(created["request"]["follow_redirects"], false);
+    assert_eq!(created["request"]["verify_certificates"], false);
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("[request.settings]")
+    );
+
+    // Settings left unset follow the preferences and leave the file.
+    let mut request = created["request"].clone();
+    request.as_object_mut().unwrap().remove("timeout_ms");
+    request
+        .as_object_mut()
+        .unwrap()
+        .remove("verify_certificates");
+    let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":request}));
+    assert_eq!(updated["request"], request);
+    let source = fs::read_to_string(path).unwrap();
+    assert!(source.contains("follow_redirects = false"), "{source}");
+    assert!(
+        !source.contains("timeout_ms") && !source.contains("verify_certificates"),
+        "{source}"
+    );
+}
+
+#[test]
+fn certificate_settings_are_added_and_removed() {
+    let cli = Cli::new();
+    let ca = cli.0.path().join("ca.pem");
+    let settings = cli.call(json!({"command":"settings.request","ca_certificates":ca}));
+    assert_eq!(settings["request"]["ca_certificates"], json!(ca));
+
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["api.example.com".into()]).unwrap();
+    let certificate_path = cli.0.path().join("client.crt");
+    let key_path = cli.0.path().join("client.key");
+    let combined_path = cli.0.path().join("client.pem");
+    fs::write(&certificate_path, cert.pem()).unwrap();
+    fs::write(&key_path, signing_key.serialize_pem()).unwrap();
+    fs::write(&combined_path, cert.pem() + &signing_key.serialize_pem()).unwrap();
+
+    let settings = cli.call(json!({"command":"settings.client_certificates.add","host":" api.example.com:8443 ","certificate":certificate_path,"key":key_path}));
+    let certificate = &settings["request"]["client_certificates"][0];
+    assert_eq!(certificate["host"], "api.example.com:8443");
+    assert_eq!(
+        certificate["files"],
+        json!({"format":"pem","certificate":certificate_path,"key":key_path})
+    );
+    let id = certificate["id"].as_str().unwrap().to_owned();
+    cli.call(json!({"command":"settings.client_certificates.add","host":"*.example.com","certificate":combined_path}));
+
+    let path = cli.0.path().join("preferences.json");
+    let before = fs::read(&path).unwrap();
+    for input in [
+        json!({"command":"settings.client_certificates.add","host":"https://api.example.com","certificate":combined_path}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","certificate":combined_path,"pkcs12":"/certs/client.p12"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","pkcs12":"/certs/missing.p12"}),
+        json!({"command":"settings.client_certificates.add","host":"api.example.com","certificate":certificate_path}),
+        json!({"command":"settings.client_certificates.remove","id":"unknown"}),
+    ] {
+        assert_eq!(cli.raw(&input.to_string()).0, 1, "{input}");
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    let settings = cli.call(json!({"command":"settings.client_certificates.remove","id":id}));
+    let certificates = settings["request"]["client_certificates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(certificates.len(), 1);
+    assert_eq!(certificates[0]["host"], "*.example.com");
+
+    let settings = cli.call(json!({"command":"settings.request","ca_certificates":""}));
+    assert!(settings["request"].get("ca_certificates").is_none());
 }
 
 #[test]

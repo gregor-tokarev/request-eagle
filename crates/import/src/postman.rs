@@ -4,12 +4,14 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use collection::{ImportedCollection, ImportedItem};
-use request::{Field, HttpRequest, Method, Request, RequestScripts};
+use request::{
+    Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage, Request, RequestScripts,
+};
 use serde_json::Value;
 
 use crate::{
     Import, ImportError,
-    body::{multipart_form, set_content_type, url_encoded_form, url_encoded_form_script},
+    body::set_content_type,
     document::{clean_name, text},
 };
 
@@ -20,6 +22,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
     let inherited = Inherited {
         auth: own_auth(document),
         scripts: Scripts::default(),
+        behavior: Behavior::default().then(document),
     };
     let items = items(document, &inherited, &mut skipped);
     let scripts = scripts(document);
@@ -44,6 +47,28 @@ pub(crate) struct Inherited<'a> {
     /// Request Eagle has no folder scripts, so each request runs its folders'
     /// scripts before its own, in the order Postman runs them.
     pub(crate) scripts: Scripts,
+    pub(crate) behavior: Behavior,
+}
+
+/// The parts of Postman's protocol profile behavior that request settings
+/// keep. Collections and folders set it for the requests inside them, and
+/// the closest explicit value wins.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Behavior {
+    follow_redirects: Option<bool>,
+    verify_certificates: Option<bool>,
+}
+
+impl Behavior {
+    /// This behavior with the item's own values applied over it.
+    pub(crate) fn then(self, item: &Value) -> Self {
+        let own = &item["protocolProfileBehavior"];
+
+        Self {
+            follow_redirects: own["followRedirects"].as_bool().or(self.follow_redirects),
+            verify_certificates: own["strictSSL"].as_bool().or(self.verify_certificates),
+        }
+    }
 }
 
 /// Scripts in the order Postman runs them, each kept separate until they are
@@ -77,6 +102,7 @@ fn items(parent: &Value, inherited: &Inherited, skipped: &mut Vec<String>) -> Ve
                 let inherited = Inherited {
                     auth: own_auth(item).or(inherited.auth),
                     scripts: inherited.scripts.then(scripts(item)),
+                    behavior: inherited.behavior.then(item),
                 };
 
                 return Some(ImportedItem::Folder {
@@ -119,15 +145,20 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
     };
 
     // A request may be written as just its URL.
-    let path = match request {
-        Value::String(url) => url.clone(),
+    let (path, path_variables) = match request {
+        Value::String(url) => (url.clone(), Vec::new()),
         _ => url(&request["url"]),
     };
 
     let mut headers = fields(&request["header"]);
-    let mut query = Vec::new();
+    // The URL holds the parameters that are sent; those switched off stay
+    // beside it.
+    let mut query: Vec<_> = fields(&request["url"]["query"])
+        .into_iter()
+        .filter(|field| !field.enabled)
+        .collect();
     let mut scripts = inherited.scripts.then(scripts(item));
-    let body = body(&request["body"], &mut headers, &mut scripts);
+    let body = body(&request["body"], &mut headers);
     // Postman applies authorization after the pre-request scripts, which may
     // set the credentials it uses.
     authorize(
@@ -137,55 +168,50 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         &mut scripts,
     );
 
+    // The request's Settings tab in Postman.
+    let behavior = inherited.behavior.then(item);
+
     Some(HttpRequest {
         method,
         path,
         headers,
         body,
         query,
+        path_variables,
         scripts: RequestScripts {
             pre_request: join_scripts(&scripts.pre_request),
             post_response: join_scripts(&scripts.post_response),
         },
+        settings: HttpSettings {
+            timeout_ms: None,
+            follow_redirects: behavior.follow_redirects,
+            verify_certificates: behavior.verify_certificates,
+        },
     })
 }
 
-/// The URL as Postman shows it, with path variables filled in. Its query stays
-/// in the URL as written, so encoded values are sent unchanged.
-fn url(url: &Value) -> String {
+/// The URL as Postman shows it, and the values of its `:name` path
+/// variables. Its query stays in the URL as written, so encoded values are
+/// sent unchanged.
+fn url(url: &Value) -> (String, Vec<(String, String)>) {
     let raw = match url {
-        Value::String(raw) => return raw.clone(),
+        Value::String(raw) => return (raw.clone(), Vec::new()),
         Value::Object(_) => match url["raw"].as_str() {
             Some(raw) => raw.to_owned(),
             None => assemble_url(url),
         },
-        _ => return String::new(),
+        _ => return (String::new(), Vec::new()),
     };
 
-    let Some(variables) = url["variable"].as_array() else {
-        return raw;
-    };
+    let names: Vec<&str> = request::path_variables(&raw)
+        .map(|(_, name)| name)
+        .collect();
+    let variables = pairs(&url["variable"])
+        .into_iter()
+        .filter(|(key, value)| !value.is_empty() && names.contains(&key.as_str()))
+        .collect();
 
-    let end = raw.find(['?', '#']).unwrap_or(raw.len());
-    let (path, rest) = raw.split_at(end);
-    let path = path
-        .split('/')
-        .map(|segment| {
-            segment
-                .strip_prefix(':')
-                .and_then(|key| {
-                    variables
-                        .iter()
-                        .find(|variable| variable["key"].as_str() == Some(key))
-                })
-                .map(|variable| text(variable.get("value")))
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| segment.to_owned())
-        })
-        .collect::<Vec<_>>()
-        .join("/");
-
-    path + rest
+    (raw, variables)
 }
 
 /// A URL from the parts Postman stores beside, or instead of, the raw URL.
@@ -226,47 +252,77 @@ fn assemble_url(url: &Value) -> String {
     assembled
 }
 
-fn body(body: &Value, headers: &mut Vec<Field>, scripts: &mut Scripts) -> Option<Vec<u8>> {
+fn body(body: &Value, headers: &mut Vec<Field>) -> Option<Body> {
     if body["disabled"].as_bool() == Some(true) {
         return None;
     }
 
     match body["mode"].as_str()? {
         "raw" => {
-            let raw = body["raw"].as_str().filter(|raw| !raw.is_empty())?;
-            let content_type = match body["options"]["raw"]["language"].as_str() {
-                Some("json") => "application/json",
-                Some("xml") => "application/xml",
-                Some("html") => "text/html",
-                Some("javascript") => "application/javascript",
-                _ => "text/plain",
+            let text = body["raw"]
+                .as_str()
+                .filter(|raw| !raw.is_empty())?
+                .to_owned();
+            // Other languages are sent as text of their own type.
+            let language = match body["options"]["raw"]["language"].as_str() {
+                Some("json") => RawLanguage::Json,
+                Some("xml") => RawLanguage::Xml,
+                Some("html") => {
+                    set_content_type(headers, "text/html");
+                    RawLanguage::Text
+                }
+                Some("javascript") => {
+                    set_content_type(headers, "application/javascript");
+                    RawLanguage::Text
+                }
+                _ => RawLanguage::Text,
             };
-            set_content_type(headers, content_type);
 
-            Some(raw.as_bytes().to_vec())
+            Some(Body::Raw { language, text })
         }
         "urlencoded" => {
             let fields = pairs(&body["urlencoded"]);
-            if fields.is_empty() {
-                return None;
-            }
-            scripts.pre_request.extend(url_encoded_form_script(&fields));
-
-            Some(url_encoded_form(&fields, headers))
+            (!fields.is_empty()).then_some(Body::UrlEncoded { fields })
         }
         "formdata" => {
-            // Files are not part of a saved request, so only text fields remain.
-            let fields: Vec<_> = body["formdata"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|field| field["type"].as_str() != Some("file"))
-                .filter(|field| field["disabled"].as_bool() != Some(true))
-                .filter_map(|field| {
-                    Some((field["key"].as_str()?.to_owned(), text(field.get("value"))))
-                })
-                .collect();
-            (!fields.is_empty()).then(|| multipart_form(&fields, headers))
+            let mut parts = Vec::new();
+            let fields = body["formdata"].as_array().into_iter().flatten();
+            for field in fields.filter(|field| field["disabled"].as_bool() != Some(true)) {
+                let Some(name) = field["key"].as_str() else {
+                    continue;
+                };
+
+                if field["type"].as_str() != Some("file") {
+                    parts.push(FormPart {
+                        name: name.to_owned(),
+                        value: text(field.get("value")),
+                        file: false,
+                    });
+                    continue;
+                }
+
+                // A field can send several files, or none chosen yet.
+                let files = match &field["src"] {
+                    Value::Array(files) => files.iter().filter_map(Value::as_str).collect(),
+                    Value::String(file) => vec![file.as_str()],
+                    _ => Vec::new(),
+                };
+                for file in if files.is_empty() { vec![""] } else { files } {
+                    parts.push(FormPart {
+                        name: name.to_owned(),
+                        value: file.to_owned(),
+                        file: true,
+                    });
+                }
+            }
+
+            (!parts.is_empty()).then_some(Body::Multipart { parts })
+        }
+        "file" => {
+            let file = body["file"]["src"]
+                .as_str()
+                .filter(|file| !file.is_empty())?;
+            Some(Body::Binary { file: file.into() })
         }
         "graphql" => {
             let graphql = &body["graphql"];
@@ -278,13 +334,12 @@ fn body(body: &Value, headers: &mut Vec<Field>, scripts: &mut Scripts) -> Option
                 Value::Null => String::new(),
                 variables => serde_json::to_string_pretty(variables).ok()?,
             };
-            set_content_type(headers, "application/json");
 
-            Some(if variables.is_empty() {
-                format!("{{\n  \"query\": {query}\n}}").into_bytes()
+            Some(Body::json(if variables.is_empty() {
+                format!("{{\n  \"query\": {query}\n}}")
             } else {
-                format!("{{\n  \"query\": {query},\n  \"variables\": {variables}\n}}").into_bytes()
-            })
+                format!("{{\n  \"query\": {query},\n  \"variables\": {variables}\n}}")
+            }))
         }
         _ => None,
     }

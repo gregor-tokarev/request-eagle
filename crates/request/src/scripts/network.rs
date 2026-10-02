@@ -76,20 +76,19 @@ impl<'js> Network<'js> {
             state.count.set(state.count.get() + 1);
 
             state.pending.borrow_mut().push(Box::pin(async move {
-                let mut request = HttpRequest {
+                let request = HttpRequest {
                     path: input.url,
                     method: input.method,
                     headers: input.headers.into_iter().map(Field::from).collect(),
-                    body: input.body.map(String::into_bytes),
                     ..Default::default()
                 };
-                if matches!(request.method, Method::Get | Method::Head) {
-                    request.body = None;
-                }
-                let body = request.body.take().map(bytes::Bytes::from);
+                let body = input
+                    .body
+                    .filter(|_| !matches!(request.method, Method::Get | Method::Head))
+                    .map(bytes::Bytes::from);
                 let started = Instant::now();
                 let send = async {
-                    http.execute(&request, body, None).await.map_err(|error| error.to_string())
+                    http.execute(&request, body, None).await.map(|(response, _)| response).map_err(|error| error.to_string())
                 };
                 let response = match timeout {
                     Some(timeout) => smol::future::or(send, async {

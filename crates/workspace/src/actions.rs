@@ -10,11 +10,20 @@ actions!(
         FocusSidebarSearch,
         OpenSettings,
         OpenGeneralSettings,
+        OpenCookies,
+        OpenEnvironmentSelector,
+        NewCollection,
+        ImportCollection,
         SaveRequest,
+        FocusUrl,
+        // Keep the existing action name so saved keyboard shortcuts continue
+        // to work. gRPC requests are copied as grpcurl.
+        CopyAsCurl,
         NewTab,
         NewGrpcTab,
         NewWebSocketTab,
         CloseTab,
+        RenameTab,
         PreviousTab,
         NextTab,
         SelectTab1,
@@ -73,6 +82,28 @@ pub(crate) fn init(cx: &mut App) {
     )
     .expect("default save request keybinding should be valid");
 
+    keybindings_service::register(
+        FocusUrl,
+        "Focus URL bar",
+        "Select the URL of the request in the active tab.",
+        "Requests",
+        Some("secondary-l"),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default focus URL keybinding should be valid");
+
+    keybindings_service::register(
+        CopyAsCurl,
+        "Copy as cURL or grpcurl",
+        "Copy the request in the active tab as a cURL command, or as a grpcurl command for gRPC.",
+        "Requests",
+        Some("secondary-shift-c"),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default copy as command keybinding should be valid");
+
     register_tab_action(
         NewTab,
         "New tab",
@@ -85,26 +116,33 @@ pub(crate) fn init(cx: &mut App) {
         "New gRPC tab",
         "Open an empty gRPC request.",
         "Tabs",
-        None,
+        Some("secondary-alt-g"),
         Some("Workspace"),
         cx,
     )
-    .expect("the gRPC tab action should register");
+    .expect("default gRPC tab keybinding should be valid");
     keybindings_service::register(
         NewWebSocketTab,
         "New WebSocket tab",
         "Open an empty WebSocket request.",
         "Tabs",
-        None,
+        Some("secondary-alt-w"),
         Some("Workspace"),
         cx,
     )
-    .expect("the WebSocket tab action should register");
+    .expect("default WebSocket tab keybinding should be valid");
     register_tab_action(
         CloseTab,
         "Close tab",
         "Close the active tab.",
         "secondary-w",
+        cx,
+    );
+    register_tab_action(
+        RenameTab,
+        "Rename tab",
+        "Rename the request in the active tab.",
+        "f2",
         cx,
     );
     // GPUI folds Shift into punctuation on macOS and Linux (Shift+[ becomes {).
@@ -219,6 +257,50 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default sidebar search keybinding should be valid");
+
+    keybindings_service::register(
+        OpenCookies,
+        "Open cookies",
+        "Show the cookies that requests store and send, and delete them.",
+        "Requests",
+        Some("secondary-shift-k"),
+        None,
+        cx,
+    )
+    .expect("default cookies keybinding should be valid");
+
+    keybindings_service::register(
+        OpenEnvironmentSelector,
+        "Open environment selector",
+        "Choose the environment that requests use.",
+        "Environments",
+        Some("secondary-shift-e"),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default environment selector keybinding should be valid");
+
+    keybindings_service::register(
+        NewCollection,
+        "New collection",
+        "Create a collection and name it in the sidebar.",
+        "Collections",
+        Some("secondary-shift-n"),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default new collection keybinding should be valid");
+
+    keybindings_service::register(
+        ImportCollection,
+        "Import collection",
+        "Import a cURL command, a Postman collection, or an OpenAPI specification.",
+        "Collections",
+        Some("secondary-o"),
+        Some("Workspace"),
+        cx,
+    )
+    .expect("default import collection keybinding should be valid");
 
     keybindings_service::register(
         OpenSettings,

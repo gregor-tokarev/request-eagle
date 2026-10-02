@@ -43,6 +43,10 @@ pub struct GrpcSettings {
     /// response size preference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_response_message_mb: Option<u64>,
+    /// Deadline for unary calls and server reflection, zero for none. Unset
+    /// follows the timeout preference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 impl Default for GrpcSettings {
@@ -52,6 +56,7 @@ impl Default for GrpcSettings {
             server_name: String::new(),
             include_default_fields: true,
             max_response_message_mb: None,
+            timeout_ms: None,
         }
     }
 }
@@ -97,6 +102,20 @@ impl GrpcDefinition {
             Self::ProtoFile { path, import_paths } => Self::ProtoFile {
                 path: relative(path),
                 import_paths: import_paths.iter().map(relative).collect(),
+            },
+        }
+    }
+
+    /// Resolve paths relative to `collection`, so the definition still
+    /// loads for a copy of the request kept outside it.
+    pub fn resolved_from(&self, collection: &Path) -> Self {
+        let resolved = |path: &PathBuf| collection.join(path);
+
+        match self {
+            Self::Reflection => Self::Reflection,
+            Self::ProtoFile { path, import_paths } => Self::ProtoFile {
+                path: resolved(path),
+                import_paths: import_paths.iter().map(resolved).collect(),
             },
         }
     }

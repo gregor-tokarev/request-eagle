@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use request::{
-    Execution, ExecutionError, Field, HttpRequest, HttpVersion, Method, Request, RequestExecutor,
-    RequestPreferences, RequestVariables, Response, Version,
+    Body, EventStream, Execution, ExecutionError, Field, HttpRequest, HttpSettings, HttpVersion,
+    Method, Request, RequestExecutor, RequestPreferences, RequestVariables, Response, Version,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -71,6 +71,46 @@ fn no_variables() -> RequestVariables {
 }
 
 #[test]
+fn tells_whether_a_request_went_out_and_keeps_its_secrets_out_of_failures() {
+    smol::block_on(async {
+        let variables = RequestVariables::new(
+            HashMap::from([("token".to_owned(), "s3cret".to_owned())]),
+            None,
+        );
+        let (events, _updates, _stop) = EventStream::new();
+        let dispatch = events.dispatch();
+        let request = HttpRequest {
+            path: "http://127.0.0.1:1/?token={{token}}".into(),
+            ..Default::default()
+        };
+
+        let error = executor()
+            .execute_streaming(request, variables, events)
+            .await
+            .unwrap_err();
+
+        assert!(dispatch.started());
+        assert!(error.to_string().contains("s3cret"), "{error}");
+        assert!(!error.message_without_url().contains("s3cret"), "{error}");
+
+        // An unknown variable stops the request before it goes out.
+        let (events, _updates, _stop) = EventStream::new();
+        let dispatch = events.dispatch();
+        let request = HttpRequest {
+            path: "http://127.0.0.1:1/{{missing}}".into(),
+            ..Default::default()
+        };
+
+        executor()
+            .execute_streaming(request, no_variables(), events)
+            .await
+            .unwrap_err();
+
+        assert!(!dispatch.started());
+    });
+}
+
+#[test]
 fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
     smol::block_on(async {
         let mut ids = std::collections::HashSet::new();
@@ -103,7 +143,8 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                         Field::new("X-Uuid", "{{$randomUUID}}"),
                     ],
                     query: vec![Field::new("id", "{{$guid}}")],
-                    body: Some(b"{{$guid}}/{{$guid}}".to_vec()),
+                    path_variables: Vec::new(),
+                    body: Some(Body::json("{{$guid}}/{{$guid}}")),
                     scripts: request::RequestScripts {
                         pre_request: pre,
                         post_response: r#"
@@ -117,6 +158,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                             pm.expect(pm.variables.replaceIn('{{$guid}}')).to.equal(original);
                         "#.into(),
                     },
+                    settings: HttpSettings::default(),
                 };
             let execution = executor().execute(request, no_variables()).await.unwrap();
             for report in execution.scripts {
@@ -153,19 +195,26 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
 #[test]
 fn post_response_scripts_share_uploads_and_read_the_sent_body() {
     smol::block_on(async {
-        for (body, pre, post) in [
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(&file, vec![255; 40 * 1024 * 1024]).unwrap();
+        for (body, length, pre, post) in [
             (
-                vec![b'x'; 40 * 1024 * 1024],
+                Body::json("x".repeat(40 * 1024 * 1024)),
+                40 * 1024 * 1024,
                 "",
                 "pm.response.to.have.status(200);",
             ),
             (
-                vec![255; 40 * 1024 * 1024],
+                Body::Binary {
+                    file: file.path().to_owned(),
+                },
+                40 * 1024 * 1024,
                 "",
                 "pm.response.to.have.status(200);",
             ),
             (
-                b"draft".to_vec(),
+                Body::json("draft"),
+                5,
                 "pm.request.body.update('sent 🦅');",
                 "pm.expect(pm.request.body.raw).to.equal('sent 🦅');",
             ),
@@ -175,7 +224,7 @@ fn post_response_scripts_share_uploads_and_read_the_sent_body() {
             let expected_len = if pre.contains("body.update") {
                 "sent 🦅".len()
             } else {
-                body.len()
+                length
             };
             let execution = executor()
                 .execute(
@@ -241,15 +290,21 @@ fn report(label: &str, execution: &Execution) {
 #[test]
 fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
     smol::block_on(async {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(&file, [0, 255, 42]).unwrap();
         let response = b"HTTP/1.1 201 Created\r\nContent-Length: 3\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nX-Raw: \xff\r\nConnection: close\r\n\r\n\x00\xff\x01";
         let (url, server) = serve(response.to_vec()).await;
         let request = HttpRequest {
             method: Method::Post,
             path: format!("{url}/submit?tag=existing#ignored"),
             headers: vec![Field::new("X-Tag", "one"), Field::new("X-Tag", "two")],
-            body: Some(vec![0, 255, 42]),
+            body: Some(Body::Binary {
+                file: file.path().to_owned(),
+            }),
             scripts: Default::default(),
             query: vec![Field::new("tag", "a & b"), Field::new("tag", "c+d")],
+            path_variables: Vec::new(),
+            settings: HttpSettings::default(),
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
         let received = server.await;
@@ -301,7 +356,7 @@ fn rows_that_are_switched_off_are_neither_sent_nor_resolved() {
                 method: Method::Post,
                 path: url,
                 headers: vec![Field::new("X-On", "1"), off("X-Off"), off("Content-Type")],
-                body: Some(b"{}".to_vec()),
+                body: Some(Body::json("{}")),
                 query: vec![off("off"), Field::new("on", "1")],
                 ..HttpRequest::default()
             };
@@ -319,6 +374,38 @@ fn rows_that_are_switched_off_are_neither_sent_nor_resolved() {
                 "{head}"
             );
         }
+    });
+}
+
+#[test]
+fn fills_path_variables_and_sends_query_params_moved_into_the_url_unchanged() {
+    smol::block_on(async {
+        let response = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+        let (url, server) = serve(response.to_vec()).await;
+        let mut request = HttpRequest {
+            path: format!("{url}/pets/:id/toys/:toy?tag=existing#ignored"),
+            path_variables: vec![("id".into(), "{{pet}}".into())],
+            query: vec![Field::new("tag", "a & b"), Field::new("tag", "c+d {{tag}}")],
+            ..Default::default()
+        };
+        request.inline_query();
+        assert!(request.query.is_empty());
+
+        let variables = RequestVariables::new(
+            HashMap::from([("pet".into(), "7".into()), ("tag".into(), "e".into())]),
+            None,
+        );
+        executor().execute(request, variables).await.unwrap();
+
+        // A path variable without a value is sent as written.
+        let received = server.await;
+        assert!(
+            received.head.starts_with(
+                "GET /pets/7/toys/:toy?tag=existing&tag=a+%26+b&tag=c%2Bd+e HTTP/1.1\r\n"
+            ),
+            "{}",
+            received.head
+        );
     });
 }
 
@@ -498,7 +585,7 @@ fn redirects_follow_the_setting_and_preserve_http_method_semantics() {
                         HttpRequest {
                             method: Method::Post,
                             path: url,
-                            body: Some(b"payload".to_vec()),
+                            body: Some(Body::json("payload")),
                             ..HttpRequest::default()
                         },
                         no_variables(),
@@ -517,6 +604,113 @@ fn redirects_follow_the_setting_and_preserve_http_method_semantics() {
                     assert_eq!(response.headers["location"], "/final");
                     assert_eq!(response.body, b"moved");
                 }
+            }
+        }
+    });
+}
+
+#[test]
+fn request_settings_override_the_redirect_and_timeout_preferences() {
+    smol::block_on(async {
+        // Following is on in preferences and off for this request.
+        let (url, server) = serve(
+            b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let execution = executor()
+            .execute(
+                HttpRequest {
+                    path: url,
+                    settings: HttpSettings {
+                        follow_redirects: Some(false),
+                        ..HttpSettings::default()
+                    },
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
+            .await
+            .unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.status.as_u16(), 302);
+
+        // Following is off in preferences and on for this request.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/start", listener.local_addr().unwrap());
+        let server = smol::spawn(async move {
+            for response in [
+                &b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..],
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone",
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                stream.write_all(response).await.unwrap();
+            }
+        });
+        let execution = RequestExecutor::new(&RequestPreferences {
+            timeout_ms: 2_000,
+            follow_all_redirects: false,
+            ..RequestPreferences::default()
+        })
+        .unwrap()
+        .execute(
+            HttpRequest {
+                path: url,
+                settings: HttpSettings {
+                    follow_redirects: Some(true),
+                    ..HttpSettings::default()
+                },
+                ..HttpRequest::default()
+            },
+            no_variables(),
+        )
+        .await
+        .unwrap();
+        server.await;
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.body, b"done");
+
+        // A request's timeout replaces the preference, and zero turns it off.
+        for (preference, setting) in [(0, Some(150)), (150, Some(0))] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = smol::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                smol::Timer::after(Duration::from_millis(400)).await;
+                let _ = stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nslow")
+                    .await;
+            });
+            let result = RequestExecutor::new(&RequestPreferences {
+                timeout_ms: preference,
+                ..RequestPreferences::default()
+            })
+            .unwrap()
+            .execute(
+                HttpRequest {
+                    path: url,
+                    settings: HttpSettings {
+                        timeout_ms: setting,
+                        ..HttpSettings::default()
+                    },
+                    ..HttpRequest::default()
+                },
+                no_variables(),
+            )
+            .await;
+
+            if setting == Some(0) {
+                let Response::Http(response) = result.unwrap().response;
+                assert_eq!(response.body, b"slow");
+                server.await;
+            } else {
+                assert!(matches!(
+                    result.unwrap_err(),
+                    ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150)
+                ));
             }
         }
     });
@@ -729,7 +923,7 @@ fn explicit_host_overrides_only_follow_redirects_on_the_same_authority() {
                                 Field::new("Authorization", "Bearer test-token"),
                                 Field::new("Cookie", "session=test-session"),
                             ],
-                            body: Some(b"payload".to_vec()),
+                            body: Some(Body::json("payload")),
                             ..HttpRequest::default()
                         },
                         no_variables(),
@@ -1000,7 +1194,7 @@ fn generated_preview_matches_headers_received_by_the_server() {
                     method: Method::Post,
                     path,
                     headers,
-                    body: Some(b"abc".to_vec()),
+                    body: Some(Body::json("abc")),
                     ..HttpRequest::default()
                 },
                 no_variables(),
@@ -1303,6 +1497,28 @@ fn preserves_serialized_request_and_preference_formats() {
     assert!(preferences.ssl_certificate_verification);
     assert!(preferences.follow_all_redirects);
 
+    // Settings are saved only when a request changes them.
+    assert!(encoded.get("settings").is_none());
+    let request: Request = serde_json::from_str(
+        r#"{"type":"http","method":"GET","path":"https://example.test","settings":{"timeout_ms":0,"verify_certificates":false}}"#,
+    )
+    .unwrap();
+    let Request::Http(http) = &request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(
+        http.settings,
+        HttpSettings {
+            timeout_ms: Some(0),
+            follow_redirects: None,
+            verify_certificates: Some(false),
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(&request).unwrap()["settings"],
+        serde_json::json!({"timeout_ms": 0, "verify_certificates": false})
+    );
+
     let preferences: RequestPreferences =
         serde_json::from_str(r#"{"follow_all_redirects":false}"#).unwrap();
     assert!(!preferences.follow_all_redirects);
@@ -1320,7 +1536,7 @@ fn scripts_wrap_the_real_http_execution() {
         let request = HttpRequest {
             method: Method::Post,
             path: format!("{url}/{{{{resource}}}}"),
-            body: Some(br#"{"name":"{{name}}"}"#.to_vec()),
+            body: Some(Body::json(r#"{"name":"{{name}}"}"#)),
             scripts: request::RequestScripts {
                 pre_request: "pm.variables.set('resource', 'echo'); pm.variables.set('name', 'Eagle'); pm.request.headers.upsert({key: 'X-Script', value: 'ran'});".into(),
                 post_response: "pm.test('status', () => pm.response.to.have.status(200)); pm.test('json', () => pm.expect(pm.response.json()).to.have.property('success', true)); pm.test('vars', () => pm.expect(pm.variables.get('name')).to.equal('Eagle'));".into(),
@@ -1354,7 +1570,7 @@ fn scripts_filter_bodies_and_logging_failures_do_not_block_http() {
             let mut request = HttpRequest {
                 method: Method::Post,
                 path: url,
-                body: Some(b"{{unclosed".to_vec()),
+                body: Some(Body::json("{{unclosed")),
                 ..Default::default()
             };
             request.scripts.pre_request = format!(
@@ -1493,6 +1709,99 @@ fn request_timeout_does_not_discard_a_response_during_its_post_response_script()
                 .as_ref()
                 .unwrap()
                 .contains("script failed after response")
+        );
+    });
+}
+
+#[test]
+fn sends_forms_with_their_variables_encoded_in_each_field() {
+    smol::block_on(async {
+        let ok = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_vec();
+        let variables = RequestVariables::new(
+            HashMap::from([("name".to_owned(), "Rex & co".to_owned())]),
+            None,
+        );
+        let (url, server) = serve(ok.clone()).await;
+        let request = HttpRequest {
+            method: Method::Post,
+            path: url,
+            body: Some(Body::UrlEncoded {
+                fields: vec![("pet".into(), "{{name}}".into()), ("n".into(), "1".into())],
+            }),
+            ..Default::default()
+        };
+        executor().execute(request, variables).await.unwrap();
+        let received = server.await;
+        assert!(
+            received
+                .head
+                .contains("content-type: application/x-www-form-urlencoded\r\n"),
+            "{}",
+            received.head
+        );
+        assert_eq!(received.body, b"pet=Rex+%26+co&n=1");
+
+        let file = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+        std::fs::write(&file, "file text").unwrap();
+        let (url, server) = serve(ok).await;
+        let request = HttpRequest {
+            method: Method::Put,
+            path: url,
+            body: Some(Body::Multipart {
+                parts: vec![
+                    request::FormPart {
+                        name: "title".into(),
+                        value: "Hi".into(),
+                        file: false,
+                    },
+                    request::FormPart {
+                        name: "notes".into(),
+                        value: file.path().to_string_lossy().into_owned(),
+                        file: true,
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+        let execution = executor().execute(request, no_variables()).await.unwrap();
+        let received = server.await;
+        let boundary = received
+            .head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-type: multipart/form-data; boundary="))
+            .unwrap();
+        let body = String::from_utf8(received.body).unwrap();
+        assert!(body.starts_with(&format!("--{boundary}\r\n")), "{body}");
+        assert!(body.contains("name=\"title\"\r\n\r\nHi\r\n"), "{body}");
+        assert!(
+            body.contains("Content-Type: text/plain\r\n\r\nfile text\r\n"),
+            "{body}"
+        );
+        let Response::Http(response) = execution.response;
+        assert_eq!(response.metrics.request_body_bytes, body.len());
+    });
+}
+
+#[test]
+fn a_missing_body_file_stops_the_send() {
+    smol::block_on(async {
+        let request = HttpRequest {
+            method: Method::Post,
+            path: "http://127.0.0.1:1/".into(),
+            body: Some(Body::Binary {
+                file: "/no/such/eagle.bin".into(),
+            }),
+            ..Default::default()
+        };
+        let error = executor()
+            .execute(request, no_variables())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("could not read /no/such/eagle.bin:"),
+            "{error}"
         );
     });
 }

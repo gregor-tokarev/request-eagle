@@ -1,15 +1,47 @@
-use gpui_kit::{App, Hsla, component::ActiveTheme as _};
+use gpui_kit::component::{ActiveTheme as _, Icon};
+use gpui_kit::*;
 
-/// The color that identifies an HTTP method, or the gRPC or WebSocket
+/// The color that identifies an HTTP method, or the HTTP, gRPC or WebSocket
 /// protocol, wherever it is shown.
 pub fn method_color(method: &str, cx: &App) -> Hsla {
     let theme = cx.theme();
 
     match method {
-        "GET" => theme.success,
-        "POST" => theme.warning,
-        "PUT" | "PATCH" | "gRPC" | "WS" => theme.info,
+        "GET" | "HTTP" => theme.success,
+        "POST" | "WS" => theme.warning,
+        "PUT" | "PATCH" | "gRPC" => theme.info,
         "HEAD" | "OPTIONS" => theme.muted_foreground,
         _ => theme.danger,
     }
+}
+
+/// The icon of a request protocol, `HTTP`, `gRPC` or `WS`, in its color.
+pub fn protocol_icon(protocol: &str, cx: &App) -> Icon {
+    let icon = Icon::default().text_color(method_color(protocol, cx));
+
+    match protocol {
+        "HTTP" => icon.path("icons/protocol-http.svg"),
+        "gRPC" => icon.path("icons/protocol-grpc.svg"),
+        "WS" => icon.path("icons/protocol-websocket.svg"),
+        _ => icon,
+    }
+}
+
+/// A request's HTTP method in its color. gRPC and WebSocket requests have no
+/// method and show their protocol's icon instead.
+pub fn method_label(method: impl Into<SharedString>, cx: &App) -> AnyElement {
+    let method = method.into();
+
+    if matches!(method.as_ref(), "gRPC" | "WS") {
+        return protocol_icon(&method, cx)
+            .size(rems(0.875))
+            .into_any_element();
+    }
+
+    div()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(method_color(&method, cx))
+        .child(method)
+        .into_any_element()
 }

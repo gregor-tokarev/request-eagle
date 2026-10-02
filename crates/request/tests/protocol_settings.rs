@@ -1,8 +1,8 @@
 use std::{net::TcpListener, sync::Arc};
 
 use request::{
-    ExecutionError, Field, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
-    RequestVariables, Response, Version,
+    ExecutionError, Field, HttpRequest, HttpSettings, HttpVersion, RequestExecutor,
+    RequestPreferences, RequestVariables, Response, Version,
 };
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -90,6 +90,70 @@ fn certificate_verification_is_enabled_by_default_and_can_be_overridden() {
                 println!("     body: {:?}", String::from_utf8_lossy(&response.body));
                 assert_eq!(response.status.as_u16(), 200);
                 assert_eq!(response.body, b"secure");
+            }
+
+            server.await.unwrap();
+        }
+    });
+}
+
+#[test]
+fn a_request_can_override_certificate_verification() {
+    smol::block_on(async {
+        let acceptor = TlsAcceptor::from(Arc::new(tls_config()));
+
+        for (preference, setting) in [(true, false), (false, true)] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("https://{}", listener.local_addr().unwrap());
+            let acceptor = acceptor.clone();
+            let server = reqwest_client::runtime().spawn(async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let Ok(mut stream) = acceptor.accept(stream).await else {
+                    return;
+                };
+                let mut head = Vec::new();
+
+                while !head.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).await.unwrap();
+                    head.push(byte[0]);
+                }
+
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await
+                    .unwrap();
+                stream.shutdown().await.unwrap();
+            });
+            let executor = RequestExecutor::new(&RequestPreferences {
+                timeout_ms: 2_000,
+                ssl_certificate_verification: preference,
+                ..RequestPreferences::default()
+            })
+            .unwrap();
+            let result = executor
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        settings: HttpSettings {
+                            verify_certificates: Some(setting),
+                            ..HttpSettings::default()
+                        },
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
+                .await;
+
+            if setting {
+                assert!(matches!(result.unwrap_err(), ExecutionError::Transport(_)));
+            } else {
+                let Response::Http(response) = result.unwrap().response;
+                assert_eq!(response.body, b"ok");
             }
 
             server.await.unwrap();

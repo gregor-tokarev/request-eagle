@@ -1,9 +1,12 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields};
-use crate::response_view::ResponseView;
+use super::path_variables::{PathVariableChanged, PathVariables};
+use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
+use crate::response_view::{ResponseContent, ResponseView};
 use crate::{
-    Environments,
+    Environments, RequestSent,
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
@@ -12,11 +15,12 @@ use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
     input::{EditorState, InputEvent, InputState},
+    notification::Notification,
     scroll::ScrollableElement as _,
     *,
 };
-use gpui_kit::*;
-use request::{HttpRequest, Method};
+use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::{Field, HttpRequest, Method};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {
@@ -24,6 +28,7 @@ pub(crate) enum RequestSection {
     Headers,
     Body,
     Scripts,
+    Settings,
 }
 
 /// Where a saved request is stored, and how the collections sidebar names it.
@@ -38,7 +43,7 @@ pub struct RequestLocation {
 
 impl RequestLocation {
     /// The directory of the collection that stores the request.
-    pub(crate) fn collection_path(&self) -> Option<PathBuf> {
+    pub fn collection_path(&self) -> Option<PathBuf> {
         self.path
             .ancestors()
             .nth(self.folders.len() + 1)
@@ -56,25 +61,42 @@ impl RequestLocation {
 pub struct RequestDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: HttpRequest,
     saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
     pub(crate) section: RequestSection,
+    /// The URL's query parameters.
     pub(super) params: Option<Entity<RequestFields>>,
+    pub(super) path_variables: Option<Entity<PathVariables>>,
+    /// The values given to path variables in this tab. A value stays while
+    /// its variable is out of the URL, so it returns with the variable.
+    path_values: Vec<(String, String)>,
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
+    /// The editors of each body type, kept while another type is chosen.
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) form: Option<Entity<RequestFields>>,
+    pub(super) parts: Option<Entity<RequestFields>>,
+    pub(super) body_file: Option<Entity<InputState>>,
     pub(super) body_vim: Option<Entity<crate::vim::Vim>>,
     pub(super) body_json_valid: bool,
     pub(super) body_task: Option<Task<()>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     pub(super) variables: Entity<VariableScope>,
     pub(super) variable_sessions: EnvironmentSessions,
     pub(super) url_completion: Option<Entity<VariableInput>>,
     pub(super) body_completion: Option<Entity<VariableInput>>,
     pub(super) response: Entity<ResponseView>,
     split: Entity<ResizableState>,
+    /// The request as a cURL command, beside it while open.
+    pub(super) code_snippet: SnippetPanel<Self>,
     pub(super) task: Option<Task<()>>,
+    /// The request being sent, which history keeps if it is cancelled after
+    /// it went out.
+    pub(super) sending: Option<(RequestSent, request::Dispatch)>,
     /// Ends the response if it is an event stream. Taken when it is stopped.
     pub(super) stop: Option<request::StopEventStream>,
     /// Whether the response is an event stream that has not ended yet.
@@ -85,11 +107,41 @@ pub struct RequestDraft {
     pub(super) _subscriptions: Vec<Subscription>,
 }
 
+impl EventEmitter<RequestSent> for RequestDraft {}
+
+impl SnippetDraft for RequestDraft {
+    type Request = HttpRequest;
+    const PROGRAM: &'static str = "cURL";
+
+    fn request(&self) -> &HttpRequest {
+        &self.request
+    }
+
+    fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
+        self.sent_request()
+            .curl_command(values, super::execution::active_jar(cx).as_ref())
+    }
+
+    fn variables(&self) -> &Entity<VariableScope> {
+        &self.variables
+    }
+
+    fn snippet_panel(&mut self) -> &mut SnippetPanel<Self> {
+        &mut self.code_snippet
+    }
+
+    fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        code_snippet::toggle(self, window, cx);
+        self.notify_address(cx);
+        cx.notify();
+    }
+}
+
 impl RequestDraft {
     /// Variables resolve from the request's collection environment, its
     /// session values and the active global environment.
     pub fn new(
-        request: HttpRequest,
+        mut request: HttpRequest,
         location: Option<RequestLocation>,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
@@ -99,7 +151,7 @@ impl RequestDraft {
             .as_ref()
             .and_then(RequestLocation::environment_path);
         // Switching the active environment changes which references resolve.
-        let subscriptions = environments
+        let mut subscriptions: Vec<_> = environments
             .iter()
             .map(|environments| {
                 cx.observe(environments, |this: &mut Self, _, cx| {
@@ -107,6 +159,11 @@ impl RequestDraft {
                 })
             })
             .collect();
+        // Other tabs, the cookies page and settings change the cookies shown
+        // among the generated headers.
+        subscriptions.push(cx.observe_global::<crate::Cookies>(Self::refresh_generated_headers));
+        subscriptions
+            .push(cx.observe_global::<preferences::Preferences>(Self::refresh_generated_headers));
         let variables = cx.new(|_| VariableScope {
             session: sessions.for_path(environment_path.as_deref()),
             path: environment_path,
@@ -121,28 +178,38 @@ impl RequestDraft {
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
+        request.inline_query();
 
         Self {
             location,
+            name: None,
             generated_headers: super::execution::generated_headers(&request),
+            path_values: request.path_variables.clone(),
             saved_request: request.clone(),
             request,
             url: None,
             section: RequestSection::Headers,
             params: None,
+            path_variables: None,
             headers: None,
             body: None,
+            form: None,
+            parts: None,
+            body_file: None,
             body_vim: None,
             body_json_valid: false,
             body_task: None,
             scripts: None,
+            timeout: None,
             variables,
             variable_sessions: sessions,
             url_completion: None,
             body_completion: None,
             response,
             split,
+            code_snippet: SnippetPanel::default(),
             task: None,
+            sending: None,
             stop: None,
             streaming: false,
             executor: None,
@@ -152,8 +219,30 @@ impl RequestDraft {
         }
     }
 
+    /// The request as it is sent, with its body's files found from the
+    /// collection.
+    pub(super) fn sent_request(&self) -> HttpRequest {
+        let mut request = self.request.clone();
+        let collection = self
+            .location
+            .as_ref()
+            .and_then(RequestLocation::collection_path);
+        if let (Some(body), Some(collection)) = (&mut request.body, collection) {
+            *body = body.resolved_from(&collection);
+        }
+
+        request
+    }
+
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
+    }
+
+    /// The query parameters and path variables in the URL.
+    pub(super) fn params_count(&self) -> usize {
+        request::query_params(&self.request.path).len()
+            + path_variable_names(&self.request.path).len()
     }
 
     /// Redraw the cached URL bar for a change that did not come from its input.
@@ -173,10 +262,38 @@ impl RequestDraft {
         });
 
         self.location = Some(location);
+        self.notify_address(cx);
         cx.notify();
     }
 
-    pub fn mark_saved(&mut self, request: HttpRequest, cx: &mut Context<Self>) {
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.notify_address(cx);
+        cx.notify();
+    }
+
+    /// Show the response, or the failure, that history kept for this request.
+    pub fn show_recorded(
+        &mut self,
+        response: Option<request_history::Response>,
+        error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.response
+            .update(cx, |view, cx| match (response, error) {
+                (Some(response), _) => {
+                    let content = ResponseContent::recorded(response);
+                    view.finish(Ok(content), window, cx);
+                }
+                (None, Some(error)) => view.fail(error.into(), cx),
+                (None, None) => {}
+            });
+    }
+
+    pub fn mark_saved(&mut self, mut request: HttpRequest, cx: &mut Context<Self>) {
+        request.inline_query();
         self.saved_request = request;
         cx.notify();
     }
@@ -192,6 +309,63 @@ impl RequestDraft {
         cx.notify();
     }
 
+    /// Replace the request with the one a pasted cURL command sends. Its
+    /// scripts stay. A command that cannot be read is explained instead.
+    pub(super) fn paste_curl(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request = match import::parse_curl(command) {
+            Ok(request) => request,
+            Err(error) => {
+                window.push_notification(
+                    Notification::error(error.to_string()).title("Could not import cURL"),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        self.request = HttpRequest {
+            scripts: std::mem::take(&mut self.request.scripts),
+            ..request
+        };
+
+        // The URL keeps focus. Path values given before belong to the replaced
+        // request. The other editors are created again from the new request
+        // when they are shown.
+        self.path_values.clear();
+        if let Some(url) = &self.url {
+            let path = self.request.path.clone();
+            url.update(cx, |url, cx| url.set_value(path, window, cx));
+        }
+        if let Some(url) = &self.url_completion {
+            url.update(cx, |url, cx| url.set_path_variables(HashSet::new(), cx));
+        }
+        self.params = None;
+        self.path_variables = None;
+        self.headers = None;
+        self.body = None;
+        self.form = None;
+        self.parts = None;
+        self.body_file = None;
+        self.body_vim = None;
+        self.body_completion = None;
+        self.body_task = None;
+
+        self.set_method(self.request.method, cx);
+        self.prepare(window, cx);
+        self.notify_address(cx);
+    }
+
+    /// Copies the request as a cURL command, with the variables that resolve
+    /// filled in.
+    pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
+        code_snippet::copy(self, window, cx);
+    }
+
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.variables.update(cx, |scope, cx| scope.changed(cx));
 
@@ -199,15 +373,34 @@ impl RequestDraft {
         // notify GPUI; doing it inside render schedules an unnecessary frame.
         self.url_state(window, cx);
 
-        if self.section == RequestSection::Body {
-            self.body_state(window, cx);
-        } else if self.section == RequestSection::Scripts {
-            self.script_state(window, cx);
-        } else {
-            self.fields_state(window, cx);
+        match self.section {
+            RequestSection::Params => {
+                self.params_state(window, cx);
+            }
+            RequestSection::Headers => {
+                self.headers_state(window, cx);
+            }
+            RequestSection::Body => self.body_state(window, cx),
+            RequestSection::Scripts => {
+                self.script_state(window, cx);
+            }
+            RequestSection::Settings => {
+                self.timeout_state(window, cx);
+            }
         }
 
         self.refresh_generated_headers(cx);
+    }
+
+    /// Puts the cursor in the URL with its text selected, as a browser's
+    /// address bar does.
+    pub fn focus_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.url_state(window, cx);
+
+        url.update(cx, |url, cx| {
+            url.select_all(window, cx);
+            url.focus(window, cx);
+        });
     }
 
     pub(super) fn url_state(
@@ -225,16 +418,18 @@ impl RequestDraft {
                         .placeholder("Enter URL or paste text")
                         .default_value(self.request.path.clone())
                 });
+                let filled = filled_path_variables(&self.path_values);
                 self.url_completion = Some(cx.new(|cx| {
                     VariableInput::new(VariableTarget::Input(url.clone()), scope, window, cx)
+                        .with_path_variables(filled)
                 }));
-                self._subscriptions.push(cx.subscribe(
+                self._subscriptions.push(cx.subscribe_in(
                     &url,
-                    |this, input, event: &InputEvent, cx| {
+                    window,
+                    |this, input, event: &InputEvent, window, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.path = input.read(cx).value().to_string();
-                            this.refresh_generated_headers(cx);
-                            cx.notify();
+                            this.url_changed(window, cx);
                         }
                     },
                 ));
@@ -273,58 +468,219 @@ impl RequestDraft {
             .update(cx, |scripts, cx| scripts.editor(window, cx))
     }
 
-    fn fields_state(
+    /// Show an edit of the URL in the Params tables.
+    fn url_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let names = path_variable_names(&self.request.path);
+        self.keep_path_values_in_url();
+
+        if let Some(params) = &self.params {
+            let values = request::query_params(&self.request.path);
+            params.update(cx, |params, cx| params.set_values(&values, window, cx));
+        }
+        if let Some(table) = &self.path_variables {
+            table.update(cx, |table, cx| {
+                table.set_names(&names, &self.path_values, window, cx)
+            });
+        }
+
+        self.refresh_generated_headers(cx);
+        cx.notify();
+    }
+
+    /// Write the Params table's rows that are sent into the URL's query, and
+    /// keep those switched off beside it.
+    fn set_query(&mut self, params: &[Field], window: &mut Window, cx: &mut Context<Self>) {
+        let path = request::with_query_params(&self.request.path, &Field::pairs(params));
+        let off: Vec<_> = params
+            .iter()
+            .filter(|param| !param.enabled)
+            .cloned()
+            .collect();
+        if path == self.request.path && off == self.request.query {
+            return;
+        }
+
+        if path != self.request.path {
+            if let Some(url) = &self.url {
+                url.update(cx, |url, cx| url.set_value(path.clone(), window, cx));
+            }
+            self.request.path = path;
+
+            self.refresh_generated_headers(cx);
+            self.notify_address(cx);
+        }
+        self.request.query = off;
+        cx.notify();
+    }
+
+    /// Send and save the values of the path variables in the URL.
+    fn keep_path_values_in_url(&mut self) {
+        let names = path_variable_names(&self.request.path);
+        self.request.path_variables = self
+            .path_values
+            .iter()
+            .filter(|(name, _)| names.contains(name))
+            .cloned()
+            .collect();
+    }
+
+    /// Keep a value typed in the Path Variables table. Its variable is in
+    /// the URL, since the table shows only those.
+    fn set_path_value(&mut self, changed: &PathVariableChanged, cx: &mut Context<Self>) {
+        let PathVariableChanged { name, value } = changed;
+        let known = self.path_values.iter().position(|(known, _)| known == name);
+
+        match known {
+            Some(index) if value.is_empty() => {
+                self.path_values.remove(index);
+            }
+            Some(index) => self.path_values[index].1 = value.clone(),
+            None if !value.is_empty() => self.path_values.push((name.clone(), value.clone())),
+            None => {}
+        }
+
+        self.keep_path_values_in_url();
+        // The filled path decides which cookies the jar sends.
+        self.refresh_generated_headers(cx);
+
+        let filled = filled_path_variables(&self.path_values);
+        if let Some(url) = &self.url_completion {
+            url.update(cx, |url, cx| url.set_path_variables(filled, cx));
+        }
+        cx.notify();
+    }
+
+    fn headers_state(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<RequestFields> {
-        let scope = self.variables.clone();
-        let is_headers = self.section == RequestSection::Headers;
-        let slot = if is_headers {
-            &mut self.headers
-        } else {
-            &mut self.params
-        };
-
-        if slot.is_none() {
-            let id = if is_headers { "headers" } else { "params" };
-            let values = if is_headers {
-                self.request.headers.as_slice()
-            } else {
-                self.request.query.as_slice()
-            };
-            let generated = if is_headers {
-                self.generated_headers.as_slice()
-            } else {
-                &[]
-            };
-            let fields = cx.new(|cx| RequestFields::new(id, values, generated, scope, window, cx));
-            let subscription = cx.subscribe(&fields, move |this, _, event: &FieldsChanged, cx| {
-                if is_headers {
-                    this.request.headers = event.0.clone();
-                    this.refresh_generated_headers(cx);
-                } else {
-                    this.request.query = event.0.clone();
-                }
-
-                cx.notify();
-            });
-            self._subscriptions.push(subscription);
-            *slot = Some(fields);
+        if let Some(headers) = &self.headers {
+            return headers.clone();
         }
 
-        slot.as_ref().unwrap().clone()
+        let scope = self.variables.clone();
+        let headers = cx.new(|cx| {
+            RequestFields::new(
+                "headers",
+                &self.request.headers,
+                &self.generated_headers,
+                scope,
+                window,
+                cx,
+            )
+        });
+        self._subscriptions.push(
+            cx.subscribe(&headers, |this, _, event: &FieldsChanged, cx| {
+                this.request.headers = event.0.clone();
+                this.refresh_generated_headers(cx);
+                cx.notify();
+            }),
+        );
+        self.headers = Some(headers.clone());
+
+        headers
     }
 
-    fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // The selected section tab already names the table.
-        self.fields_state(window, cx).into_any_element()
+    fn params_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<RequestFields>, Entity<PathVariables>) {
+        if let (Some(params), Some(path_variables)) = (&self.params, &self.path_variables) {
+            return (params.clone(), path_variables.clone());
+        }
+
+        let scope = self.variables.clone();
+        // The URL holds the parameters that are sent; those switched off are
+        // kept beside it.
+        let values: Vec<_> = request::query_params(&self.request.path)
+            .into_iter()
+            .map(Field::from)
+            .chain(
+                self.request
+                    .query
+                    .iter()
+                    .filter(|param| !param.enabled)
+                    .cloned(),
+            )
+            .collect();
+        let params = cx.new(|cx| {
+            RequestFields::new("params", &values, &[], scope.clone(), window, cx)
+                .with_keyless_rows()
+        });
+        self._subscriptions.push(cx.subscribe_in(
+            &params,
+            window,
+            |this, _, event: &FieldsChanged, window, cx| this.set_query(&event.0, window, cx),
+        ));
+
+        let names = path_variable_names(&self.request.path);
+        let path_variables =
+            cx.new(|cx| PathVariables::new(&names, &self.path_values, scope, window, cx));
+        self._subscriptions.push(cx.subscribe(
+            &path_variables,
+            |this, _, event: &PathVariableChanged, cx| this.set_path_value(event, cx),
+        ));
+
+        self.params = Some(params.clone());
+        self.path_variables = Some(path_variables.clone());
+
+        (params, path_variables)
+    }
+
+    /// The Query Params table, and the Path Variables table when the URL has
+    /// `:name` segments.
+    fn params(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let (params, path_variables) = self.params_state(window, cx);
+        let label = |text: &'static str| {
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(cx.theme().muted_foreground)
+                .child(text)
+        };
+
+        v_flex()
+            .gap_4()
+            .child(v_flex().gap_2().child(label("Query Params")).child(params))
+            .when(!path_variables.read(cx).is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .gap_2()
+                        .child(label("Path Variables"))
+                        .child(path_variables),
+                )
+            })
+            .into_any_element()
     }
 }
 
+/// The names of the URL's path variables, each once, in URL order.
+fn path_variable_names(url: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+
+    for (_, name) in request::path_variables(url) {
+        if !names.iter().any(|known| known == name) {
+            names.push(name.to_owned());
+        }
+    }
+
+    names
+}
+
+/// The path variables that are filled in when the request is sent.
+fn filled_path_variables(values: &[(String, String)]) -> HashSet<String> {
+    values
+        .iter()
+        .filter(|(_, value)| !value.is_empty())
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 impl Render for RequestDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request = v_flex()
             .debug_selector(|| "request-draft".into())
             .size_full()
             .min_w_0()
@@ -360,7 +716,9 @@ impl Render for RequestDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
-            )
+            );
+
+        code_snippet::with_snippet(self, request.into_any_element(), cx)
     }
 }
 
@@ -376,11 +734,25 @@ impl Render for RequestAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(super::controls::request_header(
-                        "HTTP",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(super::controls::request_header(
+                                        "HTTP",
+                                        draft.location.as_ref(),
+                                        draft.name.as_ref(),
+                                        cx,
+                                    )),
+                            )
+                            .child(code_snippet::toggle_button(
+                                draft.code_snippet.snippet.is_some(),
+                                cx,
+                            )),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())
@@ -394,9 +766,12 @@ impl Render for RequestConfiguration {
         self.0
             .update(cx, |draft, cx| {
                 let content = match draft.section {
-                    RequestSection::Headers | RequestSection::Params => draft.fields(window, cx),
+                    // The selected section tab already names the table.
+                    RequestSection::Headers => draft.headers_state(window, cx).into_any_element(),
+                    RequestSection::Params => draft.params(window, cx),
                     RequestSection::Body => draft.body(window, cx),
                     RequestSection::Scripts => draft.script_editor(cx).into_any_element(),
+                    RequestSection::Settings => draft.settings(window, cx),
                 };
 
                 v_flex()

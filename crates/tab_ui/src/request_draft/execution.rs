@@ -1,12 +1,17 @@
-use std::time::Duration;
+use std::{
+    convert::Infallible,
+    time::{Duration, SystemTime},
+};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
+use request::{Body, Field, HttpRequest, Method};
 use request::{EventStream, EventStreamUpdate, RequestExecutor};
-use request::{Field, HttpRequest, Method};
 
 use super::draft::RequestDraft;
+use crate::RequestSent;
+use crate::cookies::Cookies;
 
 /// The most event-stream updates shown per redraw. A fast stream is drawn in
 /// batches instead of once for every event.
@@ -27,11 +32,20 @@ fn request_url(path: &str) -> String {
 }
 
 pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
-    let supports_body = !matches!(request.method, Method::Get | Method::Head);
-    let body_bytes = if supports_body {
-        request.body.as_ref().map_or(0, Vec::len)
-    } else {
-        0
+    // As sending, which leaves out empty raw text.
+    let body = request
+        .body
+        .as_ref()
+        .filter(|_| !matches!(request.method, Method::Get | Method::Head))
+        .filter(|body| !matches!(body, Body::Raw { text, .. } if text.is_empty()));
+    // Only raw text has its length at hand. Encoding a form or reading
+    // files on each edit would be slow, and a multipart form's boundary is
+    // chosen when it is sent.
+    let (body_bytes, calculated, templated_body) = match body {
+        Some(Body::Raw { text, .. }) => (text.len(), false, text.contains("{{")),
+        // An unknown length is not zero, so the header is shown.
+        Some(_) => (1, true, false),
+        None => (0, false, false),
     };
     let url = request_url(&request.path);
     let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {
@@ -46,8 +60,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     let mut headers =
         request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
-    if supports_body && request.body.is_some() && !has("content-type") {
-        headers.push(("Content-Type".into(), "application/json".into()));
+    if let Some(body) = body
+        && !has("content-type")
+    {
+        let mut content_type = body.content_type();
+        if matches!(body, Body::Multipart { .. }) {
+            content_type.push_str("; boundary=Calculated on Send");
+        }
+        headers.push(("Content-Type".into(), content_type));
     }
 
     if request.path.contains("{{")
@@ -68,28 +88,70 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         if templated_header_names
             || (name == "Host" && value.contains("{{"))
             || (name == "Authorization" && templated_authorization)
-            || (name == "Content-Length"
-                && request
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| body.windows(2).any(|bytes| bytes == b"{{")))
+            || (name == "Content-Length" && templated_body)
         {
             *value = "Resolved on Send".into();
+        } else if name == "Content-Length" && calculated {
+            *value = "Calculated on Send".into();
         }
     }
 
     headers
 }
 
+/// The jar that requests store and send cookies in, while it is on.
+pub(super) fn active_jar(cx: &App) -> Option<request::CookieJar> {
+    cx.try_global::<Preferences>()
+        .is_none_or(|preferences| preferences.request.cookie_jar)
+        .then(|| Cookies::jar(cx))
+}
+
+/// The Cookie header that the jar adds to the request, while it is on.
+fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
+    let jar = active_jar(cx)?;
+    let url = request_url(&request.path);
+    let templated = url.contains("{{")
+        || request
+            .path_variables
+            .iter()
+            .any(|(_, value)| value.contains("{{"))
+        || Field::enabled(&request.headers).any(|(name, value)| {
+            name.contains("{{") || (name.eq_ignore_ascii_case("cookie") && value.contains("{{"))
+        });
+
+    let cookies = if templated {
+        // Which cookies apply depends on the resolved URL and headers.
+        (!jar.is_empty()).then(|| "Resolved on Send".to_owned())
+    } else {
+        // Their path decides which cookies are sent.
+        let Ok(url) = request::fill_path_variables(&url, &request.path_variables, |value| {
+            Ok::<_, Infallible>(value.to_owned())
+        });
+        jar.cookie_header(&url, &Field::pairs(&request.headers))
+    };
+
+    cookies.map(|cookies| ("Cookie".to_owned(), cookies))
+}
+
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
-        self.generated_headers = generated_headers(&self.request);
+        let mut headers = generated_headers(&self.request);
+        headers.extend(jar_cookies(&self.request, cx));
+
+        if headers == self.generated_headers {
+            return;
+        }
+
+        self.generated_headers = headers;
 
         if let Some(headers) = &self.headers {
             headers.update(cx, |headers, cx| {
                 headers.set_generated_headers(&self.generated_headers, cx);
             });
         }
+
+        // The Headers section counts them.
+        cx.notify();
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -102,7 +164,10 @@ impl RequestDraft {
         response.update(cx, |response, cx| response.start(cx));
 
         let scope = self.variables.clone();
-        let request = self.request.clone();
+        // History keeps where the files were found, so the request can be
+        // sent again from it.
+        let request = self.sent_request();
+        let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
         let preferences = cx
             .try_global::<Preferences>()
@@ -113,22 +178,40 @@ impl RequestDraft {
             .as_ref()
             .filter(|(settings, _)| settings == &preferences)
             .map(|(_, executor)| executor.clone());
+        let cookies = Cookies::jar(cx);
         let (events, mut updates, stop) = EventStream::new();
+        let dispatch = events.dispatch();
         self.stop = Some(stop);
+        self.sending = Some((
+            RequestSent {
+                record: request_history::Record::sent(request.clone()),
+                sent_at: SystemTime::now(),
+            },
+            dispatch.clone(),
+        ));
         let task = cx.background_executor().spawn(async move {
-            let executor = match cached
-                .map(Ok)
-                .unwrap_or_else(|| RequestExecutor::new(&preferences))
-            {
+            let executor = match cached.map(Ok).unwrap_or_else(|| {
+                RequestExecutor::new(&preferences).map(|executor| executor.with_cookie_jar(cookies))
+            }) {
                 Ok(executor) => executor,
-                Err(error) => return (None, Err(error)),
+                Err(error) => return (None, Err(error), None),
             };
-            let result = executor
-                .execute_streaming(request, variables, events)
-                .await
-                .map(crate::response_view::ResponseContent::new);
+            let result = executor.execute_streaming(request, variables, events).await;
+            // What history keeps of the outcome. A request that failed
+            // before it went out is left out.
+            let outcome = match &result {
+                Ok(execution) => Some(Ok(request_history::Response::new(execution))),
+                Err(error) if dispatch.started() => Some(Err(error.message_without_url())),
+                Err(_) => None,
+            };
 
-            (Some((preferences, executor)), result)
+            (
+                Some((preferences, executor)),
+                result.map(|execution| {
+                    crate::response_view::ResponseContent::new(execution).named_after(&url)
+                }),
+                outcome,
+            )
         });
 
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -161,12 +244,23 @@ impl RequestDraft {
                 }
             });
 
-            let (executor, result) = task.await;
+            let (executor, result, outcome) = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                if let Some((mut sent, _)) = this.sending.take()
+                    && let Some(outcome) = outcome
+                {
+                    match outcome {
+                        Ok(response) => sent.record.response = Some(response),
+                        Err(error) => sent.record.error = Some(error),
+                    }
+                    cx.emit(sent);
+                }
+
                 this.executor = executor;
                 this.task = None;
                 this.stop = None;
                 scope.update(cx, |scope, cx| scope.changed(cx));
+                Cookies::changed(cx);
                 // Scripts may have changed variables that other visible tabs of
                 // the collection share; redraw so their chips recolor.
                 window.refresh();
@@ -192,6 +286,8 @@ impl RequestDraft {
                     version,
                     headers,
                 } => {
+                    // The jar stored the stream's cookies with its head.
+                    Cookies::changed(cx);
                     self.streaming = true;
                     self.response.update(cx, |response, cx| {
                         response.open_stream(status, version, headers, window, cx)
@@ -226,6 +322,16 @@ impl RequestDraft {
         self.task = None;
         self.stop = None;
         self.streaming = false;
+        // Redirects before the cancellation may have set cookies.
+        Cookies::changed(cx);
+
+        // The server may already act on a request that went out.
+        if let Some((mut sent, dispatch)) = self.sending.take()
+            && dispatch.started()
+        {
+            sent.record.error = Some("Request cancelled".into());
+            cx.emit(sent);
+        }
 
         self.response.update(cx, |response, cx| response.cancel(cx));
 

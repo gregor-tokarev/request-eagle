@@ -2,8 +2,8 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method, Request,
-    WebSocketRequest,
+    Body, Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method,
+    Request, WebSocketRequest,
 };
 
 use crate::{ImportError, read};
@@ -141,6 +141,7 @@ order: 1000
                 server_name: "shop.internal".into(),
                 include_default_fields: false,
                 max_response_message_mb: Some(16),
+                timeout_ms: None,
             },
             scripts: GrpcScripts {
                 before_invoke: "console.log('invoke');".into(),
@@ -300,7 +301,8 @@ order: 2000
     assert_eq!(request(&pets[0]).0, "Add a pet");
     let add = http(&pets[0]);
     assert_eq!(add.method, Method::Post);
-    assert_eq!(add.body.as_deref(), Some(br#"{"name": "Rex"}"#.as_slice()));
+    assert_eq!(add.body, Some(Body::json(r#"{"name": "Rex"}"#)));
+    // JSON bodies are sent as JSON without a header of their own.
     assert_eq!(
         add.headers,
         [
@@ -308,13 +310,13 @@ order: 2000
                 enabled: false,
                 ..Field::new("X-Debug", "1")
             },
-            Field::new("Content-Type", "application/json"),
             Field::new("Authorization", "Basic YWRtaW46c2VjcmV0"),
         ]
     );
 
     let find = http(&pets[1]);
-    assert_eq!(find.path, "{{base_url}}/pets/7?expand=owner");
+    assert_eq!(find.path, "{{base_url}}/pets/:id?expand=owner");
+    assert_eq!(find.path_variables, [("id".to_owned(), "7".to_owned())]);
     assert_eq!(find.headers, [Field::new("Accept", "application/json")]);
     assert_eq!(
         find.scripts.post_response,

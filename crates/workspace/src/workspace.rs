@@ -1,11 +1,13 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use crate::actions::*;
 use crate::{
     bottom_panel::BottomPanel,
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
-    main_view::MainView,
+    history_panel::{HistoryPanel, HistoryPanelEvent},
+    main_view::{MainView, Page},
+    session::{SavedSidebar, SavedWindow, Session},
     top_panel::TopPanel,
 };
 use collection::CollectionRegistry;
@@ -19,6 +21,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request_history::History;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use tab_ui::{Environments, RequestLocation};
 use updater::Updater;
@@ -27,16 +30,20 @@ use updater::Updater;
 pub(crate) enum SidebarSection {
     Collections,
     Environments,
+    History,
 }
 
 pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
     pub(crate) sidebar: Entity<CollectionPanel>,
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
+    history: Entity<HistoryPanel>,
     collections_open: bool,
     environments_open: bool,
+    history_open: bool,
     pub(crate) collections_header: FocusHandle,
     environments_header: FocusHandle,
+    history_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
 
@@ -51,8 +58,12 @@ pub(crate) struct Workspace {
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
+    /// Where the window, sidebar and tabs are saved when the window closes.
+    session_path: PathBuf,
+
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
+    _history_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
@@ -60,11 +71,20 @@ impl Workspace {
     pub(crate) fn new(
         collections: CollectionRegistry,
         environments: GlobalEnvironments,
+        history: History,
         updater: Entity<Updater>,
+        session: Session,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let sidebar_visible = cx.new(|_| true);
+        let Session {
+            path: session_path,
+            sidebar: sidebar_state,
+            tabs,
+            selected_tab,
+            ..
+        } = session;
+        let sidebar_visible = cx.new(|_| sidebar_state.visible);
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
 
@@ -143,8 +163,12 @@ impl Workspace {
                         view.prepare_active_tab(window, cx);
                     });
                 }
+                CollectionPanelEvent::OpenUnsavedRequest(request) => {
+                    this.update_tabs(window, cx, |view, cx| {
+                        view.open_unsaved_request(request.clone(), cx)
+                    });
+                }
             });
-        window.focus(&sidebar.focus_handle(cx), cx);
 
         let active_environment = cx
             .try_global::<preferences::Preferences>()
@@ -166,17 +190,52 @@ impl Workspace {
             },
         );
 
-        let main_view = cx.new(|cx| MainView::new(environments, sidebar.clone(), window, cx));
-        main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
+        let history = cx.new(|cx| HistoryPanel::new(history, window, cx));
+        let history_subscription = cx.subscribe_in(
+            &history,
+            window,
+            |this, _, event: &HistoryPanelEvent, window, cx| match event {
+                HistoryPanelEvent::Open { entry, record } => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_history(entry, record.clone(), window, cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+            },
+        );
+
+        let main_view = cx.new(|cx| {
+            MainView::new(
+                environments,
+                sidebar.clone(),
+                history.clone(),
+                tabs,
+                selected_tab,
+                window,
+                cx,
+            )
+        });
+
+        // Start in the collections tree, or in the tabs while it is hidden or
+        // folded.
+        if sidebar_state.visible && sidebar_state.collections {
+            window.focus(&sidebar.focus_handle(cx), cx);
+            main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
+        } else {
+            main_view.update(cx, |view, cx| view.focus(window, cx));
+        }
 
         Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
-            collections_open: true,
-            environments_open: true,
+            history,
+            collections_open: sidebar_state.collections,
+            environments_open: sidebar_state.environments,
+            history_open: sidebar_state.history,
             collections_header: cx.focus_handle(),
             environments_header: cx.focus_handle(),
+            history_header: cx.focus_handle(),
             main_view,
             bottom_panel,
             main_split: cx.new(|_| ResizableState::default()),
@@ -186,9 +245,34 @@ impl Workspace {
             previous_focus: None,
             updater,
             command_palette: None,
+            session_path,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
+            _history_subscription: history_subscription,
             _settings_subscription: None,
+        }
+    }
+
+    /// Save the window, sidebar and tabs for the next launch.
+    fn save_session(&self, window: &Window, cx: &App) {
+        let session = Session {
+            path: self.session_path.clone(),
+            window: SavedWindow::capture(window, cx),
+            sidebar: SavedSidebar {
+                visible: *self.sidebar_visible.read(cx),
+                collections: self.collections_open,
+                environments: self.environments_open,
+                history: self.history_open,
+            },
+            tabs: self.main_view.read(cx).saved_tabs(cx),
+            selected_tab: self.main_view.read(cx).selected,
+        };
+
+        if let Err(error) = session.save() {
+            eprintln!(
+                "Could not save the session to {}: {error}",
+                self.session_path.display()
+            );
         }
     }
 
@@ -287,7 +371,13 @@ impl Workspace {
         self.command_palette = Some(palette.downgrade());
     }
 
-    pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A hidden sidebar is not drawn, so keys sent to it would miss the
+        // workspace's shortcuts.
+        if *self.sidebar_visible.read(cx) && self.sidebar_contains_focus(window, cx) {
+            self.main_view.update(cx, |view, cx| view.focus(window, cx));
+        }
+
         self.sidebar_visible.update(cx, |visible, cx| {
             *visible = !*visible;
 
@@ -295,6 +385,22 @@ impl Workspace {
         });
 
         cx.notify();
+    }
+
+    fn sidebar_contains_focus(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.collections_header,
+            &self.environments_header,
+            &self.history_header,
+        ]
+        .iter()
+        .any(|header| header.is_focused(window))
+            || self.sidebar.read(cx).contains_focus(window, cx)
+            || self
+                .environment_panel
+                .focus_handle(cx)
+                .contains_focused(window, cx)
+            || self.history.read(cx).contains_focus(window, cx)
     }
 
     pub(crate) fn toggle_sidebar_section(
@@ -306,6 +412,7 @@ impl Workspace {
         match section {
             SidebarSection::Collections => self.collections_open = !self.collections_open,
             SidebarSection::Environments => self.environments_open = !self.environments_open,
+            SidebarSection::History => self.history_open = !self.history_open,
         }
 
         self.release_section_focus(section, window, cx);
@@ -329,6 +436,11 @@ impl Workspace {
                     .contains_focused(window, cx),
                 &self.environments_header,
             ),
+            SidebarSection::History => (
+                self.history_open,
+                self.history.read(cx).contains_focus(window, cx),
+                &self.history_header,
+            ),
         };
 
         if !open && contains_focus {
@@ -336,10 +448,20 @@ impl Workspace {
         }
     }
 
-    fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // The new collection is named in the tree, so it must be visible.
+    /// Show the collections tree, even when a shortcut runs with the sidebar
+    /// hidden.
+    fn reveal_collections(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_visible.update(cx, |visible, cx| {
+            *visible = true;
+            cx.notify();
+        });
         self.collections_open = true;
         cx.notify();
+    }
+
+    fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The new collection is named in the tree, so it must be visible.
+        self.reveal_collections(cx);
 
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
@@ -347,8 +469,7 @@ impl Workspace {
 
     fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The imported collection is revealed in the tree, so it must be visible.
-        self.collections_open = true;
-        cx.notify();
+        self.reveal_collections(cx);
 
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.open_import_dialog(window, cx));
@@ -362,11 +483,21 @@ impl Workspace {
             .update(cx, |view, cx| view.create_environment(window, cx));
     }
 
+    fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The confirmation shows in the section, so it must be visible.
+        self.history_open = true;
+        cx.notify();
+
+        self.history
+            .update(cx, |history, cx| history.request_clear(window, cx));
+    }
+
     /// How far a section is open, from 0 when folded to 1 when open.
     fn section_progress(&self, section: SidebarSection, window: &mut Window, cx: &mut App) -> f32 {
         let (id, open) = match section {
             SidebarSection::Collections => ("collections-section", self.collections_open),
             SidebarSection::Environments => ("environments-section", self.environments_open),
+            SidebarSection::History => ("history-section", self.history_open),
         };
 
         motion::transition(
@@ -400,6 +531,12 @@ impl Workspace {
                 "Environments",
                 self.environments_open,
                 &self.environments_header,
+            ),
+            SidebarSection::History => (
+                "history-section",
+                "History",
+                self.history_open,
+                &self.history_header,
             ),
         };
         let focus_visible = focus.is_focused(window) && window.last_input_was_keyboard();
@@ -456,29 +593,41 @@ impl Workspace {
     fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+        let history_count = self.history.read(cx).count();
         let collections_progress = self.section_progress(SidebarSection::Collections, window, cx);
         let environments_progress = self.section_progress(SidebarSection::Environments, window, cx);
+        let history_progress = self.section_progress(SidebarSection::History, window, cx);
 
         // A folding section's rows stay on screen, where a click can still
         // focus them.
         self.release_section_focus(SidebarSection::Collections, window, cx);
         self.release_section_focus(SidebarSection::Environments, window, cx);
+        self.release_section_focus(SidebarSection::History, window, cx);
 
         let new_collection = Button::new("new-collection")
             .debug_selector(|| "new-collection".into())
             .icon(IconName::Plus)
-            .tooltip("New Collection")
+            .tooltip_with_action("New Collection", &NewCollection, Some("Workspace"))
             .on_click(cx.listener(|this, _, window, cx| this.create_collection(window, cx)));
         let import_collection = Button::new("import-collection")
             .debug_selector(|| "import-collection".into())
             .icon(Icon::default().path("icons/import.svg"))
-            .tooltip("Import Collection")
+            .tooltip_with_action("Import Collection", &ImportCollection, Some("Workspace"))
             .on_click(cx.listener(|this, _, window, cx| this.import_collection(window, cx)));
         let new_environment = Button::new("new-environment")
             .debug_selector(|| "new-environment".into())
             .icon(IconName::Plus)
             .tooltip("New Environment")
             .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
+        let clear_history = Button::new("clear-history")
+            .debug_selector(|| "clear-history".into())
+            .icon(Icon::default().path("icons/trash.svg"))
+            .tooltip("Clear History")
+            .disabled(history_count == 0)
+            .on_click(cx.listener(|this, _, window, cx| this.clear_history(window, cx)));
+
+        let border = cx.theme().sidebar_border;
+        let divider = move || div().flex_none().mx_2().h(px(1.)).bg(border);
 
         // Open sections share the height, like the sections of an editor sidebar.
         // A folding section gives its share away and clips its rows. An open
@@ -514,13 +663,7 @@ impl Workspace {
                     self.sidebar.clone().into(),
                 ))
             })
-            .child(
-                div()
-                    .flex_none()
-                    .mx_2()
-                    .h(px(1.))
-                    .bg(cx.theme().sidebar_border),
-            )
+            .child(divider())
             .child(self.section_header(
                 SidebarSection::Environments,
                 environments_progress,
@@ -535,6 +678,18 @@ impl Workspace {
                     self.environment_panel.clone().into(),
                 ))
             })
+            .child(divider())
+            .child(self.section_header(
+                SidebarSection::History,
+                history_progress,
+                history_count,
+                vec![clear_history],
+                window,
+                cx,
+            ))
+            .when(history_progress > 0.0, |this| {
+                this.child(section_body(history_progress, self.history.clone().into()))
+            })
     }
 
     fn update_tabs(
@@ -548,6 +703,25 @@ impl Workspace {
             view.focus(window, cx);
         });
     }
+}
+
+/// Handled outside the workspace's focus, so the status bar's button opens
+/// the page wherever focus is.
+fn on_open_cookies(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
+    let workspace = workspace.downgrade();
+
+    cx.on_action(move |_: &OpenCookies, cx| {
+        let workspace = workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.close_settings(window, cx);
+                    this.update_tabs(window, cx, MainView::open_cookies);
+                });
+            });
+        });
+    });
 }
 
 fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: &mut App) {
@@ -601,11 +775,21 @@ pub(crate) fn on_toggle_command_palette(
     });
 }
 
-pub(crate) fn on_toggle_sidebar(workspace: &Entity<Workspace>, cx: &mut App) {
-    let workspace = workspace.clone();
+pub(crate) fn on_toggle_sidebar(
+    workspace: &Entity<Workspace>,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let workspace = workspace.downgrade();
 
     cx.on_action(move |_: &ToggleLeftSidebar, cx| {
-        workspace.update(cx, |this, cx| this.toggle_sidebar(cx));
+        let workspace = workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| this.toggle_sidebar(window, cx));
+            });
+        });
     });
 }
 
@@ -647,20 +831,34 @@ impl Render for Workspace {
                 rems(30.).to_pixels(window.rem_size()),
             );
 
+        // Commands that only apply to some tabs stay out of the palette for
+        // the others. They are handled here, so they also work while the
+        // sidebar has focus.
+        let active_page = self.main_view.read(cx).active_page();
+        let has_url = active_page.is_some_and(Page::is_request);
+        let copyable = active_page.is_some_and(Page::can_copy_as_command);
+
         let workspace = v_flex()
             .size_full()
             .key_context("Workspace")
             .on_action(cx.listener(|this, _: &FocusSidebarSearch, window, cx| {
-                this.sidebar_visible.update(cx, |visible, cx| {
-                    *visible = true;
-                    cx.notify();
-                });
-                this.collections_open = true;
-                cx.notify();
+                this.reveal_collections(cx);
 
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
             }))
+            .on_action(cx.listener(|this, _: &NewCollection, window, cx| {
+                this.create_collection(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ImportCollection, window, cx| {
+                this.import_collection(window, cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &OpenEnvironmentSelector, window, cx| {
+                    this.main_view
+                        .update(cx, |view, cx| view.open_environment_picker(window, cx));
+                }),
+            )
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| {
                 this.main_view
                     .update(cx, |view, cx| view.send_request(window, cx));
@@ -669,6 +867,18 @@ impl Render for Workspace {
                 this.main_view
                     .update(cx, |view, cx| view.save_active_request(window, cx));
             }))
+            .when(has_url, |this| {
+                this.on_action(cx.listener(|this, _: &FocusUrl, window, cx| {
+                    this.main_view
+                        .update(cx, |view, cx| view.focus_url(window, cx));
+                }))
+            })
+            .when(copyable, |this| {
+                this.on_action(cx.listener(|this, _: &CopyAsCurl, window, cx| {
+                    this.main_view
+                        .update(cx, |view, cx| view.copy_as_command(window, cx));
+                }))
+            })
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
                 this.update_tabs(window, cx, MainView::new_tab);
             }))
@@ -750,22 +960,70 @@ impl Render for Workspace {
             .text_base()
             .child(workspace)
             .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
             .into_any_element()
     }
 }
 
+/// Save the session as the window closes, while its bounds can still be
+/// read, or when the app quits with the window open.
+fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mut App) {
+    let closing = workspace.downgrade();
+    window.on_window_should_close(cx, move |window, cx| {
+        if let Some(workspace) = closing.upgrade() {
+            workspace.read(cx).save_session(window, cx);
+        }
+
+        true
+    });
+
+    let workspace = workspace.downgrade();
+    let handle = window.window_handle();
+    cx.on_app_quit(move |cx| {
+        let _ = handle.update(cx, |_, window, cx| {
+            if let Some(workspace) = workspace.upgrade() {
+                workspace.read(cx).save_session(window, cx);
+            }
+        });
+
+        async {}
+    })
+    .detach();
+}
+
+/// `cookies` is the jar that every request shares, or why it could not be
+/// read. `session` is how the workspace last looked; it is saved again when
+/// the window closes.
+// Each store is loaded once at startup and handed over here.
+#[allow(clippy::too_many_arguments)]
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
+    cookies: Result<request::CookieJar, String>,
+    history: History,
     updater: Entity<Updater>,
+    session: Session,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
     crate::actions::init(cx);
+    tab_ui::Cookies::init(cookies, cx);
 
-    let workspace = cx.new(|cx| Workspace::new(collections, environments, updater, window, cx));
-    on_toggle_sidebar(&workspace, cx);
+    let workspace = cx.new(|cx| {
+        Workspace::new(
+            collections,
+            environments,
+            history,
+            updater,
+            session,
+            window,
+            cx,
+        )
+    });
+    save_session_on_close(&workspace, window, cx);
+    on_toggle_sidebar(&workspace, window.window_handle(), cx);
     on_open_settings(&workspace, window.window_handle(), cx);
+    on_open_cookies(&workspace, window.window_handle(), cx);
     on_toggle_command_palette(&workspace, window.window_handle(), cx);
 
     workspace.into()

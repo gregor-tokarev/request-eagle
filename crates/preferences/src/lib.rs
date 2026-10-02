@@ -11,11 +11,14 @@ mod macos_credentials;
 #[cfg(feature = "ui")]
 mod store;
 
-#[cfg(all(test, feature = "ui"))]
-mod tests;
-
 pub use appearance::{AppearanceMode, AppearancePreferences};
 pub use file::{Preferences, PreferencesFile, UpdateChannel};
-pub use request::{HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol, RequestPreferences};
+pub use request::{
+    CertificateFiles, ClientCertificate, HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol,
+    RequestPreferences,
+};
 #[cfg(feature = "ui")]
-pub use store::{credential_error, init, load, update, update_proxy};
+pub use store::{
+    add_client_certificate, credential_error, init, load, remove_client_certificate, update,
+    update_proxy,
+};

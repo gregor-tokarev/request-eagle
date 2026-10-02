@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use environment::EnvironmentSessions;
@@ -13,11 +14,12 @@ use request::{Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPr
 
 use super::definition::DefinitionState;
 use super::methods::{MethodList, method_list};
+use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::{
-    Environments,
+    Environments, RequestSent,
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -36,6 +38,8 @@ pub(crate) enum GrpcSection {
 pub struct GrpcDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: GrpcRequest,
     saved_request: GrpcRequest,
     pub(crate) section: GrpcSection,
@@ -52,6 +56,7 @@ pub struct GrpcDraft {
     pub(super) import_paths: Vec<Entity<InputState>>,
     pub(super) server_name: Option<Entity<InputState>>,
     pub(super) max_message: Option<Entity<InputState>>,
+    pub(super) timeout: Option<Entity<InputState>>,
     pub(crate) definition: DefinitionState,
     /// The settings the current definition was loaded or is loading for.
     pub(super) definition_source: Option<super::definition::DefinitionSource>,
@@ -69,9 +74,40 @@ pub struct GrpcDraft {
     pub(super) send_error: Option<SharedString>,
     pub(super) client: Option<(RequestPreferences, GrpcClient)>,
     split: Entity<ResizableState>,
+    /// The call as a grpcurl command, beside the request while open.
+    pub(super) code_snippet: SnippetPanel<Self>,
     address: Entity<GrpcAddress>,
     configuration: Entity<GrpcConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<RequestSent> for GrpcDraft {}
+
+impl SnippetDraft for GrpcDraft {
+    type Request = GrpcRequest;
+    const PROGRAM: &'static str = "grpcurl";
+
+    fn request(&self) -> &GrpcRequest {
+        &self.request
+    }
+
+    fn command(&self, values: &HashMap<String, String>, _: &App) -> String {
+        self.request
+            .grpcurl_command(values, self.collection_path().as_deref())
+    }
+
+    fn variables(&self) -> &Entity<VariableScope> {
+        &self.variables
+    }
+
+    fn snippet_panel(&mut self) -> &mut SnippetPanel<Self> {
+        &mut self.code_snippet
+    }
+
+    fn toggle_code_snippet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        code_snippet::toggle(self, window, cx);
+        self.redraw(cx);
+    }
 }
 
 impl GrpcDraft {
@@ -113,6 +149,7 @@ impl GrpcDraft {
 
         Self {
             location,
+            name: None,
             saved_request: request.clone(),
             request,
             section: GrpcSection::Message,
@@ -129,6 +166,7 @@ impl GrpcDraft {
             import_paths: Vec::new(),
             server_name: None,
             max_message: None,
+            timeout: None,
             definition: DefinitionState::Idle,
             definition_source: None,
             reflected_target: None,
@@ -142,6 +180,7 @@ impl GrpcDraft {
             send_error: None,
             client: None,
             split,
+            code_snippet: SnippetPanel::default(),
             address,
             configuration,
             _subscriptions: subscriptions,
@@ -158,8 +197,9 @@ impl GrpcDraft {
         cx.notify();
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -174,12 +214,24 @@ impl GrpcDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.redraw(cx);
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.redraw(cx);
     }
 
     pub fn mark_saved(&mut self, request: GrpcRequest, cx: &mut Context<Self>) {
         self.saved_request = request;
         cx.notify();
+    }
+
+    /// Copies the call as a grpcurl command, with the variables that resolve
+    /// filled in.
+    pub fn copy_as_grpcurl(&self, window: &mut Window, cx: &mut App) {
+        code_snippet::copy(self, window, cx);
     }
 
     /// The directory relative `.proto` paths resolve from.
@@ -229,6 +281,17 @@ impl GrpcDraft {
         {
             self.load_definition(false, window, cx);
         }
+    }
+
+    /// Puts the cursor in the URL with its text selected, as a browser's
+    /// address bar does.
+    pub fn focus_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.url_state(window, cx);
+
+        url.update(cx, |url, cx| {
+            url.select_all(window, cx);
+            url.focus(window, cx);
+        });
     }
 
     pub(super) fn url_state(
@@ -425,8 +488,8 @@ impl GrpcDraft {
 }
 
 impl Render for GrpcDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request = v_flex()
             .debug_selector(|| "grpc-draft".into())
             .size_full()
             .min_w_0()
@@ -462,7 +525,9 @@ impl Render for GrpcDraft {
                                 .child(self.response.clone()),
                         ),
                 ),
-            )
+            );
+
+        code_snippet::with_snippet(self, request.into_any_element(), cx)
     }
 }
 
@@ -477,11 +542,22 @@ impl Render for GrpcAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(crate::request_draft::request_header(
-                        "gRPC",
-                        draft.location.as_ref(),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(div().flex_1().min_w_0().child(
+                                crate::request_draft::request_header(
+                                    "gRPC",
+                                    draft.location.as_ref(),
+                                    draft.name.as_ref(),
+                                    cx,
+                                ),
+                            ))
+                            .child(code_snippet::toggle_button(
+                                draft.code_snippet.snippet.is_some(),
+                                cx,
+                            )),
+                    )
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

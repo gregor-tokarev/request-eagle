@@ -1,5 +1,6 @@
 mod collections;
 mod commands;
+mod cookies;
 mod execution;
 mod settings;
 
@@ -74,6 +75,7 @@ fn main() {
                         execution::run(
                             &collections,
                             &preferences,
+                            &data.join("cookies.json"),
                             &path,
                             trust_scripts,
                             variables,
@@ -81,10 +83,15 @@ fn main() {
                         )
                         .await
                     }
+                    command @ (Command::CookiesList { .. } | Command::CookiesDelete { .. }) => {
+                        cookies::dispatch(&data.join("cookies.json"), command)
+                    }
                     command @ (Command::SettingsGet {}
                     | Command::SettingsRequest { .. }
                     | Command::SettingsAppearance { .. }
-                    | Command::SettingsProxy { .. }) => {
+                    | Command::SettingsProxy { .. }
+                    | Command::SettingsClientCertificatesAdd { .. }
+                    | Command::SettingsClientCertificatesRemove { .. }) => {
                         settings::dispatch(&preferences, command).await
                     }
                     command => collections::dispatch(&collections, command),

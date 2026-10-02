@@ -10,7 +10,7 @@ use request::{
     StatusCode, Version,
 };
 
-use super::body::Body;
+use super::body::{Body, BodyMode};
 use super::content::ResponseContent;
 use super::events::EventLog;
 use super::scripts::script_results;
@@ -30,6 +30,7 @@ pub struct ResponseView {
     pub(super) content: Option<ResponseContent>,
     /// Present exactly when `content` is.
     pub(super) body: Option<Body>,
+    pub(super) mode: BodyMode,
     /// The events of an event-stream response, while it is open and after it ends.
     pub(super) events: Option<Entity<EventLog>>,
     pub(super) message: SharedString,
@@ -42,6 +43,12 @@ pub struct ResponseView {
     pub(super) cookies_list: ListState,
     pub(super) detail_open: [bool; 3],
     background_selection_scope: TextSelectionScopeId,
+    /// Where the body was last saved, or why it could not be.
+    pub(super) saved: Option<Result<std::path::PathBuf, SharedString>>,
+    /// Counts the responses shown, so a save finishing late reports only on
+    /// the response it saved.
+    pub(super) responses: u64,
+    pub(super) save_task: Option<Task<()>>,
 }
 
 impl ResponseView {
@@ -50,6 +57,7 @@ impl ResponseView {
             focus: cx.focus_handle(),
             content: None,
             body: None,
+            mode: BodyMode::Raw,
             events: None,
             message: "Send a request to see the response".into(),
             loading: false,
@@ -61,12 +69,17 @@ impl ResponseView {
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
             detail_open: [false; 3],
             background_selection_scope: TextSelectionScopeId::new(),
+            saved: None,
+            responses: 0,
+            save_task: None,
         }
     }
 
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
         self.content = None;
         self.body = None;
+        self.saved = None;
+        self.responses += 1;
         self.events = None;
         self.scripts.clear();
         self.loading = true;
@@ -99,8 +112,9 @@ impl ResponseView {
 
         self.headers_list.reset(content.headers.len());
         self.cookies_list.reset(content.cookies.len());
+        let mode = content.default_mode();
         self.content = Some(content);
-        self.set_pretty(true, window, cx);
+        self.show(mode, window, cx);
         self.events = Some(cx.new(|cx| EventLog::new(window, cx)));
         self.loading = false;
         cx.notify();
@@ -120,11 +134,6 @@ impl ResponseView {
         cx.notify();
     }
 
-    #[cfg(test)]
-    pub(crate) fn events_for_test(&self) -> Option<Entity<EventLog>> {
-        self.events.clone()
-    }
-
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         self.loading = false;
         self.message = "Request cancelled".into();
@@ -134,6 +143,18 @@ impl ResponseView {
             log.update(cx, |log, cx| log.finish(Some(message), cx));
         }
 
+        cx.notify();
+    }
+
+    /// Show why a request from history failed after it was sent.
+    pub(crate) fn fail(&mut self, message: SharedString, cx: &mut Context<Self>) {
+        self.content = None;
+        self.body = None;
+        self.events = None;
+        self.scripts.clear();
+        self.loading = false;
+        self.error = true;
+        self.message = message;
         cx.notify();
     }
 
@@ -156,8 +177,11 @@ impl ResponseView {
                 }
                 self.headers_list.reset(content.headers.len());
                 self.cookies_list.reset(content.cookies.len());
+                let mode = content.default_mode();
                 self.content = Some(content);
-                self.set_pretty(true, window, cx);
+                self.show(mode, window, cx);
+                self.saved = None;
+                self.responses += 1;
                 self.error = false;
 
                 if let Some(log) = &self.events {
@@ -353,7 +377,14 @@ impl Render for ResponseView {
             }
             Section::Body if has_response => match &self.events {
                 Some(events) => events.clone().into_any_element(),
-                None => self.body(cx),
+                None => match self
+                    .content
+                    .as_ref()
+                    .and_then(|content| content.omitted_body)
+                {
+                    Some(size) => omitted_body(size),
+                    None => self.body(cx),
+                },
             },
             Section::Headers if has_response => self.headers(false, cx),
             Section::Cookies if has_response => self.headers(true, cx),
@@ -407,4 +438,29 @@ impl Render for ResponseView {
                 TextSelectionScopeId::default()
             })
     }
+}
+
+fn omitted_body(size: usize) -> AnyElement {
+    div()
+        .debug_selector(|| "response-body-omitted".into())
+        .flex()
+        .flex_1()
+        .min_h_0()
+        .child(
+            Empty::new().header(
+                EmptyHeader::new()
+                    .media(
+                        EmptyMedia::new()
+                            .with_variant(EmptyMediaVariant::Icon)
+                            .child(Icon::new(IconName::Inbox)),
+                    )
+                    .title(EmptyTitle::new().child("Body not kept in history"))
+                    .description(EmptyDescription::new().child(format!(
+                        "History keeps bodies up to {}. This one is {}. Send the request again to see it.",
+                        super::metadata::size_label(request_history::BODY_LIMIT),
+                        super::metadata::size_label(size),
+                    ))),
+            ),
+        )
+        .into_any_element()
 }

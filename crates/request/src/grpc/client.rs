@@ -20,7 +20,7 @@ use super::{
     transport::{self, Target},
 };
 use crate::{
-    Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
+    CookieJar, Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
     scripts::CallScripts,
 };
 
@@ -38,6 +38,8 @@ pub struct GrpcClient {
     /// server ends them or the call is cancelled.
     timeout: Option<Duration>,
     preferences: RequestPreferences,
+    /// Holds the cookies of scripts' HTTP requests.
+    cookies: Option<CookieJar>,
     /// Sends the HTTP requests of scripts, created when a script first runs.
     script_executor: Arc<OnceLock<Result<RequestExecutor, String>>>,
 }
@@ -50,8 +52,16 @@ impl GrpcClient {
             timeout: (preferences.timeout_ms != 0)
                 .then(|| Duration::from_millis(preferences.timeout_ms)),
             preferences: preferences.clone(),
+            cookies: None,
             script_executor: Arc::default(),
         }
+    }
+
+    /// Share `jar` with the HTTP requests that scripts send, as
+    /// `RequestExecutor::with_cookie_jar` does.
+    pub fn with_cookie_jar(mut self, jar: CookieJar) -> Self {
+        self.cookies = Some(jar);
+        self
     }
 
     /// Where and how to connect, with the request's TLS settings applied.
@@ -64,8 +74,29 @@ impl GrpcClient {
             .verify_certificates
             .unwrap_or(self.verify_certificates);
         target.server_name = (!server_name.is_empty()).then(|| server_name.to_owned());
+        target.ca_certificates = self.preferences.ca_certificates.clone();
+        target.client_certificate = target
+            .tls
+            .then(|| {
+                crate::certificates::client_certificate(
+                    &self.preferences.client_certificates,
+                    &target.host,
+                    target.port,
+                )
+            })
+            .flatten()
+            .cloned();
 
         Ok(target)
+    }
+
+    /// The request's timeout, or the preference's when it has none.
+    fn timeout(&self, request: &GrpcRequest) -> Option<Duration> {
+        match request.settings.timeout_ms {
+            Some(0) => None,
+            Some(timeout) => Some(Duration::from_millis(timeout)),
+            None => self.timeout,
+        }
     }
 
     /// Load the request's services, from its `.proto` file or the server.
@@ -76,7 +107,7 @@ impl GrpcClient {
         variables: &RequestVariables,
         collection: Option<&Path>,
     ) -> impl Future<Output = Result<ServiceDefinition, GrpcError>> + Send + 'static + use<> {
-        let client = self.clone();
+        let request_timeout = self.timeout(request);
         let prepared = match &request.definition {
             GrpcDefinition::ProtoFile { path, import_paths } => {
                 let resolve = |path: &Path| resolve_path(path, collection);
@@ -95,7 +126,7 @@ impl GrpcClient {
                 .map_err(GrpcError::Variables)
                 .and_then(|request| {
                     Ok(Definition::Reflection(
-                        self.target(&request)?,
+                        Box::new(self.target(&request)?),
                         metadata(&request.metadata)?,
                     ))
                 }),
@@ -107,13 +138,13 @@ impl GrpcClient {
                     ServiceDefinition::from_proto_file(&path, &import_paths)
                 }
                 Definition::Reflection(target, metadata) => {
-                    let timeout = client.timeout.map_or(REFLECTION_TIMEOUT, |timeout| {
+                    let timeout = request_timeout.map_or(REFLECTION_TIMEOUT, |timeout| {
                         timeout.min(REFLECTION_TIMEOUT)
                     });
 
                     on_runtime(async move {
                         let load = async {
-                            let channel = transport::connect(&target, client.timeout).await?;
+                            let channel = transport::connect(&target, request_timeout).await?;
 
                             // A TLS server resets a plaintext connection.
                             match reflection::load(channel, metadata).await {
@@ -202,7 +233,13 @@ impl GrpcClient {
     fn script_executor(&self) -> Result<RequestExecutor, GrpcError> {
         self.script_executor
             .get_or_init(|| {
-                RequestExecutor::new(&self.preferences).map_err(|error| error.to_string())
+                let executor =
+                    RequestExecutor::new(&self.preferences).map_err(|error| error.to_string())?;
+
+                Ok(match &self.cookies {
+                    Some(jar) => executor.with_cookie_jar(jar.clone()),
+                    None => executor,
+                })
             })
             .clone()
             .map_err(GrpcError::ScriptSetup)
@@ -290,7 +327,7 @@ impl GrpcClient {
             call.tasks.push(task.abort_handle());
         }
 
-        let client = self.clone();
+        let timeout = self.timeout(request);
         let output = method.output();
         let max_message_bytes = match request.settings.max_response_message_mb {
             Some(megabytes) => message_limit(megabytes),
@@ -299,7 +336,7 @@ impl GrpcClient {
         let started = Instant::now();
         let task = reqwest_client::runtime().spawn(async move {
             let run = async {
-                let channel = transport::connect(&target, client.timeout).await?;
+                let channel = transport::connect(&target, timeout).await?;
                 let call_target = CallTarget {
                     channel,
                     path,
@@ -322,7 +359,7 @@ impl GrpcClient {
             };
 
             // A stream stays open as long as the user keeps it open.
-            let result = match client.timeout {
+            let result = match timeout {
                 Some(timeout) if !kind.streams_requests() && !kind.streams_responses() => {
                     tokio::time::timeout(timeout, run)
                         .await
@@ -407,7 +444,7 @@ fn message_limit(megabytes: u64) -> usize {
 
 enum Definition {
     ProtoFile(PathBuf, Vec<PathBuf>),
-    Reflection(Target, MetadataMap),
+    Reflection(Box<Target>, MetadataMap),
 }
 
 fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcError> {

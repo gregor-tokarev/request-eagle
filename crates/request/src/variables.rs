@@ -1,13 +1,17 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use environment::{EnvironmentSession, VariableError, VariableResolver};
+use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
+use url::form_urlencoded;
 
-use crate::{Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{Body, Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
+    /// The values `{{name}}` resolves to.
     pub(crate) values: HashMap<String, String>,
+    /// The scopes `values` come from, which scripts read and change.
+    pub(crate) scopes: VariableScopes,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
     pub(crate) environment_error: Option<String>,
@@ -17,19 +21,20 @@ pub struct RequestVariables {
 }
 
 impl RequestVariables {
+    /// Environment values without a session.
     pub fn new(mut values: HashMap<String, String>, environment_error: Option<String>) -> Self {
         if environment_error.is_some() {
             values.clear();
-        } else {
-            values.retain(|name, _| !name.starts_with('$'));
         }
-        Self {
-            values,
-            session: None,
-            collection_scripts: Ok(RequestScripts::default()),
-            environment_error,
-            generated: BTreeMap::new(),
-        }
+        let scopes = VariableScopes {
+            environment: values
+                .into_iter()
+                .map(|(name, value)| (name, Some(value)))
+                .collect(),
+            ..Default::default()
+        };
+
+        Self::from_scopes(scopes, environment_error, None)
     }
 
     /// Run the collection's scripts before the request's own script in each
@@ -39,19 +44,40 @@ impl RequestVariables {
         self
     }
 
-    /// Read the current session overlay while retaining file-read errors for
-    /// references that cannot be satisfied by the session itself.
+    /// Read the collection's variables and the active environment with the
+    /// session's changes over them, and the session's globals. Session
+    /// values still resolve when a file could not be read.
     pub fn with_environment_session(
-        values: HashMap<String, String>,
+        collection: HashMap<String, String>,
+        environment: HashMap<String, String>,
         environment_error: Option<String>,
         session: EnvironmentSession,
     ) -> Self {
-        let mut variables = Self::new(values, environment_error);
-        variables.values = session.values(variables.values);
-        variables.values.retain(|name, _| !name.starts_with('$'));
-        variables.session = Some(session);
+        let scopes = if environment_error.is_some() {
+            session.scopes(HashMap::new(), HashMap::new())
+        } else {
+            session.scopes(collection, environment)
+        };
 
-        variables
+        Self::from_scopes(scopes, environment_error, Some(session))
+    }
+
+    fn from_scopes(
+        mut scopes: VariableScopes,
+        environment_error: Option<String>,
+        session: Option<EnvironmentSession>,
+    ) -> Self {
+        // `{{$name}}` generates a value unless a script sets one for the send.
+        scopes.retain(|name| !name.starts_with('$'));
+
+        Self {
+            values: scopes.values(),
+            scopes,
+            session,
+            collection_scripts: Ok(RequestScripts::default()),
+            environment_error,
+            generated: BTreeMap::new(),
+        }
     }
 
     /// Resolve where a gRPC request connects: its URL and metadata. The
@@ -187,6 +213,66 @@ fn describe_error(error: VariableError, environment_error: Option<&str>) -> Stri
     error.to_string()
 }
 
+/// The URL a request to `path` is sent to, without its query: its
+/// `{{variables}}` and `:name` path variables filled as sending fills them,
+/// with the values scripts `generated` or set for `{{$name}}`. Only the scheme,
+/// host and path decide cookies, so a query variable that is not set yet does
+/// not matter. None when another variable cannot be resolved.
+pub(crate) fn sent_url(
+    path: &str,
+    path_variables: &[(String, String)],
+    values: &HashMap<String, String>,
+    generated: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut resolver = VariableResolver::new(values);
+    resolver.limit_output(32 * 1024 * 1024);
+
+    let overrides = generated
+        .iter()
+        .chain(values.iter().filter(|(name, _)| name.starts_with('$')));
+    for (name, value) in overrides {
+        resolver.override_generated(name.clone(), value.clone());
+    }
+
+    let path = &path[..query_start(path)];
+    let url = resolve_url(path, &mut resolver).ok()?;
+    let path = crate::request_url::fill_path_variables(&url, path_variables, |value| {
+        resolver.resolve(value)
+    })
+    .ok()?;
+
+    Some(
+        HttpRequest {
+            path,
+            ..HttpRequest::default()
+        }
+        .prepare_for_send()
+        .path,
+    )
+}
+
+/// Where the URL's query or fragment starts, outside its `{{variables}}`.
+fn query_start(url: &str) -> usize {
+    let mut index = 0;
+
+    while let Some(offset) = url[index..].find(['?', '#', '{']) {
+        let at = index + offset;
+
+        if url[at..].starts_with("{{") {
+            let Some(end) = url[at + 2..].find("}}") else {
+                return url.len();
+            };
+            index = at + 2 + end + 2;
+        } else if url[at..].starts_with('{') {
+            index = at + 1;
+        } else {
+            return at;
+        }
+    }
+
+    url.len()
+}
+
 /// `scripted` reports whether a collection or request pre-request script ran.
 pub(crate) fn resolve_request(
     values: &HashMap<String, String>,
@@ -239,7 +325,13 @@ impl HttpRequest {
         body_changed: bool,
     ) -> Result<Self, VariableError> {
         let mut request = self;
-        request.path = resolve_url(&request.path, resolver)?;
+        // Fill path variables only where the resolved URL is sent, so a value
+        // after a fragment is not resolved either.
+        let path = resolve_url(&request.path, resolver)?;
+        request.path =
+            crate::request_url::fill_path_variables(&path, &request.path_variables, |value| {
+                resolver.resolve(value)
+            })?;
         request.headers.retain(|field| field.enabled);
         request.query.retain(|field| field.enabled);
 
@@ -248,37 +340,80 @@ impl HttpRequest {
             field.value = resolver.resolve(&field.value)?;
         }
 
-        if let Some(body) = &mut request.body
-            && let Ok(text) = std::str::from_utf8(body)
-            && (body_changed || text.contains("{{"))
-        {
-            *body = resolver.resolve(text)?.into_bytes();
+        match &mut request.body {
+            Some(Body::Raw { text, .. }) if body_changed || text.contains("{{") => {
+                *text = resolver.resolve(text)?;
+            }
+            Some(Body::UrlEncoded { fields }) => {
+                for (name, value) in fields {
+                    *name = resolver.resolve(name)?;
+                    *value = resolver.resolve(value)?;
+                }
+            }
+            // A file is sent from the path as written.
+            Some(Body::Multipart { parts }) => {
+                for part in parts {
+                    part.name = resolver.resolve(&part.name)?;
+                    if !part.file {
+                        part.value = resolver.resolve(&part.value)?;
+                    }
+                }
+            }
+            Some(Body::Raw { .. } | Body::Binary { .. }) | None => {}
         }
 
         Ok(request)
     }
 }
 
+/// Resolve a URL's `{{variables}}`. In the query, a variable's value is
+/// encoded so it stays within its key or value; the text around it is sent as
+/// written. A fragment is not sent, including one a variable introduces: the
+/// rest of the path after that variable is dropped, its query is not.
 fn resolve_url(text: &str, resolver: &mut VariableResolver<'_>) -> Result<String, VariableError> {
     let mut remaining = text.split('#').next().unwrap_or_default();
     let mut resolved = String::new();
+    let mut in_query = false;
 
-    while let Some(start) = remaining.find("{{") {
-        resolved.push_str(&resolver.resolve(&remaining[..start])?);
-        let end = remaining[start + 2..]
-            .find("}}")
-            .map(|end| start + 2 + end + 2)
-            .ok_or(VariableError::Unclosed)?;
-        let value = resolver.resolve(&remaining[start..end])?;
-        // A whole-URL variable can introduce a fragment too. No later reference
-        // in this URL is transmitted, so do not resolve or validate it.
-        if let Some((before_fragment, _)) = value.split_once('#') {
-            resolved.push_str(before_fragment);
+    loop {
+        let start = remaining.find("{{").unwrap_or(remaining.len());
+        let (literal, rest) = remaining.split_at(start);
+
+        match literal.split_once('?') {
+            Some((path, query)) if !in_query => {
+                resolved.push_str(&resolver.resolve(path)?);
+                // A whole-URL variable may have started the query already.
+                resolved.push(if resolved.contains('?') { '&' } else { '?' });
+                resolved.push_str(&resolver.resolve(query)?);
+                in_query = true;
+            }
+            _ => resolved.push_str(&resolver.resolve(literal)?),
+        }
+
+        if rest.is_empty() {
             return Ok(resolved);
         }
-        resolved.push_str(&value);
-        remaining = &remaining[end..];
+
+        let end = rest[2..]
+            .find("}}")
+            .map(|end| end + 4)
+            .ok_or(VariableError::Unclosed)?;
+        let reference = &rest[..end];
+        let value = resolver.resolve(reference)?;
+        remaining = &rest[end..];
+
+        if in_query && !reference.starts_with("{{!") {
+            resolved.extend(form_urlencoded::byte_serialize(value.as_bytes()));
+        } else if let Some((before_fragment, _)) = value.split_once('#') {
+            resolved.push_str(before_fragment);
+
+            // Unsent references are not resolved or validated.
+            match remaining.find('?') {
+                Some(query) if !in_query => remaining = &remaining[query..],
+                _ => return Ok(resolved),
+            }
+        } else {
+            resolved.push_str(&value);
+        }
     }
-    resolved.push_str(&resolver.resolve(remaining)?);
-    Ok(resolved)
 }

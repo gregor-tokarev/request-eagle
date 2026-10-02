@@ -323,6 +323,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             "headers",
             "body",
             "query",
+            "path_variables",
             "scripts",
             "tls",
             "method",
@@ -333,6 +334,18 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         ] {
             if updates["request"].get(field).is_none() {
                 request.remove(field);
+            }
+        }
+
+        // A body of another type keeps none of the previous type's fields.
+        if let (Some(current), Some(update)) = (
+            request.get_mut("body").and_then(Item::as_table_like_mut),
+            updates["request"].get("body").and_then(Item::as_table_like),
+        ) {
+            for field in ["language", "text", "fields", "parts", "file"] {
+                if update.get(field).is_none() {
+                    current.remove(field);
+                }
             }
         }
 

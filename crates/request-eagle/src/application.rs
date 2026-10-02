@@ -44,6 +44,12 @@ pub fn run() {
             return;
         };
 
+        // Read how the app was last left while the preferences load.
+        let session_path = home.join(".request-eagle/session.json");
+        let session = cx
+            .background_executor()
+            .spawn(async move { workspace::Session::load(session_path) });
+
         if let Err(error) =
             keybindings_service::load_overrides(home.join(".request-eagle/keybindings.json"), cx)
         {
@@ -59,13 +65,14 @@ pub fn run() {
                 eprintln!("Failed to load preferences: {error:#}");
             }
 
-            cx.update(|cx| open_workspace(&home, cx));
+            let session = session.await;
+            cx.update(|cx| open_workspace(&home, session, cx));
         })
         .detach();
     });
 }
 
-fn open_workspace(home: &std::path::Path, cx: &mut App) {
+fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut App) {
     request_eagle_theme::init(cx);
 
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
@@ -80,8 +87,18 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
     }
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
+    let cookies_path = home.join(".request-eagle/cookies.json");
+    let cookies = request::CookieJar::open(&cookies_path).map_err(|error| {
+        // The unreadable file stays as it is.
+        format!(
+            "Saved cookies could not be read from {}: {error}. Cookies are kept until you \
+             quit. To save them again, fix or delete the file and restart Request Eagle.",
+            cookies_path.display()
+        )
+    });
+    let history = request_history::History::new(home.join(".request-eagle/history"));
 
-    let window_options = crate::window_options::use_window_options(cx);
+    let window_options = crate::window_options::use_window_options(&session, cx);
     cx.open_window(window_options, move |window, cx| {
         window
             .observe_window_appearance(|window, cx| {
@@ -89,7 +106,16 @@ fn open_workspace(home: &std::path::Path, cx: &mut App) {
             })
             .detach();
 
-        let workspace = workspace::init(collections, environments, updater, window, cx);
+        let workspace = workspace::init(
+            collections,
+            environments,
+            cookies,
+            history,
+            updater,
+            session,
+            window,
+            cx,
+        );
         let view = cx.new(|_| ApplicationView { workspace });
 
         cx.new(|cx| Root::new(view, window, cx))

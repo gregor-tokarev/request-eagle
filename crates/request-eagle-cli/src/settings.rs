@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use preferences::{Preferences, PreferencesFile};
+use preferences::{CertificateFiles, ClientCertificate, Preferences, PreferencesFile};
 use serde_json::{Value, json};
 
 use crate::commands::{AppearanceMode, Command, HttpVersion, ProxyMode, ProxyProtocol};
@@ -13,6 +13,8 @@ pub async fn dispatch(file: &PreferencesFile, command: Command) -> Result<Value>
             max_response_size_mb,
             ssl_certificate_verification,
             follow_all_redirects,
+            cookie_jar,
+            ca_certificates,
         } => file.update(|preferences| {
             let request = &mut preferences.request;
             if let Some(version) = http_version {
@@ -34,8 +36,45 @@ pub async fn dispatch(file: &PreferencesFile, command: Command) -> Result<Value>
             if let Some(value) = follow_all_redirects {
                 request.follow_all_redirects = value;
             }
+            if let Some(value) = cookie_jar {
+                request.cookie_jar = value;
+            }
+            if let Some(path) = ca_certificates {
+                // Later commands can run from another working directory.
+                request.ca_certificates = if path.as_os_str().is_empty() {
+                    None
+                } else {
+                    Some(std::path::absolute(path)?)
+                };
+            }
             Ok(())
         })?,
+        Command::SettingsClientCertificatesAdd {
+            host,
+            certificate,
+            key,
+            pkcs12,
+            passphrase,
+        } => {
+            let files = match (certificate, key, pkcs12) {
+                (Some(certificate), key, None) => CertificateFiles::Pem { certificate, key },
+                (None, None, Some(path)) => CertificateFiles::Pkcs12 { path },
+                _ => bail!("Supply a PEM certificate, with an optional key, or a PKCS #12 file"),
+            };
+
+            file.add_client_certificate(ClientCertificate {
+                id: String::new(),
+                host,
+                files,
+                has_passphrase: false,
+                passphrase: passphrase.unwrap_or_default(),
+                passphrase_unavailable: false,
+            })
+            .await?
+        }
+        Command::SettingsClientCertificatesRemove { id } => {
+            file.remove_client_certificate(&id).await?
+        }
         Command::SettingsAppearance {
             mode,
             light_theme,

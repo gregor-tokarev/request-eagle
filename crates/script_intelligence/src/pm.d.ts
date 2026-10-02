@@ -72,12 +72,38 @@ declare namespace RequestEagle {
         toJSON(): string;
     }
 
+    /** A multipart form's part: text with a value, or a file with its path in src. */
+    type FormPart =
+        | {key: string; value: string; type?: "text"}
+        | {key: string; src: string; type: "file"};
+
+    interface FormData {
+        /** Return the last matching part's value, or undefined when absent or a file. */
+        get(name: string): string | undefined;
+        has(name: string): boolean;
+        /** Append a part, preserving existing parts with the same name. */
+        add(part: FormPart): void;
+        /** Remove all parts with this name. */
+        remove(name: string): void;
+        /** Replace all matching parts with this one. */
+        upsert(part: FormPart): void;
+        clear(): void;
+        toJSON(): FormPart[];
+    }
+
     interface RequestBody {
-        readonly mode: "raw";
-        /** Decoded body text, or null when absent. Assign text to replace the body. */
+        /** The body's type. A request without a body is raw. */
+        readonly mode: "raw" | "urlencoded" | "formdata" | "file";
+        /** Decoded raw text, or null when absent. After the response, the sent body. Assign text to replace the body with raw text. */
         raw: string | null;
         /** Replace the outgoing body with text. GET and HEAD omit request bodies. */
         update(text: string): void;
+        /** A URL-encoded form's fields. */
+        readonly urlencoded?: Entries;
+        /** A multipart form's parts. */
+        readonly formdata?: FormData;
+        /** The file a binary body sends. */
+        readonly file?: {readonly src: string};
     }
 
     /** The execution snapshot. Edits never modify the request draft or saved file. */
@@ -128,26 +154,152 @@ declare namespace RequestEagle {
     }
 
     interface LocalVariables extends VariableScope {
-        /** Read the local override first, then the environment. */
+        /** Read the local override first, then the environment, collection variables and globals. */
         get(name: string): string | undefined;
         /** Set an override for this execution, including its post-response phase. */
         set(name: string, value: unknown): void;
-        /** Remove a local override, revealing its environment value if present. */
+        /** Remove a local override, revealing its stored value if present. */
         unset(name: string): void;
-        /** Remove all local overrides, leaving environment values visible. */
+        /** Remove all local overrides, leaving stored values visible. */
         clear(): void;
     }
 
     interface EnvironmentVariables extends VariableScope {
+        /** Read the active global environment, then the collection's variables. */
+        get(name: string): string | undefined;
         /**
-         * Save a session value for other requests in this environment without changing its file.
+         * Save a session value for other requests in this collection without changing a file.
          * @param name Nonempty variable name that does not start with $.
          */
         set(name: string, value: unknown): void;
-        /** Hide the value for this session, including any value in the environment file. */
+        /** Hide the value for this session, including file values and collection variables. */
         unset(name: string): void;
         /** Hide all environment values visible to this script. */
         clear(): void;
+    }
+
+    interface CollectionVariables extends VariableScope {
+        /** Read the collection's variables from its environment.toml, with session changes. */
+        get(name: string): string | undefined;
+        /**
+         * Save a session value for other requests in this collection without changing its file.
+         * The active global environment still overrides it.
+         * @param name Nonempty variable name that does not start with $.
+         */
+        set(name: string, value: unknown): void;
+        /** Hide the value for this session, including the value in environment.toml and globals. */
+        unset(name: string): void;
+        /** Hide all collection variables visible to this script. */
+        clear(): void;
+    }
+
+    interface GlobalVariables extends VariableScope {
+        /** Read a value every collection shares for this session. */
+        get(name: string): string | undefined;
+        /**
+         * Save a session value for requests in every collection. Collection variables and environments override it.
+         * @param name Nonempty variable name that does not start with $.
+         */
+        set(name: string, value: unknown): void;
+        unset(name: string): void;
+        clear(): void;
+    }
+
+    interface Cookie {
+        readonly name: string;
+        readonly value: string;
+        /** Attributes the response's Set-Cookie header sent, or the cookie jar keeps. */
+        readonly domain?: string;
+        readonly path?: string;
+        readonly expires?: Date;
+        /** Max-Age in seconds. */
+        readonly maxAge?: number;
+        readonly httpOnly?: boolean;
+        readonly secure?: boolean;
+        readonly sameSite?: string;
+        /** Whether only the cookie's domain receives it, and not its subdomains. */
+        readonly hostOnly?: boolean;
+    }
+
+    /** A cookie to keep in the jar. */
+    interface CookieInit {
+        name: string;
+        value: string;
+        domain?: string;
+        path?: string;
+        expires?: Date | string;
+        /** Seconds until it expires. */
+        maxAge?: number;
+        secure?: boolean;
+        httpOnly?: boolean;
+        sameSite?: string;
+    }
+
+    type CookieCallback<T = unknown> = (error: Error | null, result?: T) => unknown;
+
+    /**
+     * The cookie jar that requests share. Methods report through the callback;
+     * without one, an error is logged. When the jar is off in Settings, each
+     * method reports an error.
+     */
+    interface CookieJar {
+        /** The value of the cookie named `name` that a request to `url` sends. */
+        get(url: string, name: string, callback?: CookieCallback<string>): void;
+        /** Every cookie a request to `url` sends. */
+        getAll(url: string, callback?: CookieCallback<Cookie[]>): void;
+        /** Keep a cookie as if a response from `url` set it. */
+        set(url: string, name: string, value: string, callback?: CookieCallback<Cookie | null>): void;
+        set(url: string, cookie: CookieInit, callback?: CookieCallback<Cookie | null>): void;
+        /** Delete the cookies named `name` that a request to `url` sends. */
+        unset(url: string, name: string, callback?: CookieCallback<void>): void;
+        /** Delete every cookie a request to `url` sends. */
+        clear(url: string, callback?: CookieCallback<void>): void;
+    }
+
+    interface CookieList {
+        /** Return the value of the first cookie with this name, or undefined. */
+        get(name: string): string | undefined;
+        /** Whether a cookie has this name, and this value when given. */
+        has(name: string, value?: string): boolean;
+        /** Return the first cookie with this name, or undefined. */
+        one(name: string): Cookie | undefined;
+        all(): Cookie[];
+        count(): number;
+        idx(index: number): Cookie | undefined;
+        each(callback: (cookie: Cookie, index: number) => void): void;
+        filter(callback: (cookie: Cookie, index: number) => unknown): Cookie[];
+        find(callback: (cookie: Cookie, index: number) => unknown): Cookie | undefined;
+        map<T>(callback: (cookie: Cookie, index: number) => T): T[];
+        /** Cookie names mapped to values. */
+        toObject(): Record<string, string>;
+        toJSON(): Cookie[];
+    }
+
+    interface ExchangeCookies extends CookieList {
+        jar(): CookieJar;
+    }
+
+    interface UUID {
+        /** Return a new random UUID. */
+        (): string;
+        v4(): string;
+    }
+
+    /** Libraries scripts can require. */
+    type LibraryName = "atob" | "btoa" | "crypto-js" | "lodash" | "moment" | "uuid";
+
+    /** Postman's legacy script API. */
+    interface LegacyPostman {
+        /** Has no effect: Request Eagle sends one request at a time. */
+        setNextRequest(name: string | null): void;
+        getEnvironmentVariable(name: string): string | undefined;
+        setEnvironmentVariable(name: string, value: unknown): void;
+        clearEnvironmentVariable(name: string): void;
+        clearEnvironmentVariables(): void;
+        getGlobalVariable(name: string): string | undefined;
+        setGlobalVariable(name: string, value: unknown): void;
+        clearGlobalVariable(name: string): void;
+        clearGlobalVariables(): void;
     }
 
     interface Crypto {
@@ -593,6 +745,8 @@ declare namespace RequestEagle {
     interface CommonAPI {
         readonly variables: LocalVariables;
         readonly environment: EnvironmentVariables;
+        readonly collectionVariables: CollectionVariables;
+        readonly globals: GlobalVariables;
         readonly crypto: Crypto;
         readonly encoding: Encoding;
         readonly schema: SchemaAPI;
@@ -617,15 +771,30 @@ declare namespace RequestEagle {
 
     interface PreRequestAPI extends CommonAPI {
         readonly request: Request;
+        /** Cookies the request sends: those in its Cookie header and the cookie jar's for its URL. */
+        readonly cookies: ExchangeCookies;
         readonly execution: {
             /** Stop the pre-request script and skip sending the primary request with a visible reason. */
             skipRequest(reason?: string): never;
+            /** Has no effect: Request Eagle sends one request at a time. */
+            setNextRequest(name: string | null): void;
         };
+    }
+
+    interface PrimaryResponse extends Response {
+        /** Cookies the response's Set-Cookie headers set. */
+        readonly cookies: CookieList;
     }
 
     interface PostResponseAPI extends CommonAPI {
         readonly request: Request;
-        readonly response: Response;
+        readonly response: PrimaryResponse;
+        /** Cookies the request sent, from its Cookie header and the cookie jar, replaced or deleted by those the response set. */
+        readonly cookies: ExchangeCookies;
+        readonly execution: {
+            /** Has no effect: Request Eagle sends one request at a time. */
+            setNextRequest(name: string | null): void;
+        };
     }
 
     interface GrpcBeforeInvokeAPI extends CommonAPI {
@@ -658,3 +827,48 @@ declare namespace RequestEagle {
 
 /** Captured script output, shown in the response Console. */
 declare const console: RequestEagle.Console;
+
+/** Load a library Postman scripts can require. */
+declare function require(name: RequestEagle.LibraryName): any;
+
+// The editor resolves `require(name)` to these modules.
+declare module "atob" {
+    /** Decode Base64 to text with one character for each byte. */
+    function atob(text: string): string;
+    export = atob;
+}
+declare module "btoa" {
+    /** Encode text whose characters are each one byte as Base64. */
+    function btoa(text: string): string;
+    export = btoa;
+}
+declare module "crypto-js" {
+    /** crypto-js 4.2.0. */
+    const CryptoJS: any;
+    export = CryptoJS;
+}
+declare module "lodash" {
+    /** Lodash 4.17.21. */
+    const _: any;
+    export = _;
+}
+declare module "moment" {
+    /** Moment.js 2.30.1. */
+    const moment: any;
+    export = moment;
+}
+declare module "uuid" {
+    const uuid: RequestEagle.UUID;
+    export = uuid;
+}
+
+/** Lodash 4.17.21, loaded when first used. */
+declare const _: any;
+/** crypto-js 4.2.0, loaded when first used. */
+declare const CryptoJS: any;
+/** Encode text whose characters are each one byte as Base64. */
+declare function btoa(text: string): string;
+/** Decode Base64 to text with one character for each byte. */
+declare function atob(text: string): string;
+/** Postman's legacy script API. */
+declare const postman: RequestEagle.LegacyPostman;

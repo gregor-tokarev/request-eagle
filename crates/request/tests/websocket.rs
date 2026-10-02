@@ -176,6 +176,7 @@ fn messages_stream_in_both_directions_until_the_server_closes() {
             headers: vec![Field::new("X-Token", "{{token}}")],
             query: vec![Field::new("room", "{{room}}")],
             message: String::new(),
+            settings: Default::default(),
         },
         variables(&values),
         &preferences(),
@@ -429,6 +430,33 @@ fn an_unanswered_handshake_times_out() {
         assert!(matches!(
             next(&mut events).await,
             WebSocketEventKind::Failed(ExecutionError::Timeout { .. })
+        ));
+    });
+    drop(listener);
+}
+
+#[test]
+fn a_connection_timeout_overrides_the_preference() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let (_connection, mut events) = open_with(
+        WebSocketRequest {
+            url: format!("ws://{}", listener.local_addr().unwrap()),
+            settings: request::WebSocketSettings {
+                timeout_ms: Some(200),
+                ..Default::default()
+            },
+            ..WebSocketRequest::default()
+        },
+        &RequestPreferences {
+            timeout_ms: 0,
+            ..preferences()
+        },
+    );
+
+    smol::block_on(async {
+        assert!(matches!(
+            next(&mut events).await,
+            WebSocketEventKind::Failed(ExecutionError::Timeout { timeout }) if timeout == Duration::from_millis(200)
         ));
     });
     drop(listener);

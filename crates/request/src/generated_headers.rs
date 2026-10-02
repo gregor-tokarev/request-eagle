@@ -48,9 +48,12 @@ pub fn generated_headers(
     }
 
     // Byte ranges apply to the selected representation. Do not opt range
-    // requests into gzip unless the caller explicitly asks for it.
+    // requests into compression unless the caller explicitly asks for it.
     if !has("accept-encoding") && !has("range") {
-        generated.push(("Accept-Encoding".into(), "gzip".into()));
+        generated.push((
+            "Accept-Encoding".into(),
+            crate::response_encoding::ACCEPTED_CODINGS.into(),
+        ));
     }
 
     if !has("content-length")

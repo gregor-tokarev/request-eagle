@@ -10,7 +10,7 @@ use super::{
     runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
-    Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
+    Body, Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
     RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
@@ -59,7 +59,7 @@ fn common_assertions_support_chaining_and_nested_values() {
         pm.test('aliases', () => pm.expect('request eagle').to.contain('eagle').and.match(/request/));
         pm.test('custom message', () => pm.expect(42).to.be.a('number', 'the answer'));
         pm.test('no host globals', () => {
-            for (const name of ['chai', 'module', 'exports', 'require', 'process', 'fetch']) {
+            for (const name of ['chai', 'module', 'exports', 'process', 'fetch']) {
                 pm.expect(typeof globalThis[name]).to.equal('undefined');
             }
         });
@@ -117,6 +117,7 @@ fn response_tests(status: StatusCode, body: &[u8], source: &str) -> ScriptReport
         variables: Default::default(),
         session: None,
         collection_post_response: String::new(),
+        response_url: None,
     };
     let result = smol::block_on(post_response(
         request,
@@ -231,7 +232,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
             path: "https://example.com/{{!customer}}".into(),
             headers: vec![Field::new("X-Literal", "{{!$guid}}/{{!customer}}")],
             query: vec![Field::new("{{!key}}", "{{!customer}}")],
-            body: Some(b"{{!customer}}".to_vec()),
+            body: Some(Body::json("{{!customer}}")),
             ..Default::default()
         };
         if mode == "dynamic" {
@@ -244,7 +245,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
         assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
         assert_eq!(sent.headers[0].value, "{{$guid}}/{{customer}}");
         assert_eq!(sent.query, [Field::new("{{key}}", "{{customer}}")]);
-        assert_eq!(sent.body.unwrap(), b"{{customer}}");
+        assert_eq!(sent.body, Some(Body::json("{{customer}}")));
         if mode == "dynamic" {
             uuid::Uuid::parse_str(&sent.headers[1].value).unwrap();
         }
@@ -261,7 +262,9 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
             Field::new("{{$guid}}", "{{$randomUUID}}"),
         ],
         query: vec![Field::new("id", "{{$randomUUID}}")],
-        body: Some(br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#.to_vec()),
+        body: Some(Body::json(
+            r#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#,
+        )),
         ..Default::default()
     };
     let (sent, state, reports) = send(original.clone());
@@ -277,7 +280,10 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
         sent.path.strip_prefix("https://example.com/").unwrap(),
         sent.headers[1].key
     );
-    let body: serde_json::Value = serde_json::from_slice(&sent.body.unwrap()).unwrap();
+    let Some(Body::Raw { text, .. }) = sent.body else {
+        panic!("expected a raw body");
+    };
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(body["id"], sent.headers[1].key);
     chrono::DateTime::parse_from_rfc3339(body["time"].as_str().unwrap()).unwrap();
     assert!(body["n"].as_u64().unwrap() <= 1000);

@@ -7,7 +7,7 @@ fn previews_only_headers_the_transport_adds() {
         [
             ("Host".into(), "example.com".into()),
             ("Accept".into(), "*/*".into()),
-            ("Accept-Encoding".into(), "gzip".into())
+            ("Accept-Encoding".into(), "gzip, deflate, br, zstd".into())
         ]
     );
 
@@ -27,7 +27,7 @@ fn previews_only_headers_the_transport_adds() {
         generated_headers(Method::Get, "", &[], 0),
         [
             ("Accept".into(), "*/*".into()),
-            ("Accept-Encoding".into(), "gzip".into())
+            ("Accept-Encoding".into(), "gzip, deflate, br, zstd".into())
         ]
     );
 }

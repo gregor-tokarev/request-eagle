@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use collection::{ImportedCollection, ImportedItem};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
-use request::{Field, HttpRequest, Method, Request, RequestScripts};
+use request::{Body, Field, FormPart, HttpRequest, Method, RawLanguage, Request, RequestScripts};
 use serde_json::{Map, Value};
 
 use crate::{
     Import, ImportError,
-    body::{multipart_form, set_content_type, url_encoded_form, url_encoded_form_script},
+    body::set_content_type,
     document::{clean_name, text},
 };
 
@@ -171,7 +171,6 @@ impl<'a> Spec<'a> {
         let mut query = Vec::new();
         let mut form = Vec::new();
         let mut body_schema = None;
-        let mut pre_request = None;
 
         for parameter in self.parameters(path_item, operation) {
             let Some(name) = parameter["name"].as_str() else {
@@ -222,10 +221,9 @@ impl<'a> Spec<'a> {
             } else if form.is_empty() {
                 None
             } else if consumes.is_some_and(|media_type| media_type.starts_with("multipart/")) {
-                Some(multipart_form(&form, &mut headers))
+                Some(multipart(form))
             } else {
-                pre_request = url_encoded_form_script(&form);
-                Some(url_encoded_form(&form, &mut headers))
+                Some(Body::UrlEncoded { fields: form })
             }
         } else {
             self.request_body(operation, &mut headers)
@@ -237,10 +235,9 @@ impl<'a> Spec<'a> {
             headers,
             body,
             query,
-            scripts: RequestScripts {
-                pre_request: pre_request.unwrap_or_default(),
-                post_response: String::new(),
-            },
+            path_variables: Vec::new(),
+            scripts: RequestScripts::default(),
+            settings: Default::default(),
         }
     }
 
@@ -342,7 +339,7 @@ impl<'a> Spec<'a> {
     }
 
     /// An OpenAPI 3 request body, preferring JSON.
-    fn request_body(&self, operation: &'a Value, headers: &mut Vec<Field>) -> Option<Vec<u8>> {
+    fn request_body(&self, operation: &'a Value, headers: &mut Vec<Field>) -> Option<Body> {
         let content = self.resolve(&operation["requestBody"])["content"].as_object()?;
         let (media_type, media) = content
             .iter()
@@ -560,9 +557,9 @@ fn fill_path(path: &str, values: &HashMap<&str, String>) -> String {
     filled
 }
 
-/// Encodes an example value as the body for its media type, and sets the
-/// media type as the request's `Content-Type`.
-fn encode(media_type: &str, value: &Value, headers: &mut Vec<Field>) -> Option<Vec<u8>> {
+/// The body that sends an example value as its media type. A media type
+/// other than the body's own becomes the request's `Content-Type`.
+fn encode(media_type: &str, value: &Value, headers: &mut Vec<Field>) -> Option<Body> {
     if value.is_null() {
         return None;
     }
@@ -577,16 +574,40 @@ fn encode(media_type: &str, value: &Value, headers: &mut Vec<Field>) -> Option<V
     };
 
     if media_type == "application/x-www-form-urlencoded" {
-        Some(url_encoded_form(&fields(), headers))
+        Some(Body::UrlEncoded { fields: fields() })
     } else if media_type.starts_with("multipart/form-data") {
-        Some(multipart_form(&fields(), headers))
-    } else if media_type.contains("json") {
-        set_content_type(headers, media_type);
-        Some(serde_json::to_string_pretty(value).ok()?.into_bytes())
-    } else if let Value::String(text) = value {
-        set_content_type(headers, media_type);
-        Some(text.clone().into_bytes())
+        Some(multipart(fields()))
     } else {
-        None
+        let (language, text) = if media_type.contains("json") {
+            (RawLanguage::Json, serde_json::to_string_pretty(value).ok()?)
+        } else if let Value::String(text) = value {
+            let language = if media_type.contains("xml") {
+                RawLanguage::Xml
+            } else {
+                RawLanguage::Text
+            };
+            (language, text.clone())
+        } else {
+            return None;
+        };
+
+        if media_type != language.content_type() {
+            set_content_type(headers, media_type);
+        }
+        Some(Body::Raw { language, text })
+    }
+}
+
+/// A multipart form of text fields.
+fn multipart(fields: Vec<(String, String)>) -> Body {
+    Body::Multipart {
+        parts: fields
+            .into_iter()
+            .map(|(name, value)| FormPart {
+                name,
+                value,
+                file: false,
+            })
+            .collect(),
     }
 }

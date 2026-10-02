@@ -176,6 +176,25 @@ impl CollectionPanel {
         cx.notify();
     }
 
+    /// Rename a saved request outside the tree, such as from its tab. Open
+    /// tabs follow it through the relocation event.
+    pub fn rename_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.collections.rename_request(path, expected_id, name)?;
+
+        let selected = self
+            .selected
+            .map(|index| self.tree.items[index].path.clone());
+        self.rebuild_tree(selected.as_deref(), Some((path, path)), cx);
+
+        Ok(())
+    }
+
     pub(super) fn request_delete(
         &mut self,
         index: usize,

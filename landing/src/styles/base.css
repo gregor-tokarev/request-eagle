@@ -1,0 +1,433 @@
+@font-face {
+  font-family: "Archivo";
+  src: url("../assets/fonts/archivo.woff2") format("woff2");
+  font-weight: 400 800;
+  font-stretch: 100% 112%;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Archivo";
+  src: url("../assets/fonts/archivo-italic.woff2") format("woff2");
+  font-weight: 700 900;
+  font-stretch: 112% 125%;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../assets/fonts/geist-mono.woff2") format("woff2");
+  font-weight: 400 500;
+  font-display: swap;
+}
+
+:root {
+  --night: #060912;
+  --deep: #0b1120;
+  --line: rgba(255, 255, 255, 0.1);
+  --text: #eef3fb;
+  --muted: #94a0b8;
+  --sky: #4fc3ff;
+  --ink: #04121d;
+  --sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --page: min(1240px, 100% - 56px);
+  --slant: 5vw;
+  --hero-top: 176px;
+
+  /* Height of the two headline lines: the column width times the type scale. */
+  --headline: calc(min(1240px, 100vw - 56px) * 0.13 * 0.88 * 2);
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--text);
+  font: 17px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  overflow-x: clip;
+
+  /* Pages shorter than the window stretch their content, so the footer reaches the bottom edge. */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+main { flex: 1; }
+
+img { display: block; max-width: 100%; height: auto; }
+
+a { color: inherit; text-decoration: none; }
+
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid var(--sky);
+  outline-offset: 3px;
+}
+
+/* The sky panels need the inverse pair; sky on sky would hide the selection. */
+::selection { background: var(--sky); color: var(--ink); }
+
+.band ::selection,
+.footer ::selection { background: var(--ink); color: var(--sky); }
+
+.band a:focus-visible,
+.footer a:focus-visible { outline-color: var(--ink); }
+
+/* The column is a size container, so headlines scale with it and never outgrow it. */
+.wrap {
+  container-type: inline-size;
+  width: var(--page);
+  margin-inline: auto;
+}
+
+/* Display type: wide, heavy, leaning forward. */
+.display {
+  font-style: italic;
+  font-weight: 900;
+  font-stretch: 125%;
+  text-transform: uppercase;
+  letter-spacing: -0.035em;
+  line-height: 0.88;
+}
+
+/* Navigation */
+
+.nav {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 20;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.nav .wrap {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  height: 84px;
+  transition: height 0.3s var(--ease);
+}
+
+/* Without the script nothing tracks the scroll, so the bar keeps its background throughout. */
+.nav.is-scrolled,
+html:not(.js) .nav {
+  background: rgba(6, 9, 18, 0.78);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.nav.is-scrolled .wrap { height: 64px; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 800;
+  font-stretch: 112%;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.brand img { width: 34px; height: 34px; transition: rotate 0.5s var(--ease), scale 0.5s var(--ease); }
+
+.brand:hover img { rotate: -8deg; scale: 1.08; }
+
+.nav nav {
+  display: flex;
+  gap: 30px;
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.nav nav a {
+  position: relative;
+  padding: 6px 0;
+  transition: color 0.2s ease;
+}
+
+.nav nav a::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--sky);
+  transform: scaleX(0) skewX(-30deg);
+  transform-origin: 0 50%;
+  transition: transform 0.35s var(--ease);
+}
+
+.nav nav a:hover { color: var(--text); }
+
+.nav nav a:hover::after { transform: scaleX(1) skewX(-30deg); }
+
+/* Buttons */
+
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 30px;
+  background: var(--sky);
+  color: var(--ink);
+  font: italic 800 16px var(--sans);
+  font-stretch: 112%;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  overflow: hidden;
+  transform: skewX(-10deg);
+  translate: var(--mx, 0) var(--my, 0);
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, translate 0.35s var(--ease), scale 0.2s var(--ease);
+}
+
+.button > * { transform: skewX(10deg); }
+
+/* A highlight crosses the button on hover. */
+.button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%);
+  transform: translateX(-120%);
+}
+
+.button:hover::after { transform: translateX(120%); transition: transform 0.7s ease; }
+
+.button:hover { background: #fff; }
+
+.button:active { scale: 0.97; }
+
+.button--outline { background: transparent; color: var(--text); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.28); }
+
+.button--outline:hover { background: transparent; color: var(--sky); box-shadow: inset 0 0 0 2px var(--sky); }
+
+.button--outline::after { background: linear-gradient(100deg, transparent 30%, rgba(79, 195, 255, 0.28) 50%, transparent 70%); }
+
+.button--small { height: 42px; padding: 0 20px; font-size: 13px; }
+
+.button svg { width: 18px; height: 18px; }
+
+/* Streaks: air rushing past, echoing the three bars of the app icon. */
+
+.streaks {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.streaks i {
+  position: absolute;
+  left: 100%;
+  width: var(--w, 30%);
+  height: var(--h, 2px);
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e2f4ff, var(--sky) 25%, rgba(79, 195, 255, 0));
+  box-shadow: 0 0 16px rgba(79, 195, 255, 0.5);
+  opacity: var(--o, 0.8);
+  animation: rush var(--d, 4s) linear var(--delay, 0s) infinite;
+}
+
+/* Hero streaks run above, between and below the headline lines, clear of the body copy. */
+.streaks i:nth-child(1) { top: calc(var(--hero-top) - 44px); --w: 34%; --d: 3.8s; --delay: -0.6s; }
+.streaks i:nth-child(2) { top: calc(var(--hero-top) + var(--headline) * 0.5); --w: 52%; --h: 4px; --d: 2.9s; --delay: -1.9s; }
+.streaks i:nth-child(3) { top: calc(var(--hero-top) + var(--headline) + 16px); --w: 26%; --d: 4.6s; --delay: -3.1s; --o: 0.6; }
+.streaks i:nth-child(4) { top: calc(var(--hero-top) + var(--headline) + 254px); --w: 20%; --d: 5.4s; --delay: -1.2s; --o: 0.4; }
+
+@keyframes rush {
+  to { transform: translateX(calc(-100vw - 100%)); }
+}
+
+/* Hero */
+
+.hero {
+  position: relative;
+  padding: var(--hero-top) 0 0;
+  background:
+    radial-gradient(70% 60% at 85% 0%, rgba(79, 195, 255, 0.22), transparent 65%),
+    linear-gradient(180deg, #0b1324 0%, var(--night) 75%);
+  overflow: hidden;
+}
+
+.hero .wrap { position: relative; }
+
+h1 {
+  margin: 0;
+  font-size: clamp(36px, 11.4vw, 160px);
+  font-size: 13cqw;
+  white-space: nowrap;
+}
+
+/* Lines rise out of a mask; the padding keeps italic overhang from being clipped. */
+.line {
+  display: block;
+  margin: -0.08em -0.14em -0.08em -0.06em;
+  padding: 0.08em 0.14em 0.08em 0.06em;
+  overflow: hidden;
+}
+
+.line > span { display: block; animation: rise 1s var(--ease) both; }
+
+.line:nth-child(2) > span { animation-delay: 0.12s; }
+
+@keyframes rise {
+  from { transform: translateY(112%) skewY(5deg); }
+}
+
+h1 .line > .outline {
+  color: transparent;
+  -webkit-text-stroke: 2px var(--sky);
+  background: linear-gradient(var(--sky), var(--sky)) no-repeat 0 0 / 0% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: rise 1s var(--ease) 0.12s both, sweep 1.5s var(--ease) 0.9s backwards;
+  transition: background-size 0.6s var(--ease);
+}
+
+h1:hover .outline { background-size: 100% 100%; }
+
+/* The fill wipes in from the left and leaves through the right. */
+@keyframes sweep {
+  0% { background-size: 0% 100%; background-position: 0 0; }
+  50% { background-size: 100% 100%; background-position: 0 0; }
+  50.01% { background-size: 100% 100%; background-position: 100% 0; }
+  100% { background-size: 0% 100%; background-position: 100% 0; }
+}
+
+.hero__row {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  gap: 56px;
+  align-items: end;
+  margin-top: 44px;
+  animation: lift 0.9s var(--ease) 0.35s both;
+}
+
+@keyframes lift {
+  from { opacity: 0; transform: translateY(28px); }
+}
+
+.lede {
+  max-width: 560px;
+  margin: 0;
+  font-size: clamp(18px, 1.7vw, 22px);
+  line-height: 1.5;
+  color: #c6d0e2;
+  text-wrap: pretty;
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 18px; justify-content: flex-end; padding-right: 10px; }
+
+.stage {
+  margin-top: 84px;
+  perspective: 2200px;
+  animation: lift 1.1s var(--ease) 0.5s both;
+}
+
+/* The short hero of the smaller pages: a single headline line. */
+
+.hero--short { padding-bottom: calc(var(--slant) + 150px); }
+
+/* Nothing sits beside the copy here, so the buttons follow it down the left edge. */
+.hero--short .hero__row { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+
+.hero--short .actions { justify-content: flex-start; padding: 0 0 0 10px; }
+
+/* The lower streaks close up beneath the one line. */
+.hero--short .streaks i:nth-child(2) { top: calc(var(--hero-top) + var(--headline) * 0.5 + 16px); }
+.hero--short .streaks i:nth-child(3) { top: calc(var(--hero-top) + var(--headline) * 0.5 + 254px); }
+
+/* Footer */
+
+.footer {
+  position: relative;
+  z-index: 1;
+  margin-top: calc(var(--slant) * -1);
+  padding: calc(var(--slant) + 64px) 0 38px;
+  background: var(--sky);
+  color: var(--ink);
+  clip-path: polygon(0 var(--slant), 100% 0, 100% 100%, 0 100%);
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.footer__mark {
+  font-size: min(7.8vw, 112px);
+  font-size: 9.1cqw;
+  white-space: nowrap;
+}
+
+.footer__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin-top: 40px;
+  padding-top: 22px;
+  border-top: 3px solid var(--ink);
+}
+
+.footer nav { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-left: auto; }
+
+.footer a { text-underline-offset: 4px; }
+
+.footer a:hover { text-decoration: underline; }
+
+@media (max-width: 960px) {
+  .nav nav { display: none; }
+  .nav .button { margin-left: auto; }
+  :root { --hero-top: 132px; }
+
+  /* The stacked buttons leave no clear lane below the copy. */
+  .hero .streaks i:nth-child(4) { display: none; }
+  .hero__row { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .actions { justify-content: flex-start; padding: 0 0 0 10px; }
+  .hero--short .streaks i:nth-child(3) { display: none; }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --page: calc(100% - 36px);
+    --slant: 8vw;
+    --headline: calc((100vw - 36px) * 0.13 * 0.88 * 2);
+  }
+  body { font-size: 16px; }
+  h1 .line > .outline { -webkit-text-stroke-width: 1.5px; }
+  .button { height: 50px; padding: 0 22px; font-size: 14px; }
+  .button--small { height: 38px; padding: 0 16px; font-size: 12px; }
+  .brand { font-size: 15px; gap: 9px; }
+  .brand img { width: 28px; height: 28px; }
+  .stage { margin-top: 56px; }
+  .footer nav { margin-left: 0; }
+}
+
+@media print {
+  .nav { position: absolute; }
+  .streaks { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .streaks i { left: auto; right: 6%; }
+}

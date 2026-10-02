@@ -1,0 +1,31 @@
+---
+import Page from "../layouts/Page.astro";
+
+import "../styles/base.css";
+---
+
+<Page title="Page not found — Request Eagle" description="This page does not exist.">
+  <main>
+
+    <div class="hero hero--short">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <h1 class="display">
+          <span class="line"><span>Off course</span></span>
+        </h1>
+
+        <div class="hero__row">
+          <p class="lede">
+            There is no page at this address.
+          </p>
+
+          <div class="actions">
+            <a class="button" href="/"><span>Back to the landing</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</Page>

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use http_client::http::{HeaderMap, StatusCode, Version};
+use serde::{Deserialize, Serialize};
 
 /// One completed execution. HTTP error status codes are completed responses too.
 #[derive(Debug)]
@@ -30,7 +31,8 @@ pub struct HttpResponse {
 }
 
 /// Measurements available at the HTTP client boundary.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct HttpMetrics {
     pub prepare: Duration,
     /// Includes connection setup, uploading the request, and waiting for headers.

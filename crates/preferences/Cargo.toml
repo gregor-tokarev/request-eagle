@@ -35,4 +35,5 @@ core-foundation = "0.10"
 smol = "2"
 
 [dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }
+p12-keystore = "0.3"
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }

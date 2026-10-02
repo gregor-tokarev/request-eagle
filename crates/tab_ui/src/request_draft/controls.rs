@@ -3,33 +3,45 @@ use gpui_kit::component::{
     button::*,
     input::{Input, InputGroup, InputGroupAddon},
     menu::{DropdownMenu, PopupMenuItem},
-    tag::Tag,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Field, Method};
-use request_eagle_theme::method_color;
+use request_eagle_theme::{method_color, protocol_icon};
 
 use super::draft::{RequestDraft, RequestLocation, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
 
-/// The request's protocol and where it is saved.
+/// The request's protocol, `HTTP`, `gRPC` or `WS`, and where it is saved. An
+/// unsaved request shows the name given in its tab.
 pub(crate) fn request_header(
     protocol: &'static str,
     location: Option<&RequestLocation>,
+    name: Option<&SharedString>,
     cx: &App,
 ) -> impl IntoElement + use<> {
+    let name = location
+        .map(|location| &location.name)
+        .or(name)
+        .cloned()
+        .unwrap_or_else(|| "Untitled Request".into());
+
     h_flex()
         .flex_none()
         .h_10()
         .gap_2()
         .child(
-            Tag::secondary()
-                .small()
+            div()
+                .debug_selector(|| "request-protocol".into())
                 .flex_none()
-                .font_weight(FontWeight::MEDIUM)
-                .child(protocol),
+                .size_7()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(cx.theme().radius_tokens().md)
+                .bg(cx.theme().secondary)
+                .child(protocol_icon(protocol, cx).size_4()),
         )
         .child(
             h_flex()
@@ -84,11 +96,7 @@ pub(crate) fn request_header(
                         .text_ellipsis()
                         .text_base()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(
-                            location.map_or("Untitled Request".into(), |location| {
-                                location.name.clone()
-                            }),
-                        ),
+                        .child(name),
                 ),
         )
 }
@@ -102,6 +110,7 @@ impl RequestDraft {
         let url = self.url_state(window, cx);
         let method = self.request.method;
         let draft = cx.entity().downgrade();
+        let paste_target = draft.clone();
         let sending = self.task.is_some();
         let streaming = self.streaming;
         // Stopping lasts while the response completes and its scripts run.
@@ -181,7 +190,26 @@ impl RequestDraft {
                             .child(with_variables(
                                 self.url_completion.as_ref().unwrap(),
                                 InputGroup::new("request-url-group")
-                                    .input(Input::new(&url).aria_label("Request URL"))
+                                    .input(
+                                        Input::new(&url)
+                                            .aria_label("Request URL")
+                                            // A pasted cURL command fills in
+                                            // the whole request, as in Postman.
+                                            .on_paste(move |clipboard, window, cx| {
+                                                let Some(command) = clipboard
+                                                    .text()
+                                                    .filter(|text| import::is_curl(text))
+                                                else {
+                                                    return false;
+                                                };
+
+                                                paste_target
+                                                    .update(cx, |draft, cx| {
+                                                        draft.paste_curl(&command, window, cx)
+                                                    })
+                                                    .is_ok()
+                                            }),
+                                    )
                                     .addon(
                                         InputGroupAddon::new("request-method-addon")
                                             .p_1()
@@ -236,6 +264,7 @@ impl RequestDraft {
             ("Headers", Some(RequestSection::Headers)),
             ("Body", self.supports_body().then_some(RequestSection::Body)),
             ("Scripts", Some(RequestSection::Scripts)),
+            ("Settings", Some(RequestSection::Settings)),
         ];
 
         h_flex().flex_none().gap_2().min_w_0().child(
@@ -248,11 +277,16 @@ impl RequestDraft {
                 .children(sections.into_iter().map(|(label, section)| {
                     let selected = section == Some(self.section);
                     let count = match section {
-                        Some(RequestSection::Params) => Field::enabled(&self.request.query).count(),
+                        Some(RequestSection::Params) => self.params_count(),
                         Some(RequestSection::Headers) => {
                             Field::enabled(&self.request.headers).count()
                                 + self.generated_headers.len()
                         }
+                        Some(RequestSection::Body) => match &self.request.body {
+                            Some(request::Body::UrlEncoded { fields }) => fields.len(),
+                            Some(request::Body::Multipart { parts }) => parts.len(),
+                            _ => 0,
+                        },
                         Some(RequestSection::Scripts) => {
                             usize::from(!self.request.scripts.pre_request.is_empty())
                                 + usize::from(!self.request.scripts.post_response.is_empty())

@@ -55,7 +55,7 @@ impl CallScripts {
         Self {
             scripts,
             variables: Variables {
-                environment: variables.values.clone().into_iter().collect(),
+                scopes: variables.scopes.clone(),
                 ..Default::default()
             },
             session: variables.session.clone(),
@@ -100,14 +100,14 @@ impl CallScripts {
         }
 
         let ScriptOutput {
-            request: changes,
+            request: call,
             variables: values,
-            environment_changes,
+            changes,
             skip_reason,
         } = output.expect("successful script output");
 
         if let Some(session) = &self.session
-            && let Err(message) = session.apply(&environment_changes)
+            && let Err(message) = session.apply(&changes)
         {
             report.error = Some(message.into());
             return Err(GrpcError::Script {
@@ -123,25 +123,20 @@ impl CallScripts {
             });
         }
 
-        request.url = changes.url;
-        request.metadata = changes.metadata.into_iter().map(Field::from).collect();
-        request.message = changes.message;
+        request.url = call.url;
+        request.metadata = call.metadata.into_iter().map(Field::from).collect();
+        request.message = call.message;
         self.variables = values;
 
         // Like a send, `{{$name}}` resolves to the value the script generated
         // or set, rather than a new one.
         variables.values.clear();
         variables.generated = self.variables.generated.clone();
-        for (name, value) in self
-            .variables
-            .environment
-            .iter()
-            .chain(&self.variables.values)
-        {
+        for (name, value) in self.variables.visible() {
             if name.starts_with('$') {
-                variables.generated.insert(name.clone(), value.clone());
+                variables.generated.insert(name, value);
             } else {
-                variables.values.insert(name.clone(), value.clone());
+                variables.values.insert(name, value);
             }
         }
 
@@ -241,7 +236,7 @@ impl CallScripts {
             && let Some(output) = output
         {
             if let Some(session) = &self.session
-                && let Err(message) = session.apply(&output.environment_changes)
+                && let Err(message) = session.apply(&output.changes)
             {
                 report.error = Some(message.into());
             } else {

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry};
 
-use request::{Field, Method, Request, WebSocketRequest};
+use request::{Body, Field, Method, Request, WebSocketRequest, WebSocketSettings};
 
 struct Fixture(PathBuf);
 
@@ -105,7 +105,7 @@ fn creates_a_named_request_with_its_draft_and_no_path_traversal() {
     let request = request::HttpRequest {
         method: Method::Post,
         path: "https://example.test/new".into(),
-        body: Some(b"draft body".to_vec()),
+        body: Some(Body::json("draft body")),
         ..Default::default()
     };
     for _ in 0..2 {
@@ -184,6 +184,10 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
         headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         query: vec![Field::new("room", "42")],
         message: "{\"subscribe\":\"prices\"}".into(),
+        settings: WebSocketSettings {
+            timeout_ms: Some(0),
+            verify_certificates: Some(false),
+        },
     };
     let path = registry
         .create_request_with(&collection, "Prices", request.clone().into())
@@ -203,11 +207,13 @@ fn websocket_requests_save_and_reload_without_stale_fields() {
     request.headers.clear();
     request.query.clear();
     request.message.clear();
+    request.settings.timeout_ms = None;
     registry
         .update_request(&path, &file.id, request.clone().into())
         .unwrap();
     let content = fs::read_to_string(&path).unwrap();
-    for field in ["headers", "query", "message"] {
+    assert!(content.contains("verify_certificates = false"), "{content}");
+    for field in ["headers", "query", "message", "timeout_ms"] {
         assert!(!content.contains(field), "{field} remained in {content}");
     }
     let Request::WebSocket(saved) = crate::FileEntry::from_path(&path).unwrap().request else {

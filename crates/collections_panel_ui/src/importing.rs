@@ -6,34 +6,49 @@ use std::{
 use collection::Collection;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
+    input::{Textarea, TextareaState},
     spinner::Spinner,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use import::{Import, ImportError};
 
-use super::{panel::CollectionPanel, tree::path_name};
+use super::{
+    panel::{CollectionPanel, CollectionPanelEvent},
+    tree::path_name,
+};
 
 impl CollectionPanel {
-    /// Opens a dialog that imports a Postman collection, from a file or a
-    /// folder, or an OpenAPI specification as a new collection.
+    /// Opens a dialog that imports a Postman collection, from a file, a
+    /// folder or pasted text, or an OpenAPI specification as a new
+    /// collection. A pasted cURL command opens as a new request instead.
     pub fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = cx.entity().downgrade();
-        let dialog = cx.new(|_| ImportDialog {
-            panel,
-            importing: false,
-            error: None,
-            skipped: None,
-            _task: None,
-        });
+        let dialog = cx.new(|cx| ImportDialog::new(panel, window, cx));
+        let text = dialog.read(cx).text.clone();
 
         window.open_dialog(cx, move |modal, window, _| {
             // Wide like a page, but never wider than the window allows.
             let width = rems(48.)
                 .to_pixels(window.rem_size())
                 .min(window.viewport_size().width - rems(4.).to_pixels(window.rem_size()));
+            let confirmed = dialog.downgrade();
 
-            modal.title("Import").w(width).child(dialog.clone())
+            modal
+                .title("Import")
+                .w(width)
+                // Enter imports the typed text. The dialog stays open to show
+                // an error, and closes itself once the import is done.
+                .on_ok(move |_, window, cx| {
+                    let _ = confirmed.update(cx, |dialog, cx| {
+                        let source = dialog.text.read(cx).value().to_string();
+                        dialog.import_text(source, window, cx);
+                    });
+                    false
+                })
+                .child(dialog.clone())
         });
+        text.update(cx, |text, cx| text.focus(window, cx));
     }
 
     /// Adds an imported collection and selects it. Its folders start
@@ -67,10 +82,16 @@ impl CollectionPanel {
     }
 }
 
-/// Imports a Postman collection or an OpenAPI specification from a file, or a
-/// Postman collection folder, as a new collection.
+/// The longest pasted cURL command that stays in the import field. Longer
+/// ones, such as commands with large bodies, would be slow to lay out.
+const RETAINED_COMMAND_LIMIT: usize = 16 * 1024;
+
+/// Imports a Postman collection or an OpenAPI specification from a file or
+/// pasted text, or a Postman collection folder, as a new collection.
 struct ImportDialog {
     panel: WeakEntity<CollectionPanel>,
+    /// Takes a cURL command or a collection's text, like Postman's import field.
+    text: Entity<TextareaState>,
     importing: bool,
     error: Option<String>,
     /// The imported collection's name and the requests it left out, shown
@@ -80,6 +101,76 @@ struct ImportDialog {
 }
 
 impl ImportDialog {
+    fn new(
+        panel: WeakEntity<CollectionPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // Pasting imports at once. Typed text imports with Enter, and
+        // Shift-Enter starts a new line.
+        let text = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 8)
+                .submit_on_enter(true)
+                .placeholder("Paste cURL or raw text")
+        });
+
+        Self {
+            panel,
+            text,
+            importing: false,
+            error: None,
+            skipped: None,
+            _task: None,
+        }
+    }
+
+    /// Opens a cURL command as a new request, or imports a collection
+    /// written as text.
+    fn import_text(&mut self, source: String, window: &mut Window, cx: &mut Context<Self>) {
+        if source.trim().is_empty() {
+            return;
+        }
+
+        if !import::is_curl(&source) {
+            let read = move || {
+                import::parse(&source).map_err(|error| match error {
+                    ImportError::Syntax(error) => {
+                        format!("The text is not valid JSON or YAML: {error}")
+                    }
+                    ImportError::UnknownFormat => "The text is not a cURL command, a Postman \
+                                                   collection or an OpenAPI specification."
+                        .to_owned(),
+                    error => error.to_string(),
+                })
+            };
+            self.import(read, window, cx);
+            return;
+        }
+
+        // A pasted command stays in the field as it is, so a failed import can
+        // be corrected and tried again with Enter. A collection is left out:
+        // laying out a whole document would stall the window.
+        if source.len() <= RETAINED_COMMAND_LIMIT && self.text.read(cx).value() != source {
+            let text = source.clone();
+            self.text
+                .update(cx, |field, cx| field.set_value(text, window, cx));
+        }
+
+        match import::parse_curl(&source) {
+            Ok(request) => {
+                window.close_dialog(cx);
+                let _ = self.panel.update(cx, |_, cx| {
+                    cx.emit(CollectionPanelEvent::OpenUnsavedRequest(request))
+                });
+            }
+            Err(error) => {
+                self.error = Some(error.to_string());
+                cx.notify();
+            }
+        }
+    }
+
     fn choose_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -108,6 +199,20 @@ impl ImportDialog {
     }
 
     fn import_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.import(
+            move || import::read(&path).map_err(|error| error.to_string()),
+            window,
+            cx,
+        );
+    }
+
+    /// Converts and writes a collection in the background.
+    fn import(
+        &mut self,
+        read: impl FnOnce() -> Result<Import, String> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(panel) = self.panel.upgrade() else {
             return;
         };
@@ -128,7 +233,7 @@ impl ImportDialog {
         // Writing a large collection takes a while, so it happens here too.
         let imported = cx.background_executor().spawn(async move {
             let directory = directory.ok_or("No collections directory is configured.")?;
-            let import = import::read(&path).map_err(|error| error.to_string())?;
+            let import = read()?;
             let collection = import
                 .collection
                 .write(&directory)
@@ -226,13 +331,32 @@ impl Render for ImportDialog {
 
         let theme = cx.theme();
 
+        let paste_target = cx.entity().downgrade();
+
         v_flex()
             .debug_selector(|| "import-dialog".into())
             .gap_3()
             .child(
+                div().debug_selector(|| "import-text".into()).child(
+                    Textarea::new(&self.text)
+                        .aria_label("cURL command or raw text to import")
+                        .disabled(self.importing)
+                        // The pasted text replaces the field and is imported at once.
+                        .on_paste(move |clipboard, window, cx| {
+                            let Some(source) = clipboard.text() else {
+                                return false;
+                            };
+
+                            paste_target
+                                .update(cx, |this, cx| this.import_text(source, window, cx))
+                                .is_ok()
+                        }),
+                ),
+            )
+            .child(
                 v_flex()
                     .id("import-drop-zone")
-                    .h(rems(24.))
+                    .h(rems(20.))
                     .items_center()
                     .justify_center()
                     .gap_3()
@@ -318,6 +442,7 @@ impl Render for ImportDialog {
                     .gap_y_1()
                     .text_sm()
                     .text_color(theme.muted_foreground)
+                    .child("cURL commands")
                     .child("Postman Collection v2.0 and v2.1")
                     .child("Postman collection folders, with gRPC requests")
                     .child("OpenAPI 3 and Swagger 2.0, in JSON or YAML"),

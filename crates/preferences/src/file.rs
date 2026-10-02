@@ -1,4 +1,5 @@
-use crate::{AppearancePreferences, ProxyPreferences, RequestPreferences};
+use crate::credentials::Secret;
+use crate::{AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences};
 use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -67,9 +68,15 @@ impl PreferencesFile {
             );
         }
 
+        let previous_certificates = preferences.request.client_certificates.clone();
         change(&mut preferences)?;
         if preferences.request.proxy != previous_proxy {
             bail!("Use update_proxy to change proxy settings.");
+        }
+        if preferences.request.client_certificates != previous_certificates {
+            bail!(
+                "Use add_client_certificate and remove_client_certificate to change client certificates."
+            );
         }
 
         persist(&self.path, &preferences)?;
@@ -85,7 +92,7 @@ impl PreferencesFile {
             && proxy.authentication
             && let Some(id) = &preferences.proxy_credentials_id
         {
-            let secret = crate::credentials::read(id)
+            let secret = crate::credentials::read(Secret::ProxyCredentials, id)
                 .await?
                 .context("Saved proxy credentials are missing from the keyring")?;
             let credentials: crate::credentials::ProxyCredentials = serde_json::from_slice(&secret)
@@ -95,7 +102,88 @@ impl PreferencesFile {
         }
 
         proxy.validate().map_err(anyhow::Error::msg)?;
+
+        // A certificate whose passphrase is unavailable explains it when used.
+        for certificate in &mut preferences.request.client_certificates {
+            if certificate.has_passphrase {
+                let passphrase =
+                    crate::credentials::read(Secret::CertificatePassphrase, &certificate.id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|passphrase| String::from_utf8(passphrase).ok());
+
+                match passphrase {
+                    Some(passphrase) => certificate.passphrase = passphrase,
+                    None => certificate.passphrase_unavailable = true,
+                }
+            }
+        }
+
         Ok(preferences.request)
+    }
+
+    /// Check a client certificate's files, then save it under a new ID, with
+    /// its passphrase in the OS credential store.
+    pub async fn add_client_certificate(
+        &self,
+        mut certificate: ClientCertificate,
+    ) -> Result<Preferences> {
+        let _lock = self.lock()?;
+        let mut preferences = read_document(&self.path)?;
+        check_no_legacy_credentials(&preferences)?;
+        certificate.validate().map_err(anyhow::Error::msg)?;
+        certificate.files = certificate.files.absolute()?;
+        certificate.check().map_err(anyhow::Error::msg)?;
+
+        certificate.id = Uuid::new_v4().to_string();
+        certificate.host = certificate.host.trim().to_owned();
+        certificate.has_passphrase = !certificate.passphrase.is_empty();
+        certificate.passphrase_unavailable = false;
+
+        if certificate.has_passphrase {
+            crate::credentials::write(
+                Secret::CertificatePassphrase,
+                &certificate.id,
+                certificate.passphrase.as_bytes(),
+            )
+            .await?;
+        }
+
+        let id = certificate.id.clone();
+        let has_passphrase = certificate.has_passphrase;
+        preferences.request.client_certificates.push(certificate);
+
+        if let Err(error) = persist(&self.path, &preferences) {
+            if has_passphrase {
+                let _ = crate::credentials::delete(Secret::CertificatePassphrase, &id).await;
+            }
+            return Err(error);
+        }
+
+        Ok(preferences)
+    }
+
+    /// Forget a client certificate and remove its passphrase from the OS
+    /// credential store.
+    pub async fn remove_client_certificate(&self, id: &str) -> Result<Preferences> {
+        let _lock = self.lock()?;
+        let mut preferences = read_document(&self.path)?;
+        check_no_legacy_credentials(&preferences)?;
+
+        let certificates = &mut preferences.request.client_certificates;
+        let index = certificates
+            .iter()
+            .position(|certificate| certificate.id == id)
+            .context("Unknown client certificate ID")?;
+        let removed = certificates.remove(index);
+        persist(&self.path, &preferences)?;
+
+        if removed.has_passphrase {
+            let _ = crate::credentials::delete(Secret::CertificatePassphrase, id).await;
+        }
+
+        Ok(preferences)
     }
 
     /// Patch proxy configuration. Supply both credential fields to replace them;
@@ -153,7 +241,7 @@ impl PreferencesFile {
 
         proxy.validate().map_err(anyhow::Error::msg)?;
         if let Some((id, secret)) = &staged {
-            crate::credentials::write(id, secret).await?;
+            crate::credentials::write(Secret::ProxyCredentials, id, secret).await?;
         }
 
         proxy.username.clear();
@@ -161,7 +249,7 @@ impl PreferencesFile {
 
         if let Err(error) = persist(&self.path, &preferences) {
             if let Some((id, _)) = &staged {
-                let _ = crate::credentials::delete(id).await;
+                let _ = crate::credentials::delete(Secret::ProxyCredentials, id).await;
             }
             return Err(error);
         }
@@ -169,7 +257,7 @@ impl PreferencesFile {
         if old_id != preferences.proxy_credentials_id
             && let Some(id) = old_id
         {
-            let _ = crate::credentials::delete(&id).await;
+            let _ = crate::credentials::delete(Secret::ProxyCredentials, &id).await;
         }
 
         Ok(preferences)
@@ -189,6 +277,18 @@ impl PreferencesFile {
             .context("Preferences are being edited by another process; retry")?;
         Ok(lock)
     }
+}
+
+fn check_no_legacy_credentials(preferences: &Preferences) -> Result<()> {
+    let proxy = &preferences.request.proxy;
+
+    if !proxy.username.is_empty() || !proxy.password.is_empty() {
+        bail!(
+            "Migrate legacy proxy credentials through Settings > Proxy before editing other preferences."
+        );
+    }
+
+    Ok(())
 }
 
 /// Reads preferences as saved, including any legacy plaintext proxy credentials.

@@ -4,6 +4,7 @@ members = [
     "crates/collection",
     "crates/collections_panel_ui",
     "crates/environment",
+    "crates/history",
     "crates/import",
     "crates/keybindings_service",
     "crates/preferences",
