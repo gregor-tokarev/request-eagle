@@ -12,18 +12,21 @@ pub(crate) fn open(
     main: Entity<MainView>,
     sidebar: Entity<CollectionPanel>,
     tab_id: u64,
+    name: Option<SharedString>,
     request: request::Request,
     window: &mut Window,
     cx: &mut App,
 ) {
     let dialog = cx.new(|cx| {
-        // A gRPC request is named after its method, such as SayHello.
-        let target = match &request {
-            request::Request::Grpc(grpc) => grpc
+        // A request keeps the name given in its tab. Otherwise a gRPC request
+        // is named after its method, such as SayHello.
+        let target = match (&name, &request) {
+            (Some(name), _) => name.as_ref(),
+            (None, request::Request::Grpc(grpc)) => grpc
                 .method
                 .rsplit_once('/')
                 .map_or(request.url(), |(_, method)| method),
-            _ => request.url(),
+            (None, _) => request.url(),
         }
         .trim();
         let suggested = if target.is_empty() {

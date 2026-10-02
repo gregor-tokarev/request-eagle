@@ -49,6 +49,8 @@ pub(crate) enum WebSocketSection {
 pub struct WebSocketDraft {
     /// Unsaved drafts have no location.
     pub location: Option<RequestLocation>,
+    /// The name given to the request in its tab before it is saved.
+    pub name: Option<SharedString>,
     pub request: WebSocketRequest,
     saved_request: WebSocketRequest,
     pub(crate) section: WebSocketSection,
@@ -117,6 +119,7 @@ impl WebSocketDraft {
 
         Self {
             location,
+            name: None,
             handshake_headers: request::websocket_handshake_headers(&request.url, &request.headers),
             saved_request: request.clone(),
             request,
@@ -144,8 +147,9 @@ impl WebSocketDraft {
         }
     }
 
+    /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request
+        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
     }
 
     /// Follow the saved request to its current file and name.
@@ -160,7 +164,13 @@ impl WebSocketDraft {
         });
 
         self.location = Some(location);
-        cx.notify();
+        self.notify_controls(cx);
+    }
+
+    /// Name the request before it is saved.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = Some(name);
+        self.notify_controls(cx);
     }
 
     pub fn mark_saved(&mut self, request: WebSocketRequest, cx: &mut Context<Self>) {
@@ -698,7 +708,12 @@ impl Render for WebSocketAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(request_header("WebSocket", draft.location.as_ref(), cx))
+                    .child(request_header(
+                        "WebSocket",
+                        draft.location.as_ref(),
+                        draft.name.as_ref(),
+                        cx,
+                    ))
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

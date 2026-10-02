@@ -18,6 +18,7 @@ actions!(
         NewGrpcTab,
         NewWebSocketTab,
         CloseTab,
+        RenameTab,
         PreviousTab,
         NextTab,
         SelectTab1,
@@ -130,6 +131,13 @@ pub(crate) fn init(cx: &mut App) {
         "Close tab",
         "Close the active tab.",
         "secondary-w",
+        cx,
+    );
+    register_tab_action(
+        RenameTab,
+        "Rename tab",
+        "Rename the request in the active tab.",
+        "f2",
         cx,
     );
     // GPUI folds Shift into punctuation on macOS and Linux (Shift+[ becomes {).
