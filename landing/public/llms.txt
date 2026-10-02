@@ -1,11 +1,11 @@
 # Request Eagle
 
-> Request Eagle is a native API client for macOS, written in Rust and rendered on the GPU. It is a Postman alternative that keeps requests as TOML files on disk, with scripts, Vim mode and a CLI for agents.
+> Request Eagle is a native API client for macOS, Windows and Linux, written in Rust and rendered on the GPU. It is a Postman alternative that keeps requests as TOML files on disk, with scripts, Vim mode and a CLI for agents.
 
 ## Pages
 
 - [Landing](https://requesteagle.tokarev.work/): What Request Eagle is and what it can do
-- [Download](https://requesteagle.tokarev.work/downloads/): The latest build for Apple Silicon Macs
+- [Download](https://requesteagle.tokarev.work/downloads/): Stable and nightly builds for Apple Silicon Macs, Windows, and Debian or Ubuntu
 
 ## Guides
 

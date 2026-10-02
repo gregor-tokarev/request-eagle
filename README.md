@@ -4,10 +4,10 @@
 
 <h1 align="center">Request Eagle</h1>
 
-<p align="center">A native API client for macOS.</p>
+<p align="center">A native API client for macOS, Windows and Linux.</p>
 
 <p align="center">
-  <a href="https://github.com/gregor-tokarev/request-eagle/releases/latest">Download for macOS</a>
+  <a href="https://requesteagle.tokarev.work/downloads/">Download</a>
   ·
   <a href="https://requesteagle.tokarev.work">Website</a>
   ·

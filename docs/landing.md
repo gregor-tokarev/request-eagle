@@ -51,16 +51,20 @@ cf pages projects deployments create requesteagle --branch main
 ## Downloads
 
 `src/pages/downloads.astro` is the page at `/downloads/`, and the landing's
-download buttons lead there. It offers one build, the latest release of this repository, as a
-disk image or a ZIP archive.
+download buttons lead there. It offers the macOS disk image and ZIP archive,
+the Windows installer and the Debian package, from either
+[update track](releases.md): stable by default, or nightly after choosing it.
+`/downloads/#nightly` opens the page on the nightly track.
 
-Its script, `src/scripts/downloads.js`, reads that release from the GitHub API in the visitor's
-browser, so the buttons follow each new release without an edit or a deploy.
-The page shows no version number. The CLI executables are not offered, because
-the CLI is installed from the app.
+Its script, `src/scripts/downloads.js`, reads the releases from the GitHub API
+in the visitor's browser, so the buttons follow each new or promoted release
+without an edit or a deploy. Each button takes the newest file for its
+platform on the chosen track. The page shows no version number. The CLI
+executables are not offered, because the CLI is installed from the app.
 
 Without scripts, or when GitHub cannot be reached, the buttons lead to the
-latest release on GitHub instead.
+latest release on GitHub instead. A platform with no file on the chosen track
+leads to the list of releases.
 
 ## Motion
 
@@ -124,4 +128,4 @@ npx lighthouse http://localhost:3000/
   Postman, and "18 times". They come from [the startup benchmark](startup-benchmark.md).
 - Eleven theme families, and the seven themes offered by the picker.
 - Interface sizes from 12 to 24 px.
-- The macOS build targets Apple Silicon; Linux builds from source.
+- The macOS build targets Apple Silicon; Windows and Debian builds target x64.
