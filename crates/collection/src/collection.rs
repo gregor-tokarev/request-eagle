@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::toml_merge::merge_table;
 use crate::{CollectionEditError, DirEntry, Entry, FileEntry};
-use request::RequestScripts;
+use request::{Auth, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
 const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
@@ -23,12 +23,17 @@ pub struct Collection {
     pub entries: Vec<Entry>,
     pub(crate) local_env: Environment,
     pub(crate) scripts: RequestScripts,
+    pub(crate) auth: Auth,
 }
 
-#[derive(Default, Deserialize, Serialize)]
-struct CollectionSettings {
+/// The settings a collection shares with its requests: scripts that run
+/// around each of them, and the authorization they inherit.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SharedSettings {
     #[serde(default, skip_serializing_if = "RequestScripts::is_empty")]
-    scripts: RequestScripts,
+    pub scripts: RequestScripts,
+    #[serde(default, skip_serializing_if = "Auth::is_unset")]
+    pub auth: Auth,
 }
 
 impl Collection {
@@ -50,41 +55,42 @@ impl Collection {
 
         let excluded = [local_env.path.clone(), path.join(SETTINGS_FILE_NAME)];
         let entries = load_directory(path, &excluded)?.entries;
-        let scripts = Self::load_scripts(path)?;
+        let SharedSettings { scripts, auth } = Self::load_settings(path)?;
 
         Ok(Self {
             path: path.to_path_buf(),
             entries,
             local_env,
             scripts,
+            auth,
         })
     }
 
-    /// Reads the scripts that run around every request in the collection at `path`.
-    pub fn load_scripts(path: &Path) -> Result<RequestScripts, CollectionLoadError> {
+    /// Reads the scripts and authorization that the collection at `path`
+    /// shares with its requests.
+    pub fn load_settings(path: &Path) -> Result<SharedSettings, CollectionLoadError> {
         let path = path.join(SETTINGS_FILE_NAME);
         let source = match fs::read_to_string(&path) {
             Ok(source) => source,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(RequestScripts::default());
+                return Ok(SharedSettings::default());
             }
             Err(source) => return Err(CollectionLoadError::Read { path, source }),
         };
 
-        toml::from_str::<CollectionSettings>(&source)
-            .map(|settings| settings.scripts)
-            .map_err(|source| CollectionLoadError::Parse { path, source })
+        toml::from_str(&source).map_err(|source| CollectionLoadError::Parse { path, source })
     }
 
-    /// Saves variables and scripts together. If the second file cannot be
-    /// written, the first is restored, so a failed save changes nothing.
+    /// Saves variables, scripts and authorization together. If the second
+    /// file cannot be written, the first is restored, so a failed save
+    /// changes nothing.
     pub(crate) fn save_settings(
         &mut self,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
     ) -> Result<(), CollectionEditError> {
         let scripts_path = self.path.join(SETTINGS_FILE_NAME);
-        let scripts_changed = self.scripts != scripts;
+        let scripts_changed = self.scripts != shared.scripts || self.auth != shared.auth;
         let variables_changed = self.local_env.entries != variables;
         let previous_scripts = if scripts_changed && variables_changed {
             match fs::read(&scripts_path) {
@@ -97,7 +103,7 @@ impl Collection {
         };
 
         if scripts_changed {
-            write_scripts(&scripts_path, &scripts)?;
+            write_settings(&scripts_path, &shared)?;
         }
 
         if variables_changed {
@@ -111,7 +117,7 @@ impl Collection {
                     && let Err(restore) = restore_file(&scripts_path, previous_scripts)
                 {
                     return Err(io::Error::other(format!(
-                        "{error}; could not restore the collection scripts: {restore}"
+                        "{error}; could not restore the collection settings: {restore}"
                     ))
                     .into());
                 }
@@ -123,7 +129,8 @@ impl Collection {
         }
 
         if scripts_changed {
-            self.scripts = scripts;
+            self.scripts = shared.scripts;
+            self.auth = shared.auth;
         }
 
         Ok(())
@@ -144,21 +151,23 @@ impl Collection {
     pub fn scripts(&self) -> &RequestScripts {
         &self.scripts
     }
+
+    /// What requests that inherit their authorization send.
+    pub fn auth(&self) -> &Auth {
+        &self.auth
+    }
 }
 
-fn write_scripts(path: &Path, scripts: &RequestScripts) -> Result<(), CollectionSaveError> {
-    if scripts.is_empty() {
+fn write_settings(path: &Path, settings: &SharedSettings) -> Result<(), CollectionSaveError> {
+    if settings.scripts.is_empty() && settings.auth.is_unset() {
         return restore_file(path, None).map_err(|source| CollectionSaveError::Write {
             path: path.to_path_buf(),
             source,
         });
     }
 
-    let settings = CollectionSettings {
-        scripts: scripts.clone(),
-    };
     let content =
-        toml::to_string_pretty(&settings).map_err(|source| CollectionSaveError::Serialize {
+        toml::to_string_pretty(settings).map_err(|source| CollectionSaveError::Serialize {
             path: path.to_path_buf(),
             source,
         })?;
@@ -324,6 +333,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             "metadata",
             "definition",
             "settings",
+            "auth",
         ] {
             if updates["request"].get(field).is_none() {
                 request.remove(field);
@@ -342,9 +352,10 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
             }
         }
 
-        // gRPC definitions, settings and scripts also omit optional fields,
-        // such as import paths once they are removed.
-        for table in ["definition", "settings", "scripts"] {
+        // gRPC definitions, settings, scripts and authorizations also omit
+        // optional fields, such as import paths once they are removed or
+        // the fields of another kind of authorization.
+        for table in ["definition", "settings", "scripts", "auth"] {
             if let (Some(current), Some(update)) = (
                 request.get_mut(table).and_then(Item::as_table_like_mut),
                 updates["request"].get(table).and_then(Item::as_table_like),

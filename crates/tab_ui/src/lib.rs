@@ -8,6 +8,7 @@
 //! for the same reason: requests store and send the jar's cookies.
 
 mod actions;
+mod auth_editor;
 mod code_snippet;
 mod collection_page;
 mod cookie_page;

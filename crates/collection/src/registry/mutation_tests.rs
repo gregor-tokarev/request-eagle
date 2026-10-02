@@ -5,9 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
+use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry, SharedSettings};
 
-use request::{Body, HttpRequest, Method, Request};
+use request::{ApiKeyAuth, Auth, AuthLocation, Body, HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -167,6 +167,7 @@ request_custom = 'keep the request metadata'
         body: Some(Body::json("new body")),
         query: vec![("page".into(), "2".into())],
         path_variables: vec![("team".into(), "core".into())],
+        auth: Default::default(),
         settings: Default::default(),
     };
 
@@ -639,12 +640,20 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
         pre_request: "pm.variables.set('a', 1);\nconsole.log('b');".into(),
         post_response: String::new(),
     };
+    let auth = Auth::ApiKey(ApiKeyAuth {
+        key: "X-Api-Key".into(),
+        value: "{{key}}".into(),
+        add_to: AuthLocation::Header,
+    });
 
     registry
         .update_collection(
             &collection,
             [("base_url".into(), "https://api.test".into())].into(),
-            scripts.clone(),
+            SharedSettings {
+                scripts: scripts.clone(),
+                auth: auth.clone(),
+            },
         )
         .unwrap();
     registry.rename(&collection, "Renamed API").unwrap();
@@ -656,6 +665,7 @@ fn collection_variables_and_scripts_survive_reload_without_becoming_requests() {
         .find(|collection| collection.path == root.join("Renamed API"))
         .unwrap();
     assert_eq!(collection.scripts(), &scripts);
+    assert_eq!(collection.auth(), &auth);
     assert_eq!(
         collection.local_env().resolve("base_url"),
         Some("https://api.test")
@@ -678,7 +688,14 @@ fn clearing_collection_scripts_removes_their_file_and_keeps_unchanged_variables(
     };
 
     registry
-        .update_collection(&collection, variables.clone(), scripts)
+        .update_collection(
+            &collection,
+            variables.clone(),
+            SharedSettings {
+                scripts,
+                auth: Auth::None,
+            },
+        )
         .unwrap();
     let settings = fs::read_dir(&collection)
         .unwrap()
@@ -724,9 +741,12 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
         .local_env()
         .entries
         .clone();
-    let scripts = |source: &str| request::RequestScripts {
-        pre_request: source.into(),
-        post_response: String::new(),
+    let scripts = |source: &str| SharedSettings {
+        scripts: request::RequestScripts {
+            pre_request: source.into(),
+            post_response: String::new(),
+        },
+        auth: Auth::Inherit,
     };
     registry
         .update_collection(&collection, variables, scripts("console.log('saved');"))

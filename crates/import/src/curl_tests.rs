@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use request::{Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
+use request::{
+    Auth, AwsSignatureAuth, BearerAuth, Body, FormPart, HttpRequest, HttpSettings, Method,
+    PasswordAuth, RawLanguage,
+};
 
 use crate::{CurlError, is_curl, parse_curl};
 
@@ -161,9 +164,15 @@ fn reads_json_forms_and_credentials() {
         headers(&[
             ("User-Agent", "agent"),
             ("Referer", "https://ref.example"),
-            ("Authorization", "Basic dXNlcjpzZWNyZXQ="),
             ("Cookie", "a=1; b=2"),
         ])
+    );
+    assert_eq!(
+        request.auth,
+        Auth::Basic(PasswordAuth {
+            username: "user".into(),
+            password: "secret".into(),
+        })
     );
     assert_eq!(
         request.body,
@@ -420,4 +429,46 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
             .settings
             .is_default()
     );
+}
+
+#[test]
+fn credentials_become_the_requests_authorization() {
+    let auth = |command: &str| parse_curl(command).unwrap().auth;
+
+    assert_eq!(auth("curl https://example.com"), Auth::Inherit);
+    assert_eq!(
+        auth("curl --digest -u user https://example.com"),
+        Auth::Digest(PasswordAuth {
+            username: "user".into(),
+            password: String::new(),
+        })
+    );
+    assert_eq!(
+        auth("curl --oauth2-bearer t0ken https://example.com"),
+        Auth::Bearer(BearerAuth {
+            token: "t0ken".into()
+        })
+    );
+    assert_eq!(
+        auth("curl --aws-sigv4 aws:amz:eu-west-1:s3 --user AKID:secret https://example.com"),
+        Auth::AwsSignature(AwsSignatureAuth {
+            access_key: "AKID".into(),
+            secret_key: "secret".into(),
+            region: "eu-west-1".into(),
+            service: "s3".into(),
+            ..AwsSignatureAuth::default()
+        })
+    );
+
+    // The commands Request Eagle writes read back to the same authorization.
+    let request = HttpRequest {
+        path: "https://example.com/".into(),
+        auth: Auth::Digest(PasswordAuth {
+            username: "user".into(),
+            password: "p@ss:word".into(),
+        }),
+        ..HttpRequest::default()
+    };
+    let command = request.curl_command(&HashMap::new(), None);
+    assert_eq!(parse_curl(&command).unwrap().auth, request.auth);
 }

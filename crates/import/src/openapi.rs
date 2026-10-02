@@ -113,6 +113,7 @@ pub(crate) fn convert(document: &Value) -> Result<Import, ImportError> {
             name: clean_name(document["info"]["title"].as_str(), "OpenAPI"),
             variables,
             scripts: RequestScripts::default(),
+            auth: Default::default(),
             items,
         },
         skipped,
@@ -232,6 +233,8 @@ impl<'a> Spec<'a> {
             body,
             query,
             path_variables: Vec::new(),
+            // Each operation's credentials are in its headers or query.
+            auth: Default::default(),
             scripts: RequestScripts::default(),
             settings: Default::default(),
         }

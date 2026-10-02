@@ -9,7 +9,7 @@ use std::{ffi::OsStr, fs, path::Path};
 
 use collection::{ImportedCollection, ImportedItem};
 use request::{
-    GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, Request, RequestScripts,
+    Auth, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, Request, RequestScripts,
     WebSocketRequest,
 };
 use serde_json::{Map, Value, json};
@@ -39,10 +39,10 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
 
     let definition = read_definition(directory)?;
     let group = group(&definition);
-    // Collection scripts become the collection's own scripts, so requests
-    // inherit only its authorization.
+    // The collection's scripts and authorization become its own, which its
+    // requests run and inherit.
     let inherited = Inherited {
-        auth: postman::own_auth(&group),
+        auth: None,
         scripts: Scripts::default(),
         behavior: Behavior::default(),
     };
@@ -68,6 +68,7 @@ pub(crate) fn convert(directory: &Path) -> Result<Import, ImportError> {
                 pre_request: postman::join_scripts(&scripts.pre_request),
                 post_response: postman::join_scripts(&scripts.post_response),
             },
+            auth: postman::own_auth(&group).map_or(Auth::Inherit, postman::auth),
             items,
         },
         skipped,
@@ -210,17 +211,7 @@ fn http_item(request: &Value, auth: Value) -> Value {
 }
 
 fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
-    let mut metadata = postman::pairs(&entries(&request["metadata"]));
-    // gRPC calls have no query parameters, so only authorizations sent as
-    // metadata apply.
     let own = json!({ "auth": auth });
-    postman::authorize(
-        postman::own_auth(&own).or(inherited.auth),
-        &mut metadata,
-        &mut Vec::new(),
-        &mut Scripts::default(),
-    );
-
     let settings = &request["settings"];
 
     GrpcRequest {
@@ -228,7 +219,8 @@ fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> Grp
         tls: settings["secureConnection"].as_bool().unwrap_or_default(),
         method: method(request["methodPath"].as_str().unwrap_or_default()),
         message: text(request["message"].get("content")),
-        metadata,
+        metadata: postman::pairs(&entries(&request["metadata"])),
+        auth: postman::request_auth(postman::own_auth(&own), inherited),
         definition: service_definition(&request["schema"], path.parent().unwrap_or(path)),
         settings: GrpcSettings {
             verify_certificates: settings["strictSSL"].as_bool(),
