@@ -3,7 +3,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use request::{Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
+use request::{Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 use thiserror::Error;
 
 /// Characters `--data-urlencode` leaves as they are.
@@ -532,7 +532,7 @@ impl Options {
         Ok(HttpRequest {
             method,
             path: url,
-            headers: self.headers,
+            headers: self.headers.into_iter().map(Field::from).collect(),
             body,
             settings: HttpSettings {
                 timeout_ms: self.timeout_ms,

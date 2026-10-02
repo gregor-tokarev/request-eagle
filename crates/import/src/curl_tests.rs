@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use request::{Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
+use request::{Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 
 use crate::{CurlError, is_curl, parse_curl};
 
@@ -20,10 +20,10 @@ fn part(name: &str, value: &str, file: bool) -> FormPart {
     }
 }
 
-fn headers(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+fn headers(pairs: &[(&str, &str)]) -> Vec<Field> {
     pairs
         .iter()
-        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .map(|(name, value)| Field::new(*name, *value))
         .collect()
 }
 

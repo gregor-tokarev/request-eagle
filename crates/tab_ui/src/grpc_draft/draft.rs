@@ -10,7 +10,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use request::{GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
+use request::{Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
 
 use super::definition::DefinitionState;
 use super::methods::{MethodList, method_list};
@@ -425,13 +425,13 @@ impl GrpcDraft {
             &metadata,
             window,
             |this, _, event: &FieldsChanged, window, cx| {
-                let count = this.request.metadata.len();
+                let count = Field::enabled(&this.request.metadata).count();
                 this.request.metadata = event.0.clone();
                 // Servers may require credentials to answer reflection.
                 this.schedule_reflection(window, cx);
 
                 // The Metadata tab shows the count.
-                if this.request.metadata.len() != count {
+                if Field::enabled(&this.request.metadata).count() != count {
                     this.redraw(cx);
                 } else {
                     cx.notify();

@@ -1,5 +1,5 @@
 use collection::ImportedItem;
-use request::{Body, FormPart, HttpRequest, Method, Request};
+use request::{Body, Field, FormPart, HttpRequest, Method, Request};
 
 use crate::parse;
 
@@ -48,7 +48,7 @@ const COLLECTION: &str = r#"{
                         "method": "GET",
                         "header": [
                             {"key": "Accept", "value": "application/json"},
-                            {"key": "X-Debug", "value": "1", "disabled": true}
+                            {"key": "X-Debug", "value": "1", "disabled": true, "description": "Server traces"}
                         ],
                         "url": {
                             "raw": "{{base_url}}/pets/:id?expand=owner%20name",
@@ -122,11 +122,18 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     assert_eq!(find.method, Method::Get);
     assert_eq!(find.path, "{{base_url}}/pets/:id?expand=owner%20name");
     assert_eq!(find.path_variables, [("id".to_owned(), "7".to_owned())]);
+    // Headers that are switched off stay with their descriptions, but are
+    // not sent.
     assert_eq!(
         find.headers,
         [
-            ("Accept".to_owned(), "application/json".to_owned()),
-            ("Authorization".to_owned(), "Bearer {{token}}".to_owned()),
+            Field::new("Accept", "application/json"),
+            Field {
+                enabled: false,
+                description: "Server traces".into(),
+                ..Field::new("X-Debug", "1")
+            },
+            Field::new("Authorization", "Bearer {{token}}"),
         ]
     );
     // Folder scripts run before the request's own, each in its own block.
@@ -204,10 +211,7 @@ fn postman_forms_and_basic_auth_are_encoded() {
     assert!(login.scripts.pre_request.is_empty());
     assert_eq!(
         login.headers,
-        [(
-            "Authorization".to_owned(),
-            "Basic YWRtaW46c2VjcmV0".to_owned()
-        )]
+        [Field::new("Authorization", "Basic YWRtaW46c2VjcmV0")]
     );
 }
 
@@ -356,5 +360,5 @@ fn postman_form_data_files_and_graphql_bodies_are_kept() {
 
     let (_, key) = http(&import.collection.items[4]);
     assert_eq!(key.method, Method::Get);
-    assert_eq!(key.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
+    assert_eq!(key.query, [Field::new("api_key", "{{key}}")]);
 }

@@ -20,6 +20,8 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
+// Events are passed on one at a time, so boxing the request would not help.
+#[allow(clippy::large_enum_variant)]
 pub enum CollectionPanelEvent {
     OpenCollection {
         path: PathBuf,
@@ -414,6 +416,23 @@ impl Render for CollectionPanel {
                         .text_xs()
                         .text_color(cx.theme().danger)
                         .child(error),
+                )
+            })
+            // Only the count: request-eagle-cli tells agents which files and why.
+            .when(!self.collections.skipped().is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .debug_selector(|| "collections-skipped".into())
+                        .px_3()
+                        .pb_2()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(Icon::new(IconName::TriangleAlert).xsmall())
+                        .child(match self.collections.skipped().len() {
+                            1 => "Couldn't load 1 file".to_owned(),
+                            count => format!("Couldn't load {count} files"),
+                        }),
                 )
             })
             .child(

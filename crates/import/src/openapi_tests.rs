@@ -1,5 +1,5 @@
 use collection::ImportedItem;
-use request::{Body, HttpRequest, Method, Request};
+use request::{Body, Field, HttpRequest, Method, Request};
 use serde_json::json;
 
 use crate::{ImportError, parse};
@@ -184,21 +184,18 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
     assert_eq!(
         find.query,
         [
-            ("fields".to_owned(), "name".to_owned()),
-            ("ids".to_owned(), "1".to_owned()),
-            ("ids".to_owned(), "2".to_owned()),
-            ("filter[color]".to_owned(), "red".to_owned()),
+            Field::new("fields", "name"),
+            Field::new("ids", "1"),
+            Field::new("ids", "2"),
+            Field::new("filter[color]", "red"),
         ]
     );
     assert_eq!(
         find.headers,
         [
-            ("X-Trace".to_owned(), "{{X-Trace}}".to_owned()),
-            ("X-Tags".to_owned(), "a,b".to_owned()),
-            (
-                "Authorization".to_owned(),
-                "Bearer {{bearerAuth}}".to_owned()
-            ),
+            Field::new("X-Trace", "{{X-Trace}}"),
+            Field::new("X-Tags", "a,b"),
+            Field::new("Authorization", "Bearer {{bearerAuth}}"),
         ]
     );
 
@@ -206,10 +203,7 @@ fn openapi_parameters_fill_the_url_query_and_headers() {
     let (_, order) = http(&store[0]);
     assert_eq!(order.path, "{{base_url}}/stores/{{storeId}}/orders");
     // JSON bodies are sent as JSON without a header of their own.
-    assert_eq!(
-        order.headers,
-        [("X-API-Key".to_owned(), "{{apiKey}}".to_owned())]
-    );
+    assert_eq!(order.headers, [Field::new("X-API-Key", "{{apiKey}}")]);
     assert_eq!(json_body(order), json!({"quantity": 2}));
 
     // Path values cannot end or split their segment.
@@ -228,7 +222,7 @@ fn openapi_bodies_are_generated_from_schemas() {
         !update
             .headers
             .iter()
-            .any(|(name, _)| name == "Content-Type")
+            .any(|field| field.key == "Content-Type")
     );
 
     let body = json_body(update);
@@ -288,7 +282,7 @@ fn swagger_specifications_are_imported() {
 
     let (_, update) = http(&collection.items[0]);
     assert_eq!(update.path, "{{base_url}}/users/{{id}}");
-    assert_eq!(update.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
+    assert_eq!(update.query, [Field::new("api_key", "{{key}}")]);
     assert_eq!(json_body(update), json!({"age": 0}));
 
     let (name, login) = http(&collection.items[1]);

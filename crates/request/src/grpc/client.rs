@@ -20,7 +20,7 @@ use super::{
     transport::{self, Target},
 };
 use crate::{
-    CookieJar, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
+    CookieJar, Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
     scripts::CallScripts,
 };
 
@@ -126,7 +126,7 @@ impl GrpcClient {
                 .map_err(GrpcError::Variables)
                 .and_then(|request| {
                     Ok(Definition::Reflection(
-                        self.target(&request)?,
+                        Box::new(self.target(&request)?),
                         metadata(&request.metadata)?,
                     ))
                 }),
@@ -444,7 +444,7 @@ fn message_limit(megabytes: u64) -> usize {
 
 enum Definition {
     ProtoFile(PathBuf, Vec<PathBuf>),
-    Reflection(Target, MetadataMap),
+    Reflection(Box<Target>, MetadataMap),
 }
 
 fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcError> {
@@ -462,10 +462,10 @@ fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcE
         })
 }
 
-fn metadata(pairs: &[(String, String)]) -> Result<MetadataMap, GrpcError> {
+fn metadata(fields: &[Field]) -> Result<MetadataMap, GrpcError> {
     let mut headers = HeaderMap::new();
 
-    for (name, value) in pairs {
+    for (name, value) in Field::enabled(fields) {
         let name = name.trim();
 
         if name.is_empty() {
@@ -474,7 +474,7 @@ fn metadata(pairs: &[(String, String)]) -> Result<MetadataMap, GrpcError> {
 
         let key = HeaderName::try_from(name.to_ascii_lowercase())
             .map_err(|_| GrpcError::InvalidMetadata(format!("{name} is not a valid key")))?;
-        let value = HeaderValue::try_from(value.as_str())
+        let value = HeaderValue::try_from(value)
             .map_err(|_| GrpcError::InvalidMetadata(format!("the value of {name} is invalid")))?;
         headers.append(key, value);
     }

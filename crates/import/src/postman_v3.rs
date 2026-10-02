@@ -185,7 +185,7 @@ fn request(
         // Postman keeps a connection's saved messages in separate files.
         "websocket-request" => Some(Request::WebSocket(WebSocketRequest {
             url: text(request.get("url")),
-            headers: postman::pairs(&entries(&request["headers"])),
+            headers: postman::fields(&entries(&request["headers"])),
             ..WebSocketRequest::default()
         })),
         _ => None,
@@ -210,7 +210,7 @@ fn http_item(request: &Value, auth: Value) -> Value {
 }
 
 fn grpc(request: &Value, auth: Value, path: &Path, inherited: &Inherited) -> GrpcRequest {
-    let mut metadata = postman::pairs(&entries(&request["metadata"]));
+    let mut metadata = postman::fields(&entries(&request["metadata"]));
     // gRPC calls have no query parameters, so only authorizations sent as
     // metadata apply.
     let own = json!({ "auth": auth });

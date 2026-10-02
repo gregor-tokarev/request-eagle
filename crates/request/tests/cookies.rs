@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use request::{
-    CookieJar, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences, RequestScripts,
-    RequestVariables,
+    CookieJar, Field, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
+    RequestScripts, RequestVariables,
 };
 use smol::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -62,7 +62,7 @@ async fn get(executor: &RequestExecutor, url: String, headers: Vec<(String, Stri
         .execute(
             HttpRequest {
                 path: url,
-                headers,
+                headers: headers.into_iter().map(Field::from).collect(),
                 ..HttpRequest::default()
             },
             RequestVariables::new(HashMap::new(), None),

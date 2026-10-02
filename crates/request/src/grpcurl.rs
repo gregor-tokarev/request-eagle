@@ -8,7 +8,7 @@ use environment::VariableResolver;
 
 use crate::curl::{keep_unknown, quote};
 use crate::grpc::Target;
-use crate::{GrpcDefinition, GrpcRequest};
+use crate::{Field, GrpcDefinition, GrpcRequest};
 
 impl GrpcRequest {
     /// The grpcurl command that makes this call as Request Eagle does.
@@ -104,7 +104,7 @@ impl GrpcRequest {
             options.push(("-proto", name.display().to_string()));
         }
 
-        for (name, value) in &request.metadata {
+        for (name, value) in Field::enabled(&request.metadata) {
             let name = fill(name);
             let value = fill(value);
             let name = name.trim();

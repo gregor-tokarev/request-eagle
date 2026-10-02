@@ -994,6 +994,8 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
 /// `cookies` is the jar that every request shares, or why it could not be
 /// read. `session` is how the workspace last looked; it is saved again when
 /// the window closes.
+// Each store is loaded once at startup and handed over here.
+#[allow(clippy::too_many_arguments)]
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,

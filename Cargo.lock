@@ -7010,6 +7010,7 @@ dependencies = [
 name = "request-eagle"
 version = "0.1.21"
 dependencies = [
+ "chrono",
  "collection",
  "environment",
  "gpui-fps",
@@ -7017,9 +7018,12 @@ dependencies = [
  "gpui-pre-reqwest-client",
  "history",
  "keybindings_service",
+ "log",
  "objc2-app-kit 0.3.2",
  "preferences",
  "request",
+ "rustix",
+ "tempfile",
  "theme",
  "updater",
  "workspace",
@@ -9164,6 +9168,7 @@ name = "updater"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "preferences",
  "rustix",
  "semver",
  "serde",

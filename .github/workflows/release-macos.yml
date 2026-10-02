@@ -216,9 +216,12 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
         shell: bash
+        # Every build reaches daily users first. The Promote release workflow
+        # makes a tested one the stable release behind releases/latest.
         run: |
           gh release create "$TAG" \
             --verify-tag \
+            --prerelease \
             --generate-notes \
             --title "Request Eagle $VERSION" \
             "dist/RequestEagle-$VERSION-arm64.dmg" \

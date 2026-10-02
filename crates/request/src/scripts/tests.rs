@@ -10,8 +10,9 @@ use super::{
     runtime::{self, Cancellation, ScriptState},
 };
 use crate::{
-    Body, Execution, ExecutionError, FormPart, HeaderMap, HttpMetrics, HttpRequest, HttpResponse,
-    Method, RequestExecutor, RequestPreferences, RequestVariables, Response, StatusCode, Version,
+    Body, Execution, ExecutionError, Field, FormPart, HeaderMap, HttpMetrics, HttpRequest,
+    HttpResponse, Method, RequestExecutor, RequestPreferences, RequestVariables, Response,
+    StatusCode, Version,
 };
 
 fn scripted(source: &str) -> HttpRequest {
@@ -83,15 +84,15 @@ fn edits_only_the_outgoing_snapshot_and_resolves_variables_in_all_fields() {
         "#,
         );
         request.path = "http://localhost/{{path}}".into();
-        request.headers = vec![("x-test".into(), "old".into())];
-        request.query = vec![("q".into(), "{{value}}".into())];
+        request.headers = vec![Field::new("x-test", "old")];
+        request.query = vec![Field::new("q", "{{value}}")];
         let original = request.clone();
         let (sent, state, reports) = pre_request(request, no_variables()).await.unwrap();
 
         assert_eq!(sent.path, "http://localhost/hello");
         assert_eq!(sent.method, Method::Post);
-        assert_eq!(sent.headers, [("X-Test".into(), "a & b".into())]);
-        assert_eq!(sent.query[0].1, "a & b");
+        assert_eq!(sent.headers, [Field::new("X-Test", "a & b")]);
+        assert_eq!(sent.query[0].value, "a & b");
         assert_eq!(sent.body, Some(Body::json(r#"{"message":"a & b"}"#)));
         assert_eq!(state.variables.values["path"], "hello");
         assert_eq!(reports[0].logs.len(), 1);
@@ -338,16 +339,16 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
             "pm.expect(pm.variables.get('value')).to.equal('from file'); pm.variables.set('path', 'created'); pm.variables.set('value', 'local');",
         );
         request.path = "http://localhost/{{path}}".into();
-        request.headers = vec![("X-Value".into(), "{{value}}/{{!value}}/{{$guid}}".into())];
-        request.query = vec![("id".into(), "{{$guid}}".into())];
+        request.headers = vec![Field::new("X-Value", "{{value}}/{{!value}}/{{$guid}}")];
+        request.query = vec![Field::new("id", "{{$guid}}")];
         let (sent, state, _) = pre_request(request, RequestVariables::new(values, None))
             .await
             .unwrap();
         assert_eq!(sent.path, "http://localhost/created");
         assert_eq!(state.variables.values["value"], "local");
         assert_eq!(
-            sent.headers[0].1,
-            format!("local/{{{{value}}}}/{}", sent.query[0].1)
+            sent.headers[0].value,
+            format!("local/{{{{value}}}}/{}", sent.query[0].value)
         );
 
         let mut request = scripted("pm.variables.set('path', 'fallback');");
@@ -389,16 +390,16 @@ fn script_method_changes_control_body_resolution_and_dynamic_overrides_win() {
             ));
             request.method = before;
             request.path = "http://localhost/{{$guid}}".into();
-            request.headers = vec![("X-Id".into(), "{{$guid}}".into())];
-            request.query = vec![("id".into(), "{{$guid}}".into())];
+            request.headers = vec![Field::new("X-Id", "{{$guid}}")];
+            request.query = vec![Field::new("id", "{{$guid}}")];
             request.body = Some(Body::json(body));
             let values = HashMap::from([("$guid".into(), "from file".into())]);
             let (sent, _, _) = pre_request(request, RequestVariables::new(values, None))
                 .await
                 .unwrap();
             assert_eq!(sent.path, "http://localhost/fixed");
-            assert_eq!(sent.headers[0].1, "fixed");
-            assert_eq!(sent.query[0].1, "fixed");
+            assert_eq!(sent.headers[0].value, "fixed");
+            assert_eq!(sent.query[0].value, "fixed");
             assert_eq!(raw(&sent.body), expected);
         }
     });

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use collection::{ImportedCollection, ImportedItem};
 use request::{
-    Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage, Request, RequestScripts,
+    Body, Field, FormPart, HttpRequest, HttpSettings, Method, RawLanguage, Request, RequestScripts,
 };
 use serde_json::Value;
 
@@ -150,8 +150,13 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
         _ => url(&request["url"]),
     };
 
-    let mut headers = pairs(&request["header"]);
-    let mut query = Vec::new();
+    let mut headers = fields(&request["header"]);
+    // The URL holds the parameters that are sent; those switched off stay
+    // beside it.
+    let mut query: Vec<_> = fields(&request["url"]["query"])
+        .into_iter()
+        .filter(|field| !field.enabled)
+        .collect();
     let mut scripts = inherited.scripts.then(scripts(item));
     let body = body(&request["body"], &mut headers);
     // Postman applies authorization after the pre-request scripts, which may
@@ -247,7 +252,7 @@ fn assemble_url(url: &Value) -> String {
     assembled
 }
 
-fn body(body: &Value, headers: &mut Vec<(String, String)>) -> Option<Body> {
+fn body(body: &Value, headers: &mut Vec<Field>) -> Option<Body> {
     if body["disabled"].as_bool() == Some(true) {
         return None;
     }
@@ -350,25 +355,27 @@ pub(crate) fn own_auth(item: &Value) -> Option<&Value> {
 /// Applies an authorization as the headers or query parameters Postman sends.
 pub(crate) fn authorize(
     auth: Option<&Value>,
-    headers: &mut Vec<(String, String)>,
-    query: &mut Vec<(String, String)>,
+    headers: &mut Vec<Field>,
+    query: &mut Vec<Field>,
     scripts: &mut Scripts,
 ) {
     let Some(auth) = auth else { return };
     let kind = auth["type"].as_str().unwrap_or_default();
     let value = |key: &str| auth_value(auth, kind, key);
-    let has_authorization = headers
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
+    let has_authorization =
+        Field::enabled(headers).any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
 
     match kind {
         // Postman sends no token when it is empty.
         "bearer" if !has_authorization && !value("token").is_empty() => {
-            headers.push(("Authorization".into(), format!("Bearer {}", value("token"))));
+            headers.push(Field::new(
+                "Authorization",
+                format!("Bearer {}", value("token")),
+            ));
         }
         "oauth2" if !has_authorization && !value("accessToken").is_empty() => {
-            headers.push((
-                "Authorization".into(),
+            headers.push(Field::new(
+                "Authorization",
                 format!("Bearer {}", value("accessToken")),
             ));
         }
@@ -381,18 +388,18 @@ pub(crate) fn authorize(
                     "pm.request.headers.upsert({{key: \"Authorization\", value: \"Basic \" + pm.encoding.base64Encode(pm.variables.replaceIn({credentials}))}});"
                 ));
             } else {
-                headers.push((
-                    "Authorization".into(),
+                headers.push(Field::new(
+                    "Authorization",
                     format!("Basic {}", STANDARD.encode(credentials)),
                 ));
             }
         }
         "apikey" => {
-            let pair = (value("key"), value("value"));
+            let field = Field::new(value("key"), value("value"));
             if value("in") == "query" {
-                query.push(pair);
+                query.push(field);
             } else {
-                headers.push(pair);
+                headers.push(field);
             }
         }
         _ => {}
@@ -412,7 +419,28 @@ fn auth_value(auth: &Value, kind: &str, key: &str) -> String {
     }
 }
 
-/// Enabled key–value pairs, such as headers or form fields.
+/// Header or metadata rows, including those switched off, with their
+/// descriptions.
+pub(crate) fn fields(fields: &Value) -> Vec<Field> {
+    fields
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|field| {
+            let description = &field["description"];
+
+            Some(Field {
+                key: field["key"].as_str()?.to_owned(),
+                value: text(field.get("value")),
+                enabled: field["disabled"].as_bool() != Some(true),
+                // A description is text, or an object with its text as content.
+                description: text(description.get("content").or(Some(description))),
+            })
+        })
+        .collect()
+}
+
+/// Enabled key–value pairs, such as form fields.
 pub(crate) fn pairs(pairs: &Value) -> Vec<(String, String)> {
     pairs
         .as_array()

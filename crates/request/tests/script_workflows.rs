@@ -12,7 +12,8 @@ use std::{
 
 use environment::{EnvironmentSession, EnvironmentSessions, VariableScopes};
 use request::{
-    ExecutionError, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences, RequestVariables,
+    ExecutionError, Field, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences,
+    RequestVariables,
 };
 
 struct Server {
@@ -40,6 +41,9 @@ impl Server {
                 };
                 let received = received.clone();
                 connections.push(thread::spawn(move || {
+                    // macOS accepts sockets in the listener's non-blocking mode,
+                    // which would cut large responses short.
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                     let mut request = Vec::new();
                     let mut buffer = [0; 4096];
@@ -128,7 +132,7 @@ fn response_tokens_survive_execution_and_locals_do_not() {
     smol::block_on(executor.execute(login, variables(&session))).unwrap();
     let mut next = server.request("pm.expect(pm.variables.has('local')).to.be.false;", "");
     next.headers
-        .push(("Authorization".into(), "Bearer {{token}}".into()));
+        .push(Field::new("Authorization", "Bearer {{token}}"));
     smol::block_on(executor.execute(next.clone(), variables(&session))).unwrap();
     assert!(
         server.requests.lock().unwrap()[1]
@@ -174,7 +178,7 @@ fn postman_scopes_carry_values_to_later_requests_and_other_collections() {
     let mut next = server.request("", "");
     next.path = format!("{}/{{{{api}}}}/{{{{user}}}}", server.url);
     next.headers
-        .push(("Authorization".into(), "Bearer {{token}}".into()));
+        .push(Field::new("Authorization", "Bearer {{token}}"));
     smol::block_on(executor.execute(next.clone(), session("/one/environment.toml"))).unwrap();
     let sent = server.requests.lock().unwrap()[1].to_lowercase();
     assert!(sent.starts_with("get /collection/42 "), "{sent}");
