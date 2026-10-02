@@ -339,6 +339,17 @@ impl WebSocketDraft {
         }
     }
 
+    /// Puts the cursor in the URL with its text selected, as a browser's
+    /// address bar does.
+    pub fn focus_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.url_state(window, cx);
+
+        url.update(cx, |url, cx| {
+            url.select_all(window, cx);
+            url.focus(window, cx);
+        });
+    }
+
     pub(crate) fn url_state(
         &mut self,
         window: &mut Window,

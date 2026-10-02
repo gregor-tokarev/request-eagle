@@ -13,6 +13,8 @@ mod top_panel;
 mod workspace;
 
 #[cfg(test)]
+mod actions_tests;
+#[cfg(test)]
 mod history_panel_tests;
 #[cfg(test)]
 mod session_tests;

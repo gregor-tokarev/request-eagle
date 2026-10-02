@@ -9,10 +9,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{
-    CloseTab, CopyAsCurl, CopyAsGrpcurl, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab,
-    SaveRequest,
-};
+use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
@@ -73,8 +70,13 @@ impl Page {
         }
     }
 
-    fn is_request(&self) -> bool {
+    pub(crate) fn is_request(&self) -> bool {
         matches!(self, Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_))
+    }
+
+    /// HTTP requests copy as cURL and gRPC requests as grpcurl.
+    pub(crate) fn can_copy_as_command(&self) -> bool {
+        matches!(self, Page::Request(_) | Page::Grpc(_))
     }
 
     /// Name a request tab's request before it is saved.
@@ -1269,6 +1271,33 @@ impl MainView {
         }
     }
 
+    pub(crate) fn active_page(&self) -> Option<&Page> {
+        self.selected.map(|index| &self.tabs[index].page)
+    }
+
+    pub(crate) fn copy_as_command(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.active_page() {
+            Some(Page::Request(draft)) => {
+                draft.update(cx, |draft, cx| draft.copy_as_curl(window, cx))
+            }
+            Some(Page::Grpc(draft)) => {
+                draft.update(cx, |draft, cx| draft.copy_as_grpcurl(window, cx))
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn focus_url(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.active_page() {
+            Some(Page::Request(draft)) => draft.update(cx, |draft, cx| draft.focus_url(window, cx)),
+            Some(Page::Grpc(draft)) => draft.update(cx, |draft, cx| draft.focus_url(window, cx)),
+            Some(Page::WebSocket(draft)) => {
+                draft.update(cx, |draft, cx| draft.focus_url(window, cx))
+            }
+            _ => {}
+        }
+    }
+
     /// Choose the protocol of a new tab. The plus button opens HTTP requests.
     fn new_tab_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let view = cx.entity().downgrade();
@@ -1529,13 +1558,6 @@ impl MainView {
 
 impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Only HTTP requests offer Copy as cURL and gRPC requests Copy as
-        // grpcurl, so other tabs leave the commands out of the palette.
-        let (http_draft, grpc_draft) = match self.selected.map(|index| &self.tabs[index].page) {
-            Some(Page::Request(draft)) => (Some(draft.clone()), None),
-            Some(Page::Grpc(draft)) => (None, Some(draft.clone())),
-            _ => (None, None),
-        };
         // Only request tabs can be renamed, so other tabs leave Rename tab
         // out of the palette.
         let renamable = self
@@ -1548,16 +1570,6 @@ impl Render for MainView {
             .min_w_0()
             .overflow_hidden()
             .track_focus(&self.focus)
-            .when_some(http_draft, |this, draft| {
-                this.on_action(move |_: &CopyAsCurl, window, cx| {
-                    draft.update(cx, |draft, cx| draft.copy_as_curl(window, cx));
-                })
-            })
-            .when_some(grpc_draft, |this, draft| {
-                this.on_action(move |_: &CopyAsGrpcurl, window, cx| {
-                    draft.update(cx, |draft, cx| draft.copy_as_grpcurl(window, cx));
-                })
-            })
             .when_some(renamable, |this, index| {
                 this.on_action(cx.listener(move |this, _: &RenameTab, window, cx| {
                     this.begin_rename(index, window, cx);
