@@ -1,0 +1,76 @@
+---
+import { Image } from "astro:assets";
+
+import archivo from "../assets/fonts/archivo.woff2?url";
+import archivoItalic from "../assets/fonts/archivo-italic.woff2?url";
+import icon from "../assets/icon.png";
+
+// `home` marks the landing itself, whose navigation scrolls within the page.
+const { title, description, socialTitle = title, socialDescription = description, home = false, download = true } = Astro.props;
+
+const address = new URL(Astro.url.pathname, Astro.site);
+const preview = new URL("/assets/social-preview.png", Astro.site);
+const landing = home ? "" : "/";
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<meta name="description" content={description}>
+<link rel="canonical" href={address}>
+<meta property="og:type" content="website">
+<meta property="og:url" content={address}>
+<meta property="og:title" content={socialTitle}>
+<meta property="og:description" content={socialDescription}>
+<meta property="og:image" content={preview}>
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#060912">
+<link rel="icon" href="/assets/favicon.png">
+<link rel="preload" href={archivo} as="font" type="font/woff2" crossorigin>
+<link rel="preload" href={archivoItalic} as="font" type="font/woff2" crossorigin>
+</head>
+
+<body>
+
+<header class="nav" data-nav>
+  <div class="wrap">
+    <a class="brand" href={home ? "#top" : "/"}>
+      <Image src={icon} width={34} height={34} densities={[1, 2, 3]} loading="eager" alt="" />
+      Request Eagle
+    </a>
+
+    <nav aria-label="Sections">
+      <a href={`${landing}#speed`}>Speed</a>
+      <a href={`${landing}#features`}>Features</a>
+      <a href={`${landing}#themes`}>Themes</a>
+      <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
+    </nav>
+
+    {download && <a class="button button--small" href="/downloads/"><span>Download</span></a>}
+  </div>
+</header>
+
+<slot />
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__mark display" aria-hidden="true">Request Eagle</div>
+
+    <div class="footer__row">
+      <span>Built in Rust with GPUI.</span>
+
+      <nav aria-label="Footer">
+        <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
+        <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/scripting.md">Scripting guide</a>
+        <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md">CLI guide</a>
+        <a href="https://github.com/gregor-tokarev/request-eagle/issues">Feedback</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

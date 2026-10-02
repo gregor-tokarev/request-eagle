@@ -235,7 +235,7 @@ async function showTheme(button) {
     other.setAttribute("aria-pressed", String(other === button));
   }
 
-  next.src = button.dataset.src;
+  next.srcset = button.dataset.srcset;
   await next.decode().catch(() => {});
 
   // A newer choice was made while this capture was loading.
@@ -246,7 +246,7 @@ async function showTheme(button) {
 
   if (choice !== latestChoice) return;
 
-  current.src = button.dataset.src;
+  current.srcset = button.dataset.srcset;
   current.alt = `Request Eagle in the ${button.textContent.trim()} theme.`;
   await current.decode().catch(() => {});
 

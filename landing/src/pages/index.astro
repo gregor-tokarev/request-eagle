@@ -1,0 +1,315 @@
+---
+import { Image, Picture, getImage } from "astro:assets";
+
+import AppleLogo from "../components/AppleLogo.astro";
+import Page from "../layouts/Page.astro";
+
+import "../styles/landing.css";
+
+import icon from "../assets/icon.png";
+import cropScripts from "../assets/shots/crop-scripts.webp";
+import cropVariables from "../assets/shots/crop-variables.webp";
+import cropVim from "../assets/shots/crop-vim.webp";
+import heroDark from "../assets/shots/hero-dark.webp";
+import heroLight from "../assets/shots/hero-light.webp";
+import themeCatppuccin from "../assets/shots/theme-catppuccin.webp";
+import themeEverforest from "../assets/shots/theme-everforest.webp";
+import themeFlexoki from "../assets/shots/theme-flexoki.webp";
+import themeGruvbox from "../assets/shots/theme-gruvbox.webp";
+import themeSolarized from "../assets/shots/theme-solarized.webp";
+
+// How wide each capture is drawn, so the browser fetches the smallest file that stays sharp.
+const pageWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 1296px) calc(100vw - 56px), 1240px";
+const mediaWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 960px) calc(100vw - 56px), (max-width: 1296px) 55vw, 690px";
+const frontWide = "(max-width: 960px) 70vw, (max-width: 1296px) 39vw, 480px";
+
+// The picker swaps these in from the script, so each theme is a plain WebP source set rather than a <picture>.
+const themeCaptures = [
+  ["Ayu Dark", heroDark],
+  ["Catppuccin Mocha", themeCatppuccin],
+  ["Flexoki Light", themeFlexoki],
+  ["Gruvbox Dark", themeGruvbox],
+  ["Solarized Light", themeSolarized],
+  ["Everforest Dark", themeEverforest],
+  ["Ayu Light", heroLight],
+];
+
+const themes = await Promise.all(
+  themeCaptures.map(async ([name, capture]) => ({
+    name,
+    shot: await getImage({ src: capture, format: "webp", width: 1440, widths: [720, 1080, 1440] }),
+  })),
+);
+---
+
+<Page
+  title="Request Eagle — the fast, native API client"
+  description="Request Eagle is a native API client written in Rust and rendered on the GPU. Requests live as TOML files on your disk, with scripts, Vim mode and a CLI for agents."
+  socialTitle="Request Eagle — fast is a feature"
+  socialDescription="A native API client written in Rust and rendered on the GPU."
+  home
+>
+  <main id="top">
+
+    <div class="hero">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <h1 class="display">
+          <span class="line"><span>Fast is</span></span>
+          <span class="line"><span class="outline">a feature.</span></span>
+        </h1>
+
+        <div class="hero__row">
+          <p class="lede">
+            Request Eagle is a Postman alternative written in Rust and rendered on the GPU.
+            It is a real Mac app with no web view inside, and it keeps your requests as files
+            on your disk.
+          </p>
+
+          <div class="actions">
+            <a class="button" data-magnetic href="/downloads/">
+              <AppleLogo />
+              <span>Download for macOS</span>
+            </a>
+
+            <a class="button button--outline" data-magnetic href="https://github.com/gregor-tokarev/request-eagle"><span>GitHub</span></a>
+          </div>
+        </div>
+
+        <div class="stage" data-stage>
+          <figure class="window">
+            <div class="window__lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <Picture src={heroDark} formats={["avif"]} fallbackFormat="webp" widths={[640, 960, 1280, 1920, 2400]} sizes={pageWide} loading="eager"
+                     alt="Request Eagle showing a collection sidebar, a GET request and a formatted JSON response with a 200 OK status." />
+          </figure>
+        </div>
+      </div>
+    </div>
+
+    <section class="band" data-band aria-label="What Request Eagle leaves out">
+      <div class="band__row display">
+        <span>No web view.</span><span>No account.</span><span>No cloud.</span>
+        <span aria-hidden="true">No web view.</span><span aria-hidden="true">No account.</span><span aria-hidden="true">No cloud.</span>
+        <span aria-hidden="true">No web view.</span><span aria-hidden="true">No account.</span><span aria-hidden="true">No cloud.</span>
+      </div>
+
+      <div class="band__row band__row--outline display" aria-hidden="true">
+        <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
+        <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
+        <span>GET</span><span>POST</span><span>PUT</span><span>PATCH</span><span>DELETE</span><span>HEAD</span><span>OPTIONS</span>
+      </div>
+    </section>
+
+    <section class="race" id="speed" data-race>
+      <div class="wrap">
+        <div class="race__intro">
+          <h2 class="display" data-reveal="left">Ready in<br>0.2 seconds.</h2>
+
+          <p data-reveal="left">
+            That is the time from launch until the request editor is on screen.
+            Postman takes 3.9 seconds, 18 times as long.
+          </p>
+        </div>
+
+        <p class="visually-hidden">
+          Request Eagle is ready 0.22 seconds after launch. Postman is ready after 3.86 seconds.
+        </p>
+
+        <!-- The lanes replay both launches in real time. The figures are medians from docs/startup-benchmark.md. -->
+        <div class="race__lanes" data-reveal aria-hidden="true">
+          <div class="lane lane--eagle is-ready" data-lane data-ms="216">
+            <div class="lane__head">
+              <span class="lane__name">Request Eagle</span>
+              <span class="lane__time" data-time>0.22 s</span>
+            </div>
+            <div class="lane__track"><div class="lane__fill" data-fill></div></div>
+          </div>
+
+          <div class="lane is-ready" data-lane data-ms="3859">
+            <div class="lane__head">
+              <span class="lane__name">Postman</span>
+              <span class="lane__time" data-time>3.86 s</span>
+            </div>
+            <div class="lane__track"><div class="lane__fill" data-fill></div></div>
+          </div>
+        </div>
+
+        <div class="race__foot" data-reveal>
+          <button type="button" class="race__again" data-again><span>Run it again</span></button>
+
+          <details class="method">
+            <summary>How this was measured</summary>
+
+            <p>
+              Both apps were launched ten times in turn on one machine while the screen was recorded
+              at 60 frames per second. The time runs from starting the process to the last frame in
+              which the window was still being drawn. The figures are medians: 216 ms for
+              Request Eagle 0.1.15, and 3,859 ms for Postman 12.30.3 used without an account.
+            </p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="wrap">
+
+        <article class="feature">
+          <div class="feature__text" data-reveal="left">
+            <h2 class="display">Your disk.<br>Your git.</h2>
+            <p>
+              Every request is a TOML file in a folder you control. There is no account, no sync
+              service and no export step.
+            </p>
+            <ul>
+              <li>Collections and nested folders</li>
+              <li>Environments in <code>environment.toml</code></li>
+              <li>Search by name, method or URL</li>
+            </ul>
+          </div>
+
+          <div class="feature__media" data-reveal="right">
+<pre data-tilt><span class="c"># Flight API / Flights / List flights.toml</span>
+<span class="k">id</span> = <span class="s">"3f1c9a52-7e4b-4d1a-9c55-0b6e2a8d41f7"</span>
+<span class="k">name</span> = <span class="s">"List flights"</span>
+<span class="k">schema_version</span> = <span class="n">1</span>
+
+<span class="h">[request]</span>
+<span class="k">type</span> = <span class="s">"http"</span>
+<span class="k">method</span> = <span class="s">"GET"</span>
+<span class="k">path</span> = <span class="s">"&#123;&#123;base_url&#125;&#125;/v1/flights"</span>
+<span class="k">headers</span> = [[<span class="s">"Authorization"</span>, <span class="s">"Bearer &#123;&#123;token&#125;&#125;"</span>]]
+<span class="k">query</span> = [[<span class="s">"status"</span>, <span class="s">"airborne"</span>], [<span class="s">"limit"</span>, <span class="s">"25"</span>]]</pre>
+          </div>
+        </article>
+
+        <article class="feature feature--flip">
+          <div class="feature__text" data-reveal="right">
+            <h2 class="display">Script it.<br>Test it.</h2>
+            <p>
+              Pre-request and post-response JavaScript with a familiar <code>pm.*</code> API.
+              Results land next to the response.
+            </p>
+            <ul>
+              <li>Chained requests with <code>await pm.sendRequest</code></li>
+              <li>Assertions and JSON Schema checks</li>
+              <li>SHA-256, HMAC and Base64 helpers</li>
+              <li>Typed completion, no Node.js needed</li>
+            </ul>
+          </div>
+
+          <div class="feature__media" data-reveal="left">
+            <figure class="shot" data-tilt>
+              <Picture src={cropScripts} formats={["avif"]} fallbackFormat="webp" widths={[480, 720, 1080, 1520]} sizes={mediaWide}
+                       alt="Script editor with a pre-request script and two passing tests in the response panel." />
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div class="feature__text" data-reveal="left">
+            <h2 class="display">Never leave<br>the keys.</h2>
+            <p>
+              Send with ⌘↵ from anywhere in the request. Rebind any shortcut, and switch on Vim mode
+              for the body and script editors.
+            </p>
+            <ul>
+              <li>Vim motions, operators, counts and Visual mode</li>
+              <li>Variable completion when you type <code>&#123;&#123;</code></li>
+              <li>Generated values such as <code>&#123;&#123;$guid&#125;&#125;</code></li>
+            </ul>
+          </div>
+
+          <div class="feature__media stack" data-reveal="right" data-parallax>
+            <figure class="shot shot--clip">
+              <Picture src={cropVim} formats={["avif"]} fallbackFormat="webp" widths={[480, 720, 1080, 1520]} sizes={mediaWide}
+                       alt="JSON body editor in Vim Normal mode." />
+            </figure>
+
+            <figure class="shot stack__front">
+              <Picture src={cropVariables} formats={["avif"]} fallbackFormat="webp" widths={[360, 540, 720, 1080]} sizes={frontWide}
+                       alt="Variable completion menu listing environment and generated variables." />
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature feature--flip">
+          <div class="feature__text" data-reveal="right">
+            <h2 class="display">Agents<br>welcome.</h2>
+            <p>
+              An optional CLI gives AI agents the same collections. It speaks JSON, describes its
+              own schema and runs without the app.
+            </p>
+          </div>
+
+          <div class="feature__media" data-reveal="left">
+<pre data-tilt><span class="k">$</span> request-eagle-cli schema
+
+<span class="k">$</span> request-eagle-cli call \
+    <span class="s">'&#123;"command":"requests.list","query":"health"&#125;'</span>
+
+<span class="k">$</span> request-eagle-cli call \
+    <span class="s">'&#123;"command":"requests.run",
+      "path":"/absolute/path/Health.toml",
+      "timeout_ms":10000&#125;'</span></pre>
+          </div>
+        </article>
+
+        <article class="feature feature--last" id="themes">
+          <div class="feature__text" data-reveal="left">
+            <h2 class="display">Make it<br>yours.</h2>
+            <p>
+              Eleven theme families, each in light and dark. Pick your editor font and scale the
+              whole interface from 12 to 24 px.
+            </p>
+
+            <div class="picker" role="group" aria-label="Preview a theme" data-picker>
+              {themes.map((theme, index) => (
+                <button type="button" aria-pressed={index === 0 ? "true" : "false"} data-srcset={theme.shot.srcSet.attribute}><span>{theme.name}</span></button>
+              ))}
+            </div>
+          </div>
+
+          <div class="feature__media" data-reveal="right">
+            <figure class="window window--flat" data-theme-stage>
+              <div class="window__lights" aria-hidden="true"><i></i><i></i><i></i></div>
+              <img src={themes[0].shot.src} srcset={themes[0].shot.srcSet.attribute} sizes={mediaWide} width="2400" height="1500" loading="lazy" decoding="async"
+                   alt={`Request Eagle in the ${themes[0].name} theme.`}>
+              <img class="window__next" src={themes[0].shot.src} srcset={themes[0].shot.srcSet.attribute} sizes={mediaWide} width="2400" height="1500" loading="lazy" decoding="async" alt="" aria-hidden="true">
+            </figure>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <section class="takeoff" data-takeoff>
+      <div class="streaks streaks--wide" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <div class="takeoff__icon" data-reveal>
+          <span class="takeoff__glow" aria-hidden="true"></span>
+          <Image src={icon} width={148} height={148} densities={[1, 2]} alt="" data-icon />
+        </div>
+
+        <h2 class="display" data-reveal>Ready<br>for takeoff.</h2>
+
+        <p data-reveal>
+          Request Eagle runs on Apple Silicon Macs and builds from source on Linux. It is in
+          early development, and new builds ship most days.
+        </p>
+
+        <div class="actions" data-reveal data-boost>
+          <a class="button" data-magnetic href="/downloads/"><span>Download for macOS</span></a>
+          <a class="button button--outline" data-magnetic href="https://github.com/gregor-tokarev/request-eagle#build-from-source"><span>Build from source</span></a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</Page>
+
+<script>
+  import "../scripts/landing.js";
+</script>
