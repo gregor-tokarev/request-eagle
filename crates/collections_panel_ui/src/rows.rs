@@ -15,7 +15,7 @@ use super::{
     tree::ItemKind,
 };
 use collection::MovePlacement;
-use request_eagle_theme::method_label;
+use request_eagle_theme::{method_label, protocol_icon};
 
 impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -277,7 +277,7 @@ impl CollectionPanel {
                     }
                 }),
             )
-            .context_menu(move |menu, _, _| {
+            .context_menu(move |menu, _, cx| {
                 // Resolve shortcuts in the tree's key context. Clicks still run
                 // the item handlers, which target the clicked row's path.
                 let menu = menu.action_context(focus.clone());
@@ -298,48 +298,62 @@ impl CollectionPanel {
                     let folder_view = view.clone();
                     let folder_parent = path.clone();
 
+                    // New requests show their protocol icons, as in the tab
+                    // bar's new tab menu, and folders their tree icon.
                     menu.item(
-                        PopupMenuItem::new("New Request").on_click(move |_, window, cx| {
-                            let view = request_view.clone();
-                            let parent = request_parent.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.create_request(&parent, window, cx)
+                        PopupMenuItem::new("New Request")
+                            .icon(protocol_icon("HTTP", cx))
+                            .on_click(move |_, window, cx| {
+                                let view = request_view.clone();
+                                let parent = request_parent.clone();
+                                window.defer(cx, move |window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.create_request(&parent, window, cx)
+                                    });
                                 });
-                            });
-                        }),
+                            }),
                     )
                     .item(
-                        PopupMenuItem::new("New gRPC Request").on_click(move |_, window, cx| {
-                            let view = grpc_view.clone();
-                            let parent = grpc_parent.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.create_grpc_request(&parent, window, cx)
+                        PopupMenuItem::new("New gRPC Request")
+                            .icon(protocol_icon("gRPC", cx))
+                            .on_click(move |_, window, cx| {
+                                let view = grpc_view.clone();
+                                let parent = grpc_parent.clone();
+                                window.defer(cx, move |window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.create_grpc_request(&parent, window, cx)
+                                    });
                                 });
-                            });
-                        }),
+                            }),
                     )
                     .item(
-                        PopupMenuItem::new("New WebSocket").on_click(move |_, window, cx| {
-                            let view = websocket_view.clone();
-                            let parent = websocket_parent.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.create_websocket(&parent, window, cx)
+                        PopupMenuItem::new("New WebSocket")
+                            .icon(protocol_icon("WS", cx))
+                            .on_click(move |_, window, cx| {
+                                let view = websocket_view.clone();
+                                let parent = websocket_parent.clone();
+                                window.defer(cx, move |window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.create_websocket(&parent, window, cx)
+                                    });
                                 });
-                            });
-                        }),
+                            }),
                     )
                     .item(
-                        PopupMenuItem::new("New Folder").on_click(move |_, window, cx| {
-                            let view = folder_view.clone();
-                            let parent = folder_parent.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view
-                                    .update(cx, |this, cx| this.create_folder(&parent, window, cx));
-                            });
-                        }),
+                        PopupMenuItem::new("New Folder")
+                            .icon(
+                                Icon::new(IconName::FolderClosed)
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .on_click(move |_, window, cx| {
+                                let view = folder_view.clone();
+                                let parent = folder_parent.clone();
+                                window.defer(cx, move |window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.create_folder(&parent, window, cx)
+                                    });
+                                });
+                            }),
                     )
                     .separator()
                 } else {
