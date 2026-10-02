@@ -34,21 +34,23 @@ impl AuthEditor {
 
     fn text_row(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let input = self.input(field, window, cx);
-        let completion = input.completion.clone();
-        let control = match &input.target {
-            VariableTarget::Input(input) => with_variables(
-                &completion,
-                Input::new(input)
-                    .aria_label(field.label())
-                    .when(field.secret(), |input| input.mask_toggle()),
-            ),
-            VariableTarget::Editor(editor) => with_variables(
-                &completion,
-                Editor::new(editor)
+        let control = match (&input.target, &input.completion) {
+            (VariableTarget::Input(input), Some(completion)) => {
+                with_variables(completion, Input::new(input).aria_label(field.label()))
+            }
+            (VariableTarget::Input(input), None) => {
+                div().child(Input::new(input).aria_label(field.label()).mask_toggle())
+            }
+            (VariableTarget::Editor(editor), completion) => {
+                let editor = Editor::new(editor)
                     .h(rems(8.))
                     .text_sm()
-                    .aria_label(field.label()),
-            ),
+                    .aria_label(field.label());
+                match completion {
+                    Some(completion) => with_variables(completion, editor),
+                    None => div().child(editor),
+                }
+            }
         };
         let label = field.label();
 
@@ -188,6 +190,7 @@ impl Render for AuthEditor {
                         "",
                         false,
                         Checkbox::new("auth-secret-base64")
+                            .small()
                             .label("Secret is Base64 encoded")
                             .checked(base64)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
@@ -199,11 +202,12 @@ impl Render for AuthEditor {
                         cx,
                     )
                 }
+                // A line separates a group from the rows above it.
                 Row::Heading(heading) => div()
                     .w_full()
-                    .pt_3()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
+                    .when(!content.is_empty(), |heading| {
+                        heading.pt_3().border_t_1().border_color(cx.theme().border)
+                    })
                     .font_weight(FontWeight::MEDIUM)
                     .child(heading),
                 Row::GetToken => self.token_row(cx),
@@ -226,15 +230,13 @@ impl Render for AuthEditor {
                     .w(rems(16.))
                     .flex_none()
                     .gap_2()
+                    .child(div().font_weight(FontWeight::MEDIUM).child("Auth Type"))
                     .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Auth Type"),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "auth-type".into())
-                            .child(Select::new(&kinds).accessibility_label("Auth type").w_full()),
+                        div().debug_selector(|| "auth-type".into()).child(
+                            Select::new(&kinds)
+                                .accessibility_label("Auth type")
+                                .w_full(),
+                        ),
                     )
                     .child(
                         div()

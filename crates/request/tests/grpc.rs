@@ -440,8 +440,10 @@ async fn authorization_is_sent_as_metadata() {
     let mut request = request(address, "Say", r#"{"text": "x"}"#);
     let definition = reflect(&request).await;
     let echoed = |events: &[GrpcEvent], value: &str| {
-        events.iter().any(|event| matches!(event,
-            GrpcEvent::Metadata(metadata) if metadata.contains(&("x-echo".into(), value.into()))))
+        events.iter().any(|event| {
+            matches!(event,
+            GrpcEvent::Metadata(metadata) if metadata.contains(&("x-echo".into(), value.into())))
+        })
     };
 
     // A call has no query, so the collection's API key is metadata either way.

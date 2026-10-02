@@ -74,7 +74,10 @@ pub(super) fn sign_with(
         .join("&");
 
     let url = request.url;
-    let port = url.port().map(|port| format!(":{port}")).unwrap_or_default();
+    let port = url
+        .port()
+        .map(|port| format!(":{port}"))
+        .unwrap_or_default();
     let base_url = format!(
         "{}://{}{port}{}",
         url.scheme(),

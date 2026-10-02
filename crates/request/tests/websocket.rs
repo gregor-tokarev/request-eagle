@@ -615,13 +615,12 @@ fn handshakes_send_the_authorization_the_request_inherits() {
     let url = serve(|mut socket, handshake| async move {
         socket.send(Message::text(handshake)).await.unwrap();
     });
-    let inherited = variables(&[("token", "secret")]).with_collection_auth(Auth::ApiKey(
-        ApiKeyAuth {
+    let inherited =
+        variables(&[("token", "secret")]).with_collection_auth(Auth::ApiKey(ApiKeyAuth {
             key: "api_key".into(),
             value: "{{token}}".into(),
             add_to: AuthLocation::Query,
-        },
-    ));
+        }));
     let (_connection, mut events) = WebSocketConnection::open(
         WebSocketRequest {
             url: format!("{url}/feed?room=1"),

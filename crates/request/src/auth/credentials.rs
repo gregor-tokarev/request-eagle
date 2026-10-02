@@ -52,9 +52,7 @@ impl Auth {
             // Like Postman, an empty token or password sends nothing.
             Self::Bearer(auth) if auth.token.is_empty() => Vec::new(),
             Self::Bearer(auth) => vec![authorization(format!("Bearer {}", auth.token))],
-            Self::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => {
-                Vec::new()
-            }
+            Self::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
             Self::Basic(auth) => vec![authorization(basic(&auth.username, &auth.password))],
             Self::OAuth2(auth) if auth.access_token.is_empty() => Vec::new(),
             Self::OAuth2(auth) => vec![match auth.add_to {
@@ -73,9 +71,7 @@ impl Auth {
                     AuthLocation::Query => Credential::Query(auth.query_param.clone(), token),
                 }]
             }
-            Self::OAuth1(auth) => {
-                super::oauth1::sign(auth, request.ok_or_else(unsupported)?, now)?
-            }
+            Self::OAuth1(auth) => super::oauth1::sign(auth, request.ok_or_else(unsupported)?, now)?,
             Self::AwsSignature(auth) => {
                 super::aws::sign(auth, request.ok_or_else(unsupported)?, now)?
             }
@@ -219,7 +215,10 @@ fn authorization(value: String) -> Credential {
 }
 
 pub(crate) fn basic(username: &str, password: &str) -> String {
-    format!("Basic {}", STANDARD.encode(format!("{username}:{password}")))
+    format!(
+        "Basic {}",
+        STANDARD.encode(format!("{username}:{password}"))
+    )
 }
 
 /// A token after its scheme, such as `Bearer`. Without one, the token alone.

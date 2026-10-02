@@ -25,8 +25,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    Auth, ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest,
-    tls::Tls,
+    Auth, ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest, tls::Tls,
 };
 
 /// Events wait in a queue until the tab reads them. When it holds this many
@@ -87,9 +86,10 @@ pub fn websocket_handshake_headers(
         generated.insert(0, ("Host".into(), "Resolved on connect".into()));
     }
 
-    // The authorization replaces credentials written in the URL.
+    // An Authorization header of the authorization replaces credentials
+    // written in the URL.
     let auth_headers = auth.preview_headers();
-    if !auth_headers.is_empty() {
+    if auth_headers.iter().any(|(name, _)| name == "Authorization") {
         generated.retain(|(name, _)| name != "Authorization");
     }
     let pending = if auth.kind().computes_credentials() {

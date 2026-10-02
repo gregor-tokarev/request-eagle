@@ -326,7 +326,11 @@ impl Auth {
 
     /// The text of every field, for noticing when their variables change.
     pub(crate) fn texts(&self) -> Vec<String> {
-        self.clone().texts_mut().into_iter().map(|text| text.clone()).collect()
+        self.clone()
+            .texts_mut()
+            .into_iter()
+            .map(|text| text.clone())
+            .collect()
     }
 
     /// Replace each `{{variable}}` in the fields.

@@ -51,7 +51,9 @@ pub(crate) struct Inherited {
 
 pub(super) struct FieldInput {
     pub target: VariableTarget,
-    pub completion: Entity<VariableInput>,
+    /// None for a hidden secret, whose masked text cannot show variables
+    /// where they are.
+    pub completion: Option<Entity<VariableInput>>,
 }
 
 /// The Auth tab of a request or collection: a kind of authorization and its
@@ -183,16 +185,21 @@ impl AuthEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> &FieldInput {
-        let key = (self.auth.kind(), field);
+        let kind = self.auth.kind();
+        let key = (kind, field);
         if !self.inputs.contains_key(&key) {
             let text = field.text(&self.auth);
             let target = if field.multiline() {
                 let editor = cx.new(|cx| {
                     EditorState::new(window, cx)
-                        .language(if field == Field::PrivateKey { "text" } else { "json" })
+                        .language(if field == Field::PrivateKey {
+                            "text"
+                        } else {
+                            "json"
+                        })
                         .line_number(false)
                         .soft_wrap(true)
-                        .placeholder(field.placeholder())
+                        .placeholder(field.placeholder(kind))
                         .default_value(text)
                 });
                 self._subscriptions.push(cx.subscribe(
@@ -207,7 +214,7 @@ impl AuthEditor {
             } else {
                 let input = cx.new(|cx| {
                     InputState::new(window, cx)
-                        .placeholder(field.placeholder())
+                        .placeholder(field.placeholder(kind))
                         .masked(field.secret())
                         .default_value(text)
                 });
@@ -222,8 +229,8 @@ impl AuthEditor {
                 VariableTarget::Input(input)
             };
             let scope = self.scope.clone();
-            let completion =
-                cx.new(|cx| VariableInput::new(target.clone(), scope, window, cx));
+            let completion = (!field.secret())
+                .then(|| cx.new(|cx| VariableInput::new(target.clone(), scope, window, cx)));
 
             self.inputs.insert(key, FieldInput { target, completion });
         }
@@ -257,7 +264,8 @@ impl AuthEditor {
             .and_then(|label| options.iter().position(|option| *option == label))
             .map(IndexPath::new);
         let labels: Vec<SharedString> = options.into_iter().map(SharedString::from).collect();
-        let select = cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx));
+        let select =
+            cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx));
         self._subscriptions.push(cx.subscribe_in(
             &select,
             window,

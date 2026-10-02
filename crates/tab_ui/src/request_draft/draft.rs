@@ -280,18 +280,20 @@ impl RequestDraft {
 
         let inherited = self.inherited.clone();
         let auth = cx.new(|cx| {
-            let mut editor =
-                AuthEditor::new(self.request.auth.clone(), AuthTarget::Http, self.variables.clone());
+            let mut editor = AuthEditor::new(
+                self.request.auth.clone(),
+                AuthTarget::Http,
+                self.variables.clone(),
+            );
             editor.set_inherited(inherited, cx);
             editor
         });
-        self._subscriptions.push(
-            cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
+        self._subscriptions
+            .push(cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
                 this.request.auth = event.0.clone();
                 this.refresh_generated_headers(cx);
                 cx.notify();
-            }),
-        );
+            }));
         self.auth = Some(auth.clone());
 
         auth

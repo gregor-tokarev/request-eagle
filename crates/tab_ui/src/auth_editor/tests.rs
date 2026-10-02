@@ -40,9 +40,10 @@ fn each_row_edits_a_field_or_choice_of_its_kind() {
                 match row {
                     Row::Text(field) => {
                         let mut edited = auth.clone();
-                        *field.text_mut(&mut edited).unwrap_or_else(|| {
-                            panic!("{field:?} is not a field of {auth:?}")
-                        }) = "edited".into();
+                        *field
+                            .text_mut(&mut edited)
+                            .unwrap_or_else(|| panic!("{field:?} is not a field of {auth:?}")) =
+                            "edited".into();
                         assert_eq!(field.text(&edited), "edited");
                         assert_ne!(edited, auth, "{field:?} of {auth:?}");
                     }
@@ -95,7 +96,9 @@ fn forms_show_the_fields_their_choices_need() {
     assert!(!fields.contains(&Row::SecretBase64));
 
     // gRPC calls have no query, so nothing offers it.
-    let Auth::Jwt(sent) = &jwt else { unreachable!() };
+    let Auth::Jwt(sent) = &jwt else {
+        unreachable!()
+    };
     assert_eq!(sent.add_to, AuthLocation::Query);
     let fields = rows(&jwt, false);
     assert!(!fields.contains(&Row::Choice(Choice::AddTo)));

@@ -115,13 +115,10 @@ fn authorization_code(
     }
 
     let token = async move {
-        let code = smol::future::or(
-            receive_code(&listeners, callback.path(), &state),
-            async {
-                smol::Timer::after(SIGN_IN_TIMEOUT).await;
-                Err("Timed out waiting for the browser to return after signing in".to_owned())
-            },
-        )
+        let code = smol::future::or(receive_code(&listeners, callback.path(), &state), async {
+            smol::Timer::after(SIGN_IN_TIMEOUT).await;
+            Err("Timed out waiting for the browser to return after signing in".to_owned())
+        })
         .await?;
         drop(listeners);
 
@@ -334,7 +331,12 @@ async fn receive_code(
         }
 
         let Some(code) = parameters.get("code") else {
-            respond(&mut stream, "400 Bad Request", "The authorization code is missing.").await;
+            respond(
+                &mut stream,
+                "400 Bad Request",
+                "The authorization code is missing.",
+            )
+            .await;
             continue;
         };
         if parameters.get("state").map(String::as_str) != Some(state) {
@@ -364,13 +366,10 @@ async fn read_target(stream: &mut TcpStream) -> Option<String> {
     let mut buffer = [0; 1024];
 
     while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-        let read = smol::future::or(
-            async { stream.read(&mut buffer).await.ok() },
-            async {
-                smol::Timer::after(Duration::from_secs(10)).await;
-                None
-            },
-        )
+        let read = smol::future::or(async { stream.read(&mut buffer).await.ok() }, async {
+            smol::Timer::after(Duration::from_secs(10)).await;
+            None
+        })
         .await?;
         if read == 0 || head.len() > 16 * 1024 {
             return None;

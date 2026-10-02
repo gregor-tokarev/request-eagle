@@ -72,7 +72,10 @@ fn simple_credentials_go_where_they_are_configured() {
         credentials(Auth::Bearer(BearerAuth {
             token: "abc".into()
         })),
-        [Credential::Header("Authorization".into(), "Bearer abc".into())]
+        [Credential::Header(
+            "Authorization".into(),
+            "Bearer abc".into()
+        )]
     );
     assert_eq!(
         credentials(Auth::Basic(PasswordAuth {
@@ -90,7 +93,10 @@ fn simple_credentials_go_where_they_are_configured() {
             header_prefix: "Token".into(),
             ..OAuth2Auth::default()
         })),
-        [Credential::Header("Authorization".into(), "Token token".into())]
+        [Credential::Header(
+            "Authorization".into(),
+            "Token token".into()
+        )]
     );
     assert_eq!(
         credentials(Auth::OAuth2(OAuth2Auth {
@@ -182,7 +188,10 @@ fn signing_kinds_cannot_authorize_grpc_calls() {
         .new_auth()
         .credentials(None, SystemTime::now())
         .unwrap_err();
-    assert!(error.contains("OAuth 1.0 cannot authorize gRPC calls"), "{error}");
+    assert!(
+        error.contains("OAuth 1.0 cannot authorize gRPC calls"),
+        "{error}"
+    );
 
     // Digest sends nothing before a challenge, which a call never gets.
     assert!(AuthKind::Bearer.supports_grpc() && AuthKind::Jwt.supports_grpc());
@@ -191,9 +200,8 @@ fn signing_kinds_cannot_authorize_grpc_calls() {
 #[test]
 fn oauth1_signs_the_query_form_and_protocol_parameters() {
     // Twitter's documented example of a signed request.
-    let url =
-        Url::parse("https://api.twitter.com/1.1/statuses/update.json?include_entities=true")
-            .unwrap();
+    let url = Url::parse("https://api.twitter.com/1.1/statuses/update.json?include_entities=true")
+        .unwrap();
     let form = [(
         "status".to_owned(),
         "Hello Ladies + Gentlemen, a signed OAuth request!".to_owned(),
@@ -243,11 +251,9 @@ fn oauth1_signs_the_query_form_and_protocol_parameters() {
         "oauth_signature".into(),
         "hCtSmYh+iHYCEqBWrE7C7hYmtUk=".into()
     )));
-    assert!(
-        credentials
-            .iter()
-            .all(|credential| matches!(credential, Credential::Query(name, _) if name.starts_with("oauth_")))
-    );
+    assert!(credentials.iter().all(
+        |credential| matches!(credential, Credential::Query(name, _) if name.starts_with("oauth_"))
+    ));
 
     // PLAINTEXT sends the key itself, and a realm comes first.
     let credentials = oauth1::sign_with(
@@ -330,8 +336,9 @@ fn rsa_public_key() -> UnparsedPublicKey<Vec<u8>> {
 fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
     let auth = JwtAuth {
         secret: "your-256-bit-secret".into(),
-        payload: "{\n  \"sub\": \"1234567890\",\n  \"name\": \"John Doe\",\n  \"iat\": 1516239022\n}"
-            .into(),
+        payload:
+            "{\n  \"sub\": \"1234567890\",\n  \"name\": \"John Doe\",\n  \"iat\": 1516239022\n}"
+                .into(),
         ..JwtAuth::default()
     };
     let credentials = Auth::Jwt(auth.clone())
@@ -380,7 +387,10 @@ fn jwt_tokens_match_the_reference_and_keep_the_written_claim_order() {
     })
     .credentials(None, SystemTime::now())
     .unwrap_err();
-    assert!(error.starts_with("The JWT payload is not valid JSON"), "{error}");
+    assert!(
+        error.starts_with("The JWT payload is not valid JSON"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -557,7 +567,10 @@ fn aws_signatures_match_the_signature_v4_test_suite() {
         header(&credentials, "X-Amz-Content-Sha256"),
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     );
-    assert!(header(&credentials, "Authorization").contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date,"));
+    assert!(
+        header(&credentials, "Authorization")
+            .contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date,")
+    );
 
     let error = Auth::AwsSignature(AwsSignatureAuth {
         region: " ".into(),
@@ -576,7 +589,10 @@ fn previews_show_known_values_and_leave_the_rest_for_sending() {
             password: "pass".into(),
         })
         .preview_headers(),
-        [("Authorization".to_owned(), Some("Basic dXNlcjpwYXNz".to_owned()))]
+        [(
+            "Authorization".to_owned(),
+            Some("Basic dXNlcjpwYXNz".to_owned())
+        )]
     );
     assert_eq!(
         Auth::Bearer(BearerAuth {
@@ -624,7 +640,8 @@ fn saved_requests_keep_only_an_authorization_they_choose() {
         request
     );
 
-    let none: crate::WebSocketRequest = toml::from_str("url = \"wss://example.com\"\n[auth]\ntype = \"none\"").unwrap();
+    let none: crate::WebSocketRequest =
+        toml::from_str("url = \"wss://example.com\"\n[auth]\ntype = \"none\"").unwrap();
     assert_eq!(none.auth, Auth::None);
 
     // Fields left out take their defaults.

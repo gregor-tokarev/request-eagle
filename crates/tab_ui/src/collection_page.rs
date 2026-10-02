@@ -3,6 +3,8 @@ use std::{
     path::PathBuf,
 };
 
+use collection::SharedSettings;
+use environment::EnvironmentSessions;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -12,8 +14,6 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use collection::SharedSettings;
-use environment::EnvironmentSessions;
 use request::{Auth, RequestScripts};
 
 use crate::Environments;

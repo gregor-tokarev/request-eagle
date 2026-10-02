@@ -785,7 +785,8 @@ fn authorizations_are_saved_and_runs_send_the_collections() {
     // Requests inherit the collection's authorization unless they set one.
     let created = cli.create(&collection, json!({"method":"GET", "url":"{{base}}/me"}));
     assert!(created["request"].get("auth").is_none(), "{created}");
-    let response = cli.call(json!({"command":"requests.run","path":created["path"],"timeout_ms":5000}));
+    let response =
+        cli.call(json!({"command":"requests.run","path":created["path"],"timeout_ms":5000}));
     server.join().unwrap();
     assert_eq!(response["status"], 204);
 

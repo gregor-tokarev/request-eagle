@@ -269,7 +269,10 @@ fn signing_failures_stop_the_request_before_it_goes_out() {
             .execute(request, variables(&[]))
             .await
             .unwrap_err();
-        assert_eq!(error.to_string(), "Enter the AWS access key in the Auth tab");
+        assert_eq!(
+            error.to_string(),
+            "Enter the AWS access key in the Auth tab"
+        );
     });
 }
 
@@ -299,7 +302,10 @@ fn client_credentials_tokens_come_from_the_token_endpoint() {
 
         let received = server.await;
         assert!(received[0].head.starts_with("POST /token "));
-        assert_eq!(received[0].header("authorization"), Some("Basic YXBwOnNlY3JldA=="));
+        assert_eq!(
+            received[0].header("authorization"),
+            Some("Basic YXBwOnNlY3JldA==")
+        );
         assert_eq!(received[0].header("accept"), Some("application/json"));
         assert_eq!(
             String::from_utf8_lossy(&received[0].body),
@@ -384,7 +390,9 @@ fn authorization_codes_return_to_the_callback_and_are_exchanged_with_pkce() {
             let get = |target: String| async move {
                 let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
                 stream
-                    .write_all(format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+                    .write_all(
+                        format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes(),
+                    )
                     .await
                     .unwrap();
                 let mut response = String::new();
@@ -430,7 +438,10 @@ fn callbacks_must_return_to_this_computer() {
     let Err(error) = executor().oauth2_token(&auth, &variables(&[])) else {
         panic!("expected an error");
     };
-    assert!(error.starts_with("The callback URL must be a loopback address"), "{error}");
+    assert!(
+        error.starts_with("The callback URL must be a loopback address"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -445,7 +456,10 @@ fn curl_snippets_carry_the_authorization() {
     };
     let values = HashMap::from([("user".to_owned(), "eagle".to_owned())]);
     let command = request.curl_command(&values, None);
-    assert!(command.ends_with("\\\n--user 'eagle:{{unknown}}'"), "{command}");
+    assert!(
+        command.ends_with("\\\n--user 'eagle:{{unknown}}'"),
+        "{command}"
+    );
 
     let command = HttpRequest {
         auth: Auth::ApiKey(ApiKeyAuth {
@@ -456,14 +470,20 @@ fn curl_snippets_carry_the_authorization() {
         ..request.clone()
     }
     .curl_command(&values, None);
-    assert!(command.contains("'https://example.com/items?key=eagle'"), "{command}");
+    assert!(
+        command.contains("'https://example.com/items?key=eagle'"),
+        "{command}"
+    );
 
     let command = HttpRequest {
         auth: AuthKind::Digest.new_auth(),
         ..request.clone()
     }
     .curl_command(&values, None);
-    assert!(command.ends_with("\\\n--digest \\\n--user ':'"), "{command}");
+    assert!(
+        command.ends_with("\\\n--digest \\\n--user ':'"),
+        "{command}"
+    );
 
     let command = HttpRequest {
         auth: Auth::AwsSignature(AwsSignatureAuth {
@@ -477,7 +497,8 @@ fn curl_snippets_carry_the_authorization() {
     }
     .curl_command(&values, None);
     assert!(
-        command.ends_with("\\\n--aws-sigv4 'aws:amz:us-east-1:execute-api' \\\n--user 'AKID:secret'"),
+        command
+            .ends_with("\\\n--aws-sigv4 'aws:amz:us-east-1:execute-api' \\\n--user 'AKID:secret'"),
         "{command}"
     );
 }

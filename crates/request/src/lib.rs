@@ -52,9 +52,9 @@ mod request_url_tests;
 pub use scripts::{GrpcScripts, RequestScripts, ScriptLog, ScriptPhase, ScriptReport, ScriptTest};
 
 pub use auth::{
-    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm,
-    JwtAuth, OAuth1Auth, OAuth1Signature, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant,
-    OAuth2Token, OAuth2TokenRequest, PasswordAuth,
+    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm, JwtAuth,
+    OAuth1Auth, OAuth1Signature, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, OAuth2Token,
+    OAuth2TokenRequest, PasswordAuth,
 };
 pub use body::{Body, FormPart, RawLanguage};
 pub use certificates::{CertificateFiles, ClientCertificate};

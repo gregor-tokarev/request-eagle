@@ -33,10 +33,10 @@ mod status;
 mod transport;
 
 pub use call::{GrpcCall, GrpcEvent, GrpcEvents, GrpcMessage};
+pub(crate) use client::auth_metadata;
 pub use client::{GrpcClient, PreparedCall};
 pub use definition::{GrpcMethod, GrpcService, MethodKind, ServiceDefinition};
 pub use error::GrpcError;
 pub use model::{GrpcDefinition, GrpcRequest, GrpcSettings};
 pub use status::GrpcStatus;
-pub(crate) use client::auth_metadata;
 pub(crate) use transport::Target;

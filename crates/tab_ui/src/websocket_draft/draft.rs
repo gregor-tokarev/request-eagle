@@ -205,14 +205,13 @@ impl WebSocketDraft {
             editor.set_inherited(inherited, cx);
             editor
         });
-        self._subscriptions.push(
-            cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
+        self._subscriptions
+            .push(cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
                 this.request.auth = event.0.clone();
                 this.refresh_handshake_headers(cx);
                 // The Headers tab counts the handshake's headers.
                 this.notify_controls(cx);
-            }),
-        );
+            }));
         self.auth = Some(auth.clone());
 
         auth

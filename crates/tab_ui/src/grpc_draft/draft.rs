@@ -251,8 +251,11 @@ impl GrpcDraft {
 
         let inherited = self.inherited.clone();
         let auth = cx.new(|cx| {
-            let mut editor =
-                AuthEditor::new(self.request.auth.clone(), AuthTarget::Grpc, self.variables.clone());
+            let mut editor = AuthEditor::new(
+                self.request.auth.clone(),
+                AuthTarget::Grpc,
+                self.variables.clone(),
+            );
             editor.set_inherited(inherited, cx);
             editor
         });

@@ -183,7 +183,11 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
     let user = |username: &str, password: &str| ("user", Some(format!("{username}:{password}")));
 
     match &auth {
-        _ if own_authorization && auth.credential_name().is_some_and(|(_, name)| name == "Authorization") => {
+        _ if own_authorization
+            && auth
+                .credential_name()
+                .is_some_and(|(_, name)| name == "Authorization") =>
+        {
             Vec::new()
         }
         Auth::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
@@ -199,7 +203,11 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
             vec![
                 (
                     "aws-sigv4",
-                    Some(format!("aws:amz:{}:{}", aws.region.trim(), aws.service.trim())),
+                    Some(format!(
+                        "aws:amz:{}:{}",
+                        aws.region.trim(),
+                        aws.service.trim()
+                    )),
                 ),
                 user(aws.access_key.trim(), aws.secret_key.trim()),
             ]

@@ -83,8 +83,10 @@ impl Field {
         }
     }
 
-    pub(super) fn placeholder(self) -> &'static str {
+    pub(super) fn placeholder(self, kind: AuthKind) -> &'static str {
         match self {
+            // OAuth 1.0 sends a callback only to get a request token.
+            Self::CallbackUrl if kind == AuthKind::OAuth1 => "Optional",
             Self::Key => "X-API-Key",
             Self::Token | Self::AccessToken => "Token",
             Self::PrivateKey => "-----BEGIN PRIVATE KEY-----",
@@ -94,11 +96,11 @@ impl Field {
             Self::TokenUrl => "https://example.com/oauth/token",
             Self::Scope => "read write",
             Self::Payload => "{\"sub\": \"1234567890\"}",
-            Self::JwtHeaders => "{\"kid\": \"key-1\"}",
             Self::QueryParam => "token",
             Self::Region => "us-east-1",
             Self::Service => "execute-api",
             Self::Realm | Self::Verifier | Self::SessionToken => "Optional",
+            Self::JwtHeaders => "Optional, such as {\"kid\": \"key-1\"}",
             _ => self.label(),
         }
     }
@@ -175,7 +177,10 @@ const ADD_TO: [(AuthLocation, &str); 2] = [
 ];
 
 const CLIENT_AUTHENTICATION: [(OAuth2ClientAuthentication, &str); 2] = [
-    (OAuth2ClientAuthentication::Header, "Send as Basic Auth header"),
+    (
+        OAuth2ClientAuthentication::Header,
+        "Send as Basic Auth header",
+    ),
     (OAuth2ClientAuthentication::Body, "Send credentials in body"),
 ];
 
@@ -193,12 +198,19 @@ impl Choice {
     pub(super) fn options(self) -> Vec<&'static str> {
         match self {
             Self::AddTo => ADD_TO.iter().map(|(_, label)| *label).collect(),
-            Self::SignatureMethod => OAuth1Signature::ALL.iter().map(|method| method.label()).collect(),
+            Self::SignatureMethod => OAuth1Signature::ALL
+                .iter()
+                .map(|method| method.label())
+                .collect(),
             Self::GrantType => OAuth2Grant::ALL.iter().map(|grant| grant.label()).collect(),
-            Self::ClientAuthentication => {
-                CLIENT_AUTHENTICATION.iter().map(|(_, label)| *label).collect()
-            }
-            Self::Algorithm => JwtAlgorithm::ALL.iter().map(|algorithm| algorithm.label()).collect(),
+            Self::ClientAuthentication => CLIENT_AUTHENTICATION
+                .iter()
+                .map(|(_, label)| *label)
+                .collect(),
+            Self::Algorithm => JwtAlgorithm::ALL
+                .iter()
+                .map(|algorithm| algorithm.label())
+                .collect(),
         }
     }
 
@@ -333,7 +345,10 @@ pub(super) fn rows(auth: &Auth, query: bool) -> Vec<Row> {
                 rows.push(Text(HeaderPrefix));
             }
             rows.extend(add_to);
-            rows.extend([Row::Heading("Get New Access Token"), Pick(Choice::GrantType)]);
+            rows.extend([
+                Row::Heading("Get New Access Token"),
+                Pick(Choice::GrantType),
+            ]);
             match auth.grant_type {
                 OAuth2Grant::AuthorizationCode => {
                     rows.extend([Text(CallbackUrl), Text(AuthUrl), Text(TokenUrl)]);

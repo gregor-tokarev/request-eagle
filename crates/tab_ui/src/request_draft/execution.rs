@@ -103,9 +103,10 @@ pub(super) fn generated_headers(request: &HttpRequest, auth: &Auth) -> Vec<(Stri
         }
     }
 
-    // The authorization replaces credentials written in the URL.
+    // An Authorization header of the authorization replaces credentials
+    // written in the URL.
     let auth_headers = auth.preview_headers();
-    if !auth_headers.is_empty() {
+    if auth_headers.iter().any(|(name, _)| name == "Authorization") {
         headers.retain(|(name, _)| name != "Authorization");
     }
     let pending = if auth.kind().computes_credentials() {

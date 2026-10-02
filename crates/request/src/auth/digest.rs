@@ -163,8 +163,7 @@ fn digest_challenges(header: &str) -> Vec<Challenge> {
         search = start + "digest".len();
 
         // A scheme starts the header or follows the previous challenge.
-        if (before.is_empty() || before.ends_with(',')) && after.starts_with(char::is_whitespace)
-        {
+        if (before.is_empty() || before.ends_with(',')) && after.starts_with(char::is_whitespace) {
             challenges.push(Challenge {
                 params: parameters(after),
             });
@@ -179,9 +178,12 @@ fn parameters(mut text: &str) -> Vec<(String, String)> {
     let mut parameters = Vec::new();
 
     loop {
-        text = text.trim_start_matches(|character: char| character == ',' || character.is_whitespace());
+        text = text
+            .trim_start_matches(|character: char| character == ',' || character.is_whitespace());
         let end = text
-            .find(|character: char| character == '=' || character == ',' || character.is_whitespace())
+            .find(|character: char| {
+                character == '=' || character == ',' || character.is_whitespace()
+            })
             .unwrap_or(text.len());
         let name = &text[..end];
         let rest = text[end..].trim_start();

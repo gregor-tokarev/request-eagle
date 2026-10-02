@@ -9,8 +9,8 @@ use bytes::Bytes;
 use http_client::http::header::WWW_AUTHENTICATE;
 
 use crate::{
-    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, HttpRequest,
-    RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
+    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
+    RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.

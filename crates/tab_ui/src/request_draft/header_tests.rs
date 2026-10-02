@@ -10,7 +10,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
         body: Some(request::Body::json("{}")),
         ..Default::default()
     };
-    let preview = super::execution::generated_headers(&request);
+    let preview = super::execution::generated_headers(&request, &request.auth);
     assert!(preview.iter().all(|(_, value)| value == "Resolved on Send"));
 
     for name in [
@@ -23,7 +23,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
         let values = HashMap::from([("header_name".into(), name.into())]);
         let resolved = request.resolve_variables(&values).unwrap();
         assert!(
-            super::execution::generated_headers(&resolved)
+            super::execution::generated_headers(&resolved, &resolved.auth)
                 .iter()
                 .all(|(generated, _)| generated != name)
         );
@@ -54,7 +54,7 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
             path: path.into(),
             ..Default::default()
         };
-        let headers = super::execution::generated_headers(&request);
+        let headers = super::execution::generated_headers(&request, &request.auth);
         assert_eq!(
             headers
                 .iter()
@@ -68,7 +68,7 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
             .headers
             .push(("AUTHORIZATION".into(), "Bearer explicit".into()));
         assert!(
-            super::execution::generated_headers(&request)
+            super::execution::generated_headers(&request, &request.auth)
                 .iter()
                 .all(|(name, _)| name != "Authorization")
         );
@@ -78,7 +78,7 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
         ..Default::default()
     };
     assert!(
-        super::execution::generated_headers(&request)
+        super::execution::generated_headers(&request, &request.auth)
             .iter()
             .all(|(name, _)| name != "Authorization")
     );
@@ -97,14 +97,14 @@ fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
             path: path.into(),
             ..Default::default()
         };
-        let headers = super::execution::generated_headers(&request);
+        let headers = super::execution::generated_headers(&request, &request.auth);
         assert_eq!(headers[0], ("Host".into(), expected.into()), "{path}");
 
         request
             .headers
             .push(("hOsT".into(), "override.example".into()));
         assert!(
-            super::execution::generated_headers(&request)
+            super::execution::generated_headers(&request, &request.auth)
                 .iter()
                 .all(|(name, _)| name != "Host")
         );
@@ -122,7 +122,7 @@ fn body_types_preview_their_content_type_and_length() {
             body: Some(body),
             ..Default::default()
         };
-        let headers = super::execution::generated_headers(&request);
+        let headers = super::execution::generated_headers(&request, &request.auth);
         let header = |name: &str| {
             headers
                 .iter()
@@ -193,4 +193,44 @@ fn body_types_preview_their_content_type_and_length() {
         ),
         (None, None)
     );
+}
+
+#[test]
+fn the_authorization_shows_the_headers_it_adds() {
+    let request = request::HttpRequest {
+        path: "https://user:pass@example.com".into(),
+        ..Default::default()
+    };
+    let headers = |auth: &request::Auth| super::execution::generated_headers(&request, auth);
+    let authorization = |headers: Vec<(String, String)>| {
+        headers
+            .into_iter()
+            .filter(|(name, _)| name == "Authorization")
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>()
+    };
+
+    // Credentials in the URL stand in until an authorization replaces them.
+    assert_eq!(
+        authorization(headers(&request::Auth::Inherit)),
+        ["Basic dXNlcjpwYXNz"]
+    );
+    let bearer = request::Auth::Bearer(request::BearerAuth {
+        token: "{{token}}".into(),
+    });
+    assert_eq!(authorization(headers(&bearer)), ["Resolved on Send"]);
+    assert_eq!(
+        authorization(headers(&request::AuthKind::AwsSignature.new_auth())),
+        ["Calculated on Send"]
+    );
+
+    // An API key in its own header leaves the URL's credentials.
+    let api_key = request::Auth::ApiKey(request::ApiKeyAuth {
+        key: "X-Api-Key".into(),
+        value: "secret".into(),
+        add_to: request::AuthLocation::Header,
+    });
+    let preview = headers(&api_key);
+    assert!(preview.contains(&("X-Api-Key".into(), "secret".into())));
+    assert_eq!(authorization(preview), ["Basic dXNlcjpwYXNz"]);
 }

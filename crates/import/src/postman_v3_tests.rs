@@ -396,9 +396,11 @@ auth:
 
     let import = read(&collection).unwrap();
     let items = &import.collection.items;
-    let bearer = |token: &str| Auth::Bearer(BearerAuth {
-        token: token.into(),
-    });
+    let bearer = |token: &str| {
+        Auth::Bearer(BearerAuth {
+            token: token.into(),
+        })
+    };
 
     // The collection's first authorization is its own, which requests
     // inherit; others become the requests' own.

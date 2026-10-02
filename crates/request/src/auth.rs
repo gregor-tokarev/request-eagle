@@ -20,8 +20,7 @@ mod tests;
 
 pub(crate) use credentials::{Credential, authorize};
 pub use model::{
-    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm,
-    JwtAuth, OAuth1Auth, OAuth1Signature, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant,
-    PasswordAuth,
+    ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm, JwtAuth,
+    OAuth1Auth, OAuth1Signature, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth,
 };
 pub use oauth2::{OAuth2Token, OAuth2TokenRequest};
