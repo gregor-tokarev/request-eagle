@@ -215,4 +215,11 @@ fn environment_files_may_leave_out_their_variables() {
         parse("name: Empty\n").err().unwrap(),
         ImportError::UnknownFormat
     ));
+
+    // Variables in another shape are not dropped without a word.
+    fs::write(&path, "name: Dev\nvalues:\n  token: secret\n").unwrap();
+    assert!(matches!(
+        read(&path).err().unwrap(),
+        ImportError::UnknownFormat
+    ));
 }

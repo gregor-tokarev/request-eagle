@@ -180,7 +180,8 @@ pub fn read(path: &Path) -> Result<Import, ImportError> {
     // would not show to be an environment.
     if is_environment_file(path) {
         let document = document(&source)?;
-        if document["name"].is_string() {
+        let values = &document["values"];
+        if document["name"].is_string() && (values.is_null() || values.is_array()) {
             return Ok(Import::Environment(postman_environment::convert(&document)));
         }
     }
