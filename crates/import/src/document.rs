@@ -42,7 +42,7 @@ pub enum ImportError {
     PostmanV3File,
     #[error(
         "The folder is not a Postman workspace or collection. Choose a Git repository connected \
-         to Postman, or one of the folders in its postman/collections."
+         to Postman, or one of its collection folders."
     )]
     NotPostmanFolder,
     #[error("OpenAPI {0} is not supported. Use OpenAPI 3 or Swagger 2.0.")]

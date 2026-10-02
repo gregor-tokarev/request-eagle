@@ -58,30 +58,46 @@ impl CollectionPanel {
         text.update(cx, |text, cx| text.focus(window, cx));
     }
 
-    /// Adds an imported collection and selects it. Its folders start
-    /// collapsed, so a large import shows its structure first.
-    pub fn add_imported_collection(
+    /// Adds imported collections and selects the first. Their folders start
+    /// collapsed, so a large import shows its structure first. Several
+    /// collections start collapsed too, so they show as a list.
+    pub fn add_imported_collections(
         &mut self,
-        collection: Collection,
+        collections: Vec<Collection>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let path = collection.path.clone();
-        self.collections.add_collection(collection);
+        let paths: Vec<_> = collections
+            .iter()
+            .map(|collection| collection.path.clone())
+            .collect();
+        let Some(first) = paths.first() else {
+            return;
+        };
+
+        for collection in collections {
+            self.collections.add_collection(collection);
+        }
         self.rename = None;
         self.pending_delete = None;
         self.error = None;
-        self.reveal(&path, None, window, cx);
+        self.reveal(first, None, window, cx);
 
-        if let Some(index) = self.selected {
+        let several = paths.len() > 1;
+        for path in &paths {
+            let Some(index) = self.tree.items.iter().position(|item| &item.path == path) else {
+                continue;
+            };
+
+            let start = if several { index } else { index + 1 };
             let end = self.tree.items[index].end;
             self.collapsed
-                .extend((index + 1..end).filter(|&child| self.tree.items[child].is_branch()));
-
-            let rows = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
-            self.unfiltered_rows = Some(rows.clone());
-            self.apply_rows(rows, false, cx);
+                .extend((start..end).filter(|&item| self.tree.items[item].is_branch()));
         }
+
+        let rows = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
+        self.unfiltered_rows = Some(rows.clone());
+        self.apply_rows(rows, false, cx);
 
         if let Some(row) = self.selected_row() {
             self.scroll_handle.scroll_to_item(row, ScrollStrategy::Top);
@@ -306,11 +322,9 @@ impl ImportDialog {
             .iter()
             .map(|collection| path_name(&collection.path))
             .collect();
-        for collection in collections {
-            panel.update(cx, |panel, cx| {
-                panel.add_imported_collection(collection, window, cx)
-            });
-        }
+        panel.update(cx, |panel, cx| {
+            panel.add_imported_collections(collections, window, cx)
+        });
         if !environments.is_empty() {
             panel.update(cx, |_, cx| {
                 cx.emit(CollectionPanelEvent::EnvironmentsImported)
