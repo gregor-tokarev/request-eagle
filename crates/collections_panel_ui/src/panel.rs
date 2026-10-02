@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionRegistry, FileEntry, MovePlacement};
+use collection::{CollectionRegistry, FileEntry, MovePlacement, SharedSettings};
 
 use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
@@ -12,7 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{HttpRequest, Request, RequestScripts};
+use request::{HttpRequest, Request};
 
 use super::{
     actions::{DeleteItem, RenameItem},
@@ -27,7 +27,8 @@ pub enum CollectionPanelEvent {
         path: PathBuf,
         name: SharedString,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        /// The scripts and authorization it shares with its requests.
+        shared: SharedSettings,
     },
     CollectionRenamed {
         previous_path: PathBuf,
@@ -282,7 +283,10 @@ impl CollectionPanel {
                     path: item.path.clone(),
                     name: item.label.clone(),
                     variables: collection.local_env().entries.clone(),
-                    scripts: collection.scripts().clone(),
+                    shared: SharedSettings {
+                        scripts: collection.scripts().clone(),
+                        auth: collection.auth().clone(),
+                    },
                 })
             }
             ItemKind::Folder => None,

@@ -344,3 +344,33 @@ fn writes_each_body_type_with_the_option_that_sends_it() {
         "curl --location --request POST 'https://example.com/upload'"
     );
 }
+
+#[test]
+fn signed_bodies_are_the_bytes_curl_sends() {
+    let form = |fields: &[(&str, &str)]| {
+        let body = Body::UrlEncoded {
+            fields: fields
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        };
+        String::from_utf8(crate::curl::sent_body(Some(&body)).unwrap()).unwrap()
+    };
+
+    // What cURL 8 sent for each `--data-urlencode` of these fields.
+    assert_eq!(form(&[("a b", "c d")]), "a+b=c+d");
+    assert_eq!(form(&[("", "c")]), "c");
+    assert_eq!(
+        form(&[("x", "~!*()'@#$&+/")]),
+        "x=~%21%2A%28%29%27%40%23%24%26%2B%2F"
+    );
+    assert_eq!(form(&[("a", "1"), ("b", "2 3")]), "a=1&b=2+3");
+
+    assert_eq!(crate::curl::sent_body(None), Some(Vec::new()));
+    assert_eq!(
+        crate::curl::sent_body(Some(&Body::Binary {
+            file: "data.bin".into()
+        })),
+        None
+    );
+}

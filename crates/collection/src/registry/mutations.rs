@@ -8,8 +8,10 @@ use environment::EnvironmentSaveError;
 use thiserror::Error;
 
 use crate::collection::{is_reserved, load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry};
-use request::{Request, RequestScripts};
+use crate::{
+    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry, SharedSettings,
+};
+use request::Request;
 
 impl CollectionRegistry {
     /// Saves a request without replacing its identity or externally edited metadata.
@@ -68,18 +70,19 @@ impl CollectionRegistry {
     }
 
     /// Saves the collection's variables to `environment.toml` and its scripts
-    /// to the settings file, leaving unchanged files as they are.
+    /// and authorization to the settings file, leaving unchanged files as
+    /// they are.
     pub fn update_collection(
         &mut self,
         path: &Path,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
     ) -> Result<(), CollectionEditError> {
         self.collections
             .iter_mut()
             .find(|collection| collection.path == path)
             .ok_or(CollectionEditError::NotFound)?
-            .save_settings(variables, scripts)
+            .save_settings(variables, shared)
     }
 
     /// Request names live in TOML; collection and folder names live on disk.

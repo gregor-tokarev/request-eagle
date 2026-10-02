@@ -410,13 +410,13 @@ impl MainView {
                     path,
                     name,
                     variables,
-                    scripts,
+                    shared,
                 }) = self.sidebar.read(cx).open_event_at(&path)
                 else {
                     return false;
                 };
 
-                self.open_collection(&path, name, variables, scripts, window, cx);
+                self.open_collection(&path, name, variables, shared, window, cx);
             }
             SavedTab::Runner { path } => {
                 let Some(CollectionPanelEvent::RunRequests {
@@ -607,7 +607,7 @@ impl MainView {
         path: &Path,
         name: SharedString,
         variables: HashMap<String, String>,
-        scripts: request::RequestScripts,
+        shared: collection::SharedSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -616,8 +616,19 @@ impl MainView {
             return;
         }
 
-        let page = cx
-            .new(|_| CollectionPage::new(path.to_path_buf(), name.to_string(), variables, scripts));
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let page = cx.new(|cx| {
+            CollectionPage::new(
+                path.to_path_buf(),
+                name.to_string(),
+                variables,
+                shared,
+                sessions,
+                Some(environments),
+                cx,
+            )
+        });
         let index = self.open_tab(name, Page::Collection(page.clone()), cx);
         let id = self.tabs[index].id;
         let subscription = cx.subscribe_in(
@@ -1096,7 +1107,10 @@ impl MainView {
                                 &path,
                                 &settings.name,
                                 settings.variables.iter().cloned().collect(),
-                                settings.scripts.clone(),
+                                collection::SharedSettings {
+                                    scripts: settings.scripts.clone(),
+                                    auth: settings.auth.clone(),
+                                },
                                 cx,
                             )
                         })

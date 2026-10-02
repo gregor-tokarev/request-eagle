@@ -5,14 +5,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use collection::{Collection, FileEntry};
+use collection::{Collection, FileEntry, SharedSettings};
 use environment::{EnvironmentSession, EnvironmentSessions};
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{
-    CookieJar, Execution, ExecutionError, ExecutionInfo, LocalVariables, Request, RequestExecutor,
-    RequestScripts, RequestVariables,
+    Auth, CookieJar, Execution, ExecutionError, ExecutionInfo, LocalVariables, Request,
+    RequestExecutor, RequestScripts, RequestVariables,
 };
 
 use super::data_file::{self, DataRow};
@@ -90,6 +90,8 @@ struct RunContext {
     environment_values: HashMap<String, String>,
     environment_error: Option<String>,
     scripts: Result<RequestScripts, String>,
+    /// What requests that inherit their authorization send.
+    auth: Auth,
     /// The run's own jar, and the app's jar that keeps its cookies afterward.
     cookies: Option<(CookieJar, CookieJar)>,
     /// `pm.variables`, which last for the whole run, as in Postman.
@@ -573,7 +575,7 @@ impl CollectionRunner {
                         .map_or_else(|| Ok(HashMap::new()), read_entries)?;
                     Ok((values, environment))
                 }),
-                scripts: Collection::load_scripts(&collection).map_err(|error| error.to_string()),
+                settings: Collection::load_settings(&collection).map_err(|error| error.to_string()),
                 collection,
                 environment,
             }
@@ -595,7 +597,7 @@ impl CollectionRunner {
             requests,
             missing,
             files,
-            scripts,
+            settings,
             collection,
             environment,
         } = snapshot;
@@ -676,7 +678,11 @@ impl CollectionRunner {
                 collection_values,
                 environment_values,
                 environment_error,
-                scripts,
+                auth: settings
+                    .as_ref()
+                    .map(|settings| settings.auth.clone())
+                    .unwrap_or_default(),
+                scripts: settings.map(|settings| settings.scripts),
                 cookies: kept,
                 locals: LocalVariables::default(),
             },
@@ -800,6 +806,7 @@ impl CollectionRunner {
             context.environment_error.clone(),
             context.session.clone(),
         )
+        .with_collection_auth(context.auth.clone())
         .with_collection_scripts(context.scripts.clone())
         .with_local_variables(context.locals.clone())
         .with_iteration_data(run.data_row(position.iteration))
@@ -893,7 +900,8 @@ struct Snapshot {
     missing: Vec<SharedString>,
     /// The collection's variables and the active environment's.
     files: Result<(Values, Values), String>,
-    scripts: Result<RequestScripts, String>,
+    /// The scripts and authorization the collection shares with requests.
+    settings: Result<SharedSettings, String>,
     /// Whose session the run changes.
     collection: PathBuf,
     /// The name of the environment whose values `files` holds.

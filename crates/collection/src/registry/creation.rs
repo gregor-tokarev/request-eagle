@@ -31,6 +31,7 @@ impl CollectionRegistry {
                 entries: HashMap::new(),
             },
             scripts: Default::default(),
+            auth: Default::default(),
         });
 
         Ok(path)
@@ -62,6 +63,7 @@ impl CollectionRegistry {
                 body: None,
                 query: Vec::new(),
                 path_variables: Vec::new(),
+                auth: Default::default(),
                 scripts: Default::default(),
                 settings: Default::default(),
             }),

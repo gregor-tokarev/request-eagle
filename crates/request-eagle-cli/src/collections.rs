@@ -59,6 +59,7 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
                 "path": path,
                 "variables": collection.local_env().entries,
                 "scripts": {"pre_request": scripts.pre_request, "post_response": scripts.post_response},
+                "auth": collection.auth(),
                 "entries": entries(&collection.entries),
             }));
         }

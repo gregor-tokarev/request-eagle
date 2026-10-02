@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CollectionRegistry, Entry, ImportedCollection, ImportedItem};
 
-use request::{HttpRequest, Method, Request, RequestScripts};
+use request::{Auth, BearerAuth, HttpRequest, Method, Request, RequestScripts};
 
 struct Fixture(PathBuf);
 
@@ -53,6 +53,9 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
             pre_request: "pm.variables.set('a', 1)".into(),
             post_response: String::new(),
         },
+        auth: Auth::Bearer(BearerAuth {
+            token: "{{token}}".into(),
+        }),
         items: vec![
             ImportedItem::Folder {
                 name: "Pets".into(),
@@ -82,6 +85,12 @@ fn imported_collections_keep_their_order_settings_and_survive_reload() {
         Some("https://pets.test")
     );
     assert_eq!(collection.scripts().pre_request, "pm.variables.set('a', 1)");
+    assert_eq!(
+        collection.auth(),
+        &Auth::Bearer(BearerAuth {
+            token: "{{token}}".into()
+        })
+    );
     assert_eq!(names(&collection.entries), ["Pets", "Health"]);
 
     let Entry::Directory(folder) = &collection.entries[0] else {
@@ -106,6 +115,7 @@ fn imported_names_become_safe_unique_file_names() {
         name: "../Pets".into(),
         variables: HashMap::new(),
         scripts: RequestScripts::default(),
+        auth: Auth::Inherit,
         items: vec![
             request("Get /pets/{id}", "/pets/{id}"),
             request("Get /pets/{id}", "/pets/{id}"),

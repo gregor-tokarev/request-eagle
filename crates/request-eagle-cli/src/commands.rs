@@ -163,6 +163,14 @@ pub struct GrpcRequestInput {
     #[serde(default)]
     #[schemars(with = "Vec<FieldSchema>")]
     pub metadata: Vec<Field>,
+    /// The authorization, as `requests.get` shows it, such as
+    /// `{"type": "bearer", "token": "{{token}}"}`. Left out, the request
+    /// inherits its collection's; `{"type": "none"}` sends none. Kinds:
+    /// api_key, bearer, basic, digest, oauth1, oauth2, jwt and aws_signature
+    /// (gRPC requests cannot use digest, oauth1 or aws_signature).
+    #[serde(default, skip_serializing_if = "request::Auth::is_inherit")]
+    #[schemars(with = "Option<Value>")]
+    pub auth: request::Auth,
     /// A `.proto` file; relative paths resolve from the collection directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proto_file: Option<PathBuf>,
@@ -219,6 +227,15 @@ pub struct RequestInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_variables: Vec<(String, String)>,
     pub body: Option<Body>,
+    /// The authorization, as `requests.get` shows it, such as
+    /// `{"type": "bearer", "token": "{{token}}"}`. Left out, the request
+    /// inherits its collection's; `{"type": "none"}` sends none. Kinds:
+    /// api_key, bearer, basic, digest, oauth1, oauth2, jwt and aws_signature
+    /// (gRPC requests cannot use digest, oauth1 or aws_signature).
+    #[serde(default, skip_serializing_if = "request::Auth::is_inherit")]
+    #[schemars(with = "Option<Value>")]
+    pub auth: request::Auth,
+
     #[serde(default)]
     pub pre_request: String,
     #[serde(default)]
