@@ -12,6 +12,8 @@ mod top_panel;
 mod workspace;
 
 #[cfg(test)]
+mod actions_tests;
+#[cfg(test)]
 mod history_panel_tests;
 
 pub use actions::{OpenGeneralSettings, OpenSettings};
