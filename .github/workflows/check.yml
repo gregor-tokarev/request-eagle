@@ -298,6 +298,8 @@ jobs:
           $tests = Start-Process cargo -NoNewWindow -PassThru `
             -ArgumentList 'test', '--locked', '--no-fail-fast', '-p', 'request', '--tests', '--', '--test-threads=1' `
             -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+          # PowerShell only reports the exit code of a process whose handle it opened.
+          $null = $tests.Handle
 
           $finished = $tests.WaitForExit(15 * 60 * 1000)
           if (-not $finished) { taskkill /T /F /PID $tests.Id | Out-Null }
