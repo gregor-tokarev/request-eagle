@@ -222,12 +222,6 @@ jobs:
           key: windows-${{ hashFiles('Cargo.lock') }}
           restore-keys: windows-
 
-      - name: Test storage, preferences, updates, and settings
-        run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p request -p collection -p environment -p history
-
-      - name: Store credentials in Windows Credential Manager
-        run: cargo test --locked -p preferences --test native_keyring -- --round-trip
-
       - name: Build the installer
         env:
           PROFILE: dev
@@ -235,8 +229,14 @@ jobs:
           choco install innosetup --no-progress -y
           ./scripts/package-windows.ps1
 
+      # A hung test fails this step and keeps the log, unlike a job timeout.
+      - name: Test storage, preferences, updates, and settings
+        timeout-minutes: 30
+        run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p request -p collection -p environment -p history
+
+      # Failed tests still save the build, so the next run does not start over.
       - name: Save Cargo cache
-        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: |
@@ -244,6 +244,9 @@ jobs:
             ~/.cargo/git
             target
           key: windows-${{ hashFiles('Cargo.lock') }}
+
+      - name: Store credentials in Windows Credential Manager
+        run: cargo test --locked -p preferences --test native_keyring -- --round-trip
 
       - name: Install and open the app
         run: |
