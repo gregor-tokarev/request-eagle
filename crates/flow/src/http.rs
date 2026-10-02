@@ -44,10 +44,17 @@ impl SavedRequest {
     }
 }
 
-/// The `{{variables}}` a request uses, in the order they first appear. These
-/// are the inputs of an HTTP Request block that sends it. Generated values
-/// such as `{{$guid}}` are left out.
-pub fn request_variables(request: &HttpRequest) -> Vec<String> {
+/// The `{{variables}}` a request uses, in the order they first appear,
+/// including those of the authorization it sends: its own, or
+/// `collection_auth` when it inherits it. These are the inputs of an HTTP
+/// Request block that sends it. Generated values such as `{{$guid}}` are
+/// left out.
+pub fn request_variables(request: &HttpRequest, collection_auth: &Auth) -> Vec<String> {
+    let auth = match &request.auth {
+        Auth::Inherit => collection_auth.sending(),
+        auth => auth.sending(),
+    }
+    .texts();
     let mut texts: Vec<&str> = vec![&request.path];
     for (name, value) in Field::enabled(&request.headers)
         .chain(Field::enabled(&request.query))
@@ -77,6 +84,7 @@ pub fn request_variables(request: &HttpRequest) -> Vec<String> {
         }
         Some(Body::Binary { .. }) | None => {}
     }
+    texts.extend(auth.iter().map(String::as_str));
     texts.push(&request.scripts.pre_request);
     texts.push(&request.scripts.post_response);
 

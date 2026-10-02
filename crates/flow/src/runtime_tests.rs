@@ -875,3 +875,29 @@ fn a_loop_inside_a_cycle_still_runs() {
 
     assert!(summary.block_runs > 0);
 }
+
+#[test]
+fn authorization_variables_are_inputs_too() {
+    let mut request = HttpRequest {
+        path: "{{base}}/users".to_owned(),
+        auth: request::Auth::Bearer(request::BearerAuth {
+            token: "{{token}}".to_owned(),
+        }),
+        ..Default::default()
+    };
+    let collection_auth = request::Auth::Bearer(request::BearerAuth {
+        token: "{{shared_token}}".to_owned(),
+    });
+
+    assert_eq!(
+        crate::request_variables(&request, &collection_auth),
+        ["base", "token"]
+    );
+
+    // A request that inherits sends its collection's authorization.
+    request.auth = request::Auth::Inherit;
+    assert_eq!(
+        crate::request_variables(&request, &collection_auth),
+        ["base", "shared_token"]
+    );
+}

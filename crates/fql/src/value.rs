@@ -2,7 +2,11 @@
 //! a large response costs as much as its steps. Arrays carry JSONata's
 //! sequence flags, which decide how results flatten and collapse.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use indexmap::IndexMap;
 use serde_json::{Map, Value as Json};
@@ -89,6 +93,8 @@ pub(crate) enum Function<'a> {
 pub(crate) struct Frame<'a> {
     bindings: RefCell<HashMap<String, Value<'a>>>,
     parent: Option<Rc<Frame<'a>>>,
+    /// Whether `:=` assigned a variable here.
+    assigned: Cell<bool>,
 }
 
 impl<'a> Frame<'a> {
@@ -96,6 +102,7 @@ impl<'a> Frame<'a> {
         Rc::new(Self {
             bindings: RefCell::new(HashMap::new()),
             parent: None,
+            assigned: Cell::new(false),
         })
     }
 
@@ -103,11 +110,22 @@ impl<'a> Frame<'a> {
         Rc::new(Self {
             bindings: RefCell::new(HashMap::new()),
             parent: Some(parent.clone()),
+            assigned: Cell::new(false),
         })
     }
 
     pub fn bind(&self, name: &str, value: Value<'a>) {
         self.bindings.borrow_mut().insert(name.to_owned(), value);
+    }
+
+    /// Bind a variable with `:=`.
+    pub fn assign(&self, name: &str, value: Value<'a>) {
+        self.assigned.set(true);
+        self.bind(name, value);
+    }
+
+    pub fn assigned(&self) -> bool {
+        self.assigned.get()
     }
 
     /// Drop the variables, which frees functions that hold this frame.
@@ -274,27 +292,6 @@ impl<'a> Value<'a> {
                 wrapper
             }
             input => input,
-        }
-    }
-
-    /// Whether a function is in this value, which a frame holding it may
-    /// be held by in turn. Input JSON holds none.
-    pub fn holds_function(&self) -> bool {
-        match self {
-            Self::Function(_) => true,
-            Self::Array(Array {
-                items: Items::Owned(items),
-                ..
-            }) => items.iter().any(Self::holds_function),
-            Self::Object(Object::Owned(fields)) => fields.values().any(Self::holds_function),
-            Self::Tuple(tuple) => {
-                tuple.context.holds_function()
-                    || tuple
-                        .bindings
-                        .iter()
-                        .any(|(_, value)| value.holds_function())
-            }
-            _ => false,
         }
     }
 

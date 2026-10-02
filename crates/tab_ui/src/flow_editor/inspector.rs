@@ -552,12 +552,7 @@ impl FlowEditor {
             },
             cx,
         );
-
-        if let Some(status) = self.run.blocks.get_mut(id)
-            && let Some((_, data)) = status.last.as_ref().and_then(|run| run.inputs.first())
-        {
-            status.display = Some(preview::Display::new(data, format));
-        }
+        self.refresh_displays();
     }
 
     /// Add an entry to one of a block's lists, or remove one, keeping the
@@ -1023,7 +1018,7 @@ impl FlowEditor {
                     )
                     .child(
                         div().text_xs().text_color(theme.muted_foreground).child(
-                            match flow::request_variables(&request.request) {
+                            match flow::request_variables(&request.request, &request.collection_auth) {
                                 variables if variables.is_empty() => "No variables to fill".to_owned(),
                                 variables => format!("Inputs: {}", variables.join(", ")),
                             },

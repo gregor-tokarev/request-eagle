@@ -43,17 +43,21 @@ pub(crate) struct Evaluation<'a> {
     pub now: chrono::DateTime<chrono::Utc>,
     random: Cell<u64>,
     /// Expressions that `$eval` parsed, which live as long as the evaluation.
-    pub expressions: &'a Arena<Node>,
+    expressions: &'a Arena<Node>,
+    /// Each expression `$eval` parsed, by its text, so repeating one parses
+    /// it once.
+    parsed: RefCell<HashMap<String, &'a Node>>,
     /// The scope of each function call under way, innermost last.
     scopes: RefCell<Vec<Rc<Frame<'a>>>>,
-    /// Scopes that a function was assigned in. The function holds its scope,
-    /// so they are cleared when the evaluation ends to be freed.
-    assigned: RefCell<Vec<Rc<Frame<'a>>>>,
+    /// Scopes with assigned variables that are still held when they end,
+    /// such as by a function assigned in them that holds them in turn. They
+    /// are cleared when the evaluation ends, which frees such cycles.
+    held: RefCell<Vec<Rc<Frame<'a>>>>,
 }
 
 impl Drop for Evaluation<'_> {
     fn drop(&mut self) {
-        for frame in self.assigned.take() {
+        for frame in self.held.take() {
             frame.clear();
         }
     }
@@ -75,8 +79,28 @@ impl<'a> Evaluation<'a> {
             now,
             random: Cell::new(seed),
             expressions,
+            parsed: RefCell::new(HashMap::new()),
             scopes: RefCell::new(Vec::new()),
-            assigned: RefCell::new(Vec::new()),
+            held: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Parse an expression for `$eval`, once for each text.
+    pub fn parse(&self, source: &str) -> Result<&'a Node> {
+        if let Some(node) = self.parsed.borrow().get(source) {
+            return Ok(node);
+        }
+
+        let node: &'a Node = self.expressions.alloc(crate::parser::parse(source)?);
+        self.parsed.borrow_mut().insert(source.to_owned(), node);
+        Ok(node)
+    }
+
+    /// End the scope of `frame`. One that a variable was assigned in and
+    /// that is still held may be part of a cycle; see `held`.
+    fn close(&self, frame: Rc<Frame<'a>>) {
+        if frame.assigned() && Rc::strong_count(&frame) > 1 {
+            self.held.borrow_mut().push(frame);
         }
     }
 
@@ -264,18 +288,19 @@ impl<'a> Evaluation<'a> {
             }
             Kind::Block(expressions) => {
                 let frame = Frame::child(env);
-                let mut result = Value::Undefined;
+                let mut result = Ok(Value::Undefined);
                 for expression in expressions {
-                    result = self.evaluate(expression, input, &frame)?;
+                    result = self.evaluate(expression, input, &frame);
+                    if result.is_err() {
+                        break;
+                    }
                 }
-                result
+                self.close(frame);
+                result?
             }
             Kind::Bind { name, value } => {
                 let value = self.evaluate(value, input, env)?;
-                if value.holds_function() {
-                    self.assigned.borrow_mut().push(env.clone());
-                }
-                env.bind(name, value.clone());
+                env.assign(name, value.clone());
                 value
             }
             Kind::Call {
@@ -356,10 +381,12 @@ impl<'a> Evaluation<'a> {
             Kind::Block(expressions) if !expressions.is_empty() => {
                 let frame = Frame::child(env);
                 let (last, first) = expressions.split_last().expect("not empty");
-                for expression in first {
-                    self.evaluate(expression, input, &frame)?;
-                }
-                self.evaluate_tail(last, input, &frame)
+                let outcome = first
+                    .iter()
+                    .try_for_each(|expression| self.evaluate(expression, input, &frame).map(drop))
+                    .and_then(|()| self.evaluate_tail(last, input, &frame));
+                self.close(frame);
+                outcome
             }
             _ => self.evaluate(node, input, env).map(Outcome::Value),
         }
@@ -1236,6 +1263,7 @@ impl<'a> Evaluation<'a> {
         self.enter(position)?;
         let outcome = self.evaluate_tail(&definition.body, input, &frame);
         self.leave();
+        self.close(frame);
         outcome
     }
 

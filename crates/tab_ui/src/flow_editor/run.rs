@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use flow::{BlockKind, BlockRun, RunEvent, RunOptions, RunSummary, SavedRequest};
+use flow::{BlockKind, BlockRun, DisplayFormat, RunEvent, RunOptions, RunSummary, SavedRequest};
 use futures::StreamExt as _;
 use gpui_kit::*;
 use preferences::Preferences;
@@ -39,8 +39,9 @@ pub(super) struct BlockStatus {
     pub running: bool,
     pub runs: usize,
     pub last: Option<BlockRun>,
-    /// A Display block's latest data, ready to draw.
-    pub display: Option<preview::Display>,
+    /// A Display block's latest data, ready to draw, and the format it is
+    /// drawn in.
+    pub display: Option<(DisplayFormat, preview::Display)>,
 }
 
 impl BlockStatus {
@@ -155,6 +156,25 @@ impl FlowEditor {
         cx.notify();
     }
 
+    /// Show each Display block's data in its current format, which undo,
+    /// redo and the inspector change without running the flow again.
+    pub(super) fn refresh_displays(&mut self) {
+        for block in &self.flow.blocks {
+            let BlockKind::Display { format } = block.kind else {
+                continue;
+            };
+            if let Some(status) = self.run.blocks.get_mut(&block.id)
+                && status
+                    .display
+                    .as_ref()
+                    .is_some_and(|(shown, _)| *shown != format)
+                && let Some((_, data)) = status.last.as_ref().and_then(|run| run.inputs.first())
+            {
+                status.display = Some((format, preview::Display::new(data, format)));
+            }
+        }
+    }
+
     fn run_options(&self, cx: &App) -> Result<RunOptions, String> {
         let preferences = cx
             .try_global::<Preferences>()
@@ -247,7 +267,7 @@ impl FlowEditor {
                             BlockKind::Display { format } => run
                                 .inputs
                                 .first()
-                                .map(|(_, value)| preview::Display::new(value, *format)),
+                                .map(|(_, value)| (*format, preview::Display::new(value, *format))),
                             _ => None,
                         });
                     let status = self.run.blocks.entry(run.block.clone()).or_default();

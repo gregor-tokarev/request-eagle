@@ -607,7 +607,7 @@ fn eval<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
     let Some(source) = args.string(0)? else {
         return Ok(Value::Undefined);
     };
-    let expression = crate::parser::parse(source).map_err(|error| {
+    let expression = args.evaluation.parse(source).map_err(|error| {
         args.error(
             "D3120",
             format!(
@@ -616,7 +616,6 @@ fn eval<'a>(args: &Args<'a, '_>) -> Result<Value<'a>> {
             ),
         )
     })?;
-    let expression = args.evaluation.expressions.alloc(expression);
 
     // The expression sees the variables where `$eval` is called.
     let input = match args.get(1) {

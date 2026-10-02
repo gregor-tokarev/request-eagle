@@ -41,9 +41,13 @@ impl Expression {
         };
         environment.bind("$", input.clone());
 
-        evaluation
+        let result = evaluation
             .evaluate(&self.root, &value::Value::context(input), &environment)
-            .map(|result| result.to_json())
+            .map(|result| result.to_json());
+
+        // Functions assigned at the top level hold the environment in turn.
+        environment.clear();
+        result
     }
 }
 

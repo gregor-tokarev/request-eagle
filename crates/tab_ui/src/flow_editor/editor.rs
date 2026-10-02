@@ -4,7 +4,7 @@ use environment::EnvironmentSessions;
 use flow::{Block, BlockKind, BlockType, Connection, Flow};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::HttpRequest;
+use request::{Auth, HttpRequest};
 
 use super::{
     editing,
@@ -26,6 +26,8 @@ pub struct FlowRequest {
     /// The directory of its collection.
     pub collection: PathBuf,
     pub request: HttpRequest,
+    /// What it sends when it inherits its collection's authorization.
+    pub collection_auth: Auth,
 }
 
 /// Where a flow finds the saved requests its blocks send. The workspace
@@ -243,7 +245,7 @@ impl FlowEditor {
                 let info = self.requests.find(id, cx).map(|saved| RequestInfo {
                     method: saved.request.method.as_str(),
                     name: saved.name,
-                    variables: flow::request_variables(&saved.request)
+                    variables: flow::request_variables(&saved.request, &saved.collection_auth)
                         .into_iter()
                         .map(SharedString::from)
                         .collect(),
@@ -623,6 +625,7 @@ impl FlowEditor {
         // The settings shown may have changed.
         self.inspector = None;
         self.sync_inspector(window, cx);
+        self.refresh_displays();
         cx.notify();
     }
 

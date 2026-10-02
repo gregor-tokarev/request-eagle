@@ -42,6 +42,7 @@ impl FlowRequests for SidebarRequests {
             location: location.into(),
             collection: collection.path.clone(),
             request: request.clone(),
+            collection_auth: collection.auth().clone(),
         })
     }
 }
@@ -62,6 +63,7 @@ fn collect(
                         location: SharedString::from(location.to_owned()),
                         collection: collection.path.clone(),
                         request: request.clone(),
+                        collection_auth: collection.auth().clone(),
                     });
                 }
             }

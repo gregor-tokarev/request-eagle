@@ -636,7 +636,7 @@ impl<E: FnMut(RunEvent)> Run<'_, E> {
             .ok_or("The chosen HTTP request is no longer saved")?;
         // Send only triggers the request, unless the request has a
         // `{{send}}` variable for it to fill.
-        let fills_send = http::request_variables(&saved.request)
+        let fills_send = http::request_variables(&saved.request, &saved.auth)
             .iter()
             .any(|name| name == "send");
         let variables = inputs

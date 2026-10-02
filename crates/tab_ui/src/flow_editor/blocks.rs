@@ -397,7 +397,7 @@ impl FlowEditor {
                 return body
                     .text_color(theme.foreground)
                     .child(match status.and_then(|status| status.display.as_ref()) {
-                        Some(display) => display_element(display, cx),
+                        Some((_, display)) => display_element(display, cx),
                         None => div()
                             .text_color(theme.muted_foreground)
                             .child("Run the flow to see its data")

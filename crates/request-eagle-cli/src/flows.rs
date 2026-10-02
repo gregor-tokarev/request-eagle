@@ -122,12 +122,12 @@ fn flow_json(registry: &CollectionRegistry, path: &Path) -> Result<Value> {
 
     for block in &entry.flow.blocks {
         if let BlockKind::HttpRequest { request: id } = &block.kind
-            && let Some((_, file)) = registry.request_by_id(id)
+            && let Some((collection, file)) = registry.request_by_id(id)
         {
             let value = match &file.request {
                 Request::Http(request) => json!({
                     "name": file.name, "path": file.path, "method": request.method, "url": request.path,
-                    "variables": flow::request_variables(request),
+                    "variables": flow::request_variables(request, collection.auth()),
                 }),
                 _ => {
                     json!({"name": file.name, "path": file.path, "error": "Flows send HTTP requests only"})

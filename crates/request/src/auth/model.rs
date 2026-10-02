@@ -365,7 +365,7 @@ impl Auth {
     }
 
     /// The text of every field, for noticing when their variables change.
-    pub(crate) fn texts(&self) -> Vec<String> {
+    pub fn texts(&self) -> Vec<String> {
         self.clone()
             .texts_mut()
             .into_iter()
