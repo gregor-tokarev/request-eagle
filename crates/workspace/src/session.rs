@@ -65,9 +65,11 @@ impl Session {
             SavedBounds::Windowed(bounds) => {
                 WindowBounds::Windowed(fit_bounds(bounds, display.bounds()))
             }
-            // As the first window: maximizing a window that already fills the
-            // display would restore it to a smaller size on macOS.
-            SavedBounds::Maximized => WindowBounds::Maximized(display.default_bounds()),
+            // Without a size to return to, as the first window.
+            SavedBounds::Maximized(bounds) => WindowBounds::Maximized(match bounds {
+                Some(bounds) => fit_bounds(bounds, display.bounds()),
+                None => display.default_bounds(),
+            }),
             SavedBounds::Fullscreen(bounds) => {
                 WindowBounds::Fullscreen(fit_bounds(bounds, display.bounds()))
             }
@@ -91,26 +93,27 @@ impl SavedWindow {
 
         // Some platforms leave the full-screen or maximized state out of the
         // window's bounds.
-        let bounds = window.window_bounds().get_bounds();
-        let bounds = if window.is_fullscreen() {
-            SavedBounds::Fullscreen(bounds)
-        } else if window.is_maximized() {
-            SavedBounds::Maximized
-        } else {
-            SavedBounds::Windowed(bounds)
+        let bounds = match window.window_bounds() {
+            bounds if window.is_fullscreen() => SavedBounds::Fullscreen(bounds.get_bounds()),
+            WindowBounds::Maximized(bounds) => SavedBounds::Maximized(Some(bounds)),
+            // macOS reports a maximized window by its own bounds, not the
+            // size it returns to.
+            _ if window.is_maximized() => SavedBounds::Maximized(None),
+            bounds => SavedBounds::Windowed(bounds.get_bounds()),
         };
 
         Some(Self { display, bounds })
     }
 }
 
-/// Like `WindowBounds`, which cannot be saved itself. A full-screen window
-/// keeps the bounds it returns to. Bounds are relative to the display.
+/// Like `WindowBounds`, which cannot be saved itself. A maximized or
+/// full-screen window keeps the bounds it returns to, when the platform
+/// reports them. Bounds are relative to the display.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum SavedBounds {
     Windowed(Bounds<Pixels>),
-    Maximized,
+    Maximized(Option<Bounds<Pixels>>),
     Fullscreen(Bounds<Pixels>),
 }
 
