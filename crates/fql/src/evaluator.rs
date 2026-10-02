@@ -5,7 +5,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 use indexmap::IndexMap;
@@ -50,15 +50,18 @@ pub(crate) struct Evaluation<'a> {
     /// The scope of each function call under way, innermost last.
     scopes: RefCell<Vec<Rc<Frame<'a>>>>,
     /// Scopes with assigned variables that are still held when they end,
-    /// such as by a function assigned in them that holds them in turn. They
-    /// are cleared when the evaluation ends, which frees such cycles.
-    held: RefCell<Vec<Rc<Frame<'a>>>>,
+    /// such as by a function assigned in them that holds them in turn. Those
+    /// still held when the evaluation ends are cleared, which frees such
+    /// cycles; the others were freed as usual.
+    held: RefCell<Vec<Weak<Frame<'a>>>>,
 }
 
 impl Drop for Evaluation<'_> {
     fn drop(&mut self) {
         for frame in self.held.take() {
-            frame.clear();
+            if let Some(frame) = frame.upgrade() {
+                frame.clear();
+            }
         }
     }
 }
@@ -100,7 +103,7 @@ impl<'a> Evaluation<'a> {
     /// that is still held may be part of a cycle; see `held`.
     fn close(&self, frame: Rc<Frame<'a>>) {
         if frame.assigned() && Rc::strong_count(&frame) > 1 {
-            self.held.borrow_mut().push(frame);
+            self.held.borrow_mut().push(Rc::downgrade(&frame));
         }
     }
 
