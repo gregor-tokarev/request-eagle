@@ -10,6 +10,8 @@ clap = { version = "4", features = ["derive", "string"] }
 collection = { path = "../collection" }
 dirs = "6"
 environment = { path = "../environment" }
+flow = { path = "../flow", features = ["schema"] }
+fql = { path = "../fql" }
 futures = "0.3"
 preferences = { path = "../preferences", default-features = false }
 request = { path = "../request" }

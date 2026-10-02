@@ -172,6 +172,12 @@ pub(crate) enum SavedTab {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         draft: Option<request::Request>,
     },
+    /// A saved flow, with its changes while they are not saved.
+    Flow {
+        file: SavedFile,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        draft: Option<Box<flow::Flow>>,
+    },
     Collection {
         path: PathBuf,
     },

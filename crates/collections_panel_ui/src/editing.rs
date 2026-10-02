@@ -65,6 +65,18 @@ impl CollectionPanel {
         self.finish_creation(result, window, cx);
     }
 
+    pub(super) fn create_flow(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self
+            .collections
+            .create_flow(parent, "New Flow", flow::Flow::starter());
+        self.finish_creation(result, window, cx);
+    }
+
     pub(super) fn create_folder(
         &mut self,
         parent: &Path,
@@ -186,6 +198,32 @@ impl CollectionPanel {
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
         self.collections.rename_request(path, expected_id, name)?;
+
+        let selected = self
+            .selected
+            .map(|index| self.tree.items[index].path.clone());
+        self.rebuild_tree(selected.as_deref(), Some((path, path)), cx);
+
+        Ok(())
+    }
+
+    /// Rename a saved flow outside the tree, such as from its tab, unless
+    /// its file now holds another flow.
+    pub fn rename_flow(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        if self
+            .collections
+            .flow(path)
+            .is_none_or(|flow| flow.id != expected_id)
+        {
+            return Err(CollectionEditError::FlowReplaced);
+        }
+        self.collections.rename(path, name)?;
 
         let selected = self
             .selected
@@ -361,13 +399,23 @@ impl CollectionPanel {
                 let Ok(relative) = item.path.strip_prefix(destination) else {
                     continue;
                 };
-                let Some(file) = self.collections.file(&item.path) else {
+                // Flows follow their tabs like requests.
+                let Some(id) = self
+                    .collections
+                    .file(&item.path)
+                    .map(|file| file.id.clone())
+                    .or_else(|| {
+                        self.collections
+                            .flow(&item.path)
+                            .map(|flow| flow.id.clone())
+                    })
+                else {
                     continue;
                 };
                 let (collection, folders) = self.tree.location(index);
 
                 cx.emit(CollectionPanelEvent::RequestRelocated {
-                    id: file.id.clone().into(),
+                    id: id.into(),
                     // Joining an empty path would add a trailing separator.
                     previous_path: if relative.as_os_str().is_empty() {
                         previous.to_path_buf()

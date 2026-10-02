@@ -36,6 +36,7 @@ fn names(entries: &[Entry]) -> Vec<String> {
         .iter()
         .map(|entry| match entry {
             Entry::File(file) => file.name.clone(),
+            Entry::Flow(flow) => flow.name.clone(),
             Entry::Directory(folder) => folder.name.clone(),
         })
         .collect()

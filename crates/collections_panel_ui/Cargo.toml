@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 collection = { path = "../collection" }
+flow = { path = "../flow" }
 gpui-kit = { workspace = true, features = ["component"] }
 import = { path = "../import" }
 keybindings_service = { path = "../keybindings_service" }

@@ -17,8 +17,8 @@ use crate::session::{SavedFile, SavedTab};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
-    CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft,
-    RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
+    CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, FlowEditor,
+    GrpcDraft, RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -33,6 +33,7 @@ pub(crate) enum Page {
     Request(Entity<RequestDraft>),
     Grpc(Entity<GrpcDraft>),
     WebSocket(Entity<WebSocketDraft>),
+    Flow(Entity<FlowEditor>),
     Collection(Entity<CollectionPage>),
     Environment(Entity<EnvironmentEditor>),
     Cookies(Entity<CookiePage>),
@@ -44,6 +45,7 @@ impl Page {
             Page::Request(draft) => draft.read(cx).is_dirty(),
             Page::Grpc(draft) => draft.read(cx).is_dirty(),
             Page::WebSocket(draft) => draft.read(cx).is_dirty(),
+            Page::Flow(editor) => editor.read(cx).is_dirty(),
             Page::Collection(page) => page.read(cx).is_dirty(),
             Page::Environment(editor) => editor.read(cx).is_dirty(),
             Page::Cookies(_) => false,
@@ -56,22 +58,29 @@ impl Page {
             Page::Request(draft) => Some(draft.read(cx).request.method.as_str()),
             Page::Grpc(_) => Some("gRPC"),
             Page::WebSocket(_) => Some("WS"),
-            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
-    /// Where a request tab's request is saved.
+    /// Where a request or flow tab's file is saved.
     pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
         match self {
             Page::Request(draft) => draft.read(cx).location.as_ref(),
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
+            Page::Flow(editor) => Some(&editor.read(cx).location),
             Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
     pub(crate) fn is_request(&self) -> bool {
         matches!(self, Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_))
+    }
+
+    /// Requests and flows are named in their tabs; other tabs after what
+    /// they show.
+    fn is_renamable(&self) -> bool {
+        self.is_request() || matches!(self, Page::Flow(_))
     }
 
     /// HTTP requests copy as cURL and gRPC requests as grpcurl.
@@ -85,7 +94,8 @@ impl Page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
-            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
+            // Flows are always saved, so they are renamed in their collection.
+            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
         }
     }
 
@@ -117,6 +127,17 @@ impl Page {
                 let draft = draft.read(cx);
                 request(&draft.location, &draft.name, draft.request.clone().into())
             }
+            Page::Flow(editor) => {
+                let editor = editor.read(cx);
+                SavedTab::Flow {
+                    file: SavedFile {
+                        path: editor.location.path.clone(),
+                        id: editor.location.id.to_string(),
+                        collection: editor.location.collection_path().unwrap_or_default(),
+                    },
+                    draft: editor.is_dirty().then(|| Box::new(editor.flow().clone())),
+                }
+            }
             Page::Collection(page) => SavedTab::Collection {
                 path: page.read(cx).path.clone(),
             },
@@ -130,6 +151,7 @@ impl Page {
     fn icon(&self) -> Option<&'static str> {
         match self {
             Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
+            Page::Flow(_) => Some("icons/workflow.svg"),
             Page::Collection(_) => Some("icons/package.svg"),
             Page::Environment(_) => Some("icons/globe.svg"),
             Page::Cookies(_) => Some("icons/cookie.svg"),
@@ -156,6 +178,7 @@ impl Page {
             Page::Request(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::Grpc(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
             Page::WebSocket(draft) => cx.observe(draft, move |this, _, cx| on_change(this, cx)),
+            Page::Flow(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
             Page::Collection(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
             Page::Environment(editor) => cx.observe(editor, move |this, _, cx| on_change(this, cx)),
             Page::Cookies(page) => cx.observe(page, move |this, _, cx| on_change(this, cx)),
@@ -182,7 +205,7 @@ impl Page {
             Page::Request(draft) => Some(record(draft, history, cx)),
             Page::Grpc(draft) => Some(record(draft, history, cx)),
             Page::WebSocket(draft) => Some(record(draft, history, cx)),
-            Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Flow(_) | Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => None,
         }
     }
 
@@ -191,6 +214,7 @@ impl Page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.prepare(window, cx)),
+            Page::Flow(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
             Page::Collection(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
             Page::Environment(editor) => editor.update(cx, |editor, cx| editor.prepare(window, cx)),
             Page::Cookies(page) => page.update(cx, |page, cx| page.prepare(window, cx)),
@@ -205,6 +229,8 @@ impl Page {
             Page::Grpc(draft) => draft.clone().into_any_element(),
             // The message log changes while streaming; the draft caches its controls.
             Page::WebSocket(draft) => draft.clone().into_any_element(),
+            // The canvas redraws while it is dragged or runs.
+            Page::Flow(editor) => editor.clone().into_any_element(),
             Page::Collection(page) => page
                 .clone()
                 .cached(StyleRefinement::default().size_full())
@@ -417,6 +443,34 @@ impl MainView {
 
                 self.open_tab(name, Page::Environment(editor), cx);
             }
+            SavedTab::Flow { file, draft } => {
+                let Some(CollectionPanelEvent::OpenFlow {
+                    id,
+                    path,
+                    name,
+                    collection,
+                    folders,
+                    flow,
+                }) = self.sidebar.read(cx).open_event_at(&file.path)
+                else {
+                    return false;
+                };
+                if id.as_ref() != file.id {
+                    return false;
+                }
+
+                let location = RequestLocation {
+                    path,
+                    id,
+                    name,
+                    collection,
+                    folders,
+                };
+                let index = self.open_flow(location, flow, cx);
+                if let (Some(draft), Page::Flow(editor)) = (draft, &self.tabs[index].page) {
+                    editor.update(cx, |editor, cx| editor.restore_draft(*draft, cx));
+                }
+            }
             SavedTab::Cookies => self.open_cookies(cx),
         }
 
@@ -554,8 +608,33 @@ impl MainView {
             Page::WebSocket(draft) => {
                 draft.update(cx, |draft, cx| draft.set_location(location, cx))
             }
+            Page::Flow(editor) => editor.update(cx, |editor, cx| editor.set_location(location, cx)),
             Page::Collection(_) | Page::Environment(_) | Page::Cookies(_) => {}
         }
+    }
+
+    /// Show a saved flow, reusing its tab when it is open. Returns the tab's index.
+    pub(crate) fn open_flow(
+        &mut self,
+        location: RequestLocation,
+        flow: flow::Flow,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        if let Some(index) = self.request_tab(&location.path, &location.id, cx) {
+            self.set_request_location(index, location, cx);
+            self.select_tab(index, cx);
+            return index;
+        }
+
+        let requests =
+            std::rc::Rc::new(crate::flow_requests::SidebarRequests(self.sidebar.clone()));
+        let sessions = self.variable_sessions.clone();
+        let environments = self.environments.clone();
+        let title = location.name.clone();
+        let editor = cx
+            .new(|cx| FlowEditor::new(location, flow, requests, sessions, Some(environments), cx));
+
+        self.open_tab(title, Page::Flow(editor), cx)
     }
 
     pub(crate) fn open_collection(
@@ -966,6 +1045,31 @@ impl MainView {
             }
             // The jar saves itself whenever it changes.
             Page::Cookies(_) => {}
+            Page::Flow(editor) => {
+                let (location, flow, check) = {
+                    let editor = editor.read(cx);
+                    (
+                        editor.location.clone(),
+                        editor.flow().clone(),
+                        editor.check(),
+                    )
+                };
+                let result = check.and_then(|()| {
+                    self.sidebar
+                        .update(cx, |sidebar, _| {
+                            sidebar.save_flow(&location.path, &location.id, flow.clone())
+                        })
+                        .map_err(|error| error.to_string())
+                });
+
+                match result {
+                    Ok(()) => {
+                        editor.update(cx, |editor, cx| editor.mark_saved(flow, cx));
+                        self.close_saved_tab(index, window, cx);
+                    }
+                    Err(error) => self.save_error = Some(format!("Could not save flow: {error}")),
+                }
+            }
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
                 let location = draft.read(cx).location.clone();
@@ -1097,7 +1201,7 @@ impl MainView {
     fn begin_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let tab = &self.tabs[index];
 
-        if !tab.page.is_request() {
+        if !tab.page.is_renamable() {
             return;
         }
 
@@ -1171,15 +1275,21 @@ impl MainView {
             return;
         }
 
+        let flow = matches!(tab.page, Page::Flow(_));
         match tab.page.location(cx).cloned() {
             // The tab follows the sidebar's relocation event.
             Some(location) => {
                 let result = self.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.rename_request(&location.path, &location.id, &name, cx)
+                    if flow {
+                        sidebar.rename_flow(&location.path, &location.id, &name, cx)
+                    } else {
+                        sidebar.rename_request(&location.path, &location.id, &name, cx)
+                    }
                 });
 
                 if let Err(error) = result {
-                    self.save_error = Some(format!("Could not rename request: {error}"));
+                    let item = if flow { "flow" } else { "request" };
+                    self.save_error = Some(format!("Could not rename {item}: {error}"));
                 }
             }
             None => {
@@ -1267,6 +1377,7 @@ impl MainView {
             Some(Page::Request(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
             Some(Page::Grpc(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
             Some(Page::WebSocket(draft)) => draft.update(cx, |draft, cx| draft.send(window, cx)),
+            Some(Page::Flow(editor)) => editor.update(cx, |editor, cx| editor.run(window, cx)),
             _ => {}
         }
     }
@@ -1562,7 +1673,7 @@ impl Render for MainView {
         // out of the palette.
         let renamable = self
             .selected
-            .filter(|&index| self.tabs[index].page.is_request());
+            .filter(|&index| self.tabs[index].page.is_renamable());
 
         v_flex()
             .debug_selector(|| "main-view".into())

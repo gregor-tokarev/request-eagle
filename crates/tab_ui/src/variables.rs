@@ -95,6 +95,25 @@ impl VariableScope {
             .values(self.collection_values()?, self.environment_values(cx)?))
     }
 
+    /// The collection's and the active environment's values as their files
+    /// hold them, or why they could not be read.
+    pub fn file_values(
+        &self,
+        cx: &App,
+    ) -> (
+        HashMap<String, String>,
+        HashMap<String, String>,
+        Option<String>,
+    ) {
+        match self
+            .collection_values()
+            .and_then(|collection| Ok((collection, self.environment_values(cx)?)))
+        {
+            Ok((collection, environment)) => (collection, environment, None),
+            Err(error) => (HashMap::new(), HashMap::new(), Some(error)),
+        }
+    }
+
     pub fn request_variables(&self, cx: &App) -> request::RequestVariables {
         let files = self
             .collection_values()
@@ -114,7 +133,7 @@ impl VariableScope {
     }
 
     /// Reload the collection's scripts so saved edits apply to the next send.
-    fn collection_scripts(&self) -> Result<RequestScripts, String> {
+    pub fn collection_scripts(&self) -> Result<RequestScripts, String> {
         match self.path.as_deref().and_then(Path::parent) {
             Some(collection) => {
                 Collection::load_scripts(collection).map_err(|error| error.to_string())

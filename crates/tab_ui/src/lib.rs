@@ -1,6 +1,6 @@
 //! The pages shown in workspace tabs: HTTP and gRPC request drafts with their
-//! responses, WebSocket drafts with their message logs, collection settings,
-//! global environment editors and the cookie jar. The workspace owns tab
+//! responses, WebSocket drafts with their message logs, flow canvases,
+//! collection settings, global environment editors and the cookie jar. The workspace owns tab
 //! selection, closing and collection storage.
 //!
 //! `Environments` lives here rather than in the workspace because request drafts
@@ -14,6 +14,7 @@ mod cookie_page;
 mod cookies;
 mod environment_editor;
 mod environments;
+mod flow_editor;
 mod grpc_draft;
 mod grpc_response;
 mod request_draft;
@@ -37,6 +38,11 @@ pub use cookie_page::CookiePage;
 pub use cookies::Cookies;
 pub use environment_editor::EnvironmentEditor;
 pub use environments::{Environments, EnvironmentsEvent};
+pub use flow_editor::{
+    AddBlock, ArrangeBlocks, CopyBlocks, DeleteSelection, DuplicateBlocks, FlowEditor, FlowRequest,
+    FlowRequests, PasteBlocks, RedoFlowEdit, SelectAllBlocks, StopFlow, UndoFlowEdit, ZoomIn,
+    ZoomOut, ZoomToFit,
+};
 pub use grpc_draft::GrpcDraft;
 pub use request_draft::{RequestDraft, RequestLocation};
 pub use request_sent::RequestSent;

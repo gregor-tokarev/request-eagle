@@ -67,6 +67,7 @@ pub(crate) async fn pre_request(
         session,
         collection_scripts,
         environment_error,
+        locals,
         ..
     } = variables;
 
@@ -103,6 +104,7 @@ pub(crate) async fn pre_request(
         let mut reports = Vec::new();
         let mut state = ScriptState {
             variables: Variables {
+                values: locals,
                 scopes,
                 ..Default::default()
             },

@@ -18,6 +18,8 @@ pub struct RequestVariables {
     /// Values `{{$name}}` resolves to instead of generating new ones, set by
     /// a gRPC call's Before invoke script for the whole call.
     pub(crate) generated: BTreeMap<String, String>,
+    /// Values over every scope for one send, as `pm.variables.set` makes them.
+    pub(crate) locals: BTreeMap<String, String>,
 }
 
 impl RequestVariables {
@@ -41,6 +43,18 @@ impl RequestVariables {
     /// phase. A failure to read them stops the send before any script runs.
     pub fn with_collection_scripts(mut self, scripts: Result<RequestScripts, String>) -> Self {
         self.collection_scripts = scripts;
+        self
+    }
+
+    /// Fill `{{name}}` with these values for this send, over every scope,
+    /// as a pre-request script's `pm.variables.set` does. A flow fills a
+    /// request's variables from its block's inputs this way.
+    pub fn with_local_values(mut self, values: impl IntoIterator<Item = (String, String)>) -> Self {
+        for (name, value) in values {
+            self.values.insert(name.clone(), value.clone());
+            self.locals.insert(name, value);
+        }
+
         self
     }
 
@@ -77,6 +91,7 @@ impl RequestVariables {
             collection_scripts: Ok(RequestScripts::default()),
             environment_error,
             generated: BTreeMap::new(),
+            locals: BTreeMap::new(),
         }
     }
 
