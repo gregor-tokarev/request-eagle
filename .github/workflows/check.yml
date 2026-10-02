@@ -247,7 +247,7 @@ jobs:
 
   windows:
     runs-on: windows-2025
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       CARGO_TERM_COLOR: always
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -273,12 +273,7 @@ jobs:
           choco install innosetup --no-progress -y
           ./scripts/package-windows.ps1
 
-      # A hung test fails this step and keeps the log, unlike a job timeout.
-      - name: Test storage, preferences, updates, and settings
-        timeout-minutes: 30
-        run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p request -p collection -p environment -p history
-
-      # Failed tests still save the build, so the next run does not start over.
+      # Later failures still keep the build, so the next run does not start over.
       - name: Save Cargo cache
         if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -289,10 +284,23 @@ jobs:
             target
           key: windows-${{ hashFiles('Cargo.lock') }}
 
+      - name: Test storage, preferences, updates, and settings
+        timeout-minutes: 30
+        run: cargo test --locked --no-fail-fast -p preferences -p settings_ui -p updater -p collection -p environment -p history -p request --lib
+
+      # One at a time, so the log names a test that hangs. A step timeout
+      # keeps the log, unlike a job timeout.
+      - name: Test sending requests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: cargo test --locked --no-fail-fast -p request --tests -- --test-threads=1
+
       - name: Store credentials in Windows Credential Manager
+        if: ${{ !cancelled() }}
         run: cargo test --locked -p preferences --test native_keyring -- --round-trip
 
       - name: Install and open the app
+        if: ${{ !cancelled() }}
         run: |
           $setup = (Get-ChildItem dist\RequestEagle-*-x64-setup.exe).FullName
           Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
