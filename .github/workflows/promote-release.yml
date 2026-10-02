@@ -58,8 +58,22 @@ jobs:
               --arg archives "https://github.com/$GH_REPO/releases/download/$TAG/" \
               '.version == $version and (.url | startswith($archives)) and (.sha256 | test("^[0-9a-f]{64}$"))'
 
-          # Stable users see everything merged since the previous stable release.
           stable="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+
+          # Its notes already list everything since the stable release before it.
+          if [[ "$stable" == "$TAG" ]]; then
+            echo "$TAG is already the stable release; nothing to promote"
+            exit 0
+          fi
+
+          # Moving back to an older release keeps its notes.
+          if [[ -n "$stable" && "$(printf '%s\n' "$stable" "$TAG" | sort -V | tail -n 1)" == "$stable" ]]; then
+            gh release edit "$TAG" --prerelease=false --latest
+            echo "Moved stable back to $TAG"
+            exit 0
+          fi
+
+          # Stable users see everything merged since the previous stable release.
           python3 scripts/release-notes.py markdown "$TAG" ${stable:+"$stable"} > "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
 
