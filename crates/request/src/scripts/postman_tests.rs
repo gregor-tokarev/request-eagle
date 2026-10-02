@@ -269,6 +269,44 @@ fn json_data_keeps_its_types_for_scripts_and_is_text_in_requests() {
 }
 
 #[test]
+fn scripts_cannot_change_the_data_text_that_requests_send() {
+    let request = HttpRequest {
+        path: "https://example.com/{{amount}}/{{payload}}/{{gone}}".into(),
+        scripts: RequestScripts {
+            pre_request: r#"
+                pm.iterationData.get("payload").count = 2;
+                pm.iterationData.unset("gone");
+                pm.variables.set("signed", pm.variables.replaceIn(pm.request.url.toString()));
+            "#
+            .into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = serde_json::json!({
+        "amount": 9007199254740993u64,
+        "payload": {"count": 1},
+        "gone": "row",
+    });
+    let variables = RequestVariables::new(HashMap::from([("gone".into(), "env".into())]), None)
+        .with_iteration_data(
+            data.as_object()
+                .unwrap()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        );
+
+    let (request, state, reports) = send(request, variables);
+
+    passed(&reports[0]);
+    let sent = r#"https://example.com/9007199254740993/{"count":1}/env"#;
+    assert_eq!(request.path, sent);
+    // The script signed the same text the request sends.
+    assert_eq!(state.variables.values["signed"], sent);
+}
+
+#[test]
 fn local_variables_carry_over_to_the_next_request() {
     let locals = LocalVariables::default();
     let request = |source: &str| HttpRequest {

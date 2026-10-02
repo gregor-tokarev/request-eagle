@@ -17,6 +17,18 @@ pub(crate) struct Variables {
 }
 
 impl Variables {
+    /// Take the variables a script left. The data row keeps its own values:
+    /// a script can unset them, but its changes to them, or JavaScript's
+    /// rounding of large numbers, do not reach the request.
+    pub fn update(&mut self, mut output: Variables) {
+        let data = std::mem::take(&mut self.data);
+        output.data = data
+            .into_iter()
+            .filter(|(name, _)| output.data.contains_key(name))
+            .collect();
+        *self = output;
+    }
+
     /// How `{{name}}` writes each data file value, which scripts substitute
     /// too, so both write the same text.
     pub fn data_texts(&self) -> BTreeMap<String, String> {

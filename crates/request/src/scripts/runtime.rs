@@ -207,7 +207,7 @@ pub(crate) async fn pre_request(
             request.path = changes.url;
             request.query = changes.query.into_iter().map(Field::from).collect();
             request.headers = changes.headers.into_iter().map(Field::from).collect();
-            state.variables = output.variables;
+            state.variables.update(output.variables);
 
             if changes.body_changed {
                 body_changed = true;
@@ -358,7 +358,7 @@ pub(crate) async fn post_response(
                 {
                     report.error = Some(message.into());
                 } else {
-                    state.variables = output.variables;
+                    state.variables.update(output.variables);
                 }
             }
             execution.scripts.push(report);
