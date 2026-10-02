@@ -10,7 +10,8 @@ use serde_json::json;
 
 use super::{ScriptPhase, ScriptReport, engine::run, variables::Variables};
 use crate::{
-    Execution, ExecutionError, HttpRequest, Method, RequestExecutor, RequestVariables, Response,
+    Body, Execution, ExecutionError, FormPart, HttpRequest, Method, RequestExecutor,
+    RequestVariables, Response,
     variables::{resolve_request, sent_url},
 };
 
@@ -36,8 +37,12 @@ struct HttpChanges {
     url: String,
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
+    /// The raw text the script set, which makes the body raw.
     body: Option<String>,
     body_changed: bool,
+    /// The fields of a URL-encoded or multipart form after the script.
+    fields: Option<Vec<(String, String)>>,
+    parts: Option<Vec<FormPart>>,
 }
 
 /// State the pre-request phase hands to the post-response phase.
@@ -106,21 +111,38 @@ pub(crate) async fn pre_request(
             response_url: None,
         };
 
+        // Scripts have no access to files, so they can keep or remove the
+        // files the request attaches but not attach others.
+        let attached: Vec<String> = match &request.body {
+            Some(Body::Multipart { parts }) => parts
+                .iter()
+                .filter(|part| part.file)
+                .map(|part| part.value.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
+
         let mut body_changed = false;
         for (collection, source) in scripts {
             let input = input(&request, &state.variables);
-            let mut body = request.body.take().map(Bytes::from);
+            // Scripts read raw text only when they ask for it.
+            let mut text = match &mut request.body {
+                Some(Body::Raw { text, .. }) => Some(Bytes::from(std::mem::take(text))),
+                _ => None,
+            };
             let (output, mut report) = run::<HttpChanges>(
                 &source,
                 ScriptPhase::PreRequest,
                 input,
-                &mut body,
+                &mut text,
                 None,
                 cancelled.clone(),
                 &executor,
             );
             report.collection = collection;
-            request.body = body.map(Vec::from);
+            if let (Some(Body::Raw { text: raw, .. }), Some(text)) = (&mut request.body, text) {
+                *raw = String::from_utf8(Vec::from(text)).expect("the text read from the body");
+            }
             if cancelled.load(Ordering::Relaxed) {
                 report.error = Some("Script cancelled".into());
             }
@@ -166,7 +188,35 @@ pub(crate) async fn pre_request(
 
             if changes.body_changed {
                 body_changed = true;
-                request.body = changes.body.map(String::into_bytes);
+                // A body that was not raw becomes raw JSON, as one added to
+                // a request without a body.
+                request.body = changes.body.map(|text| match request.body.take() {
+                    Some(Body::Raw { language, .. }) => Body::Raw { language, text },
+                    _ => Body::json(text),
+                });
+            } else {
+                if let Some(part) = changes.parts.iter().flatten().find(|part| {
+                    part.file && !attached.contains(&part.value)
+                }) {
+                    let message = format!(
+                        "Scripts cannot attach files. Choose the file for \"{}\" in the request's body.",
+                        part.name
+                    );
+                    report.error = Some(message.clone());
+                    return Err(after_earlier_scripts(
+                        reports,
+                        ExecutionError::Script {
+                            message,
+                            report: Box::new(report),
+                        },
+                    ));
+                }
+
+                match (&mut request.body, changes.fields, changes.parts) {
+                    (Some(Body::UrlEncoded { fields }), Some(changed), _) => *fields = changed,
+                    (Some(Body::Multipart { parts }), _, Some(changed)) => *parts = changed,
+                    _ => {}
+                }
             }
             reports.push(report);
         }
@@ -287,6 +337,14 @@ pub(crate) async fn post_response(
 }
 
 fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
+    // Raw text is read through the body reader instead.
+    let body = match &request.body {
+        None | Some(Body::Raw { .. }) => json!({ "mode": "raw" }),
+        Some(Body::UrlEncoded { fields }) => json!({ "mode": "urlencoded", "fields": fields }),
+        Some(Body::Multipart { parts }) => json!({ "mode": "formdata", "parts": parts }),
+        Some(Body::Binary { file }) => json!({ "mode": "file", "file": file }),
+    };
+
     json!({
         "method": request.method.as_str(),
         "url": request.path,
@@ -299,6 +357,7 @@ fn input(request: &HttpRequest, variables: &Variables) -> serde_json::Value {
         ),
         "query": request.query,
         "headers": request.headers,
+        "body": body,
         "variables": variables,
     })
 }

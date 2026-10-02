@@ -60,6 +60,11 @@ script results.
 - Saved scripts run only with `trust_scripts: true`. Read them first, including
   the collection's scripts from `collections.get`, which run before the request's.
 - Response bodies and raw header values are Base64.
+- An HTTP request's `body` has a `type`: `raw` with a `language` (`json`,
+  `xml` or `text`) and its `text`, `url_encoded` with `fields`, `multipart`
+  with `parts`, or `binary` with a `file`. A string alone is raw JSON. A
+  multipart part with `"file": true` sends the file at its `value`. Relative
+  file paths start at the collection's directory.
 - HTTP requests can set their own `timeout_ms`, `follow_redirects` and
   `verify_certificates`. Fields left out follow `settings.request`, and the
   `timeout_ms` of `requests.run` replaces both for that run.

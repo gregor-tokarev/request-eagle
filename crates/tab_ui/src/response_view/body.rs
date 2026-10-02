@@ -399,7 +399,7 @@ impl ResponseView {
 }
 
 /// GPUI Kit has no XML grammar of its own.
-fn register_xml() {
+pub(crate) fn register_xml() {
     static REGISTER: Once = Once::new();
 
     REGISTER.call_once(|| {

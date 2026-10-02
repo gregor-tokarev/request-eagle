@@ -6,8 +6,8 @@ use std::{
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
+use request::{Body, HttpRequest, Method};
 use request::{EventStream, EventStreamUpdate, RequestExecutor};
-use request::{HttpRequest, Method};
 
 use super::draft::RequestDraft;
 use crate::RequestSent;
@@ -32,11 +32,20 @@ fn request_url(path: &str) -> String {
 }
 
 pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> {
-    let supports_body = !matches!(request.method, Method::Get | Method::Head);
-    let body_bytes = if supports_body {
-        request.body.as_ref().map_or(0, Vec::len)
-    } else {
-        0
+    // As sending, which leaves out empty raw text.
+    let body = request
+        .body
+        .as_ref()
+        .filter(|_| !matches!(request.method, Method::Get | Method::Head))
+        .filter(|body| !matches!(body, Body::Raw { text, .. } if text.is_empty()));
+    // Only raw text has its length at hand. Encoding a form or reading
+    // files on each edit would be slow, and a multipart form's boundary is
+    // chosen when it is sent.
+    let (body_bytes, calculated, templated_body) = match body {
+        Some(Body::Raw { text, .. }) => (text.len(), false, text.contains("{{")),
+        // An unknown length is not zero, so the header is shown.
+        Some(_) => (1, true, false),
+        None => (0, false, false),
     };
     let url = request_url(&request.path);
     let templated_authorization = url.split_once("://").is_some_and(|(scheme, rest)| {
@@ -47,14 +56,17 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
     let mut headers =
         request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
-    if supports_body
-        && request.body.is_some()
+    if let Some(body) = body
         && !request
             .headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
     {
-        headers.push(("Content-Type".into(), "application/json".into()));
+        let mut content_type = body.content_type();
+        if matches!(body, Body::Multipart { .. }) {
+            content_type.push_str("; boundary=Calculated on Send");
+        }
+        headers.push(("Content-Type".into(), content_type));
     }
 
     if request.path.contains("{{")
@@ -81,13 +93,11 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         if templated_header_names
             || (name == "Host" && value.contains("{{"))
             || (name == "Authorization" && templated_authorization)
-            || (name == "Content-Length"
-                && request
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| body.windows(2).any(|bytes| bytes == b"{{")))
+            || (name == "Content-Length" && templated_body)
         {
             *value = "Resolved on Send".into();
+        } else if name == "Content-Length" && calculated {
+            *value = "Calculated on Send".into();
         }
     }
 
@@ -159,7 +169,9 @@ impl RequestDraft {
         response.update(cx, |response, cx| response.start(cx));
 
         let scope = self.variables.clone();
-        let request = self.request.clone();
+        // History keeps where the files were found, so the request can be
+        // sent again from it.
+        let request = self.sent_request();
         let url = request.path.clone();
         let variables = scope.read(cx).request_variables(cx);
         let preferences = cx

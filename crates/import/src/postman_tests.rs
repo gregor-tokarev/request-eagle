@@ -1,5 +1,5 @@
 use collection::ImportedItem;
-use request::{HttpRequest, Method, Request};
+use request::{Body, FormPart, HttpRequest, Method, Request};
 
 use crate::parse;
 
@@ -137,11 +137,9 @@ fn postman_collections_keep_their_folders_variables_and_scripts() {
     assert_eq!(find.scripts.pre_request, "");
 
     let (_, add) = http(&items[1]);
-    assert_eq!(add.body.as_deref(), Some(br#"{"name": "Rex"}"#.as_slice()));
-    assert_eq!(
-        add.headers,
-        [("Content-Type".to_owned(), "application/json".to_owned())]
-    );
+    assert_eq!(add.body, Some(Body::json(r#"{"name": "Rex"}"#)));
+    // JSON bodies are sent as JSON without a header of their own.
+    assert!(add.headers.is_empty());
 }
 
 #[test]
@@ -192,29 +190,24 @@ fn postman_forms_and_basic_auth_are_encoded() {
 
     assert_eq!(name, "Login");
     assert_eq!(login.method, Method::Post);
+    // Sending encodes each field once its variables are filled in.
     assert_eq!(
-        String::from_utf8(login.body.clone().unwrap()).unwrap(),
-        "grant%20type=password%20%26%20more&scope={{scope}}&id={{$guid}}"
+        login.body,
+        Some(Body::UrlEncoded {
+            fields: vec![
+                ("grant type".into(), "password & more".into()),
+                ("scope".into(), "{{scope}}".into()),
+                ("id".into(), "{{$guid}}".into()),
+            ],
+        })
     );
-    // Variables are encoded once they are filled in, when sending.
-    assert!(
-        login
-            .scripts
-            .pre_request
-            .starts_with("// Encode the form after filling in its variables")
-    );
+    assert!(login.scripts.pre_request.is_empty());
     assert_eq!(
         login.headers,
-        [
-            (
-                "Content-Type".to_owned(),
-                "application/x-www-form-urlencoded".to_owned()
-            ),
-            (
-                "Authorization".to_owned(),
-                "Basic YWRtaW46c2VjcmV0".to_owned()
-            ),
-        ]
+        [(
+            "Authorization".to_owned(),
+            "Basic YWRtaW46c2VjcmV0".to_owned()
+        )]
     );
 }
 
@@ -247,7 +240,7 @@ fn postman_basic_auth_with_variables_is_encoded_when_sending() {
 }
 
 #[test]
-fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
+fn postman_form_data_files_and_graphql_bodies_are_kept() {
     let import = parse(
         r#"{
             "info": {"name": "Bodies"},
@@ -258,7 +251,10 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
                         "method": "POST",
                         "body": {"mode": "formdata", "formdata": [
                             {"key": "title", "value": "Cat", "type": "text"},
-                            {"key": "photo", "src": "/tmp/cat.png", "type": "file"}
+                            {"key": "photo", "src": "/tmp/cat.png", "type": "file"},
+                            {"key": "more", "src": ["/tmp/a.png", "/tmp/b.png"], "type": "file"},
+                            {"key": "later", "src": null, "type": "file"},
+                            {"key": "off", "value": "x", "disabled": true}
                         ]},
                         "url": "https://example.com/upload"
                     }
@@ -286,6 +282,14 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
                     }
                 },
                 {
+                    "name": "File",
+                    "request": {
+                        "method": "PUT",
+                        "body": {"mode": "file", "file": {"src": "/tmp/data.bin"}},
+                        "url": "https://example.com/data"
+                    }
+                },
+                {
                     "name": "Key",
                     "request": {
                         "auth": {"type": "apikey", "apikey": [
@@ -302,18 +306,30 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
     .unwrap();
 
     let (_, upload) = http(&import.collection.items[0]);
+    let part = |name: &str, value: &str, file| FormPart {
+        name: name.into(),
+        value: value.into(),
+        file,
+    };
     assert_eq!(
-        String::from_utf8(upload.body.clone().unwrap()).unwrap(),
-        "--RequestEagleFormBoundary\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nCat\r\n\
-         --RequestEagleFormBoundary--\r\n"
+        upload.body,
+        Some(Body::Multipart {
+            parts: vec![
+                part("title", "Cat", false),
+                part("photo", "/tmp/cat.png", true),
+                part("more", "/tmp/a.png", true),
+                part("more", "/tmp/b.png", true),
+                part("later", "", true),
+            ],
+        })
     );
-    assert_eq!(
-        upload.headers[0].1,
-        "multipart/form-data; boundary=RequestEagleFormBoundary"
-    );
+    assert!(upload.headers.is_empty());
 
     let (_, query) = http(&import.collection.items[1]);
-    let payload: serde_json::Value = serde_json::from_slice(query.body.as_ref().unwrap()).unwrap();
+    let Some(Body::Raw { text, .. }) = &query.body else {
+        panic!("expected a raw body");
+    };
+    let payload: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(
         payload,
         serde_json::json!({"query": "query { pets { id } }", "variables": {"first": 2}})
@@ -322,13 +338,23 @@ fn postman_form_data_and_graphql_bodies_become_raw_bodies() {
     // Variables that are JSON only once filled in are kept as written.
     let (_, templated) = http(&import.collection.items[2]);
     assert_eq!(
-        String::from_utf8(templated.body.clone().unwrap()).unwrap(),
-        "{\n  \"query\": \"query($limit: Int!) { pets(limit: $limit) { id } }\",\n  \
-         \"variables\": {\"limit\": {{limit}}}\n}"
+        templated.body,
+        Some(Body::json(
+            "{\n  \"query\": \"query($limit: Int!) { pets(limit: $limit) { id } }\",\n  \
+             \"variables\": {\"limit\": {{limit}}}\n}"
+        ))
     );
     assert_eq!(templated.path, "https://example.com:8443/graphql");
 
-    let (_, key) = http(&import.collection.items[3]);
+    let (_, file) = http(&import.collection.items[3]);
+    assert_eq!(
+        file.body,
+        Some(Body::Binary {
+            file: "/tmp/data.bin".into()
+        })
+    );
+
+    let (_, key) = http(&import.collection.items[4]);
     assert_eq!(key.method, Method::Get);
     assert_eq!(key.query, [("api_key".to_owned(), "{{key}}".to_owned())]);
 }

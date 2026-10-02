@@ -17,7 +17,7 @@ mod virtual_body;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use body::ResponseBodyEditor;
+pub(crate) use body::{ResponseBodyEditor, register_xml};
 pub use content::ResponseContent;
 pub(crate) use content::exceeds_editor_limit;
 pub(crate) use hex::hex_dump;

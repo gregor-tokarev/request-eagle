@@ -10,7 +10,7 @@ use super::{
     runtime::{ScriptState, post_response, pre_request},
 };
 use crate::{
-    Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
+    Body, Execution, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
     RequestPreferences, RequestVariables, Response, StatusCode, Version,
 };
 
@@ -232,7 +232,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
             path: "https://example.com/{{!customer}}".into(),
             headers: vec![("X-Literal".into(), "{{!$guid}}/{{!customer}}".into())],
             query: vec![("{{!key}}".into(), "{{!customer}}".into())],
-            body: Some(b"{{!customer}}".to_vec()),
+            body: Some(Body::json("{{!customer}}")),
             ..Default::default()
         };
         if mode == "dynamic" {
@@ -245,7 +245,7 @@ fn sends_unescape_literals_once_with_or_without_scripts_or_dynamic_values() {
         assert_eq!(sent.path, "https://example.com/{{customer}}", "{mode}");
         assert_eq!(sent.headers[0].1, "{{$guid}}/{{customer}}");
         assert_eq!(sent.query, [("{{key}}".into(), "{{customer}}".into())]);
-        assert_eq!(sent.body.unwrap(), b"{{customer}}");
+        assert_eq!(sent.body, Some(Body::json("{{customer}}")));
         if mode == "dynamic" {
             uuid::Uuid::parse_str(&sent.headers[1].1).unwrap();
         }
@@ -262,7 +262,9 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
             ("{{$guid}}".into(), "{{$randomUUID}}".into()),
         ],
         query: vec![("id".into(), "{{$randomUUID}}".into())],
-        body: Some(br#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#.to_vec()),
+        body: Some(Body::json(
+            r#"{"id":"{{$guid}}","time":"{{$isoTimestamp}}","n":{{$randomInt}}}"#,
+        )),
         ..Default::default()
     };
     let (sent, state, reports) = send(original.clone());
@@ -278,7 +280,10 @@ fn dynamic_request_templates_work_without_scripts_and_do_not_change_the_draft() 
         sent.path.strip_prefix("https://example.com/").unwrap(),
         sent.headers[1].0
     );
-    let body: serde_json::Value = serde_json::from_slice(&sent.body.unwrap()).unwrap();
+    let Some(Body::Raw { text, .. }) = sent.body else {
+        panic!("expected a raw body");
+    };
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(body["id"], sent.headers[1].0);
     chrono::DateTime::parse_from_rfc3339(body["time"].as_str().unwrap()).unwrap();
     assert!(body["n"].as_u64().unwrap() <= 1000);

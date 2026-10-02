@@ -108,10 +108,16 @@ impl SaveRequestDialog {
         let mut request = self.request.clone();
 
         // Files picked before the collection was known are stored relative to it.
-        if let request::Request::Grpc(grpc) = &mut request
-            && let Some(collection) = destination.path.ancestors().nth(destination.folders.len())
-        {
-            grpc.definition = grpc.definition.relative_to(collection);
+        if let Some(collection) = destination.path.ancestors().nth(destination.folders.len()) {
+            match &mut request {
+                request::Request::Grpc(grpc) => {
+                    grpc.definition = grpc.definition.relative_to(collection);
+                }
+                request::Request::Http(http) => {
+                    http.body = http.body.as_ref().map(|body| body.relative_to(collection));
+                }
+                request::Request::WebSocket(_) => {}
+            }
         }
 
         let result = self.sidebar.update(cx, |sidebar, cx| {

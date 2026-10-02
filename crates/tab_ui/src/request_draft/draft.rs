@@ -75,7 +75,11 @@ pub struct RequestDraft {
     path_values: Vec<(String, String)>,
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
+    /// The editors of each body type, kept while another type is chosen.
     pub(super) body: Option<Entity<EditorState>>,
+    pub(super) form: Option<Entity<RequestFields>>,
+    pub(super) parts: Option<Entity<RequestFields>>,
+    pub(super) body_file: Option<Entity<InputState>>,
     pub(super) body_vim: Option<Entity<crate::vim::Vim>>,
     pub(super) body_json_valid: bool,
     pub(super) body_task: Option<Task<()>>,
@@ -114,7 +118,7 @@ impl SnippetDraft for RequestDraft {
     }
 
     fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
-        self.request
+        self.sent_request()
             .curl_command(values, super::execution::active_jar(cx).as_ref())
     }
 
@@ -189,6 +193,9 @@ impl RequestDraft {
             path_variables: None,
             headers: None,
             body: None,
+            form: None,
+            parts: None,
+            body_file: None,
             body_vim: None,
             body_json_valid: false,
             body_task: None,
@@ -210,6 +217,21 @@ impl RequestDraft {
             configuration,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The request as it is sent, with its body's files found from the
+    /// collection.
+    pub(super) fn sent_request(&self) -> HttpRequest {
+        let mut request = self.request.clone();
+        let collection = self
+            .location
+            .as_ref()
+            .and_then(RequestLocation::collection_path);
+        if let (Some(body), Some(collection)) = (&mut request.body, collection) {
+            *body = body.resolved_from(&collection);
+        }
+
+        request
     }
 
     /// A name given before the request is saved is an unsaved change too.
@@ -326,6 +348,9 @@ impl RequestDraft {
         self.path_variables = None;
         self.headers = None;
         self.body = None;
+        self.form = None;
+        self.parts = None;
+        self.body_file = None;
         self.body_vim = None;
         self.body_completion = None;
         self.body_task = None;
@@ -355,9 +380,7 @@ impl RequestDraft {
             RequestSection::Headers => {
                 self.headers_state(window, cx);
             }
-            RequestSection::Body => {
-                self.body_state(window, cx);
-            }
+            RequestSection::Body => self.body_state(window, cx),
             RequestSection::Scripts => {
                 self.script_state(window, cx);
             }

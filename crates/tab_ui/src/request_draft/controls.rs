@@ -281,6 +281,11 @@ impl RequestDraft {
                         Some(RequestSection::Headers) => {
                             self.request.headers.len() + self.generated_headers.len()
                         }
+                        Some(RequestSection::Body) => match &self.request.body {
+                            Some(request::Body::UrlEncoded { fields }) => fields.len(),
+                            Some(request::Body::Multipart { parts }) => parts.len(),
+                            _ => 0,
+                        },
                         Some(RequestSection::Scripts) => {
                             usize::from(!self.request.scripts.pre_request.is_empty())
                                 + usize::from(!self.request.scripts.post_response.is_empty())

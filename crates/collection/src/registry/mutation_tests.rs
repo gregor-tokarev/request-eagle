@@ -7,7 +7,7 @@ use std::{
 
 use crate::{CollectionEditError, CollectionRegistry, Entry, FileEntry};
 
-use request::{HttpRequest, Method, Request};
+use request::{Body, HttpRequest, Method, Request};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -164,7 +164,7 @@ request_custom = 'keep the request metadata'
         method: Method::Post,
         path: "https://example.com/v2/users/:team".into(),
         headers: vec![("Accept".into(), "application/json".into())],
-        body: Some(b"new body".to_vec()),
+        body: Some(Body::json("new body")),
         query: vec![("page".into(), "2".into())],
         path_variables: vec![("team".into(), "core".into())],
         settings: Default::default(),
@@ -407,6 +407,78 @@ fn saving_inline_request_keeps_unknown_fields_and_removes_cleared_body() {
     };
     assert_eq!(reloaded.path, "https://example.com/edited");
     assert_eq!(reloaded.body, None);
+}
+
+#[test]
+fn saving_a_body_of_another_type_keeps_none_of_its_fields() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let mut save = |body| {
+        let request = HttpRequest {
+            method: Method::Post,
+            path: "https://example.com/users".into(),
+            body: Some(body),
+            ..HttpRequest::default()
+        };
+        registry
+            .update_request(&path, "list", request.clone().into())
+            .unwrap();
+        let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+            panic!("expected an HTTP request");
+        };
+        assert_eq!(reloaded, request);
+
+        fs::read_to_string(&path).unwrap()
+    };
+
+    let content = save(Body::json("{}"));
+    assert!(content.contains("language = \"json\""), "{content}");
+
+    let content = save(Body::Multipart {
+        parts: vec![request::FormPart {
+            name: "avatar".into(),
+            value: "eagle.png".into(),
+            file: true,
+        }],
+    });
+    assert!(!content.contains("language"), "{content}");
+
+    let content = save(Body::Binary {
+        file: "eagle.png".into(),
+    });
+    assert!(!content.contains("parts"), "{content}");
+}
+
+#[test]
+fn saving_an_inline_request_writes_its_body_inline() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    fs::write(
+        &path,
+        "id = 'list'\nname = 'List users'\nschema_version = 1\nrequest = { type = 'http', method = 'POST', path = '/users', body = [65] }\n",
+    )
+    .unwrap();
+    let mut registry = CollectionRegistry::from_path(root).unwrap();
+    let request = HttpRequest {
+        method: Method::Post,
+        path: "/users".into(),
+        body: Some(Body::UrlEncoded {
+            fields: vec![("name".into(), "Rex".into())],
+        }),
+        ..HttpRequest::default()
+    };
+
+    registry
+        .update_request(&path, "list", request.clone().into())
+        .unwrap();
+
+    let Request::Http(reloaded) = FileEntry::from_path(&path).unwrap().request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(reloaded, request);
 }
 
 #[test]

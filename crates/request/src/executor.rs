@@ -88,8 +88,15 @@ impl RequestExecutor {
                 .await?;
                 reports = pre_reports;
 
+                // Reading the body's files blocks.
+                let (request, body) = smol::unblock(move || {
+                    let body = request.encode_body();
+                    (request, body)
+                })
+                .await;
+                let body = body?.map(Bytes::from);
+
                 let sent_at = Instant::now();
-                let body = request.body.take().map(Bytes::from);
 
                 // Only a post-response script reads the sent body. Otherwise
                 // HTTP owns the upload and releases it before the download.

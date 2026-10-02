@@ -1,4 +1,4 @@
-use std::{io, time::Duration};
+use std::{io, path::PathBuf, time::Duration};
 
 use thiserror::Error;
 
@@ -84,6 +84,16 @@ pub enum ExecutionError {
 
     #[error("HTTP transport failed: {0:#}")]
     Transport(#[source] anyhow::Error),
+
+    #[error("choose a file to send for {0}")]
+    MissingFile(String),
+
+    #[error("could not read {}: {source}", path.display())]
+    BodyFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 
     #[error("could not read the HTTP response body: {0}")]
     ReadBody(#[source] io::Error),

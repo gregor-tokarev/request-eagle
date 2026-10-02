@@ -1,8 +1,24 @@
 use std::collections::HashMap;
 
-use request::{HttpRequest, HttpSettings, Method};
+use request::{Body, FormPart, HttpRequest, HttpSettings, Method, RawLanguage};
 
 use crate::{CurlError, is_curl, parse_curl};
+
+/// The text of a raw body.
+fn raw(request: &HttpRequest) -> Option<&str> {
+    match &request.body {
+        Some(Body::Raw { text, .. }) => Some(text),
+        _ => None,
+    }
+}
+
+fn part(name: &str, value: &str, file: bool) -> FormPart {
+    FormPart {
+        name: name.into(),
+        value: value.into(),
+        file,
+    }
+}
 
 fn headers(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs
@@ -40,7 +56,7 @@ fn reads_a_command_written_over_several_lines() {
                 ("Content-Type", "application/json"),
                 ("Authorization", "Bearer abc"),
             ]),
-            body: Some(b"{\n    \"name\": \"Rex\"\n}".to_vec()),
+            body: Some(Body::json("{\n    \"name\": \"Rex\"\n}")),
             ..HttpRequest::default()
         }
     );
@@ -59,7 +75,13 @@ fn reads_browser_copies_with_ansi_c_quoting() {
         request.headers,
         headers(&[("accept", "*/*"), ("content-type", "text/plain")])
     );
-    assert_eq!(request.body.as_deref(), Some("it's\né é A".as_bytes()));
+    assert_eq!(
+        request.body,
+        Some(Body::Raw {
+            language: RawLanguage::Text,
+            text: "it's\né é A".into(),
+        })
+    );
 }
 
 #[test]
@@ -75,7 +97,7 @@ fn reads_combined_and_attached_short_options() {
             ("Content-Type", "application/x-www-form-urlencoded"),
         ])
     );
-    assert_eq!(request.body.as_deref(), Some(&b"x=1"[..]));
+    assert_eq!(raw(&request), Some("x=1"));
 }
 
 #[test]
@@ -107,10 +129,7 @@ fn joins_data_and_sends_it_in_the_query_with_get() {
         "curl -d a=1 --data-urlencode 'q=hello world&more' --data-urlencode =x/y https://example.com",
     )
     .unwrap();
-    assert_eq!(
-        request.body.as_deref(),
-        Some(&b"a=1&q=hello%20world%26more&x%2Fy"[..])
-    );
+    assert_eq!(raw(&request), Some("a=1&q=hello%20world%26more&x%2Fy"));
 
     let request = parse_curl("curl -G -d a=1 -d b=2 'https://example.com/s?x=0'").unwrap();
     assert_eq!(request.method, Method::Get);
@@ -144,15 +163,14 @@ fn reads_json_forms_and_credentials() {
             ("Referer", "https://ref.example"),
             ("Authorization", "Basic dXNlcjpzZWNyZXQ="),
             ("Cookie", "a=1; b=2"),
-            (
-                "Content-Type",
-                "multipart/form-data; boundary=RequestEagleFormBoundary"
-            ),
         ])
     );
-    let body = String::from_utf8(request.body.unwrap()).unwrap();
-    assert!(body.contains("name=\"name\"\r\n\r\nRex\r\n"));
-    assert!(body.contains("name=\"note\"\r\n\r\na=b\r\n"));
+    assert_eq!(
+        request.body,
+        Some(Body::Multipart {
+            parts: vec![part("name", "Rex", false), part("note", "a=b", false)],
+        })
+    );
 }
 
 #[test]
@@ -181,12 +199,19 @@ fn explains_what_it_cannot_import() {
         Err(CurlError::UnsupportedMethod("TRACE".into()))
     );
     assert_eq!(
-        parse_curl("curl -F file=@photo.jpg https://example.com"),
-        Err(CurlError::File("--form file=@photo.jpg".into()))
+        parse_curl("curl -F 'notes=<notes.txt' https://example.com"),
+        Err(CurlError::File("--form notes=<notes.txt".into()))
+    );
+    // `--data` leaves out line breaks of the file it reads.
+    assert_eq!(
+        parse_curl("curl --data @body.json https://example.com"),
+        Err(CurlError::File("--data @body.json".into()))
     );
     assert_eq!(
-        parse_curl("curl --data-binary @body.json https://example.com"),
-        Err(CurlError::File("--data-binary @body.json".into()))
+        parse_curl("curl --data-binary @a.bin --data-binary @b.bin https://example.com"),
+        Err(CurlError::File(
+            "--data-binary @b.bin with other data".into()
+        ))
     );
     assert_eq!(
         parse_curl("curl -d a=1 -F b=2 https://example.com"),
@@ -204,14 +229,14 @@ fn reads_values_attached_to_long_options() {
     let request = parse_curl("curl --request=PATCH --data-raw=x=1 https://example.com").unwrap();
 
     assert_eq!(request.method, Method::Patch);
-    assert_eq!(request.body.as_deref(), Some(&b"x=1"[..]));
+    assert_eq!(raw(&request), Some("x=1"));
 }
 
 #[test]
 fn joins_data_as_curl_does() {
     // `--json` continues the previous data, while `--data` adds a field.
     let request = parse_curl("curl --json '{\"a\":' --json '1}' https://example.com").unwrap();
-    assert_eq!(request.body.as_deref(), Some(&b"{\"a\":1}"[..]));
+    assert_eq!(request.body, Some(Body::json("{\"a\":1}")));
 
     // `--get` adds the query before the fragment, which is not sent.
     let request = parse_curl("curl -G -d a=1 'https://example.com/path#top'").unwrap();
@@ -226,25 +251,74 @@ fn reads_form_fields_and_their_content_type() {
     )
     .unwrap();
 
+    // Sending adds the boundary.
     assert_eq!(
         request.headers,
-        headers(&[(
-            "Content-Type",
-            "multipart/form-data; boundary=RequestEagleFormBoundary"
-        )])
+        headers(&[("Content-Type", "multipart/form-data")])
     );
-    let body = String::from_utf8(request.body.unwrap()).unwrap();
-    assert!(body.contains("name=\"name\"\r\n\r\nRex\r\n"), "{body}");
-    assert!(
-        body.contains("name=\"note\"\r\n\r\na;b \"c\"\r\n"),
-        "{body}"
+    assert_eq!(
+        request.body,
+        Some(Body::Multipart {
+            parts: vec![
+                part("name", "Rex", false),
+                part("note", "a;b \"c\"", false),
+                part("raw", "x;y", false),
+            ],
+        })
     );
-    assert!(body.contains("name=\"raw\"\r\n\r\nx;y\r\n"), "{body}");
 
     // Without its closing quote, cURL sends the value as it is written.
     let request = parse_curl("curl -F 'name=\"Rex' https://example.com").unwrap();
-    let body = String::from_utf8(request.body.unwrap()).unwrap();
-    assert!(body.contains("name=\"name\"\r\n\r\n\"Rex\r\n"), "{body}");
+    assert_eq!(
+        request.body,
+        Some(Body::Multipart {
+            parts: vec![part("name", "\"Rex", false)],
+        })
+    );
+}
+
+#[test]
+fn reads_the_files_forms_and_data_send() {
+    let request = parse_curl(
+        "curl -F 'avatar=@\"my;photo,1.jpg\";type=image/jpeg' -F 'doc=@notes.txt;filename=n' \
+         -F 'files=@a.txt,b.txt;type=text/plain' \
+         -F 'named=@c.txt;filename=\"client,copy.txt\"' -F 'quote=@a\"b.txt,b.txt' \
+         -F 'spaced=@d.txt;filename= \"e,f.txt\"' -F 'listed=@ \"g,h.txt\" , i.txt' \
+         -F 'unclosed=@j.txt;filename=\"k,l.txt' https://example.com",
+    )
+    .unwrap();
+    assert_eq!(
+        request.body,
+        Some(Body::Multipart {
+            parts: vec![
+                part("avatar", "my;photo,1.jpg", true),
+                part("doc", "notes.txt", true),
+                part("files", "a.txt", true),
+                part("files", "b.txt", true),
+                part("named", "c.txt", true),
+                part("quote", "a\"b.txt", true),
+                part("quote", "b.txt", true),
+                part("spaced", "d.txt", true),
+                part("listed", "g,h.txt", true),
+                part("listed", "i.txt", true),
+                part("unclosed", "j.txt", true),
+                part("unclosed", "l.txt", true),
+            ],
+        })
+    );
+
+    let request = parse_curl(
+        "curl -H 'Content-Type: image/png' --data-binary @/tmp/eagle.png https://example.com",
+    )
+    .unwrap();
+    assert_eq!(request.method, Method::Post);
+    assert_eq!(request.headers, headers(&[("Content-Type", "image/png")]));
+    assert_eq!(
+        request.body,
+        Some(Body::Binary {
+            file: "/tmp/eagle.png".into()
+        })
+    );
 }
 
 #[test]
@@ -264,14 +338,37 @@ fn reads_the_commands_request_eagle_writes() {
             method: Method::Put,
             path: "https://example.com/pets?x=1".into(),
             headers: headers(&[("Content-Type", "application/json"), ("X-Empty", "")]),
-            body: Some(br#"{"it's": "@home"}"#.to_vec()),
+            body: Some(Body::json(r#"{"it's": "@home"}"#)),
             ..HttpRequest::default()
         },
         HttpRequest {
             method: Method::Post,
             path: "https://example.com/form".into(),
             headers: headers(&[("Content-Type", "text/plain")]),
-            body: Some(b"line one\nline two".to_vec()),
+            body: Some(Body::Raw {
+                language: RawLanguage::Text,
+                text: "line one\nline two".into(),
+            }),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            method: Method::Post,
+            path: "https://example.com/upload".into(),
+            body: Some(Body::Multipart {
+                parts: vec![
+                    part("title", "@me;type=x", false),
+                    part("avatar", "/tmp/my \"eagle\";1.png", true),
+                ],
+            }),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            method: Method::Put,
+            path: "https://example.com/upload".into(),
+            headers: headers(&[("Content-Type", "application/octet-stream")]),
+            body: Some(Body::Binary {
+                file: "/tmp/eagle.bin".into(),
+            }),
             ..HttpRequest::default()
         },
         HttpRequest {
