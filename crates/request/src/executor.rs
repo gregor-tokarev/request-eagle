@@ -6,9 +6,11 @@ use std::{
 
 use bytes::Bytes;
 
+use http_client::http::header::WWW_AUTHENTICATE;
+
 use crate::{
-    CookieJar, EventStream, Execution, ExecutionError, HttpRequest, RequestPreferences,
-    RequestVariables, Response, http::HttpExecutor, scripts,
+    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, HttpRequest,
+    RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
 };
 
 /// Reusable protocol dispatcher with a connection pool and a settings snapshot.
@@ -63,11 +65,13 @@ impl RequestExecutor {
 
     fn run(
         &self,
-        request: HttpRequest,
+        mut request: HttpRequest,
         variables: RequestVariables,
         mut events: Option<EventStream>,
     ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
         let executor = self.clone();
+        // Resolved with the request's other fields, after pre-request scripts.
+        request.auth = variables.effective_auth(&request.auth);
         let opened = events.as_ref().map(|events| events.opened.clone());
         let timeout = match request.settings.timeout_ms {
             Some(0) => None,
@@ -89,12 +93,13 @@ impl RequestExecutor {
                 reports = pre_reports;
 
                 // Reading the body's files blocks.
-                let (request, body) = smol::unblock(move || {
+                let (mut request, body) = smol::unblock(move || {
                     let body = request.encode_body();
                     (request, body)
                 })
                 .await;
                 let body = body?.map(Bytes::from);
+                authorize(&mut request, body.as_deref())?;
 
                 let sent_at = Instant::now();
 
@@ -104,10 +109,21 @@ impl RequestExecutor {
                     || !state.collection_post_response.trim().is_empty();
                 let post_body = if has_post_script { body.clone() } else { None };
 
-                let (response, url) = executor
+                let (mut response, mut url) = executor
                     .http
-                    .execute(&request, body, events.as_mut())
+                    .execute(&request, body.clone(), events.as_mut())
                     .await?;
+
+                if let Some(answer) = answer_digest(&request, &response, &url, body.as_deref()) {
+                    // Answer the server that challenged, after any redirects.
+                    request.path = url.to_string();
+                    request.query.clear();
+                    request.headers.push(("Authorization".into(), answer));
+                    (response, url) = executor
+                        .http
+                        .execute(&request, body, events.as_mut())
+                        .await?;
+                }
                 state.response_url = Some(url.into());
                 let execution = Execution {
                     response: Response::Http(response),
@@ -160,4 +176,55 @@ impl RequestExecutor {
             .await)
         }
     }
+}
+
+/// Add the credentials of the request's resolved authorization.
+fn authorize(request: &mut HttpRequest, body: Option<&[u8]>) -> Result<(), ExecutionError> {
+    let form = match &request.body {
+        Some(Body::UrlEncoded { fields }) => fields.clone(),
+        _ => Vec::new(),
+    };
+
+    crate::auth::authorize(
+        &request.auth,
+        request.method.as_str(),
+        &request.path,
+        &mut request.query,
+        &mut request.headers,
+        body.unwrap_or_default(),
+        &form,
+    )
+    .map_err(ExecutionError::Auth)
+}
+
+/// The Authorization header that answers a Digest challenge in the
+/// response, unless the request set its own.
+fn answer_digest(
+    request: &HttpRequest,
+    response: &crate::HttpResponse,
+    url: &url::Url,
+    body: Option<&[u8]>,
+) -> Option<String> {
+    let Auth::Digest(credentials) = &request.auth else {
+        return None;
+    };
+    if response.status != StatusCode::UNAUTHORIZED
+        || request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+    {
+        return None;
+    }
+
+    credentials.answer_digest(
+        response
+            .headers
+            .get_all(WWW_AUTHENTICATE)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+        request.method.as_str(),
+        url,
+        body.unwrap_or_default(),
+    )
 }

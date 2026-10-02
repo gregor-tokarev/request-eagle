@@ -15,8 +15,9 @@ use futures::{Stream, StreamExt as _, stream};
 use prost::Message as _;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, Value};
 use request::{
-    GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts,
-    GrpcSettings, MethodKind, RequestPreferences, RequestVariables, ServiceDefinition,
+    ApiKeyAuth, Auth, AuthKind, AuthLocation, BearerAuth, GrpcClient, GrpcDefinition, GrpcError,
+    GrpcEvent, GrpcEvents, GrpcRequest, GrpcScripts, GrpcSettings, MethodKind, RequestPreferences,
+    RequestVariables, ServiceDefinition,
 };
 use tokio_rustls::{TlsAcceptor, rustls};
 use tonic::{
@@ -433,6 +434,64 @@ async fn unary_calls_return_the_message_metadata_and_status() {
 }
 
 #[tokio::test]
+async fn authorization_is_sent_as_metadata() {
+    let protos = protos();
+    let address = serve(&protos, Some("v1")).await;
+    let mut request = request(address, "Say", r#"{"text": "x"}"#);
+    let definition = reflect(&request).await;
+    let echoed = |events: &[GrpcEvent], value: &str| {
+        events.iter().any(|event| matches!(event,
+            GrpcEvent::Metadata(metadata) if metadata.contains(&("x-echo".into(), value.into()))))
+    };
+
+    // A call has no query, so the collection's API key is metadata either way.
+    let inherited = variables().with_collection_auth(Auth::ApiKey(ApiKeyAuth {
+        key: "X-Echo".into(),
+        value: "{{name}}".into(),
+        add_to: AuthLocation::Query,
+    }));
+    let (_call, events) = client()
+        .invoke(&request, inherited, &definition)
+        .await
+        .unwrap();
+    assert!(echoed(&collect(events).await, "eagle"));
+
+    // Metadata the request sets itself takes precedence.
+    request.metadata = vec![("x-echo".into(), "own".into())];
+    request.auth = Auth::ApiKey(ApiKeyAuth {
+        key: "X-Echo".into(),
+        value: "auth".into(),
+        add_to: AuthLocation::Header,
+    });
+    let (_call, events) = client()
+        .invoke(&request, variables(), &definition)
+        .await
+        .unwrap();
+    assert!(echoed(&collect(events).await, "own"));
+
+    // Reflection sends the credentials too.
+    request.auth = Auth::Bearer(BearerAuth {
+        token: "{{name}}".into(),
+    });
+    client()
+        .load_definition(&request, &variables(), None)
+        .await
+        .unwrap();
+
+    // Kinds that sign an HTTP request cannot authorize a call.
+    for kind in [AuthKind::Digest, AuthKind::OAuth1, AuthKind::AwsSignature] {
+        request.auth = kind.new_auth();
+        let Err(error) = client().invoke(&request, variables(), &definition).await else {
+            panic!("{} authorized a call", kind.label());
+        };
+        assert!(
+            matches!(&error, GrpcError::Auth(message) if message.contains("cannot authorize gRPC calls")),
+            "{error}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn server_streams_arrive_in_order() {
     let protos = protos();
     let address = serve(&protos, Some("v1")).await;
@@ -805,6 +864,7 @@ fn saved_requests_round_trip_through_toml() {
         method: "echo.v1.EchoService/Say".into(),
         message: "{\"text\": \"hi\"}".into(),
         metadata: vec![("authorization".into(), "Bearer {{token}}".into())],
+        auth: Auth::None,
         definition: GrpcDefinition::ProtoFile {
             path: Path::new("protos/echo.proto").into(),
             import_paths: vec!["shared".into()],

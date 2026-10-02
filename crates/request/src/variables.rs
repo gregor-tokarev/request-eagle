@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 use url::form_urlencoded;
 
-use crate::{Body, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{Auth, Body, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -14,6 +14,8 @@ pub struct RequestVariables {
     pub(crate) scopes: VariableScopes,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
+    /// What requests that inherit their authorization send.
+    pub(crate) collection_auth: Auth,
     pub(crate) environment_error: Option<String>,
     /// Values `{{$name}}` resolves to instead of generating new ones, set by
     /// a gRPC call's Before invoke script for the whole call.
@@ -42,6 +44,32 @@ impl RequestVariables {
     pub fn with_collection_scripts(mut self, scripts: Result<RequestScripts, String>) -> Self {
         self.collection_scripts = scripts;
         self
+    }
+
+    /// Requests that inherit their authorization send the collection's.
+    pub fn with_collection_auth(mut self, auth: Auth) -> Self {
+        self.collection_auth = auth;
+        self
+    }
+
+    /// The authorization a request sends: its own, or its collection's
+    /// when it inherits it.
+    pub fn effective_auth(&self, auth: &Auth) -> Auth {
+        match auth {
+            Auth::Inherit => self.collection_auth.clone(),
+            auth => auth.clone(),
+        }
+    }
+
+    /// The authorization a request sends, with its `{{variables}}` resolved.
+    pub(crate) fn resolve_auth(&self, auth: &Auth) -> Result<Auth, String> {
+        let mut auth = self.effective_auth(auth);
+        let mut resolver = self.resolver();
+
+        auth.resolve_with(|text| resolver.resolve(text))
+            .map_err(|error| describe_error(error, self.environment_error.as_deref()))?;
+
+        Ok(auth)
     }
 
     /// Read the collection's variables and the active environment with the
@@ -75,6 +103,7 @@ impl RequestVariables {
             scopes,
             session,
             collection_scripts: Ok(RequestScripts::default()),
+            collection_auth: Auth::Inherit,
             environment_error,
             generated: BTreeMap::new(),
         }
@@ -92,12 +121,16 @@ impl RequestVariables {
     /// variables such as `{{$guid}}` stay as written, since they differ on
     /// every use, unless a Before invoke script set them for the call.
     pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
-        let texts = std::iter::once(request.url.as_str()).chain(
-            request
-                .metadata
-                .iter()
-                .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
-        );
+        // Servers may require credentials to answer reflection.
+        let auth = self.effective_auth(&request.auth).texts();
+        let texts = std::iter::once(request.url.as_str())
+            .chain(
+                request
+                    .metadata
+                    .iter()
+                    .flat_map(|(key, value)| [key.as_str(), value.as_str()]),
+            )
+            .chain(auth.iter().map(String::as_str));
         let mut resolver = self.resolver();
 
         for text in texts.clone() {
@@ -138,6 +171,9 @@ impl RequestVariables {
             *value = resolve(value)?;
         }
 
+        request.auth = self.effective_auth(&request.auth);
+        request.auth.resolve_with(&mut resolve)?;
+
         if message {
             request.message = resolve(&request.message)?;
         }
@@ -175,6 +211,7 @@ impl RequestVariables {
     ) -> Result<WebSocketRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
         let mut request = request.clone();
+        request.auth = self.effective_auth(&request.auth);
         let mut resolve = || {
             request.url = resolve_url(&request.url, &mut resolver)?;
 
@@ -183,7 +220,7 @@ impl RequestVariables {
                 *value = resolver.resolve(value)?;
             }
 
-            Ok(())
+            request.auth.resolve_with(|text| resolver.resolve(text))
         };
 
         resolve()
@@ -337,6 +374,8 @@ impl HttpRequest {
             *key = resolver.resolve(key)?;
             *value = resolver.resolve(value)?;
         }
+
+        request.auth.resolve_with(|text| resolver.resolve(text))?;
 
         match &mut request.body {
             Some(Body::Raw { text, .. }) if body_changed || text.contains("{{") => {

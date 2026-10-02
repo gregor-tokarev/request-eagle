@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Body, CookieJar, HttpRequest, Method};
+use crate::{Auth, AuthLocation, Body, CookieJar, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -29,6 +29,9 @@ impl HttpRequest {
         for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
             *key = keep_unknown(key, values);
             *value = keep_unknown(value, values);
+        }
+        for text in request.auth.texts_mut() {
+            *text = keep_unknown(text, values);
         }
         match &mut request.body {
             Some(Body::Raw { text, .. }) => *text = keep_unknown(text, values),
@@ -71,6 +74,7 @@ impl HttpRequest {
                 .path
                 .replace(&format!("\u{E000}{index}\u{E000}"), reference);
         }
+        let auth = authorization(&mut request);
         let url = url(&request.path, &request.query);
         let data = request.body.as_ref().map(data).unwrap_or_default();
 
@@ -146,6 +150,15 @@ impl HttpRequest {
             command.push_str(&quote(&header));
         }
 
+        for (option, value) in auth {
+            command.push_str(" \\\n--");
+            command.push_str(option);
+            if let Some(value) = value {
+                command.push(' ');
+                command.push_str(&quote(&value));
+            }
+        }
+
         for (option, value) in data {
             command.push_str(" \\\n--");
             command.push_str(option);
@@ -154,6 +167,64 @@ impl HttpRequest {
         }
 
         command
+    }
+}
+
+/// The options that send the request's resolved authorization. cURL
+/// computes Basic, Digest and AWS signatures itself; the credentials of the
+/// others are added to the request as sending adds them now. One that cannot
+/// be made, such as a JWT without its key, is left out.
+fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>)> {
+    let auth = std::mem::take(&mut request.auth);
+    let own_authorization = request
+        .headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
+    let user = |username: &str, password: &str| ("user", Some(format!("{username}:{password}")));
+
+    match &auth {
+        _ if own_authorization && auth.credential_name().is_some_and(|(_, name)| name == "Authorization") => {
+            Vec::new()
+        }
+        Auth::Basic(auth) if auth.username.is_empty() && auth.password.is_empty() => Vec::new(),
+        Auth::Basic(auth) => vec![user(&auth.username, &auth.password)],
+        Auth::Digest(auth) => vec![("digest", None), user(&auth.username, &auth.password)],
+        Auth::AwsSignature(aws) if aws.add_to == AuthLocation::Header => {
+            if !aws.session_token.is_empty() {
+                request
+                    .headers
+                    .push(("X-Amz-Security-Token".into(), aws.session_token.clone()));
+            }
+
+            vec![
+                (
+                    "aws-sigv4",
+                    Some(format!("aws:amz:{}:{}", aws.region.trim(), aws.service.trim())),
+                ),
+                user(aws.access_key.trim(), aws.secret_key.trim()),
+            ]
+        }
+        auth => {
+            let body = match &request.body {
+                Some(Body::Raw { text, .. }) => text.clone().into_bytes(),
+                _ => Vec::new(),
+            };
+            let form = match &request.body {
+                Some(Body::UrlEncoded { fields }) => fields.clone(),
+                _ => Vec::new(),
+            };
+            let _ = crate::auth::authorize(
+                auth,
+                request.method.as_str(),
+                &request.path,
+                &mut request.query,
+                &mut request.headers,
+                &body,
+                &form,
+            );
+
+            Vec::new()
+        }
     }
 }
 

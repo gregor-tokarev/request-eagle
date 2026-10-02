@@ -144,6 +144,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                     ],
                     query: vec![("id".into(), "{{$guid}}".into())],
                     path_variables: Vec::new(),
+                    auth: Default::default(),
                     body: Some(Body::json("{{$guid}}/{{$guid}}")),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -307,6 +308,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             scripts: Default::default(),
             query: vec![("tag".into(), "a & b".into()), ("tag".into(), "c+d".into())],
             path_variables: Vec::new(),
+            auth: Default::default(),
             settings: HttpSettings::default(),
         };
         let result = executor().execute(request, no_variables()).await.unwrap();

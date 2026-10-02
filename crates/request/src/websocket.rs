@@ -25,7 +25,8 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest, tls::Tls,
+    Auth, ExecutionError, Method, RequestPreferences, RequestVariables, WebSocketRequest,
+    tls::Tls,
 };
 
 /// Events wait in a queue until the tab reads them. When it holds this many
@@ -49,11 +50,13 @@ const UPGRADE_HEADERS: [(&str, &str); 4] = [
     (KEY_HEADER, "Generated on connect"),
 ];
 
-/// The headers a handshake adds to the request's own, which take precedence.
-/// Before connecting, the key and any values from `{{variables}}` are placeholders.
+/// The headers a handshake adds to the request's own, which take precedence,
+/// including those of `auth`, the authorization it sends. Before connecting,
+/// the key and any values from `{{variables}}` are placeholders.
 pub fn websocket_handshake_headers(
     url: &str,
     headers: &[(String, String)],
+    auth: &Auth,
 ) -> Vec<(String, String)> {
     let url = websocket_url(url);
     let templated = url.contains("{{");
@@ -83,6 +86,20 @@ pub fn websocket_handshake_headers(
     if templated && !has("host") && !generated.iter().any(|(name, _)| name == "Host") {
         generated.insert(0, ("Host".into(), "Resolved on connect".into()));
     }
+
+    // The authorization replaces credentials written in the URL.
+    let auth_headers = auth.preview_headers();
+    if !auth_headers.is_empty() {
+        generated.retain(|(name, _)| name != "Authorization");
+    }
+    generated.extend(
+        auth_headers
+            .into_iter()
+            .filter(|(name, _)| !has(name))
+            .map(|(name, value)| {
+                (name, value.unwrap_or_else(|| "Calculated on connect".into()))
+            }),
+    );
 
     generated.extend(
         UPGRADE_HEADERS
@@ -450,18 +467,34 @@ async fn handshake(
         }
     };
 
+    let mut request = request;
+    crate::auth::authorize(
+        &request.auth,
+        "GET",
+        &http_url(url.as_str()),
+        &mut request.query,
+        &mut request.headers,
+        &[],
+        &[],
+    )
+    .map_err(ExecutionError::Auth)?;
+
     // Fragments are never sent. Parameters from the editor follow the URL's own.
     url.set_fragment(None);
     if !request.query.is_empty() {
         url.query_pairs_mut().extend_pairs(&request.query);
     }
 
-    let mut headers = websocket_handshake_headers(url.as_str(), &request.headers);
+    let mut headers = websocket_handshake_headers(url.as_str(), &request.headers, &Auth::None);
     for (name, value) in &mut headers {
         if name == KEY_HEADER {
             *value = generate_key();
         }
     }
+    let own_authorization = request
+        .headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
     headers.extend(request.headers);
 
     // Credentials are sent as the Authorization header above instead, and
@@ -524,15 +557,38 @@ async fn handshake(
         .build()
         .map_err(ExecutionError::Client)?;
 
-    let mut builder = client.get(url.as_str());
-    for (name, value) in &headers {
-        builder = builder.header(name.as_str(), value.as_str());
-    }
+    let send = |headers: &[(String, String)]| {
+        let mut builder = client.get(url.as_str());
+        for (name, value) in headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
 
-    let response = builder
-        .send()
+        builder.send()
+    };
+    let mut response = send(&headers)
         .await
         .map_err(|error| ExecutionError::Transport(error.into()))?;
+
+    // Digest answers the server's challenge with a second handshake.
+    if let Auth::Digest(credentials) = &request.auth
+        && response.status() == StatusCode::UNAUTHORIZED
+        && !own_authorization
+        && let Some(answer) = credentials.answer_digest(
+            response
+                .headers()
+                .get_all("www-authenticate")
+                .iter()
+                .filter_map(|value| value.to_str().ok()),
+            "GET",
+            response.url(),
+            &[],
+        )
+    {
+        headers.push(("Authorization".into(), answer));
+        response = send(&headers)
+            .await
+            .map_err(|error| ExecutionError::Transport(error.into()))?;
+    }
     let status = response.status();
 
     if status != StatusCode::SWITCHING_PROTOCOLS {
