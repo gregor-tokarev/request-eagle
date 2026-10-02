@@ -3,18 +3,9 @@
 
 use std::collections::HashMap;
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use url::{Url, form_urlencoded::byte_serialize};
 
 use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
-
-/// What cURL escapes in a `--data-urlencode` value: all but the unreserved
-/// characters.
-const ESCAPED: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -247,20 +238,32 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
 }
 
 /// The bytes cURL sends for a body that it does not read from files.
-fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
+pub(crate) fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
+    // `--data-urlencode` keeps the unreserved characters of a value, writes
+    // a space as `+` and escapes the rest. A field without a name sends its
+    // value alone.
+    let escape = |value: &str| -> String {
+        value
+            .bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    char::from(byte).to_string()
+                }
+                b' ' => "+".to_owned(),
+                byte => format!("%{byte:02X}"),
+            })
+            .collect()
+    };
+
     match body {
         None => Some(Vec::new()),
         Some(Body::Raw { text, .. }) => Some(text.clone().into_bytes()),
-        // `--data-urlencode` joins its fields, escaping each value.
         Some(Body::UrlEncoded { fields }) => Some(
             fields
                 .iter()
-                .map(|(name, value)| {
-                    format!(
-                        "{}={}",
-                        form_encode(name),
-                        utf8_percent_encode(value, ESCAPED)
-                    )
+                .map(|(name, value)| match name.as_str() {
+                    "" => escape(value),
+                    name => format!("{}={}", form_encode(name), escape(value)),
                 })
                 .collect::<Vec<_>>()
                 .join("&")
