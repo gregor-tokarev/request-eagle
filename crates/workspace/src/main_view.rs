@@ -17,7 +17,7 @@ use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use collections_panel_ui::CollectionPanel;
-use request_eagle_theme::method_color;
+use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CookiePage, EnvironmentEditor, Environments, EnvironmentsEvent, GrpcDraft,
     RequestDraft, RequestLocation, RequestSent, SaveCollection, WebSocketDraft,
@@ -1068,7 +1068,7 @@ impl MainView {
             .flex_none()
             .icon(Icon::new(IconName::ChevronDown).size_3())
             .accessibility_label("New tab of a type")
-            .dropdown_menu(move |menu, _, _| {
+            .dropdown_menu(move |menu, _, cx| {
                 let http_view = view.clone();
                 let grpc_view = view.clone();
                 let websocket_view = view.clone();
@@ -1076,6 +1076,7 @@ impl MainView {
                 menu.action_context(focus.clone())
                     .item(
                         PopupMenuItem::new("HTTP Request")
+                            .icon(protocol_icon("HTTP", cx))
                             .action(Box::new(NewTab))
                             .on_click(move |_, window, cx| {
                                 let _ = http_view.update(cx, |this, cx| {
@@ -1086,6 +1087,7 @@ impl MainView {
                     )
                     .item(
                         PopupMenuItem::new("gRPC Request")
+                            .icon(protocol_icon("gRPC", cx))
                             .action(Box::new(NewGrpcTab))
                             .on_click(move |_, window, cx| {
                                 let _ = grpc_view.update(cx, |this, cx| {
@@ -1096,6 +1098,7 @@ impl MainView {
                     )
                     .item(
                         PopupMenuItem::new("WebSocket Request")
+                            .icon(protocol_icon("WS", cx))
                             .action(Box::new(NewWebSocketTab))
                             .on_click(move |_, window, cx| {
                                 let _ = websocket_view.update(cx, |this, cx| {
@@ -1231,10 +1234,7 @@ impl MainView {
                     div()
                         .debug_selector(move || format!("tab-method-{id}"))
                         .flex_none()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(method_color(label, cx))
-                        .child(label),
+                        .child(method_label(label, cx)),
                 )
             })
             .child(

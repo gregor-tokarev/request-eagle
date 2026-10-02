@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 22] = [
+const LOCAL_ICONS: [(&str, &[u8]); 25] = [
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
@@ -93,6 +93,19 @@ const LOCAL_ICONS: [(&str, &[u8]); 22] = [
     (
         "icons/grpc-bidi-streaming.svg",
         include_bytes!("../assets/icons/grpc-bidi-streaming.svg"),
+    ),
+    // Request protocols, shown where a request has no HTTP method to show.
+    (
+        "icons/protocol-http.svg",
+        include_bytes!("../assets/icons/protocol-http.svg"),
+    ),
+    (
+        "icons/protocol-grpc.svg",
+        include_bytes!("../assets/icons/protocol-grpc.svg"),
+    ),
+    (
+        "icons/protocol-websocket.svg",
+        include_bytes!("../assets/icons/protocol-websocket.svg"),
     ),
 ];
 
