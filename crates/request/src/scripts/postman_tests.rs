@@ -237,6 +237,8 @@ fn json_data_keeps_its_types_for_scripts_and_is_text_in_requests() {
                     pm.expect(pm.iterationData.get("count")).to.equal(2);
                     pm.expect(pm.variables.get("flags")).to.eql({a: true});
                     pm.expect(pm.variables.replaceIn("{{count}} {{shouldRun}}")).to.equal("2 false");
+                    // As the request writes it, not as JavaScript would.
+                    pm.expect(pm.variables.replaceIn("{{price}}")).to.equal("1e-6");
                 });
             "#
             .into(),
@@ -244,8 +246,13 @@ fn json_data_keeps_its_types_for_scripts_and_is_text_in_requests() {
         },
         ..Default::default()
     };
-    let data =
-        serde_json::json!({"shouldRun": false, "count": 2, "flags": {"a": true}, "none": null});
+    let data = serde_json::json!({
+        "shouldRun": false,
+        "count": 2,
+        "flags": {"a": true},
+        "none": null,
+        "price": 0.000001,
+    });
     let variables = RequestVariables::new(HashMap::new(), None).with_iteration_data(
         data.as_object()
             .unwrap()

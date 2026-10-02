@@ -7,13 +7,10 @@
     // The Collection Runner's data file row, which `{{name}}` prefers to
     // every scope and `pm.variables` overrides.
     const data = object(input.variables.data ?? {});
-    // How `{{name}}` writes a row's value: text as it is, other JSON values
-    // as JSON.
-    const dataText = key => {
-        if (!Object.hasOwn(data, key)) return undefined;
-        const value = data[key];
-        return typeof value === "string" ? value : value === null ? "" : stringify(value);
-    };
+    // How `{{name}}` writes a row's value, as the request will, so a
+    // signature over replaced text matches what is sent.
+    const dataTexts = object(input.dataText ?? {});
+    const dataText = key => Object.hasOwn(data, key) ? dataTexts[key] : undefined;
     // From lowest to highest: the environment covers the collection's
     // variables, which cover the globals. Null hides a name in its scope and
     // the scopes beneath it.

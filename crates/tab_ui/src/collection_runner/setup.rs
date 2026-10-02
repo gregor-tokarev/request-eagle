@@ -133,13 +133,14 @@ impl CollectionRunner {
         };
 
         div()
-            .id(ElementId::Name(format!("run-sequence-{id}").into()))
-            .debug_selector(move || format!("run-sequence-{index}"))
             .h_8()
             .w_full()
             .px_2()
             .child(
+                // The rounded row takes the drop highlight.
                 h_flex()
+                    .id(ElementId::Name(format!("run-sequence-{id}").into()))
+                    .debug_selector(move || format!("run-sequence-{index}"))
                     .size_full()
                     .px_2()
                     .gap_3()
@@ -197,19 +198,19 @@ impl CollectionRunner {
                             .path("icons/grip-vertical.svg")
                             .size_3p5()
                             .text_color(theme.muted_foreground),
-                    ),
+                    )
+                    .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                    .drag_over::<DraggedRequest>(move |row, drag: &DraggedRequest, _, cx| {
+                        if drag.index == index {
+                            row
+                        } else {
+                            row.bg(cx.theme().info.opacity(0.2))
+                        }
+                    })
+                    .on_drop(cx.listener(move |this, drag: &DraggedRequest, _, cx| {
+                        this.move_item(drag.index, index, cx);
+                    })),
             )
-            .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .drag_over::<DraggedRequest>(move |row, drag: &DraggedRequest, _, cx| {
-                if drag.index == index {
-                    row
-                } else {
-                    row.bg(cx.theme().info.opacity(0.2))
-                }
-            })
-            .on_drop(cx.listener(move |this, drag: &DraggedRequest, _, cx| {
-                this.move_item(drag.index, index, cx);
-            }))
             .into_any_element()
     }
 

@@ -396,6 +396,7 @@ fn input(request: &HttpRequest, state: &ScriptState, event: &str) -> serde_json:
         "headers": Field::enabled(&request.headers).collect::<Vec<_>>(),
         "body": body,
         "variables": variables,
+        "dataText": variables.data_texts(),
         "info": state.info.input(event),
     })
 }

@@ -17,6 +17,15 @@ pub(crate) struct Variables {
 }
 
 impl Variables {
+    /// How `{{name}}` writes each data file value, which scripts substitute
+    /// too, so both write the same text.
+    pub fn data_texts(&self) -> BTreeMap<String, String> {
+        self.data
+            .iter()
+            .map(|(name, value)| (name.clone(), data_text(value)))
+            .collect()
+    }
+
     /// The values `{{name}}` resolves to: the overrides over the data row,
     /// over the scopes.
     pub fn visible(&self) -> HashMap<String, String> {

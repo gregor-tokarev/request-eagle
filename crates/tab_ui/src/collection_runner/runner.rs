@@ -547,8 +547,13 @@ impl CollectionRunner {
             return;
         }
 
+        // What the run uses is taken now, so changing the environment or
+        // moving the source while it prepares changes nothing about it.
         let collection = self.collection.clone();
-        let environment = self.environments.read(cx).active_path();
+        let (environment, environment_path) = {
+            let environments = self.environments.read(cx);
+            (environments.active().cloned(), environments.active_path())
+        };
         let snapshot = cx.background_spawn(async move {
             let mut requests = Vec::new();
             let mut missing = Vec::new();
@@ -562,13 +567,15 @@ impl CollectionRunner {
             Snapshot {
                 requests,
                 missing,
-                files: read_entries(&collection.join("environment.toml")).and_then(|collection| {
-                    let environment = environment
+                files: read_entries(&collection.join("environment.toml")).and_then(|values| {
+                    let environment = environment_path
                         .as_deref()
                         .map_or_else(|| Ok(HashMap::new()), read_entries)?;
-                    Ok((collection, environment))
+                    Ok((values, environment))
                 }),
                 scripts: Collection::load_scripts(&collection).map_err(|error| error.to_string()),
+                collection,
+                environment,
             }
         });
 
@@ -589,6 +596,8 @@ impl CollectionRunner {
             missing,
             files,
             scripts,
+            collection,
+            environment,
         } = snapshot;
         if requests.is_empty() {
             self.start_error = Some("The selected requests are no longer saved.".into());
@@ -601,8 +610,7 @@ impl CollectionRunner {
             .try_global::<Preferences>()
             .map(|preferences| preferences.request.clone())
             .unwrap_or_default();
-        let environment = self.environments.read(cx).active().cloned();
-        let collection_environment = self.collection.join("environment.toml");
+        let collection_environment = collection.join("environment.toml");
         let ((collection_values, environment_values), environment_error) = match files {
             Ok(files) => (files, None),
             Err(error) => (Default::default(), Some(error)),
@@ -886,6 +894,10 @@ struct Snapshot {
     /// The collection's variables and the active environment's.
     files: Result<(Values, Values), String>,
     scripts: Result<RequestScripts, String>,
+    /// Whose session the run changes.
+    collection: PathBuf,
+    /// The name of the environment whose values `files` holds.
+    environment: Option<SharedString>,
 }
 
 /// The HTTP requests that run, and how many requests of other protocols
