@@ -31,3 +31,7 @@ git clone https://github.com/gregor-tokarev/request-eagle.git
 cd request-eagle
 make run
 ```
+
+## License
+
+Request Eagle is available under the [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE) license, at your option.

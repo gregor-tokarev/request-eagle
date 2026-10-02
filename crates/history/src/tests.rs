@@ -4,7 +4,7 @@ use std::{
 };
 
 use request::{
-    Body, Execution, GrpcRequest, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method,
+    Body, Execution, Field, GrpcRequest, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, Method,
     StatusCode, Version, WebSocketRequest,
 };
 
@@ -91,7 +91,7 @@ fn reads_a_request_with_its_response() {
     let request = HttpRequest {
         method: Method::Post,
         path: "{{host}}/users".into(),
-        headers: vec![("Authorization".into(), "Bearer {{token}}".into())],
+        headers: vec![Field::new("Authorization", "Bearer {{token}}")],
         body: Some(Body::json(r#"{"name":"Ada"}"#)),
         ..Default::default()
     };

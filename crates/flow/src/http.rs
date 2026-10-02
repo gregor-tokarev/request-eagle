@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use environment::EnvironmentSession;
-use request::{Body, Execution, HttpRequest, RequestScripts, RequestVariables, Response};
+use request::{Body, Execution, Field, HttpRequest, RequestScripts, RequestVariables, Response};
 use serde_json::{Map, Value, json};
 
 /// A saved request an HTTP Request block sends, with what its variables
@@ -43,11 +43,14 @@ impl SavedRequest {
 /// such as `{{$guid}}` are left out.
 pub fn request_variables(request: &HttpRequest) -> Vec<String> {
     let mut texts: Vec<&str> = vec![&request.path];
-    for (name, value) in request
-        .headers
-        .iter()
-        .chain(&request.query)
-        .chain(&request.path_variables)
+    for (name, value) in Field::enabled(&request.headers)
+        .chain(Field::enabled(&request.query))
+        .chain(
+            request
+                .path_variables
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        )
     {
         texts.push(name);
         texts.push(value);

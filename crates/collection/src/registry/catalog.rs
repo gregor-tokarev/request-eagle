@@ -1,12 +1,12 @@
 use std::{
+    error::Error,
     fs, io,
     path::{Path, PathBuf},
 };
 
-use environment::{Environment, EnvironmentLoadError};
-use thiserror::Error;
+use environment::Environment;
 
-use crate::{Collection, CollectionLoadError, Entry, FileEntry, FlowEntry};
+use crate::{Collection, Entry, FileEntry, FlowEntry};
 
 pub(super) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
@@ -14,6 +14,26 @@ pub(super) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 pub struct CollectionRegistry {
     pub(super) collections: Vec<Collection>,
     pub(super) directory: Option<PathBuf>,
+    pub(super) skipped: Vec<SkippedPath>,
+}
+
+/// A file or folder that could not be loaded. It is left out and stays on
+/// disk as it is. A collection whose environment or settings cannot be read
+/// is left out whole, so that saving it cannot replace them.
+#[derive(Debug)]
+pub struct SkippedPath {
+    pub path: PathBuf,
+    pub error: String,
+}
+
+impl SkippedPath {
+    pub(crate) fn new(path: &Path, error: &dyn Error) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            // The error's own description repeats the path.
+            error: error.source().unwrap_or(error).to_string(),
+        }
+    }
 }
 
 impl CollectionRegistry {
@@ -21,7 +41,8 @@ impl CollectionRegistry {
         Self::default()
     }
 
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CollectionRegistryLoadError> {
+    /// Loads every collection in `path`. A missing directory has none.
+    pub fn from_path(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
         let mut registry = Self {
             directory: Some(path.to_path_buf()),
@@ -29,58 +50,59 @@ impl CollectionRegistry {
         };
         let directory = match fs::read_dir(path) {
             Ok(directory) => directory,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(registry),
-            Err(source) => {
-                return Err(CollectionRegistryLoadError::Read {
-                    path: path.to_path_buf(),
-                    source,
-                });
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return registry,
+            Err(error) => {
+                registry.skipped.push(SkippedPath::new(path, &error));
+                return registry;
             }
         };
 
-        let mut collection_paths = directory
-            .map(|entry| {
-                entry.map(|entry| entry.path()).map_err(|source| {
-                    CollectionRegistryLoadError::Read {
-                        path: path.to_path_buf(),
-                        source,
-                    }
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut collection_paths = Vec::new();
+        for entry in directory {
+            match entry {
+                Ok(entry) => collection_paths.push(entry.path()),
+                Err(error) => registry.skipped.push(SkippedPath::new(path, &error)),
+            }
+        }
         collection_paths.sort();
 
         for collection_path in collection_paths {
-            let metadata = fs::metadata(&collection_path).map_err(|source| {
-                CollectionRegistryLoadError::Read {
-                    path: collection_path.clone(),
-                    source,
+            match fs::metadata(&collection_path) {
+                Ok(metadata) if metadata.is_dir() => {}
+                Ok(_) => continue,
+                Err(error) => {
+                    registry
+                        .skipped
+                        .push(SkippedPath::new(&collection_path, &error));
+                    continue;
                 }
-            })?;
-
-            if !metadata.is_dir() {
-                continue;
             }
 
             let environment_path = collection_path.join(ENVIRONMENT_FILE_NAME);
-            let environment = Environment::from_file(&environment_path).map_err(|source| {
-                CollectionRegistryLoadError::Environment {
-                    path: environment_path,
-                    source: Box::new(source),
+            let environment = match Environment::from_file(&environment_path) {
+                Ok(environment) => environment,
+                Err(error) => {
+                    registry
+                        .skipped
+                        .push(SkippedPath::new(&environment_path, &error));
+                    continue;
                 }
-            })?;
+            };
 
-            let collection =
-                Collection::from_path(&collection_path, environment).map_err(|source| {
-                    CollectionRegistryLoadError::Collection {
-                        path: collection_path,
-                        source: Box::new(source),
-                    }
-                })?;
-            registry.collections.push(collection);
+            match Collection::from_path(&collection_path, environment, &mut registry.skipped) {
+                Ok(collection) => registry.collections.push(collection),
+                Err(error) => registry
+                    .skipped
+                    .push(SkippedPath::new(error.path(), &error)),
+            }
         }
 
-        Ok(registry)
+        registry
+    }
+
+    /// What loading left out, in the order it was found.
+    pub fn skipped(&self) -> &[SkippedPath] {
+        &self.skipped
     }
 
     pub fn collections(&self) -> &[Collection] {
@@ -138,22 +160,4 @@ fn find_by_id<'a>(entries: &'a [Entry], id: &str) -> Option<&'a FileEntry> {
         Entry::Directory(folder) => find_by_id(&folder.entries, id),
         _ => None,
     })
-}
-
-#[derive(Debug, Error)]
-pub enum CollectionRegistryLoadError {
-    #[error("failed to read collections from {}: {source}", .path.display())]
-    Read { path: PathBuf, source: io::Error },
-
-    #[error("failed to load the environment for {}: {source}", .path.display())]
-    Environment {
-        path: PathBuf,
-        source: Box<EnvironmentLoadError>,
-    },
-
-    #[error("failed to load collection {}: {source}", .path.display())]
-    Collection {
-        path: PathBuf,
-        source: Box<CollectionLoadError>,
-    },
 }

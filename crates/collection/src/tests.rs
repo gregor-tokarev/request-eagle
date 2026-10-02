@@ -46,7 +46,7 @@ request_custom = "keep me too"
     )
     .unwrap();
 
-    let mut registry = CollectionRegistry::from_path(&root).unwrap();
+    let mut registry = CollectionRegistry::from_path(&root);
     let [loaded] = registry.collections() else {
         panic!("expected one collection");
     };
@@ -73,7 +73,7 @@ request_custom = "keep me too"
     assert!(saved.contains("request_custom = \"keep me too\""));
     assert!(saved.contains("path = \"/v2/users\""));
 
-    let reloaded = CollectionRegistry::from_path(&root).unwrap();
+    let reloaded = CollectionRegistry::from_path(&root);
     let Request::Http(request) = &reloaded.file(&request_path).unwrap().request else {
         panic!("expected an HTTP request");
     };
@@ -107,7 +107,7 @@ on_message = "console.log(2);"
     )
     .unwrap();
 
-    let mut registry = CollectionRegistry::from_path(&root).unwrap();
+    let mut registry = CollectionRegistry::from_path(&root);
     let request = GrpcRequest {
         url: "localhost:50051".into(),
         scripts: GrpcScripts {

@@ -189,6 +189,13 @@ impl Workspace {
                         view.open_unsaved_request(request.clone(), cx)
                     });
                 }
+                CollectionPanelEvent::EnvironmentsImported => {
+                    // Show the imported environments in the sidebar.
+                    this.environments_open = true;
+                    let environments = this.main_view.read(cx).environments.clone();
+                    environments.update(cx, |environments, cx| environments.refresh(cx));
+                    cx.notify();
+                }
             });
 
         let active_environment = cx
@@ -492,8 +499,16 @@ impl Workspace {
         // The imported collection is revealed in the tree, so it must be visible.
         self.reveal_collections(cx);
 
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.open_import_dialog(window, cx));
+        let environments = self
+            .main_view
+            .read(cx)
+            .environments
+            .read(cx)
+            .catalog()
+            .clone();
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.open_import_dialog(environments, window, cx)
+        });
     }
 
     fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1015,6 +1030,8 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
 /// `cookies` is the jar that every request shares, or why it could not be
 /// read. `session` is how the workspace last looked; it is saved again when
 /// the window closes.
+// Each store is loaded once at startup and handed over here.
+#[allow(clippy::too_many_arguments)]
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,

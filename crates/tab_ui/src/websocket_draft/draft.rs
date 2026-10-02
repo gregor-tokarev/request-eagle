@@ -12,7 +12,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use preferences::Preferences;
-use request::{WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest};
+use request::{Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest};
 
 use super::message_log::MessageLog;
 use crate::actions::SendRequest;
@@ -558,11 +558,15 @@ impl WebSocketDraft {
     fn section_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let sections = [
             ("Message", WebSocketSection::Message, 0),
-            ("Params", WebSocketSection::Params, self.request.query.len()),
+            (
+                "Params",
+                WebSocketSection::Params,
+                Field::enabled(&self.request.query).count(),
+            ),
             (
                 "Headers",
                 WebSocketSection::Headers,
-                self.request.headers.len() + self.handshake_headers.len(),
+                Field::enabled(&self.request.headers).count() + self.handshake_headers.len(),
             ),
             ("Settings", WebSocketSection::Settings, 0),
         ];

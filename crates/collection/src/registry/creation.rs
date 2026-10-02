@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
 use super::mutations::find_entry;
-use crate::collection::is_reserved;
+use crate::collection::{is_reserved, render};
 use crate::{
     Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
     FileEntry, FlowEntry,
@@ -88,12 +88,7 @@ impl CollectionRegistry {
                 schema_version: 1,
                 request: request.clone(),
             };
-            entry.raw_content = toml::to_string_pretty(&entry).map_err(|source| {
-                CollectionSaveError::Serialize {
-                    path: entry.path.clone(),
-                    source,
-                }
-            })?;
+            entry.raw_content = render(&entry)?.to_string();
 
             Ok((entry.raw_content.clone(), Entry::File(entry)))
         })

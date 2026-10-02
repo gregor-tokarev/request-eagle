@@ -4,6 +4,7 @@ use std::{
 };
 
 use collection::Collection;
+use environment::GlobalEnvironments;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Textarea, TextareaState},
@@ -19,12 +20,18 @@ use super::{
 };
 
 impl CollectionPanel {
-    /// Opens a dialog that imports a Postman collection, from a file, a
-    /// folder or pasted text, or an OpenAPI specification as a new
-    /// collection. A pasted cURL command opens as a new request instead.
-    pub fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens a dialog that imports Postman collections and environments, from
+    /// files, folders or pasted text, and OpenAPI specifications. Collections
+    /// are added as new collections and environments to `environments`. A
+    /// pasted cURL command opens as a new request instead.
+    pub fn open_import_dialog(
+        &mut self,
+        environments: GlobalEnvironments,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let panel = cx.entity().downgrade();
-        let dialog = cx.new(|cx| ImportDialog::new(panel, window, cx));
+        let dialog = cx.new(|cx| ImportDialog::new(panel, environments, window, cx));
         let text = dialog.read(cx).text.clone();
 
         window.open_dialog(cx, move |modal, window, _| {
@@ -51,30 +58,52 @@ impl CollectionPanel {
         text.update(cx, |text, cx| text.focus(window, cx));
     }
 
-    /// Adds an imported collection and selects it. Its folders start
-    /// collapsed, so a large import shows its structure first.
-    pub fn add_imported_collection(
+    /// Adds imported collections and selects the first. Their folders start
+    /// collapsed, so a large import shows its structure first. Several
+    /// collections start collapsed too, so they show as a list.
+    pub fn add_imported_collections(
         &mut self,
-        collection: Collection,
+        collections: Vec<Collection>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let path = collection.path.clone();
-        self.collections.add_collection(collection);
+        let paths: Vec<_> = collections
+            .iter()
+            .map(|collection| collection.path.clone())
+            .collect();
+        let Some(first) = paths.first() else {
+            return;
+        };
+
+        for collection in collections {
+            self.collections.add_collection(collection);
+        }
         self.rename = None;
         self.pending_delete = None;
         self.error = None;
-        self.reveal(&path, None, window, cx);
+        self.reveal(first, None, window, cx);
 
-        if let Some(index) = self.selected {
+        let several = paths.len() > 1;
+        for path in &paths {
+            let Some(index) = self
+                .tree
+                .roots
+                .iter()
+                .copied()
+                .find(|&index| &self.tree.items[index].path == path)
+            else {
+                continue;
+            };
+
+            let start = if several { index } else { index + 1 };
             let end = self.tree.items[index].end;
             self.collapsed
-                .extend((index + 1..end).filter(|&child| self.tree.items[child].is_branch()));
-
-            let rows = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
-            self.unfiltered_rows = Some(rows.clone());
-            self.apply_rows(rows, false, cx);
+                .extend((start..end).filter(|&item| self.tree.items[item].is_branch()));
         }
+
+        let rows = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
+        self.unfiltered_rows = Some(rows.clone());
+        self.apply_rows(rows, false, cx);
 
         if let Some(row) = self.selected_row() {
             self.scroll_handle.scroll_to_item(row, ScrollStrategy::Top);
@@ -86,23 +115,53 @@ impl CollectionPanel {
 /// ones, such as commands with large bodies, would be slow to lay out.
 const RETAINED_COMMAND_LIMIT: usize = 16 * 1024;
 
-/// Imports a Postman collection or an OpenAPI specification from a file or
-/// pasted text, or a Postman collection folder, as a new collection.
+/// What to import.
+enum Source {
+    Text(String),
+    /// Files and folders. A Postman workspace folder stands for each of its
+    /// collections and environments.
+    Paths(Vec<PathBuf>),
+}
+
+/// What an import wrote, and what it could not.
+#[derive(Default)]
+struct Outcome {
+    collections: Vec<Collection>,
+    /// The names the environments were saved under.
+    environments: Vec<String>,
+    /// Requests left out because Request Eagle cannot send their protocol or
+    /// HTTP method, each with the name of its collection.
+    skipped: Vec<(String, String)>,
+    /// Why each file or folder could not be imported.
+    failed: Vec<String>,
+}
+
+/// What an import that left something out brought in, shown until the dialog
+/// is dismissed.
+struct Summary {
+    collections: Vec<String>,
+    environments: Vec<String>,
+    skipped: Vec<String>,
+    failed: Vec<String>,
+}
+
+/// Imports Postman collections and environments and OpenAPI specifications
+/// from files, folders or pasted text.
 struct ImportDialog {
     panel: WeakEntity<CollectionPanel>,
+    environments: GlobalEnvironments,
     /// Takes a cURL command or a collection's text, like Postman's import field.
     text: Entity<TextareaState>,
     importing: bool,
     error: Option<String>,
-    /// The imported collection's name and the requests it left out, shown
-    /// until the dialog is dismissed.
-    skipped: Option<(String, Vec<String>)>,
+    summary: Option<Summary>,
     _task: Option<Task<()>>,
 }
 
 impl ImportDialog {
     fn new(
         panel: WeakEntity<CollectionPanel>,
+        environments: GlobalEnvironments,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -117,34 +176,24 @@ impl ImportDialog {
 
         Self {
             panel,
+            environments,
             text,
             importing: false,
             error: None,
-            skipped: None,
+            summary: None,
             _task: None,
         }
     }
 
-    /// Opens a cURL command as a new request, or imports a collection
-    /// written as text.
+    /// Opens a cURL command as a new request, or imports a collection or
+    /// environment written as text.
     fn import_text(&mut self, source: String, window: &mut Window, cx: &mut Context<Self>) {
         if source.trim().is_empty() {
             return;
         }
 
         if !import::is_curl(&source) {
-            let read = move || {
-                import::parse(&source).map_err(|error| match error {
-                    ImportError::Syntax(error) => {
-                        format!("The text is not valid JSON or YAML: {error}")
-                    }
-                    ImportError::UnknownFormat => "The text is not a cURL command, a Postman \
-                                                   collection or an OpenAPI specification."
-                        .to_owned(),
-                    error => error.to_string(),
-                })
-            };
-            self.import(read, window, cx);
+            self.import(Source::Text(source), window, cx);
             return;
         }
 
@@ -175,7 +224,7 @@ impl ImportDialog {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: true,
-            multiple: false,
+            multiple: true,
             prompt: Some("Import".into()),
         });
 
@@ -183,11 +232,7 @@ impl ImportDialog {
             let result = paths.await;
 
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(Ok(Some(paths))) => {
-                    if let Some(path) = paths.into_iter().next() {
-                        this.import_file(path, window, cx);
-                    }
-                }
+                Ok(Ok(Some(paths))) => this.import(Source::Paths(paths), window, cx),
                 Ok(Err(error)) => {
                     this.error = Some(format!("Could not open the file picker: {error}"));
                     cx.notify();
@@ -198,25 +243,12 @@ impl ImportDialog {
         }));
     }
 
-    fn import_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.import(
-            move || import::read(&path).map_err(|error| error.to_string()),
-            window,
-            cx,
-        );
-    }
-
-    /// Converts and writes a collection in the background.
-    fn import(
-        &mut self,
-        read: impl FnOnce() -> Result<Import, String> + Send + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Converts and writes collections and environments in the background.
+    fn import(&mut self, source: Source, window: &mut Window, cx: &mut Context<Self>) {
         let Some(panel) = self.panel.upgrade() else {
             return;
         };
-        if self.importing {
+        if self.importing || matches!(&source, Source::Paths(paths) if paths.is_empty()) {
             return;
         }
 
@@ -229,61 +261,121 @@ impl ImportDialog {
             .collections
             .directory()
             .map(Path::to_path_buf);
+        let environments = self.environments.clone();
 
-        // Writing a large collection takes a while, so it happens here too.
-        let imported = cx.background_executor().spawn(async move {
-            let directory = directory.ok_or("No collections directory is configured.")?;
-            let import = read()?;
-            let collection = import
-                .collection
-                .write(&directory)
-                .map_err(|error| format!("Could not import the collection: {error}"))?;
+        // Reading and writing a large collection takes a while.
+        let outcome = cx.background_executor().spawn(async move {
+            let reads: Vec<_> = match source {
+                Source::Text(text) => vec![(None, read_text(&text))],
+                Source::Paths(paths) => paths
+                    .iter()
+                    .flat_map(|path| import::sources(path))
+                    .map(|path| {
+                        let read = import::read(&path).map_err(|error| error.to_string());
+                        (Some(path_name(&path)), read)
+                    })
+                    .collect(),
+            };
 
-            Ok::<_, String>((collection, import.skipped))
+            // Failures name their file when there are several.
+            let several = reads.len() > 1;
+            let mut outcome = Outcome::default();
+            for (name, read) in reads {
+                let saved = read.and_then(|import| {
+                    save(import, directory.as_deref(), &environments, &mut outcome)
+                });
+
+                if let Err(error) = saved {
+                    outcome.failed.push(match name {
+                        Some(name) if several => format!("{name}: {error}"),
+                        _ => error,
+                    });
+                }
+            }
+
+            outcome
         });
 
         self._task = Some(cx.spawn_in(window, async move |this, cx| {
-            let imported = imported.await;
+            let outcome = outcome.await;
 
-            let _ = this.update_in(cx, |this, window, cx| this.finish(imported, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.finish(outcome, window, cx));
         }));
     }
 
-    fn finish(
-        &mut self,
-        imported: Result<(Collection, Vec<String>), String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn finish(&mut self, outcome: Outcome, window: &mut Window, cx: &mut Context<Self>) {
         self.importing = false;
 
         let Some(panel) = self.panel.upgrade() else {
             return;
         };
 
-        match imported {
-            Ok((collection, skipped)) => {
-                let name = path_name(&collection.path);
-                panel.update(cx, |panel, cx| {
-                    panel.add_imported_collection(collection, window, cx)
-                });
+        let Outcome {
+            collections,
+            environments,
+            skipped,
+            mut failed,
+        } = outcome;
 
-                if skipped.is_empty() {
-                    window.close_dialog(cx);
-                    let focus = panel.read(cx).focus.clone();
-                    window.focus(&focus, cx);
-                } else {
-                    self.skipped = Some((name, skipped));
-                }
-            }
-            Err(error) => self.error = Some(error),
+        // A single failure stays in the dialog, so it can be tried again.
+        if collections.is_empty() && environments.is_empty() && failed.len() <= 1 {
+            self.error = failed.pop();
+            cx.notify();
+            return;
+        }
+
+        let names: Vec<_> = collections
+            .iter()
+            .map(|collection| path_name(&collection.path))
+            .collect();
+        panel.update(cx, |panel, cx| {
+            panel.add_imported_collections(collections, window, cx)
+        });
+        if !environments.is_empty() {
+            panel.update(cx, |_, cx| {
+                cx.emit(CollectionPanelEvent::EnvironmentsImported)
+            });
+        }
+
+        if skipped.is_empty() && failed.is_empty() {
+            window.close_dialog(cx);
+            let focus = panel.read(cx).focus.clone();
+            window.focus(&focus, cx);
+        } else {
+            // Requests from several collections are named with their collection.
+            let skipped = skipped
+                .into_iter()
+                .map(|(collection, request)| {
+                    if names.len() > 1 {
+                        format!("{collection} / {request}")
+                    } else {
+                        request
+                    }
+                })
+                .collect();
+
+            self.summary = Some(Summary {
+                collections: names,
+                environments,
+                skipped,
+                failed,
+            });
         }
 
         cx.notify();
     }
 
-    fn render_summary(&self, name: &str, skipped: &[String], cx: &mut Context<Self>) -> Div {
-        let explanation = match skipped.len() {
+    fn render_summary(&self, summary: &Summary, cx: &mut Context<Self>) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let list = |id: &'static str, items: &[String]| {
+            v_flex()
+                .id(id)
+                .max_h(rems(10.))
+                .overflow_y_scroll()
+                .gap_1()
+                .children(items.iter().map(|item| div().child(item.clone())))
+        };
+        let skipped = match summary.skipped.len() {
             1 => "1 request uses a protocol or HTTP method Request Eagle cannot send, so it was \
                   left out:"
                 .to_owned(),
@@ -297,20 +389,15 @@ impl ImportDialog {
             .debug_selector(|| "import-summary".into())
             .gap_3()
             .text_sm()
-            .child(format!("Imported “{name}”."))
-            .child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(explanation),
-            )
-            .child(
-                v_flex()
-                    .id("import-skipped")
-                    .max_h(rems(10.))
-                    .overflow_y_scroll()
-                    .gap_1()
-                    .children(skipped.iter().map(|name| div().child(name.clone()))),
-            )
+            .child(summary.heading())
+            .when(!summary.skipped.is_empty(), |this| {
+                this.child(div().text_color(muted).child(skipped))
+                    .child(list("import-skipped", &summary.skipped))
+            })
+            .when(!summary.failed.is_empty(), |this| {
+                this.child(div().text_color(muted).child("Could not import:"))
+                    .child(list("import-failed", &summary.failed))
+            })
             .child(
                 h_flex().justify_end().child(
                     Button::new("close-import")
@@ -323,10 +410,80 @@ impl ImportDialog {
     }
 }
 
+impl Summary {
+    fn heading(&self) -> String {
+        if let [name] = &[&self.collections[..], &self.environments[..]].concat()[..] {
+            return format!("Imported “{name}”.");
+        }
+
+        let count = |count: usize, noun: &str| match count {
+            1 => format!("1 {noun}"),
+            count => format!("{count} {noun}s"),
+        };
+
+        match (self.collections.len(), self.environments.len()) {
+            (0, 0) => "Nothing was imported.".to_owned(),
+            (collections, 0) => format!("Imported {}.", count(collections, "collection")),
+            (0, environments) => format!("Imported {}.", count(environments, "environment")),
+            (collections, environments) => format!(
+                "Imported {} and {}.",
+                count(collections, "collection"),
+                count(environments, "environment")
+            ),
+        }
+    }
+}
+
+/// Converts pasted text, explaining failures as ones of text, not of a file.
+fn read_text(source: &str) -> Result<Import, String> {
+    import::parse(source).map_err(|error| match error {
+        ImportError::Syntax(error) => format!("The text is not valid JSON or YAML: {error}"),
+        ImportError::UnknownFormat => "The text is not a cURL command, a Postman collection or \
+                                       environment, or an OpenAPI specification."
+            .to_owned(),
+        error => error.to_string(),
+    })
+}
+
+/// Writes a converted collection or environment.
+fn save(
+    import: Import,
+    directory: Option<&Path>,
+    environments: &GlobalEnvironments,
+    outcome: &mut Outcome,
+) -> Result<(), String> {
+    match import {
+        Import::Collection(import) => {
+            let directory = directory.ok_or("No collections directory is configured.")?;
+            let collection = import
+                .collection
+                .write(directory)
+                .map_err(|error| format!("Could not import the collection: {error}"))?;
+
+            let name = path_name(&collection.path);
+            outcome.skipped.extend(
+                import
+                    .skipped
+                    .into_iter()
+                    .map(|request| (name.clone(), request)),
+            );
+            outcome.collections.push(collection);
+        }
+        Import::Environment(environment) => {
+            let name = environments
+                .import(&environment.name, environment.variables)
+                .map_err(|error| format!("Could not import the environment: {error}"))?;
+            outcome.environments.push(name);
+        }
+    }
+
+    Ok(())
+}
+
 impl Render for ImportDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some((name, skipped)) = &self.skipped {
-            return self.render_summary(name, skipped, cx);
+        if let Some(summary) = &self.summary {
+            return self.render_summary(summary, cx);
         }
 
         let theme = cx.theme();
@@ -371,9 +528,7 @@ impl Render for ImportDialog {
                             .bg(cx.theme().accent.opacity(0.5))
                     })
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                        if let Some(path) = paths.paths().first() {
-                            this.import_file(path.clone(), window, cx);
-                        }
+                        this.import(Source::Paths(paths.paths().to_vec()), window, cx);
                     }))
                     .child(
                         h_flex()
@@ -397,7 +552,7 @@ impl Render for ImportDialog {
                                         if self.importing {
                                             "Importing…"
                                         } else {
-                                            "Drop a file or folder to import"
+                                            "Drop files or folders to import"
                                         },
                                     ))
                                     .child(
@@ -411,7 +566,7 @@ impl Render for ImportDialog {
                                                     .link()
                                                     // Colored like a link, it needs no underline.
                                                     .text_decoration_0()
-                                                    .label("a file or folder")
+                                                    .label("files or folders")
                                                     .disabled(self.importing)
                                                     .on_click(cx.listener(
                                                         |this, _, window, cx| {
@@ -444,7 +599,8 @@ impl Render for ImportDialog {
                     .text_color(theme.muted_foreground)
                     .child("cURL commands")
                     .child("Postman Collection v2.0 and v2.1")
-                    .child("Postman collection folders, with gRPC requests")
+                    .child("Postman environments")
+                    .child("Postman workspace and collection folders, with gRPC requests")
                     .child("OpenAPI 3 and Swagger 2.0, in JSON or YAML"),
             )
     }

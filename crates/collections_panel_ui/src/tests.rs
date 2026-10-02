@@ -51,7 +51,7 @@ pub(super) fn collections() -> CollectionRegistry {
         )).unwrap();
     }
 
-    CollectionRegistry::from_path(directory).unwrap()
+    CollectionRegistry::from_path(directory)
 }
 
 #[test]

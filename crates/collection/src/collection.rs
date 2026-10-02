@@ -8,11 +8,11 @@ use std::{
 use environment::Environment;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use toml_edit::{DocumentMut, Item};
+use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
 use crate::toml_merge::merge_table;
-use crate::{CollectionEditError, DirEntry, Entry, FileEntry, FlowEntry};
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry, FlowEntry, SkippedPath};
 use request::{Request, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
@@ -32,9 +32,12 @@ struct CollectionSettings {
 }
 
 impl Collection {
+    /// Loads the collection at `path`. Requests and folders that cannot be
+    /// read are added to `skipped` and left out.
     pub(crate) fn from_path(
         path: impl AsRef<Path>,
         local_env: Environment,
+        skipped: &mut Vec<SkippedPath>,
     ) -> Result<Self, CollectionLoadError> {
         let path = path.as_ref();
         let metadata = fs::metadata(path).map_err(|source| CollectionLoadError::Read {
@@ -49,8 +52,8 @@ impl Collection {
         }
 
         let excluded = [local_env.path.clone(), path.join(SETTINGS_FILE_NAME)];
-        let entries = load_directory(path, &excluded)?.entries;
         let scripts = Self::load_scripts(path)?;
+        let entries = load_directory(path, &excluded, skipped)?.entries;
 
         Ok(Self {
             path: path.to_path_buf(),
@@ -195,22 +198,26 @@ pub(crate) fn is_reserved(reserved: &[PathBuf], path: &Path) -> bool {
     })
 }
 
-fn load_directory(path: &Path, excluded: &[PathBuf]) -> Result<DirEntry, CollectionLoadError> {
+/// Loads a folder's requests and subfolders. Those that cannot be read are
+/// added to `skipped` and left out; only failing to read `path` itself is an
+/// error.
+fn load_directory(
+    path: &Path,
+    excluded: &[PathBuf],
+    skipped: &mut Vec<SkippedPath>,
+) -> Result<DirEntry, CollectionLoadError> {
     let directory = fs::read_dir(path).map_err(|source| CollectionLoadError::Read {
         path: path.to_path_buf(),
         source,
     })?;
 
-    let mut paths = directory
-        .map(|entry| {
-            entry
-                .map(|entry| entry.path())
-                .map_err(|source| CollectionLoadError::Read {
-                    path: path.to_path_buf(),
-                    source,
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut paths = Vec::new();
+    for entry in directory {
+        match entry {
+            Ok(entry) => paths.push(entry.path()),
+            Err(error) => skipped.push(SkippedPath::new(path, &error)),
+        }
+    }
     paths.sort();
 
     let mut entries = Vec::new();
@@ -219,29 +226,40 @@ fn load_directory(path: &Path, excluded: &[PathBuf]) -> Result<DirEntry, Collect
             continue;
         }
 
-        let file_type = fs::symlink_metadata(&child_path)
-            .map_err(|source| CollectionLoadError::Read {
-                path: child_path.clone(),
-                source,
-            })?
-            .file_type();
+        let file_type = match fs::symlink_metadata(&child_path) {
+            Ok(metadata) => metadata.file_type(),
+            Err(error) => {
+                skipped.push(SkippedPath::new(&child_path, &error));
+                continue;
+            }
+        };
 
-        if file_type.is_dir() {
-            entries.push(Entry::Directory(load_directory(&child_path, excluded)?));
+        let entry = if file_type.is_dir() {
+            load_directory(&child_path, excluded, skipped).map(Entry::Directory)
         } else if file_type.is_file()
             && child_path
                 .extension()
                 .and_then(|extension| extension.to_str())
                 == Some("toml")
         {
-            entries.push(load_item(&child_path)?);
+            load_item(&child_path)
+        } else {
+            continue;
+        };
+
+        match entry {
+            Ok(entry) => entries.push(entry),
+            Err(error) => skipped.push(SkippedPath::new(&child_path, &error)),
         }
     }
 
-    crate::order::apply(path, &mut entries).map_err(|source| CollectionLoadError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    // Without a readable order, entries keep the loader's alphabetical order.
+    if let Err(error) = crate::order::apply(path, &mut entries) {
+        skipped.push(SkippedPath::new(
+            &path.join(crate::order::FILE_NAME),
+            &error,
+        ));
+    }
 
     Ok(DirEntry {
         path: path.to_path_buf(),
@@ -319,18 +337,7 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
         })?;
     }
 
-    let rendered =
-        toml::to_string_pretty(entry).map_err(|source| CollectionSaveError::Serialize {
-            path: entry.path.clone(),
-            source,
-        })?;
-    let updates = rendered
-        .parse::<DocumentMut>()
-        .map_err(|source| CollectionSaveError::Edit {
-            path: entry.path.clone(),
-            source,
-        })?;
-
+    let updates = render(entry)?;
     let mut document =
         entry
             .raw_content
@@ -436,6 +443,37 @@ pub(crate) fn save_flow(entry: &FlowEntry) -> Result<(), CollectionSaveError> {
     })
 }
 
+/// Serializes a request file. Header, parameter and metadata rows stay one
+/// inline array, which TOML would split into `[[request.headers]]` sections
+/// once every row is a table.
+pub(crate) fn render(entry: &FileEntry) -> Result<DocumentMut, CollectionSaveError> {
+    let rendered =
+        toml::to_string_pretty(entry).map_err(|source| CollectionSaveError::Serialize {
+            path: entry.path.clone(),
+            source,
+        })?;
+    let mut document =
+        rendered
+            .parse::<DocumentMut>()
+            .map_err(|source| CollectionSaveError::Edit {
+                path: entry.path.clone(),
+                source,
+            })?;
+
+    if let Some(request) = document
+        .get_mut("request")
+        .and_then(Item::as_table_like_mut)
+    {
+        for (_, item) in request.iter_mut() {
+            if let Item::ArrayOfTables(rows) = item {
+                *item = Item::Value(Value::Array(std::mem::take(rows).into_array()));
+            }
+        }
+    }
+
+    Ok(document)
+}
+
 fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
     let permissions = match fs::metadata(path) {
         Ok(metadata) => {
@@ -478,6 +516,17 @@ fn file_name(path: &Path) -> String {
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
         .into_owned()
+}
+
+impl CollectionLoadError {
+    /// The file or folder that could not be loaded.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Read { path, .. } | Self::Parse { path, .. } | Self::UnsupportedPath { path } => {
+                path
+            }
+        }
+    }
 }
 
 #[derive(Debug, Error)]

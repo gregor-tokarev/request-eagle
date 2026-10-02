@@ -6,7 +6,7 @@ use std::{
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
-use request::{Body, HttpRequest, Method};
+use request::{Body, Field, HttpRequest, Method};
 use request::{EventStream, EventStreamUpdate, RequestExecutor};
 
 use super::draft::RequestDraft;
@@ -52,15 +52,16 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
         authority.contains("{{") || (scheme.contains("{{") && authority.contains('@'))
     });
-    let templated_header_names = request.headers.iter().any(|(name, _)| name.contains("{{"));
+    let has = |name: &str| {
+        Field::enabled(&request.headers).any(|(header, _)| header.eq_ignore_ascii_case(name))
+    };
+    let templated_header_names =
+        Field::enabled(&request.headers).any(|(name, _)| name.contains("{{"));
     let mut headers =
         request::generated_headers(request.method, &url, &request.headers, body_bytes);
 
     if let Some(body) = body
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        && !has("content-type")
     {
         let mut content_type = body.content_type();
         if matches!(body, Body::Multipart { .. }) {
@@ -71,20 +72,14 @@ pub(super) fn generated_headers(request: &HttpRequest) -> Vec<(String, String)> 
 
     if request.path.contains("{{")
         && !headers.iter().any(|(name, _)| name == "Host")
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+        && !has("host")
     {
         headers.insert(0, ("Host".into(), "Resolved on Send".into()));
     }
 
     if templated_authorization
         && !headers.iter().any(|(name, _)| name == "Authorization")
-        && !request
-            .headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        && !has("authorization")
     {
         headers.push(("Authorization".into(), "Resolved on Send".into()));
     }
@@ -120,7 +115,7 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
             .path_variables
             .iter()
             .any(|(_, value)| value.contains("{{"))
-        || request.headers.iter().any(|(name, value)| {
+        || Field::enabled(&request.headers).any(|(name, value)| {
             name.contains("{{") || (name.eq_ignore_ascii_case("cookie") && value.contains("{{"))
         });
 
@@ -132,7 +127,7 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
         let Ok(url) = request::fill_path_variables(&url, &request.path_variables, |value| {
             Ok::<_, Infallible>(value.to_owned())
         });
-        jar.cookie_header(&url, &request.headers)
+        jar.cookie_header(&url, &Field::pairs(&request.headers))
     };
 
     cookies.map(|cookies| ("Cookie".to_owned(), cookies))

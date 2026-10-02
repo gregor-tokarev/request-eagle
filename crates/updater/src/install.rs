@@ -1,5 +1,5 @@
 use std::{
-    env, fs,
+    env, fs, io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
@@ -29,37 +29,7 @@ pub(super) struct PreparedUpdate {
 
 impl PreparedUpdate {
     pub(super) fn launch_installer(self) -> Result<(), String> {
-        const SCRIPT: &str = r#"
-pid="$1"
-current_app="$2"
-new_app="$3"
-work_dir="$4"
-backup="${current_app}.previous"
-
-while kill -0 "$pid" 2>/dev/null; do
-  sleep 0.2
-done
-
-rm -rf "$backup"
-if mv "$current_app" "$backup" && mv "$new_app" "$current_app"; then
-  open "$current_app"
-  rm -rf "$backup" "$work_dir"
-else
-  rm -rf "$current_app"
-  mv "$backup" "$current_app"
-  open "$current_app"
-fi
-"#;
-
-        Command::new("/bin/sh")
-            .args(["-c", SCRIPT, "request-eagle-updater"])
-            .arg(std::process::id().to_string())
-            .arg(&self.current_app)
-            .arg(&self.new_app)
-            .arg(self.work_dir.path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+        self.installer(std::process::id(), Duration::from_secs(120))
             .spawn()
             .map_err(|error| format!("Could not start the update installer: {error}"))?;
 
@@ -68,6 +38,114 @@ fi
 
         Ok(())
     }
+
+    /// Replaces the app once `pid` quits and opens the new version. The
+    /// previous version comes back unless the new one calls `confirm_startup`
+    /// within `confirmation_timeout`.
+    fn installer(&self, pid: u32, confirmation_timeout: Duration) -> Command {
+        const SCRIPT: &str = r#"
+pid="$1"
+current_app="$2"
+new_app="$3"
+work_dir="$4"
+confirmation_timeout="$5"
+backup="${current_app}.previous"
+
+while kill -0 "$pid" 2>/dev/null; do
+  sleep 0.2
+done
+
+# Keep the current version until the new one confirms that it started.
+rm -rf "$backup"
+if ! mv "$current_app" "$backup"; then
+  rm -rf "$work_dir"
+  open "$current_app"
+  exit 1
+fi
+
+if ! mv "$new_app" "$current_app"; then
+  rm -rf "$current_app"
+  mv "$backup" "$current_app"
+  rm -rf "$work_dir"
+  open "$current_app"
+  exit 1
+fi
+
+open "$current_app"
+
+# open returns as soon as the app launches. The new version removes the
+# backup once its window opens; until then it can still crash or hang.
+waited=0
+while [ -e "$backup" ] && [ "$waited" -lt "$confirmation_timeout" ]; do
+  sleep 1
+  waited=$((waited + 1))
+done
+
+if [ -e "$backup" ]; then
+  # Stop a hung new version, or open would only bring it to the front.
+  # pkill takes a regular expression, so escape the bundle path.
+  executable="$(printf '%s' "$current_app/Contents/MacOS/" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
+  pkill -KILL -f "$executable"
+  sleep 1
+
+  # It may have confirmed just before it stopped.
+  if [ -e "$backup" ]; then
+    rm -rf "$current_app"
+    mv "$backup" "$current_app"
+  fi
+
+  open "$current_app"
+fi
+
+rm -rf "$work_dir"
+"#;
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", SCRIPT, "request-eagle-updater"])
+            .arg(pid.to_string())
+            .arg(&self.current_app)
+            .arg(&self.new_app)
+            .arg(self.work_dir.path())
+            .arg(confirmation_timeout.as_secs().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        command
+    }
+}
+
+/// Tells the installer that this version started, so it keeps it instead of
+/// restoring the previous version. Every release must call this once its
+/// window opens.
+pub fn confirm_startup() {
+    let Ok(app) = current_app_bundle() else {
+        return;
+    };
+
+    if let Err(error) = remove_previous_version(&app) {
+        eprintln!("Could not remove the previous version of Request Eagle: {error}");
+    }
+}
+
+fn remove_previous_version(app: &Path) -> io::Result<()> {
+    let backup = app.with_extension("app.previous");
+
+    if let Some(install_dir) = app.parent()
+        && backup.exists()
+    {
+        // The installer restores whatever is at the backup path, so it must
+        // never see a partly deleted copy. Move the backup away in one step.
+        let removed = tempfile::Builder::new()
+            .prefix(".request-eagle-previous-")
+            .tempdir_in(install_dir)?;
+        fs::rename(&backup, removed.path().join("Request Eagle.app"))?;
+
+        removed.close()?;
+    }
+
+    Ok(())
 }
 
 pub(super) async fn download_and_prepare_update(

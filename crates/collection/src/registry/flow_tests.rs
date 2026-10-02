@@ -22,7 +22,7 @@ impl Drop for Fixture {
 #[test]
 fn flows_are_saved_next_to_requests_and_survive_reload() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let request = registry.create_request(&collection).unwrap();
     let path = registry
@@ -34,7 +34,7 @@ fn flows_are_saved_next_to_requests_and_survive_reload() {
     assert!(text.contains("[[flow.blocks]]"), "{text}");
     assert!(text.contains("type = \"start\""), "{text}");
 
-    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let reloaded = CollectionRegistry::from_path(&fixture.0);
     let entries = &reloaded.collections()[0].entries;
     assert!(matches!(&entries[0], Entry::File(file) if file.path == request));
     let Entry::Flow(flow) = &entries[1] else {
@@ -52,14 +52,14 @@ fn flows_are_saved_next_to_requests_and_survive_reload() {
         .create_flow(&collection, "Checkout", Flow::default())
         .unwrap();
     assert_eq!(empty, collection.join("Checkout 2.toml"));
-    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let reloaded = CollectionRegistry::from_path(&fixture.0);
     assert_eq!(reloaded.flow(&empty).unwrap().flow, Flow::default());
 }
 
 #[test]
 fn flows_update_rename_move_and_delete_like_requests() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let folder = registry.create_folder(&collection).unwrap();
     let path = registry
@@ -91,7 +91,7 @@ fn flows_update_rename_move_and_delete_like_requests() {
         .move_entry(&path, &folder, MovePlacement::Inside)
         .unwrap();
     assert_eq!(moved, folder.join("Sync.toml"));
-    let reloaded = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let reloaded = CollectionRegistry::from_path(&fixture.0);
     let saved = reloaded.flow(&moved).unwrap();
     assert_eq!(saved.name, "Nightly sync");
     assert_eq!(saved.id, id);
@@ -105,7 +105,7 @@ fn flows_update_rename_move_and_delete_like_requests() {
 #[test]
 fn finds_requests_by_id_wherever_they_moved() {
     let fixture = Fixture::new();
-    let mut registry = CollectionRegistry::from_path(&fixture.0).unwrap();
+    let mut registry = CollectionRegistry::from_path(&fixture.0);
     let collection = registry.create_collection().unwrap();
     let folder = registry.create_folder(&collection).unwrap();
     let path = registry.create_request(&collection).unwrap();
@@ -122,7 +122,7 @@ fn finds_requests_by_id_wherever_they_moved() {
 }
 
 #[test]
-fn a_file_with_neither_a_request_nor_a_flow_does_not_load() {
+fn a_file_with_neither_a_request_nor_a_flow_is_skipped() {
     let fixture = Fixture::new();
     let collection = fixture.0.join("API");
     fs::create_dir_all(&collection).unwrap();
@@ -132,9 +132,9 @@ fn a_file_with_neither_a_request_nor_a_flow_does_not_load() {
     )
     .unwrap();
 
-    let error = CollectionRegistry::from_path(&fixture.0)
-        .err()
-        .unwrap()
-        .to_string();
-    assert!(error.contains("API"), "{error}");
+    let registry = CollectionRegistry::from_path(&fixture.0);
+    let skipped = registry.skipped();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0].path, collection.join("Odd.toml"));
+    assert!(registry.collections()[0].entries.is_empty());
 }

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Body, CookieJar, HttpRequest, Method};
+use crate::{Body, CookieJar, Field, HttpRequest, Method};
 
 impl HttpRequest {
     /// The cURL command that sends this request as Request Eagle does,
@@ -26,9 +26,9 @@ impl HttpRequest {
         }
 
         request.path = keep_unknown(&request.path, values);
-        for (key, value) in request.headers.iter_mut().chain(request.query.iter_mut()) {
-            *key = keep_unknown(key, values);
-            *value = keep_unknown(value, values);
+        for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+            field.key = keep_unknown(&field.key, values);
+            field.value = keep_unknown(&field.value, values);
         }
         match &mut request.body {
             Some(Body::Raw { text, .. }) => *text = keep_unknown(text, values),
@@ -71,29 +71,27 @@ impl HttpRequest {
                 .path
                 .replace(&format!("\u{E000}{index}\u{E000}"), reference);
         }
-        let url = url(&request.path, &request.query);
+        // Rows that are switched off are not sent, also when the request is
+        // written as it is.
+        let mut headers = Field::pairs(&request.headers);
+        let url = url(&request.path, &Field::pairs(&request.query));
         let data = request.body.as_ref().map(data).unwrap_or_default();
 
         // cURL names the type of forms itself; it would send raw text and
         // files as a URL-encoded form.
         if let Some(body @ (Body::Raw { .. } | Body::Binary { .. })) = &request.body
             && !data.is_empty()
-            && !request
-                .headers
+            && !headers
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
         {
-            request
-                .headers
-                .push(("Content-Type".into(), body.content_type()));
+            headers.push(("Content-Type".into(), body.content_type()));
         }
 
         // The jar's cookies for the request's own URL, which cURL sends on
         // to redirects as well. A URL whose host is not known has none.
-        if let Some(jar_cookies) = cookies.and_then(|jar| jar.cookie_header(&url, &request.headers))
-        {
-            let own = request
-                .headers
+        if let Some(jar_cookies) = cookies.and_then(|jar| jar.cookie_header(&url, &headers)) {
+            let own = headers
                 .iter_mut()
                 .rfind(|(name, _)| name.eq_ignore_ascii_case("cookie"));
             match own {
@@ -102,7 +100,7 @@ impl HttpRequest {
                     value.push_str(&jar_cookies);
                 }
                 Some((_, value)) => *value = jar_cookies,
-                None => request.headers.push(("Cookie".into(), jar_cookies)),
+                None => headers.push(("Cookie".into(), jar_cookies)),
             }
         }
 
@@ -135,7 +133,7 @@ impl HttpRequest {
         command.push(' ');
         command.push_str(&quote(&url));
 
-        for (name, value) in &request.headers {
+        for (name, value) in &headers {
             // cURL leaves out a header written with an empty value after `:`.
             let header = if value.is_empty() {
                 format!("{name};")

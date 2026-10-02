@@ -1,4 +1,4 @@
-use request::Method;
+use request::{Field, Method};
 use std::collections::HashMap;
 
 #[test]
@@ -6,7 +6,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
     let request = request::HttpRequest {
         path: "http://example.com".into(),
         method: Method::Post,
-        headers: vec![("{{header_name}}".into(), "virtual.example".into())],
+        headers: vec![Field::new("{{header_name}}", "virtual.example")],
         body: Some(request::Body::json("{}")),
         ..Default::default()
     };
@@ -66,7 +66,7 @@ fn templated_url_credentials_preview_authorization_as_unresolved() {
 
         request
             .headers
-            .push(("AUTHORIZATION".into(), "Bearer explicit".into()));
+            .push(Field::new("AUTHORIZATION", "Bearer explicit"));
         assert!(
             super::execution::generated_headers(&request)
                 .iter()
@@ -100,9 +100,7 @@ fn templated_urls_preview_generated_host_without_hiding_known_hosts() {
         let headers = super::execution::generated_headers(&request);
         assert_eq!(headers[0], ("Host".into(), expected.into()), "{path}");
 
-        request
-            .headers
-            .push(("hOsT".into(), "override.example".into()));
+        request.headers.push(Field::new("hOsT", "override.example"));
         assert!(
             super::execution::generated_headers(&request)
                 .iter()

@@ -155,6 +155,8 @@ impl Default for SavedSidebar {
     }
 }
 
+// Most saved tabs are requests, so boxing them would not make sessions smaller.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum SavedTab {

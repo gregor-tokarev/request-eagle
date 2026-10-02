@@ -4,7 +4,7 @@ mod importing;
 mod movement;
 mod mutations;
 
-pub use catalog::{CollectionRegistry, CollectionRegistryLoadError};
+pub use catalog::{CollectionRegistry, SkippedPath};
 pub use importing::{ImportedCollection, ImportedItem};
 pub use movement::MovePlacement;
 pub use mutations::CollectionEditError;

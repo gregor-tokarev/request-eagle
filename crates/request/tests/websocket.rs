@@ -7,8 +7,9 @@ use std::{
 
 use futures::{SinkExt as _, StreamExt as _};
 use request::{
-    ExecutionError, ProxyMode, RequestPreferences, RequestVariables, StatusCode, WebSocketClose,
-    WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage, WebSocketRequest,
+    ExecutionError, Field, ProxyMode, RequestPreferences, RequestVariables, StatusCode,
+    WebSocketClose, WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage,
+    WebSocketRequest,
 };
 use tokio_tungstenite::{
     WebSocketStream,
@@ -23,6 +24,8 @@ type ServerSocket = WebSocketStream<tokio::net::TcpStream>;
 
 /// Accept one WebSocket connection and hand it to `handler` with the
 /// handshake's path and `X-Token` header.
+// The handshake callback returns tokio-tungstenite's own error response.
+#[allow(clippy::result_large_err)]
 fn serve<F, Fut>(handler: F) -> String
 where
     F: FnOnce(ServerSocket, String) -> Fut + Send + 'static,
@@ -170,8 +173,8 @@ fn messages_stream_in_both_directions_until_the_server_closes() {
     let (connection, mut events) = WebSocketConnection::open(
         WebSocketRequest {
             url: format!("{url}/feed#ignored"),
-            headers: vec![("X-Token".into(), "{{token}}".into())],
-            query: vec![("room".into(), "{{room}}".into())],
+            headers: vec![Field::new("X-Token", "{{token}}")],
+            query: vec![Field::new("room", "{{room}}")],
             message: String::new(),
             settings: Default::default(),
         },
@@ -565,7 +568,7 @@ fn the_handshake_reports_every_header_it_sent() {
 fn the_editor_previews_handshake_headers() {
     let preview = request::websocket_handshake_headers(
         "example.com/socket",
-        &[("Upgrade".into(), "websocket".into())],
+        &[Field::new("Upgrade", "websocket")],
     );
     assert_eq!(
         preview,

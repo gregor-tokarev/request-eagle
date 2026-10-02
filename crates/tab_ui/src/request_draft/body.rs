@@ -7,7 +7,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Body, Method, RawLanguage};
+use request::{Body, Field, Method, RawLanguage};
 
 use super::draft::{RequestDraft, RequestLocation};
 use super::fields::{ChooseFile, FieldsChanged, RequestFields};
@@ -153,7 +153,7 @@ impl RequestDraft {
                 fields: self
                     .form
                     .as_ref()
-                    .map(|form| form.read(cx).values(cx))
+                    .map(|form| Field::pairs(&form.read(cx).values(cx)))
                     .unwrap_or_default(),
             }),
             BodyType::Multipart => Some(Body::Multipart {
@@ -238,8 +238,8 @@ impl RequestDraft {
             return form.clone();
         }
 
-        let fields = match &self.request.body {
-            Some(Body::UrlEncoded { fields }) => fields.clone(),
+        let fields: Vec<_> = match &self.request.body {
+            Some(Body::UrlEncoded { fields }) => fields.iter().cloned().map(Field::from).collect(),
             _ => Vec::new(),
         };
         let scope = self.variables.clone();
@@ -250,7 +250,7 @@ impl RequestDraft {
         self._subscriptions
             .push(cx.subscribe(&form, |this, _, event: &FieldsChanged, cx| {
                 if let Some(Body::UrlEncoded { fields }) = &mut this.request.body {
-                    *fields = event.0.clone();
+                    *fields = Field::pairs(&event.0);
                 }
                 this.refresh_generated_headers(cx);
                 cx.notify();

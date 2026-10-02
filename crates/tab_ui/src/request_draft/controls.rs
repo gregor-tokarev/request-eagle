@@ -6,7 +6,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::Method;
+use request::{Field, Method};
 use request_eagle_theme::{method_color, protocol_icon};
 
 use super::draft::{RequestDraft, RequestLocation, RequestSection};
@@ -279,7 +279,8 @@ impl RequestDraft {
                     let count = match section {
                         Some(RequestSection::Params) => self.params_count(),
                         Some(RequestSection::Headers) => {
-                            self.request.headers.len() + self.generated_headers.len()
+                            Field::enabled(&self.request.headers).count()
+                                + self.generated_headers.len()
                         }
                         Some(RequestSection::Body) => match &self.request.body {
                             Some(request::Body::UrlEncoded { fields }) => fields.len(),

@@ -8,7 +8,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{GrpcDefinition, GrpcError, ServiceDefinition};
+use request::{Field, GrpcDefinition, GrpcError, ServiceDefinition};
 
 use super::draft::GrpcDraft;
 use super::methods::method_list;
@@ -46,7 +46,9 @@ impl GrpcDraft {
                 Some(DefinitionSource::Reflection {
                     url: self.request.url.trim().to_owned(),
                     tls: self.request.uses_tls(),
-                    metadata: self.request.metadata.clone(),
+                    metadata: Field::enabled(&self.request.metadata)
+                        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                        .collect(),
                     verify_certificates: self.request.settings.verify_certificates,
                     server_name: self.request.settings.server_name.clone(),
                 })
