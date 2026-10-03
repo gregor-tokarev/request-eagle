@@ -199,6 +199,33 @@ fn checks_ids_names_and_connections() {
 }
 
 #[test]
+fn notes_keep_a_positive_size_and_leave_it_out_until_resized() {
+    let mut flow = Flow {
+        blocks: vec![block("b1", BlockType::Note.block_kind())],
+        connections: Vec::new(),
+    };
+    flow.check().unwrap();
+    assert!(!toml::to_string(&flow).unwrap().contains("width"));
+
+    flow.blocks[0].kind = BlockKind::Note {
+        text: "1 · Sign in".to_owned(),
+        width: Some(640.),
+        height: Some(320.),
+    };
+    flow.check().unwrap();
+    let saved = toml::to_string(&flow).unwrap();
+    assert!(saved.contains("width = 640.0"));
+    assert_eq!(toml::from_str::<Flow>(&saved).unwrap(), flow);
+
+    flow.blocks[0].kind = BlockKind::Note {
+        text: String::new(),
+        width: Some(0.),
+        height: None,
+    };
+    assert!(flow.check().unwrap_err().contains("positive size"));
+}
+
+#[test]
 fn edits_keep_connections_consistent() {
     let mut flow = Flow {
         blocks: vec![

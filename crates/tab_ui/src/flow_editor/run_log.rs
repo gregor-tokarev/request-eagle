@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     scroll::Scrollbar,
@@ -7,18 +7,34 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{FlowEditor, run::LogKind};
+use super::{
+    FlowEditor,
+    run::{LogKind, RunData},
+};
 
 impl FlowEditor {
+    /// The entries the run log shows: all of them, or the selected block's.
+    pub(super) fn log_entries(&self) -> Vec<usize> {
+        let filter = match self.selection.as_slice() {
+            [block] if self.log_filtered => Some(block),
+            _ => None,
+        };
+
+        (0..self.run.log.len())
+            .filter(|&index| filter.is_none_or(|block| self.run.log[index].block == *block))
+            .collect()
+    }
+
     /// What the last run did, block by block, newest last.
     pub(super) fn render_run_log(&self, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let count = self.run.log.len();
+        let entries = self.log_entries();
+        let count = entries.len();
+        let filterable = self.selection.len() == 1;
 
         v_flex()
             .debug_selector(|| "flow-run-log".into())
-            .flex_none()
-            .h(rems(13.))
+            .size_full()
             .border_t_1()
             .border_color(theme.border)
             .bg(theme.background)
@@ -45,6 +61,21 @@ impl FlowEditor {
                         )
                     })
                     .child(div().flex_1())
+                    .when(filterable, |this| {
+                        this.child(
+                            Button::new("flow-log-filter")
+                                .debug_selector(|| "flow-log-filter".into())
+                                .xsmall()
+                                .ghost()
+                                .selected(self.log_filtered)
+                                .label("Selected block only")
+                                .tooltip("Show only the entries of the selected block")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.log_filtered = !this.log_filtered;
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(
                         Button::new("flow-close-log")
                             .xsmall()
@@ -86,8 +117,11 @@ impl FlowEditor {
                         uniform_list(
                             "flow-run-log-entries",
                             count,
-                            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
-                                range.map(|index| this.log_row(index, cx)).collect()
+                            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                                range
+                                    .filter_map(|row| entries.get(row).copied())
+                                    .map(|index| this.log_row(index, cx))
+                                    .collect()
                             }),
                         )
                         .size_full()
@@ -104,7 +138,15 @@ impl FlowEditor {
         let title = self
             .flow
             .block(&entry.block)
-            .map(|block| SharedString::from(block.title().to_owned()));
+            .map(|block| self.block_title(block, cx));
+        // A block that ran more than once, such as in a loop, numbers its runs.
+        let number = (entry.index > 0
+            && self
+                .run
+                .blocks
+                .get(&entry.block)
+                .is_some_and(|status| status.runs > 1))
+        .then(|| format!("#{}", entry.index));
         let color = match entry.kind {
             LogKind::Ran => theme.foreground,
             LogKind::Logged => theme.info,
@@ -112,9 +154,29 @@ impl FlowEditor {
             LogKind::Failed => theme.danger,
         };
         let block = entry.block.clone();
+        let (run, released) = match &entry.run {
+            RunData::Kept(run, _) => (Some(run.clone()), false),
+            // A block's last run stays with its status after its entry lets
+            // go of it.
+            RunData::Released(finished) => match self
+                .run
+                .blocks
+                .get(&entry.block)
+                .filter(|status| status.runs == entry.index)
+                .and_then(|status| status.last.clone())
+                .filter(|last| last.at == *finished)
+            {
+                Some(last) => (Some(last), false),
+                None => (None, true),
+            },
+            RunData::None => (None, false),
+        };
+        let at = entry.at;
 
         h_flex()
             .id(("flow-log-entry", index))
+            .debug_selector(move || format!("flow-log-entry-{index}"))
+            .w_full()
             .h(rems(1.75))
             .px_3()
             .gap_3()
@@ -129,12 +191,23 @@ impl FlowEditor {
                     .child(format!("{:.3}s", entry.at.as_secs_f64())),
             )
             .child(
-                div()
+                h_flex()
                     .flex_none()
-                    .w(rems(9.))
-                    .text_ellipsis()
-                    .font_weight(FontWeight::MEDIUM)
-                    .children(title),
+                    .w(rems(11.))
+                    .gap_1()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .font_weight(FontWeight::MEDIUM)
+                            .children(title),
+                    )
+                    .children(number.map(|number| {
+                        div()
+                            .flex_none()
+                            .text_color(theme.muted_foreground)
+                            .child(number)
+                    })),
             )
             .child(
                 div()
@@ -151,6 +224,11 @@ impl FlowEditor {
                         if this.flow.block(&block).is_some() {
                             this.set_selection(vec![block.clone()], window, cx);
                             this.reveal(&block, cx);
+                            match &run {
+                                Some(run) => this.show_run(&block, run.clone(), at, window, cx),
+                                None if released => this.show_released(&block, at, cx),
+                                None => {}
+                            }
                         }
                     }))
             })

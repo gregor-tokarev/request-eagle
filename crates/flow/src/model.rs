@@ -151,10 +151,17 @@ pub enum BlockKind {
         #[serde(default = "default_outputs")]
         names: Vec<String>,
     },
-    /// Text on the canvas, which does not run.
+    /// Text on the canvas, which does not run. A Note behind blocks frames
+    /// them as a section: moving it moves the blocks inside it.
     Note {
         #[serde(default)]
         text: String,
+        /// Its size, in the pixels of `x` and `y`. Without one it has the
+        /// default size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<f32>,
     },
 }
 
@@ -433,6 +440,8 @@ impl BlockType {
             },
             Self::Note => BlockKind::Note {
                 text: String::new(),
+                width: None,
+                height: None,
             },
         }
     }
@@ -701,6 +710,14 @@ impl Flow {
             }
             if !block.x.is_finite() || !block.y.is_finite() {
                 return Err(format!("Block \"{}\" has no position", block.id));
+            }
+            if let BlockKind::Note { width, height, .. } = &block.kind
+                && [width, height]
+                    .into_iter()
+                    .flatten()
+                    .any(|size| !size.is_finite() || *size <= 0.)
+            {
+                return Err(format!("Note \"{}\" must have a positive size", block.id));
             }
 
             check_names(block)?;

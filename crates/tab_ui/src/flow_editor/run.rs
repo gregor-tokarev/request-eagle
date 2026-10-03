@@ -18,6 +18,10 @@ use crate::{cookies::Cookies, variables::VariableScope};
 /// latest entries are the ones worth reading.
 const LOG_LIMIT: usize = 2000;
 
+/// About how many bytes of earlier runs' data the run log keeps for the
+/// inspector. Older entries keep only their line of text.
+const RUN_DATA_LIMIT: usize = 64 * 1024 * 1024;
+
 /// How often a running flow redraws, at most.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -29,7 +33,12 @@ pub(super) struct RunState {
     pub log: Vec<LogEntry>,
     /// Entries removed from the start of the log to keep it within its limit.
     pub dropped: usize,
+    /// About how many bytes of run data the log's entries hold.
+    pub retained: usize,
     pub summary: Option<RunSummary>,
+    /// How many times an HTTP Request block's request failed, sending from
+    /// its Fail output.
+    pub failed_requests: usize,
     /// Why the flow could not run.
     pub error: Option<SharedString>,
 }
@@ -38,7 +47,10 @@ pub(super) struct RunState {
 pub(super) struct BlockStatus {
     pub running: bool,
     pub runs: usize,
-    pub last: Option<BlockRun>,
+    pub last: Option<Arc<BlockRun>>,
+    /// What each output sent last in the run, whichever run of the block
+    /// sent it, such as a loop's Then in an earlier iteration.
+    pub outputs: HashMap<String, Arc<Value>>,
     /// A Display block's latest data, ready to draw, and the format it is
     /// drawn in.
     pub display: Option<(DisplayFormat, preview::Display)>,
@@ -49,11 +61,31 @@ impl BlockStatus {
         self.last.as_ref().is_some_and(|run| run.error.is_some())
     }
 
-    /// Whether the last run sent data from this output.
-    pub fn sent(&self, output: &str) -> bool {
+    /// Whether the last run failed or sent from a Fail output: an HTTP
+    /// Request's request or a Validate block's check failed.
+    pub fn troubled(&self) -> bool {
+        self.failed()
+            || self
+                .last
+                .as_ref()
+                .is_some_and(|run| run.outputs.iter().any(|(name, _)| name == "fail"))
+    }
+
+    /// The HTTP status of the response an HTTP Request block's last run
+    /// received.
+    pub fn http_status(&self) -> Option<u64> {
         self.last
-            .as_ref()
-            .is_some_and(|run| run.outputs.iter().any(|(name, _)| name == output))
+            .as_ref()?
+            .outputs
+            .first()?
+            .1
+            .pointer("/http/status")?
+            .as_u64()
+    }
+
+    /// Whether this output sent data in the run.
+    pub fn sent(&self, output: &str) -> bool {
+        self.outputs.contains_key(output)
     }
 }
 
@@ -70,6 +102,24 @@ pub(super) struct LogEntry {
     pub block: String,
     pub kind: LogKind,
     pub text: SharedString,
+    /// Which run of its block this is, from 1, so a loop's runs can be told
+    /// apart.
+    pub index: usize,
+    /// The run the entry tells of, which the inspector shows when the entry
+    /// is chosen.
+    pub run: RunData,
+}
+
+/// What a log entry keeps of the run it tells of.
+pub(super) enum RunData {
+    /// It tells of no block's run, such as the end of the flow's run.
+    None,
+    /// The run, and about how many bytes its data takes.
+    Kept(Arc<BlockRun>, usize),
+    /// The run's data was let go to keep memory in check. The run finished
+    /// this long into the flow's run, which tells it apart from later runs
+    /// of a block with the same ID.
+    Released(Duration),
 }
 
 impl RunState {
@@ -105,7 +155,13 @@ impl FlowEditor {
         let (sender, mut events) = futures::channel::mpsc::unbounded();
         let run = cx.background_executor().spawn(async move {
             flow::run(flow, options, move |event| {
-                let _ = sender.unbounded_send(event);
+                // Sizing a large response takes a while, so it happens here
+                // rather than where the interface draws.
+                let size = match &event {
+                    RunEvent::Finished(run) => run_size(run),
+                    _ => 0,
+                };
+                let _ = sender.unbounded_send((event, size));
             })
             .await
         });
@@ -238,27 +294,41 @@ impl FlowEditor {
         })
     }
 
-    fn receive(&mut self, events: Vec<RunEvent>, cx: &mut Context<Self>) {
-        for event in events {
+    fn receive(&mut self, events: Vec<(RunEvent, usize)>, cx: &mut Context<Self>) {
+        for (event, size) in events {
             match event {
                 RunEvent::Started { block } => {
                     self.run.blocks.entry(block).or_default().running = true;
                 }
                 RunEvent::Log { block, value, at } => {
                     let text = preview::compact(&value, 400);
-                    self.log(at, block, LogKind::Logged, text);
+                    let index = self.run.blocks.get(&block).map_or(0, |status| status.runs) + 1;
+                    self.log_run(at, block, LogKind::Logged, text, index, RunData::None);
                 }
                 RunEvent::Finished(run) => {
+                    let run = Arc::new(run);
+                    let block_kind = self.flow.block(&run.block).map(|block| &block.kind);
+                    let request = matches!(block_kind, Some(BlockKind::HttpRequest { .. }));
                     let (kind, text) = match (&run.error, &run.notice) {
                         (Some(error), _) => (LogKind::Failed, error.clone().into()),
+                        // A request that could not be sent goes out of Fail
+                        // with a notice of why.
+                        (None, Some(notice)) if request => (LogKind::Failed, notice.clone().into()),
                         (None, Some(notice)) => (LogKind::Notice, notice.clone().into()),
+                        (None, None) if request => describe_response(&run.outputs),
                         // Blocks such as Output send nothing on; show what they received.
                         (None, None) if run.outputs.is_empty() && !run.inputs.is_empty() => {
                             (LogKind::Ran, describe("Received", &run.inputs))
                         }
                         (None, None) => (LogKind::Ran, describe("Sent", &run.outputs)),
                     };
-                    self.log(run.at, run.block.clone(), kind, text);
+                    // A Log block's entry already shows what it received.
+                    let logged = matches!(block_kind, Some(BlockKind::Log))
+                        && run.error.is_none()
+                        && run.notice.is_none();
+                    if request && run.outputs.iter().any(|(name, _)| name == "fail") {
+                        self.run.failed_requests += 1;
+                    }
 
                     let display = self
                         .flow
@@ -273,16 +343,37 @@ impl FlowEditor {
                     let status = self.run.blocks.entry(run.block.clone()).or_default();
                     status.running = false;
                     status.runs += 1;
+                    let index = status.runs;
                     if display.is_some() {
                         status.display = display;
                     }
-                    status.last = Some(run);
+                    status.last = Some(run.clone());
+                    for (output, value) in &run.outputs {
+                        status.outputs.insert(output.clone(), value.clone());
+                    }
+
+                    if logged {
+                        // The entry the Log block wrote shows this run.
+                        if let Some(entry) = self.run.log.iter_mut().rev().find(|entry| {
+                            entry.block == run.block
+                                && entry.kind == LogKind::Logged
+                                && entry.index == index
+                        }) && matches!(entry.run, RunData::None)
+                        {
+                            entry.run = RunData::Kept(run.clone(), size);
+                            self.run.retained += size;
+                            self.release_runs();
+                        }
+                    } else {
+                        let data = RunData::Kept(run.clone(), size);
+                        self.log_run(run.at, run.block.clone(), kind, text, index, data);
+                    }
                 }
             }
         }
 
         // Follow the newest entries while the run goes on.
-        if let Some(last) = self.run.log.len().checked_sub(1) {
+        if let Some(last) = self.log_entries().len().checked_sub(1) {
             self.log_scroll.scroll_to_item(last, ScrollStrategy::Bottom);
         }
         cx.notify();
@@ -301,18 +392,15 @@ impl FlowEditor {
                 format_duration(summary.elapsed),
                 summary.block_runs,
                 if summary.block_runs == 1 { "" } else { "s" },
-                match summary.failures {
-                    0 => String::new(),
-                    1 => ", 1 failed".to_owned(),
-                    failures => format!(", {failures} failed"),
-                }
+                failures(summary.failures, self.run.failed_requests),
             ),
         };
-        let kind = if summary.stopped.is_some() || summary.failures > 0 {
-            LogKind::Failed
-        } else {
-            LogKind::Notice
-        };
+        let kind =
+            if summary.stopped.is_some() || summary.failures > 0 || self.run.failed_requests > 0 {
+                LogKind::Failed
+            } else {
+                LogKind::Notice
+            };
         self.log(summary.elapsed, String::new(), kind, text.into());
         self.run.summary = Some(summary);
 
@@ -325,19 +413,118 @@ impl FlowEditor {
     }
 
     fn log(&mut self, at: Duration, block: String, kind: LogKind, text: SharedString) {
+        self.log_run(at, block, kind, text, 0, RunData::None);
+    }
+
+    fn log_run(
+        &mut self,
+        at: Duration,
+        block: String,
+        kind: LogKind,
+        text: SharedString,
+        index: usize,
+        run: RunData,
+    ) {
+        if let RunData::Kept(_, size) = &run {
+            self.run.retained += size;
+        }
         self.run.log.push(LogEntry {
             at,
             block,
             kind,
             text,
+            index,
+            run,
         });
 
         if self.run.log.len() > LOG_LIMIT {
             let excess = self.run.log.len() - LOG_LIMIT;
-            self.run.log.drain(..excess);
+            for entry in self.run.log.drain(..excess) {
+                if let RunData::Kept(_, size) = entry.run {
+                    self.run.retained -= size;
+                }
+            }
             self.run.dropped += excess;
         }
+        self.release_runs();
     }
+
+    /// Let earlier entries go of their run data while the log keeps too
+    /// much. Each block's last run stays with its status.
+    fn release_runs(&mut self) {
+        let mut entries = self.run.log.iter_mut();
+        while self.run.retained > RUN_DATA_LIMIT
+            && let Some(entry) = entries.next()
+        {
+            if let RunData::Kept(run, size) = &entry.run {
+                self.run.retained -= size;
+                entry.run = RunData::Released(run.at);
+            }
+        }
+    }
+}
+
+/// About how many bytes a run's inputs and outputs take.
+fn run_size(run: &BlockRun) -> usize {
+    fn size(value: &Value) -> usize {
+        match value {
+            Value::String(text) => text.len(),
+            Value::Array(items) => items.iter().map(size).sum::<usize>() + items.len(),
+            Value::Object(fields) => fields
+                .iter()
+                .map(|(name, value)| name.len() + size(value))
+                .sum(),
+            _ => 8,
+        }
+    }
+
+    run.inputs
+        .iter()
+        .chain(&run.outputs)
+        .map(|(name, value)| name.len() + size(value))
+        .sum()
+}
+
+/// The failures of a run, such as `, 1 failed, 2 requests failed`, to
+/// follow its summary.
+pub(super) fn failures(blocks: usize, requests: usize) -> String {
+    let mut text = String::new();
+    match blocks {
+        0 => {}
+        1 => text.push_str(", 1 failed"),
+        blocks => text.push_str(&format!(", {blocks} failed")),
+    }
+    match requests {
+        0 => {}
+        1 => text.push_str(", 1 request failed"),
+        requests => text.push_str(&format!(", {requests} requests failed")),
+    }
+    text
+}
+
+/// What an HTTP Request block received, in one line: its status, the
+/// output it went out of, and the response body. A failed request is a
+/// failure of the run.
+pub(super) fn describe_response(outputs: &[(String, Arc<Value>)]) -> (LogKind, SharedString) {
+    let Some((output, value)) = outputs.first() else {
+        return (LogKind::Ran, "Sent nothing".into());
+    };
+    let kind = if output == "fail" {
+        LogKind::Failed
+    } else {
+        LogKind::Ran
+    };
+    let status = value
+        .pointer("/http/status")
+        .and_then(Value::as_u64)
+        .map(|status| format!("{status} · "))
+        .unwrap_or_default();
+    let body = value.get("body").unwrap_or(value);
+
+    (
+        kind,
+        format!("{status}{output}: {}", preview::compact(body, 300)).into(),
+    )
 }
 
 /// What a block sent or received, in one line.

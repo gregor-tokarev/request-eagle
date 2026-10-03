@@ -40,6 +40,54 @@ pub(super) enum PickerItem {
     Request(Box<FlowRequest>),
 }
 
+/// The groups the picker lists blocks in, in order. Saved requests join
+/// the HTTP Request block's group.
+const CATEGORIES: [&str; 7] = [
+    "Requests",
+    "Logic",
+    "Loops and timing",
+    "Data",
+    "Values",
+    "Results",
+    "Canvas",
+];
+
+/// The index of a block type's group in [`CATEGORIES`].
+pub(super) fn category(block_type: BlockType) -> usize {
+    match block_type {
+        BlockType::HttpRequest => 0,
+        BlockType::Evaluate
+        | BlockType::If
+        | BlockType::Condition
+        | BlockType::Validate
+        | BlockType::Or => 1,
+        BlockType::For | BlockType::Repeat | BlockType::Collect | BlockType::Delay => 2,
+        BlockType::Select
+        | BlockType::Record
+        | BlockType::List
+        | BlockType::Template
+        | BlockType::SetVariable
+        | BlockType::GetVariable => 3,
+        BlockType::String
+        | BlockType::Number
+        | BlockType::Boolean
+        | BlockType::Null
+        | BlockType::Now
+        | BlockType::Date => 4,
+        BlockType::Output | BlockType::Display | BlockType::Log => 5,
+        BlockType::Start | BlockType::Note => 6,
+    }
+}
+
+impl PickerItem {
+    fn category(&self) -> usize {
+        match self {
+            Self::Block(block_type) => category(*block_type),
+            Self::Request(_) => 0,
+        }
+    }
+}
+
 impl Picker {
     pub fn new(
         position: Point<f32>,
@@ -73,7 +121,8 @@ impl Picker {
 }
 
 impl FlowEditor {
-    /// The blocks and requests that match the picker's search, blocks first.
+    /// The blocks and requests that match the picker's search, by group.
+    /// Saved requests follow the HTTP Request block.
     fn picker_items(&self, picker: &Picker, cx: &App) -> Vec<PickerItem> {
         let query = picker.search.read(cx).value().trim().to_lowercase();
         let matches = |text: &str| text.to_lowercase().contains(&query);
@@ -98,12 +147,6 @@ impl FlowEditor {
             })
             .map(PickerItem::Block)
             .collect();
-        // Blocks named like the search come before those that only describe it.
-        items.sort_by_key(|item| match item {
-            PickerItem::Block(block_type) => !matches(block_type.name()),
-            PickerItem::Request(_) => true,
-        });
-
         if picker.from.as_ref().is_none_or(|from| from.output) {
             items.extend(
                 self.requests
@@ -120,6 +163,15 @@ impl FlowEditor {
             );
         }
 
+        // Within a group, blocks named like the search come before those
+        // that only describe it, and saved requests come last.
+        items.sort_by_key(|item| {
+            let rank = match item {
+                PickerItem::Block(block_type) => usize::from(!matches(block_type.name())),
+                PickerItem::Request(_) => 2,
+            };
+            (item.category(), rank)
+        });
         items
     }
 
@@ -243,9 +295,15 @@ impl FlowEditor {
         let theme = cx.theme();
         let items = self.picker_items(picker, cx);
         let bounds = self.picker_bounds(picker);
-        let first_request = items
+        // Each group is headed by its name.
+        let headings: Vec<Option<&'static str>> = items
             .iter()
-            .position(|item| matches!(item, PickerItem::Request(_)));
+            .enumerate()
+            .map(|(index, item)| {
+                let starts = index == 0 || items[index - 1].category() != item.category();
+                starts.then(|| CATEGORIES[item.category()])
+            })
+            .collect();
 
         v_flex()
             .id("flow-block-picker")
@@ -289,14 +347,15 @@ impl FlowEditor {
                     })
                     .children(items.into_iter().enumerate().map(|(index, item)| {
                         let highlighted = index == picker.highlighted;
-                        let heading = (Some(index) == first_request).then(|| {
+                        let heading = headings[index].map(|heading| {
                             div()
                                 .px_2()
                                 .pt_2()
                                 .pb_1()
                                 .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.muted_foreground)
-                                .child("Saved requests")
+                                .child(heading)
                         });
                         let row =
                             h_flex()

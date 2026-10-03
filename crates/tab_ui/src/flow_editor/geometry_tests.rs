@@ -1,4 +1,4 @@
-use flow::BlockType;
+use flow::{BlockKind, BlockType};
 use gpui_kit::{Bounds, Modifiers, ScrollDelta, point, px, size};
 
 use super::geometry::*;
@@ -188,8 +188,8 @@ fn fitting_centers_the_content_without_magnifying_it() {
 #[test]
 fn blocks_grow_with_their_ports_and_place_ports_on_rows() {
     let kind = BlockType::Evaluate.block_kind();
-    let one = block_size(&kind, 1);
-    let three = block_size(&kind, 3);
+    let one = block_size(&kind, 1, false);
+    let three = block_size(&kind, 3, false);
 
     assert_eq!(three.height - one.height, ROW * 2.);
     assert_eq!(one.width, three.width);
@@ -198,16 +198,125 @@ fn blocks_grow_with_their_ports_and_place_ports_on_rows() {
 }
 
 #[test]
-fn connections_are_hit_near_their_curve() {
-    let curve = wire(point(0., 0.), point(200., 100.));
+fn blocks_without_a_summary_make_room_for_a_message() {
+    let kind = BlockType::For.block_kind();
+    let quiet = block_size(&kind, 2, false);
+    let told = block_size(&kind, 2, true);
 
-    assert!(distance_to_wire(point(0., 0.), &curve) < 0.01);
-    assert!(distance_to_wire(point(200., 100.), &curve) < 0.01);
-    assert!(distance_to_wire(point(100., 50.), &curve) < 2.);
-    assert!(distance_to_wire(point(100., -40.), &curve) > 30.);
-    // A connection back to an earlier block still curves out of its output.
-    let back = wire(point(300., 0.), point(0., 0.));
-    assert!(back[1].x > 300. && back[2].x < 0.);
+    assert!(quiet.height < HEADER + ROW * 2. + MESSAGE);
+    assert_eq!(told.height, HEADER + ROW * 2. + MESSAGE);
+    // A block with room for its summary keeps its size.
+    let display = BlockType::Display.block_kind();
+    assert_eq!(
+        block_size(&display, 1, true),
+        block_size(&display, 1, false)
+    );
+}
+
+#[test]
+fn notes_have_their_own_size() {
+    let mut kind = BlockType::Note.block_kind();
+    assert_eq!(block_size(&kind, 0, false), NOTE_SIZE);
+
+    if let BlockKind::Note { width, height, .. } = &mut kind {
+        *width = Some(900.);
+        *height = Some(420.);
+    }
+    assert_eq!(block_size(&kind, 0, true), size(900., 420.));
+}
+
+#[test]
+fn connections_are_hit_near_their_curve() {
+    let curves = route(point(0., 0.), point(200., 100.), (0., 0.));
+    assert_eq!(curves.len(), 1);
+
+    assert!(distance_to_wire(point(0., 0.), &curves) < 0.01);
+    assert!(distance_to_wire(point(200., 100.), &curves) < 0.01);
+    assert!(distance_to_wire(point(100., 50.), &curves) < 2.);
+    assert!(distance_to_wire(point(100., -40.), &curves) > 30.);
+}
+
+#[test]
+fn connections_back_to_an_earlier_block_run_below_both_blocks() {
+    let from = point(300., 40.);
+    let to = point(0., 60.);
+    let curves = route(from, to, (120., 200.));
+
+    // Out of the output to the right, and into the input from the left.
+    assert_eq!(curves.first().unwrap()[0], from);
+    assert!(curves.first().unwrap()[1].x > from.x);
+    assert_eq!(curves.last().unwrap()[3], to);
+    assert!(curves.last().unwrap()[2].x < to.x);
+    // Between them it runs under the lower block.
+    let lowest = curves
+        .iter()
+        .flatten()
+        .map(|point| point.y)
+        .fold(f32::MIN, f32::max);
+    assert!(lowest > 200.);
+    assert!(distance_to_wire(point(150., lowest), &curves) < 0.01);
+    assert!(distance_to_wire(point(150., 50.), &curves) > 100.);
+    // Each curve starts where the one before it ends.
+    for pair in curves.windows(2) {
+        assert_eq!(pair[0][3], pair[1][0]);
+    }
+}
+
+#[test]
+fn zoom_steps_go_through_fixed_zooms() {
+    assert_eq!(step_zoom(1., true), 1.25);
+    assert_eq!(step_zoom(1., false), 0.75);
+    // The first zoom that shows text is a step, so stepping reaches it.
+    assert_eq!(step_zoom(0.33, true), DETAIL_ZOOM);
+    // A zoom between steps goes to the next one past it.
+    assert_eq!(step_zoom(0.4, true), 0.5);
+    assert_eq!(step_zoom(0.4, false), 0.33);
+    assert_eq!(step_zoom(MAX_ZOOM, true), MAX_ZOOM);
+    assert_eq!(step_zoom(MIN_ZOOM, false), MIN_ZOOM);
+}
+
+#[test]
+fn revealing_moves_the_view_as_little_as_it_takes() {
+    let rem = px(16.);
+    let view = size(px(800.), px(600.));
+    let viewport = Viewport {
+        origin: point(0., 0.),
+        zoom: 1.,
+    };
+    let block = |x: f32, y: f32| Bounds {
+        origin: point(x, y),
+        size: size(200., 100.),
+    };
+
+    assert_eq!(viewport.revealing(block(100., 100.), view, rem), None);
+
+    // Past the right edge: the view moves just far enough, keeping its top.
+    let moved = viewport.revealing(block(700., 100.), view, rem).unwrap();
+    assert!(close(moved.origin.x, 700. + 200. + 24. - 800.));
+    assert_eq!(moved.origin.y, 0.);
+
+    // Above the view: its top comes into view.
+    let moved = viewport.revealing(block(100., -300.), view, rem).unwrap();
+    assert!(close(moved.origin.y, -324.));
+}
+
+#[test]
+fn containment_needs_the_whole_rectangle() {
+    let frame = Bounds {
+        origin: point(0., 0.),
+        size: size(100., 100.),
+    };
+    let inside = Bounds {
+        origin: point(10., 10.),
+        size: size(50., 50.),
+    };
+    let across = Bounds {
+        origin: point(80., 10.),
+        size: size(50., 50.),
+    };
+
+    assert!(contains(&frame, &inside));
+    assert!(!contains(&frame, &across));
 }
 
 #[test]
