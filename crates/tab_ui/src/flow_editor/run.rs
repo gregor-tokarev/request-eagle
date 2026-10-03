@@ -116,8 +116,10 @@ pub(super) enum RunData {
     None,
     /// The run, and about how many bytes its data takes.
     Kept(Arc<BlockRun>, usize),
-    /// The run's data was let go to keep memory in check.
-    Released,
+    /// The run's data was let go to keep memory in check. The run finished
+    /// this long into the flow's run, which tells it apart from later runs
+    /// of a block with the same ID.
+    Released(Duration),
 }
 
 impl RunState {
@@ -454,9 +456,9 @@ impl FlowEditor {
         while self.run.retained > RUN_DATA_LIMIT
             && let Some(entry) = entries.next()
         {
-            if let RunData::Kept(_, size) = entry.run {
+            if let RunData::Kept(run, size) = &entry.run {
                 self.run.retained -= size;
-                entry.run = RunData::Released;
+                entry.run = RunData::Released(run.at);
             }
         }
     }

@@ -158,12 +158,13 @@ impl FlowEditor {
             RunData::Kept(run, _) => (Some(run.clone()), false),
             // A block's last run stays with its status after its entry lets
             // go of it.
-            RunData::Released => match self
+            RunData::Released(finished) => match self
                 .run
                 .blocks
                 .get(&entry.block)
                 .filter(|status| status.runs == entry.index)
                 .and_then(|status| status.last.clone())
+                .filter(|last| last.at == *finished)
             {
                 Some(last) => (Some(last), false),
                 None => (None, true),
