@@ -195,6 +195,9 @@ impl FlowEditor {
 
         match drag {
             Drag::Connect { from, detached, .. } => {
+                let on_canvas = self.block_at(pointer).is_none()
+                    && self.port_at(pointer, !from.output).is_none();
+
                 match (self.drop_port(&from, pointer), detached) {
                     (Some(to), Some(connection)) => {
                         if let Some(moved) = connection_between(from, to)
@@ -211,18 +214,17 @@ impl FlowEditor {
                         }
                     }
                     (Some(to), None) => self.connect(from, to, cx),
-                    // A connection pulled off and dropped on the canvas is removed.
-                    (None, Some(connection)) => self.edit(
+                    // A connection pulled off and dropped on empty canvas is removed.
+                    (None, Some(connection)) if on_canvas => self.edit(
                         None,
                         |flow| flow.connections.retain(|existing| *existing != connection),
                         cx,
                     ),
                     // Dropped on empty canvas: choose a block to connect to.
-                    (None, None) if self.block_at(pointer).is_none() => {
-                        self.open_picker(pointer, Some(from), window, cx)
-                    }
-                    // Dropped on a block it cannot join, such as its own.
-                    (None, None) => {}
+                    (None, None) if on_canvas => self.open_picker(pointer, Some(from), window, cx),
+                    // Dropped on a block or port it cannot join, such as its
+                    // own: nothing changes.
+                    (None, _) => {}
                 }
             }
             Drag::Move { moved: true, .. } => self.history.seal(),
