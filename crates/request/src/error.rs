@@ -1,26 +1,25 @@
-use std::{io, path::PathBuf, time::Duration};
+use std::{fmt, io, path::PathBuf, time::Duration};
 
 use thiserror::Error;
+
+use crate::ScriptReport;
+
+/// A request that did not complete, with the reports of the scripts that ran
+/// before it stopped. A pre-request script that failed or skipped the request
+/// reports last.
+#[derive(Debug)]
+pub struct ExecutionFailure {
+    pub error: ExecutionError,
+    pub scripts: Vec<ScriptReport>,
+}
 
 #[derive(Debug, Error)]
 pub enum ExecutionError {
     #[error("Request skipped: {reason}")]
-    Skipped {
-        reason: String,
-        report: Box<crate::ScriptReport>,
-    },
-
-    #[error("{source}")]
-    ScriptedRequest {
-        source: Box<ExecutionError>,
-        reports: Vec<crate::ScriptReport>,
-    },
+    Skipped { reason: String },
 
     #[error("pre-request script failed: {message}")]
-    Script {
-        message: String,
-        report: Box<crate::ScriptReport>,
-    },
+    Script { message: String },
 
     #[error("{0}")]
     Variables(String),
@@ -112,7 +111,6 @@ impl ExecutionError {
     pub fn message_without_url(&self) -> String {
         let message = self.to_string();
         let url = match self {
-            Self::ScriptedRequest { source, .. } => return source.message_without_url(),
             Self::Transport(error) => error
                 .chain()
                 .find_map(|error| error.downcast_ref::<reqwest::Error>())
@@ -124,5 +122,28 @@ impl ExecutionError {
             Some(url) => message.replace(&format!(" for url ({url})"), ""),
             None => message,
         }
+    }
+}
+
+/// A failure without script reports.
+impl From<ExecutionError> for ExecutionFailure {
+    fn from(error: ExecutionError) -> Self {
+        Self {
+            error,
+            scripts: Vec::new(),
+        }
+    }
+}
+
+/// The error's message, without the scripts' reports.
+impl fmt::Display for ExecutionFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for ExecutionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
     }
 }

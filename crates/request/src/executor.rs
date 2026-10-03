@@ -9,8 +9,9 @@ use bytes::Bytes;
 use http_client::http::header::WWW_AUTHENTICATE;
 
 use crate::{
-    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, Field, HttpRequest,
-    RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
+    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, ExecutionFailure, Field,
+    HttpRequest, RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor,
+    scripts,
 };
 
 /// How much of a raw body `Execution::sent` keeps.
@@ -50,7 +51,7 @@ impl RequestExecutor {
         &self,
         request: HttpRequest,
         variables: RequestVariables,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         self.run(request, variables, None)
     }
 
@@ -62,7 +63,7 @@ impl RequestExecutor {
         request: HttpRequest,
         variables: RequestVariables,
         events: EventStream,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         self.run(request, variables, Some(events))
     }
 
@@ -71,7 +72,7 @@ impl RequestExecutor {
         mut request: HttpRequest,
         variables: RequestVariables,
         mut events: Option<EventStream>,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         let executor = self.clone();
         // Resolved with the request's other fields, after pre-request scripts.
         request.auth = variables.effective_auth(&request.auth);
@@ -155,7 +156,7 @@ impl RequestExecutor {
                     sent: Some(sent),
                 };
 
-                Ok((request, post_body, state, execution))
+                Ok::<_, ExecutionFailure>((request, post_body, state, execution))
             };
 
             let (request, body, state, execution) = match timeout {
@@ -170,21 +171,18 @@ impl RequestExecutor {
                             std::future::pending::<()>().await;
                         }
 
-                        Err(ExecutionError::Timeout { timeout })
+                        Err(ExecutionError::Timeout { timeout }.into())
                     })
                     .await
                 }
                 None => run.await,
             }
-            .map_err(|error| {
-                if reports.is_empty() {
-                    error
-                } else {
-                    ExecutionError::ScriptedRequest {
-                        source: Box::new(error),
-                        reports,
-                    }
+            .map_err(|mut failure| {
+                // A failure after the pre-request scripts keeps their reports.
+                if failure.scripts.is_empty() {
+                    failure.scripts = reports;
                 }
+                failure
             })?;
 
             // Once the response is complete, its script uses the separate script

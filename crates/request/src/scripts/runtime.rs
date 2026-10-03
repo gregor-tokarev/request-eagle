@@ -14,8 +14,8 @@ use super::{
     variables::Variables,
 };
 use crate::{
-    Body, Execution, ExecutionError, Field, FormPart, HttpRequest, Method, RequestExecutor,
-    RequestVariables, Response,
+    Body, Execution, ExecutionError, ExecutionFailure, Field, FormPart, HttpRequest, Method,
+    RequestExecutor, RequestVariables, Response,
     variables::{resolve_request, sent_url},
 };
 
@@ -68,7 +68,7 @@ pub(crate) async fn pre_request(
     variables: RequestVariables,
     executor: RequestExecutor,
     cancelled: Arc<AtomicBool>,
-) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
+) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
     let RequestVariables {
         scopes,
         session,
@@ -92,9 +92,9 @@ pub(crate) async fn pre_request(
                 error: Some(message.clone()),
                 next_request: None,
             };
-            return Err(ExecutionError::Script {
-                message,
-                report: Box::new(report),
+            return Err(ExecutionFailure {
+                error: ExecutionError::Script { message },
+                scripts: vec![report],
             });
         }
     };
@@ -163,12 +163,10 @@ pub(crate) async fn pre_request(
             }
 
             if let Some(message) = report.error.clone() {
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
-                    ExecutionError::Script {
-                        message,
-                        report: Box::new(report),
-                    },
+                    report,
+                    ExecutionError::Script { message },
                 ));
             }
 
@@ -181,11 +179,11 @@ pub(crate) async fn pre_request(
                 && let Err(message) = session.apply(&output.changes)
             {
                 report.error = Some(message.into());
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
+                    report,
                     ExecutionError::Script {
                         message: message.into(),
-                        report: Box::new(report),
                     },
                 ));
             }
@@ -194,12 +192,10 @@ pub(crate) async fn pre_request(
                 if let Some(locals) = &state.locals {
                     locals.set(output.variables.values.clone());
                 }
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
-                    ExecutionError::Skipped {
-                        reason,
-                        report: Box::new(report),
-                    },
+                    report,
+                    ExecutionError::Skipped { reason },
                 ));
             }
             let changes = output.request;
@@ -226,12 +222,10 @@ pub(crate) async fn pre_request(
                         part.name
                     );
                     report.error = Some(message.clone());
-                    return Err(after_earlier_scripts(
+                    return Err(stopped(
                         reports,
-                        ExecutionError::Script {
-                            message,
-                            report: Box::new(report),
-                        },
+                        report,
+                        ExecutionError::Script { message },
                     ));
                 }
 
@@ -267,36 +261,31 @@ pub(crate) async fn pre_request(
             }
             Err(message) => {
                 let message: String = message.chars().take(4096).collect();
-                let Some(mut report) = reports.pop() else {
-                    return Err(ExecutionError::Variables(message));
+                let Some(report) = reports.last_mut() else {
+                    return Err(ExecutionError::Variables(message).into());
                 };
                 report.error = Some(message.clone());
-                Err(after_earlier_scripts(
-                    reports,
-                    ExecutionError::Script {
-                        message,
-                        report: Box::new(report),
-                    },
-                ))
+                Err(ExecutionFailure {
+                    error: ExecutionError::Script { message },
+                    scripts: reports,
+                })
             }
         }
     })
     .await
 }
 
-/// Keep the reports of scripts that completed before a later one stopped the send.
-fn after_earlier_scripts(mut reports: Vec<ScriptReport>, error: ExecutionError) -> ExecutionError {
-    if reports.is_empty() {
-        return error;
-    }
+/// A script that stopped the send, after the scripts that completed before it.
+fn stopped(
+    mut reports: Vec<ScriptReport>,
+    report: ScriptReport,
+    error: ExecutionError,
+) -> ExecutionFailure {
+    reports.push(report);
 
-    if let ExecutionError::Script { report, .. } | ExecutionError::Skipped { report, .. } = &error {
-        reports.push((**report).clone());
-    }
-
-    ExecutionError::ScriptedRequest {
-        source: Box::new(error),
-        reports,
+    ExecutionFailure {
+        error,
+        scripts: reports,
     }
 }
 

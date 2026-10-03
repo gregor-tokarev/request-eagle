@@ -234,7 +234,8 @@ fn the_request_timeout_lasts_until_the_stream_opens() {
         let error = executor(preferences)
             .execute_streaming(get(&url), no_variables(), events)
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .error;
         assert!(matches!(error, ExecutionError::Timeout { .. }), "{error}");
         assert!(updates.next().await.is_none());
         server.await;
@@ -421,7 +422,8 @@ fn streams_stay_within_the_response_size_limit() {
         })
         .execute_streaming(get(&url), no_variables(), events)
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .error;
 
         assert!(
             matches!(error, ExecutionError::ResponseTooLarge { limit_bytes } if limit_bytes == 1024 * 1024),

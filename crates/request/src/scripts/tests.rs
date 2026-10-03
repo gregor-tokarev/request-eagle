@@ -10,9 +10,9 @@ use super::{
     runtime::{self, Cancellation, ScriptState},
 };
 use crate::{
-    Body, Execution, ExecutionError, Field, FormPart, HeaderMap, HttpMetrics, HttpRequest,
-    HttpResponse, Method, RequestExecutor, RequestPreferences, RequestVariables, Response,
-    StatusCode, Version,
+    Body, Execution, ExecutionError, ExecutionFailure, Field, FormPart, HeaderMap, HttpMetrics,
+    HttpRequest, HttpResponse, Method, RequestExecutor, RequestPreferences, RequestVariables,
+    Response, StatusCode, Version,
 };
 
 fn scripted(source: &str) -> HttpRequest {
@@ -49,7 +49,7 @@ fn no_variables() -> RequestVariables {
 async fn pre_request(
     request: HttpRequest,
     variables: RequestVariables,
-) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
+) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
     runtime::pre_request(request, variables, executor(), cancelled()).await
 }
 
@@ -370,10 +370,11 @@ fn collection_variables_resolve_once_after_scripts_and_remain_bounded() {
 
         let request =
             scripted("pm.request.url = 'https://example.com/{{' + 'x'.repeat(10000) + '}}';");
-        let error = pre_request(request, no_variables()).await.unwrap_err();
-        let ExecutionError::Script { message, report } = error else {
+        let failure = pre_request(request, no_variables()).await.unwrap_err();
+        let ExecutionError::Script { message } = failure.error else {
             panic!("expected script failure")
         };
+        let report = failure.scripts.last().unwrap();
         assert_eq!(message.chars().count(), 4096);
         assert_eq!(report.error.as_deref(), Some(message.as_str()));
     });
@@ -468,12 +469,12 @@ fn exceptions_invalid_request_data_and_unhandled_rejections_fail_before_sending(
             "Promise.reject('bad'); void 0;",
             "pm.test('async', async () => {}); throw new Error('stop');",
         ] {
-            let error = pre_request(scripted(source), no_variables())
+            let failure = pre_request(scripted(source), no_variables())
                 .await
                 .unwrap_err();
             assert!(
-                matches!(error, ExecutionError::Script { .. }),
-                "{source}: {error}"
+                matches!(failure.error, ExecutionError::Script { .. }),
+                "{source}: {failure}"
             );
         }
     });
@@ -486,12 +487,13 @@ fn uncaught_errors_are_bounded_without_splitting_unicode() {
             "throw new Error('x'.repeat(8 * 1024 * 1024));",
             "throw new Error('🦅'.repeat(10000));",
         ] {
-            let error = pre_request(scripted(source), no_variables())
+            let failure = pre_request(scripted(source), no_variables())
                 .await
                 .unwrap_err();
-            let ExecutionError::Script { message, report } = error else {
+            let ExecutionError::Script { message } = failure.error else {
                 panic!("expected a script error");
             };
+            let report = failure.scripts.last().unwrap();
 
             assert!(message.contains("Error:"));
             assert_eq!(message.chars().count(), 4096);
@@ -586,7 +588,10 @@ fn request_timeout_also_interrupts_scripts() {
             executor
                 .execute(scripted("while (true) {} "), no_variables())
                 .await,
-            Err(ExecutionError::Timeout { .. })
+            Err(ExecutionFailure {
+                error: ExecutionError::Timeout { .. },
+                ..
+            })
         ));
         assert!(started.elapsed() < Duration::from_secs(1));
     });

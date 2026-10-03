@@ -171,7 +171,8 @@ async fn send(preferences: &RequestPreferences, port: u16) -> Result<String, Exe
             },
             RequestVariables::new(HashMap::new(), None),
         )
-        .await?;
+        .await
+        .map_err(|failure| failure.error)?;
     let Response::Http(response) = execution.response;
 
     Ok(String::from_utf8(response.body).unwrap())

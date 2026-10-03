@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use futures::StreamExt as _;
 use gpui_kit::*;
 use preferences::Preferences;
-use request::{GrpcCall, GrpcClient, GrpcError, GrpcEvent, GrpcEvents, RequestVariables};
+use request::{GrpcCall, GrpcClient, GrpcEvent, GrpcEvents, GrpcFailure, RequestVariables};
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
@@ -241,7 +241,7 @@ impl GrpcDraft {
     /// events until it ends.
     async fn follow(
         this: WeakEntity<Self>,
-        result: Result<(GrpcCall, GrpcEvents), GrpcError>,
+        result: Result<(GrpcCall, GrpcEvents), GrpcFailure>,
         server: SharedString,
         sent: RequestSent,
         cx: &mut AsyncWindowContext,

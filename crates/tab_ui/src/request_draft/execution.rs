@@ -8,8 +8,8 @@ use gpui_kit::*;
 use preferences::Preferences;
 use request::{Auth, Body, Field, HttpRequest, Method};
 use request::{
-    Dispatch, EventStream, EventStreamUpdate, ExecutionError, RequestExecutor, RequestPreferences,
-    StopEventStream,
+    Dispatch, EventStream, EventStreamUpdate, ExecutionFailure, RequestExecutor,
+    RequestPreferences, StopEventStream,
 };
 
 use super::draft::RequestDraft;
@@ -58,7 +58,7 @@ struct Finished {
     /// The executor that sent the request, which the next request reuses
     /// while the preferences stay the same.
     executor: Option<(RequestPreferences, RequestExecutor)>,
-    response: Result<ResponseContent, ExecutionError>,
+    response: Result<ResponseContent, ExecutionFailure>,
     /// What history keeps of the outcome. A request that failed before it
     /// went out is left out.
     history: Option<Result<request_history::Response, String>>,
@@ -278,7 +278,7 @@ impl RequestDraft {
                 Err(error) => {
                     return Finished {
                         executor: None,
-                        response: Err(error),
+                        response: Err(error.into()),
                         history: None,
                     };
                 }
@@ -286,7 +286,9 @@ impl RequestDraft {
             let result = executor.execute_streaming(request, variables, events).await;
             let history = match &result {
                 Ok(execution) => Some(Ok(request_history::Response::new(execution))),
-                Err(error) if went_out.started() => Some(Err(error.message_without_url())),
+                Err(failure) if went_out.started() => {
+                    Some(Err(failure.error.message_without_url()))
+                }
                 Err(_) => None,
             };
 

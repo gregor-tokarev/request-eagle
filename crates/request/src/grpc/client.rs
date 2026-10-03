@@ -13,8 +13,8 @@ use prost_reflect::MethodDescriptor;
 use tonic::metadata::MetadataMap;
 
 use super::{
-    GrpcCall, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcRequest, MethodKind,
-    ServiceDefinition,
+    GrpcCall, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcFailure, GrpcRequest,
+    MethodKind, ServiceDefinition,
     call::{self, CallTarget},
     reflection,
     transport::{self, Target},
@@ -176,7 +176,7 @@ impl GrpcClient {
         request: &GrpcRequest,
         variables: RequestVariables,
         definition: &ServiceDefinition,
-    ) -> impl Future<Output = Result<(GrpcCall, GrpcEvents), GrpcError>> + Send + 'static + use<>
+    ) -> impl Future<Output = Result<(GrpcCall, GrpcEvents), GrpcFailure>> + Send + 'static + use<>
     {
         let client = self.clone();
         let definition = definition.clone();
@@ -199,13 +199,13 @@ impl GrpcClient {
         &self,
         request: &GrpcRequest,
         mut variables: RequestVariables,
-    ) -> impl Future<Output = Result<PreparedCall, GrpcError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<PreparedCall, GrpcFailure>> + Send + 'static + use<> {
         let client = self.clone();
         let mut request = request.clone();
 
         async move {
             if request.method.trim().is_empty() {
-                return Err(GrpcError::MissingMethod);
+                return Err(GrpcError::MissingMethod.into());
             }
 
             let mut scripts = None;
@@ -245,13 +245,13 @@ impl GrpcClient {
             .map_err(GrpcError::ScriptSetup)
     }
 
-    /// Resolve and send a prepared call. Its errors keep the Before invoke
+    /// Resolve and send a prepared call. Its failures keep the Before invoke
     /// script's results.
     pub fn start(
         &self,
         call: PreparedCall,
         definition: &ServiceDefinition,
-    ) -> Result<(GrpcCall, GrpcEvents), GrpcError> {
+    ) -> Result<(GrpcCall, GrpcEvents), GrpcFailure> {
         let PreparedCall {
             request,
             variables,
@@ -260,7 +260,10 @@ impl GrpcClient {
         } = call;
 
         self.open(&request, variables, definition, report.clone(), scripts)
-            .map_err(|error| with_report(error, report))
+            .map_err(|error| GrpcFailure {
+                error,
+                scripts: report.into_iter().collect(),
+            })
     }
 
     /// `report` is the Before invoke script's, and `scripts` follow the
@@ -398,18 +401,11 @@ impl PreparedCall {
     }
 
     /// A failure to start the call, with the Before invoke script's results.
-    pub fn fail(self, error: GrpcError) -> GrpcError {
-        with_report(error, self.report)
-    }
-}
-
-fn with_report(error: GrpcError, report: Option<ScriptReport>) -> GrpcError {
-    match report {
-        Some(report) => GrpcError::ScriptedCall {
-            source: Box::new(error),
-            report: Box::new(report),
-        },
-        None => error,
+    pub fn fail(self, error: GrpcError) -> GrpcFailure {
+        GrpcFailure {
+            error,
+            scripts: self.report.into_iter().collect(),
+        }
     }
 }
 
