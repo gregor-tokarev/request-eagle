@@ -42,13 +42,13 @@ debug = "line-tables-only"
 
 [workspace.dependencies]
 anyhow = "1"
-gpui-kit = { version = "=0.6.2", default-features = false }
+gpui-kit = { version = "=0.7.0", default-features = false }
 # Match GPUI Kit's HTTP client version to keep the GPUI HTTP traits compatible.
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.5" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.7" }
 thiserror = "2"
 
 [patch.crates-io]
-# GPUI Kit 0.6.2 with editor fixes; see patches/gpui-kit/README.md.
-gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
-gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
-gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "c38733a06868b10813788ca3ebbace790eeb65b1" }
+# GPUI Kit 0.7.0 with editor fixes; see docs/gpui-kit-fork.md.
+gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "e44d39248944fa18ae9636cc8987a8ccfada8c9b" }
+gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "e44d39248944fa18ae9636cc8987a8ccfada8c9b" }
+gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "e44d39248944fa18ae9636cc8987a8ccfada8c9b" }

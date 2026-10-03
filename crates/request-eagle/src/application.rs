@@ -1,4 +1,4 @@
-use gpui_kit::{component::Root, *};
+use gpui_kit::*;
 use std::sync::Arc;
 
 use crate::{actions, assets, menu};
@@ -117,7 +117,7 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     let history = request_history::History::new(home.join(".request-eagle/history"));
 
     let window_options = crate::window_options::use_window_options(&session, cx);
-    cx.open_window(window_options, move |window, cx| {
+    gpui_kit::open_window(window_options, cx, move |window, cx| {
         window
             .observe_window_appearance(|window, cx| {
                 request_eagle_theme::apply_preferences(window.appearance(), cx);
@@ -135,9 +135,7 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
             window,
             cx,
         );
-        let view = cx.new(|_| ApplicationView { workspace });
-
-        cx.new(|cx| Root::new(view, window, cx))
+        cx.new(|_| ApplicationView { workspace })
     })
     .expect("Failed to open the window");
 
