@@ -201,64 +201,66 @@ fn names(library: &FlowLibrary) -> Vec<String> {
 }
 
 #[test]
-fn flows_saved_in_collections_move_to_the_flows_directory_once() {
+fn flows_the_collections_cannot_load_move_to_the_flows_directory() {
     let fixture = Fixture::new();
-    let collections = fixture.0.join("collections");
     let flows = fixture.0.join("flows");
-    let collection = collections.join("API");
+    let collection = fixture.0.join("collections").join("API");
     let folder = collection.join("Orders");
     fs::create_dir_all(&folder).unwrap();
     let request = "id = \"r1\"\nname = \"List\"\nschema_version = 1\n\n[request]\ntype = \"http\"\nmethod = \"GET\"\npath = \"/\"\n";
-    fs::write(collection.join("List.toml"), request).unwrap();
-    fs::write(collection.join("Checkout.toml"), legacy_flow("Checkout")).unwrap();
-    fs::write(folder.join("Checkout.toml"), legacy_flow("Nested")).unwrap();
-    fs::write(folder.join("Broken.toml"), "flow = ").unwrap();
-    // A request stays a request, even with a `flow` table.
-    let annotated = format!("{request}\n[flow]\nblocks = []\n");
-    fs::write(folder.join("Annotated.toml"), annotated).unwrap();
-    // A variable named like the table does not make an environment a flow.
-    fs::write(collection.join("environment.toml"), "flow = \"checkout\"\n").unwrap();
+    let files = [
+        (collection.join("Checkout.toml"), legacy_flow("Checkout")),
+        (folder.join("Checkout.toml"), legacy_flow("Nested")),
+        (folder.join("Broken.toml"), "flow = ".to_owned()),
+        // A request stays a request, even with a `flow` table.
+        (
+            folder.join("Annotated.toml"),
+            format!("{request}\n[flow]\nblocks = []\n"),
+        ),
+        // A variable named like the table does not make an environment a flow.
+        (
+            collection.join("environment.toml"),
+            "flow = \"checkout\"\n".to_owned(),
+        ),
+    ];
+    for (path, content) in &files {
+        fs::write(path, content).unwrap();
+    }
 
-    let mut moved = crate::move_flows_out_of_collections(&collections, &flows).unwrap();
+    let mut moved =
+        crate::move_flows_out_of_collections(files.iter().map(|(path, _)| path.as_path()), &flows);
+
     moved.sort();
     assert_eq!(
         moved,
         [flows.join("Checkout 2.toml"), flows.join("Checkout.toml")]
     );
-    assert!(collection.join("List.toml").exists());
-    assert!(collection.join("environment.toml").exists());
-    assert!(folder.join("Broken.toml").exists());
-    assert!(folder.join("Annotated.toml").exists());
+    assert!(!collection.join("Checkout.toml").exists());
     assert!(!folder.join("Checkout.toml").exists());
+    for (path, _) in &files[2..] {
+        assert!(path.exists(), "{}", path.display());
+    }
     assert_eq!(names(&FlowLibrary::load(&flows)), ["Checkout", "Nested"]);
-
-    // Once the flows directory exists, collections are not read again.
-    fs::write(collection.join("Later.toml"), legacy_flow("Later")).unwrap();
-    assert!(
-        crate::move_flows_out_of_collections(&collections, &flows)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(collection.join("Later.toml").exists());
 }
 
 #[cfg(unix)]
 #[test]
-fn flows_move_out_of_collections_linked_into_the_collections_directory() {
+fn moved_flows_keep_their_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
     let fixture = Fixture::new();
-    let collections = fixture.0.join("collections");
     let flows = fixture.0.join("flows");
-    let linked = fixture.0.join("elsewhere").join("Linked");
-    fs::create_dir_all(&linked).unwrap();
-    fs::create_dir_all(&collections).unwrap();
-    fs::write(linked.join("Sync.toml"), legacy_flow("Sync")).unwrap();
-    std::os::unix::fs::symlink(&linked, collections.join("Linked")).unwrap();
+    let collection = fixture.0.join("collections").join("API");
+    fs::create_dir_all(&collection).unwrap();
+    let private = collection.join("Private.toml");
+    fs::write(&private, legacy_flow("Private")).unwrap();
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o600)).unwrap();
 
-    let moved = crate::move_flows_out_of_collections(&collections, &flows).unwrap();
+    let moved = crate::move_flows_out_of_collections([private.as_path()], &flows);
 
-    assert_eq!(moved, [flows.join("Sync.toml")]);
-    assert!(!linked.join("Sync.toml").exists());
-    assert_eq!(names(&FlowLibrary::load(&flows)), ["Sync"]);
+    assert_eq!(moved, [flows.join("Private.toml")]);
+    let mode = fs::metadata(&moved[0]).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
 }
 
 #[test]
@@ -276,9 +278,8 @@ fn a_flow_moved_by_another_start_meanwhile_keeps_its_one_copy() {
         .join("API")
         .join("Checkout.toml");
 
-    let result = crate::library::move_flow(&gone, &source, &flows, "Checkout");
+    assert!(crate::library::move_flow(&gone, &flows, "Checkout").is_err());
 
-    assert!(result.is_err());
     let files: Vec<_> = fs::read_dir(&flows)
         .unwrap()
         .map(|entry| entry.unwrap().file_name())

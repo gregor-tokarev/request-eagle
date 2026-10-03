@@ -66,9 +66,17 @@ fn main() {
             command,
         }) => {
             let preferences = preferences::PreferencesFile::new(&data);
-            // Like the app, find flows that 0.1.22 saved in collections. A
-            // flow that cannot be moved is reported by the collections.
-            let _ = flow::move_flows_out_of_collections(&collections, &data.join("flows"));
+            // Like the app, move flows that 0.1.22 saved in collections,
+            // which the collections cannot load. A flow that cannot be moved
+            // is reported by the collections.
+            let registry = collection::CollectionRegistry::from_path(&collections);
+            flow::move_flows_out_of_collections(
+                registry
+                    .skipped()
+                    .iter()
+                    .map(|skipped| skipped.path.as_path()),
+                &data.join("flows"),
+            );
             match smol::block_on(async {
                 match *command {
                     Command::RequestsRun {

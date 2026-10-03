@@ -255,109 +255,96 @@ impl FlowLibrary {
     }
 }
 
-/// Moves flows that Request Eagle 0.1.22 saved inside collections into the
-/// flows directory, where they are found now. It runs while the flows
-/// directory does not exist yet, so later launches do not read every
-/// request again. A file that cannot be read or moved stays where it is,
-/// for the collections to report. Returns where the flows were moved.
-pub fn move_flows_out_of_collections(
-    collections: &Path,
+/// Moves the flows among `skipped`, the files the collections could not
+/// load, into the flows directory: Request Eagle 0.1.22 saved flows inside
+/// collections. Other files stay for the collections to report, and so does
+/// a flow that cannot be moved now, to move on the next start. Returns where
+/// the flows were moved.
+pub fn move_flows_out_of_collections<'a>(
+    skipped: impl IntoIterator<Item = &'a Path>,
     directory: &Path,
-) -> io::Result<Vec<PathBuf>> {
-    if directory.exists() {
-        return Ok(Vec::new());
-    }
-    fs::create_dir_all(directory)?;
-
-    // Like the collections, every folder of the collections directory is a
-    // collection, also through a link; links inside collections are not.
-    let mut folders: Vec<PathBuf> = fs::read_dir(collections)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()))
-        .collect();
+) -> Vec<PathBuf> {
     let mut moved = Vec::new();
 
-    while let Some(folder) = folders.pop() {
-        let Ok(entries) = fs::read_dir(&folder) else {
+    for path in skipped {
+        if path.extension().and_then(|extension| extension.to_str()) != Some(EXTENSION) {
+            continue;
+        }
+
+        // Only whole flows move, never a request, which 0.1.22 also read
+        // as one when it had a `flow` table, or a collection's environment
+        // that happens to name a variable `flow`.
+        let Ok(source) = fs::read_to_string(path) else {
             continue;
         };
+        let is_flow = source
+            .parse::<toml::Table>()
+            .is_ok_and(|table| !table.contains_key("request"))
+            && toml::from_str::<SavedFlow>(&source).is_ok();
+        if !is_flow || fs::create_dir_all(directory).is_err() {
+            continue;
+        }
 
-        for path in entries.flatten().map(|entry| entry.path()) {
-            let Ok(metadata) = fs::symlink_metadata(&path) else {
-                continue;
-            };
-            if metadata.is_dir() {
-                folders.push(path);
-                continue;
-            }
-            if !metadata.is_file()
-                || path.extension().and_then(|extension| extension.to_str()) != Some(EXTENSION)
-            {
-                continue;
-            }
-
-            // Only whole flows move, never a request, which 0.1.22 also read
-            // as one when it had a `flow` table, or a collection's
-            // environment that happens to name a variable `flow`.
-            let Ok(source) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let is_flow = source
-                .parse::<toml::Table>()
-                .is_ok_and(|table| !table.contains_key("request"))
-                && toml::from_str::<SavedFlow>(&source).is_ok();
-            if !is_flow {
-                continue;
-            }
-
-            let stem = path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if let Ok(destination) = move_flow(&path, &source, directory, &stem) {
-                moved.push(destination);
-            }
+        let stem = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if let Ok(destination) = move_flow(path, directory, &stem) {
+            moved.push(destination);
         }
     }
 
-    Ok(moved)
+    moved
 }
 
-/// Writes a flow's `source` under a free name in `directory`, then removes
-/// the file at `from`. It works across filesystems, never replaces a file,
-/// and on failure removes only the file it wrote, so two starts moving the
-/// same flow at once leave exactly one copy of it.
-pub(crate) fn move_flow(
-    from: &Path,
-    source: &str,
-    directory: &Path,
-    stem: &str,
-) -> io::Result<PathBuf> {
+/// Moves a flow's file to a free name in `directory`. The new name is a
+/// link to the file, which appears whole, never replaces another file and
+/// keeps its permissions; across filesystems, a complete copy is linked
+/// instead. The original goes only while it still holds what was moved, so
+/// a flow saved meanwhile, or moved by another start at the same time, keeps
+/// exactly one copy.
+pub(crate) fn move_flow(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
+    let to = match link_to_free_name(from, directory, stem) {
+        Ok(to) => to,
+        Err(_) => {
+            let temporary = directory.join(format!(".request-eagle-{}.tmp", Uuid::new_v4()));
+            let linked = fs::copy(from, &temporary)
+                .and_then(|_| link_to_free_name(&temporary, directory, stem));
+            let _ = fs::remove_file(&temporary);
+            linked?
+        }
+    };
+
+    let unchanged = fs::read(from)
+        .and_then(|original| Ok(original == fs::read(&to)?))
+        .unwrap_or(false);
+    let removed = if unchanged {
+        fs::remove_file(from)
+    } else {
+        Err(io::Error::other("The flow changed while it was moved."))
+    };
+    if let Err(error) = removed {
+        let _ = fs::remove_file(&to);
+        return Err(error);
+    }
+
+    Ok(to)
+}
+
+/// Links `from` as `stem.toml` in `directory`, or `stem 2.toml` and so on
+/// when the name is taken.
+fn link_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
     for number in 1.. {
         let to = match number {
             1 => directory.join(format!("{stem}.{EXTENSION}")),
             number => directory.join(format!("{stem} {number}.{EXTENSION}")),
         };
-        let mut file = match fs::File::create_new(&to) {
-            Ok(file) => file,
+
+        match fs::hard_link(from, &to) {
+            Ok(()) => return Ok(to),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
-        };
-
-        let result = file
-            .write_all(source.as_bytes())
-            .and_then(|()| file.sync_all())
-            .and_then(|()| fs::remove_file(from));
-        if let Err(error) = result {
-            drop(file);
-            let _ = fs::remove_file(&to);
-            return Err(error);
         }
-
-        return Ok(to);
     }
 
     unreachable!()

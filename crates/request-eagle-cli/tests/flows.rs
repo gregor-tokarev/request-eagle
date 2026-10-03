@@ -226,8 +226,7 @@ fn unreadable_flows_are_reported_and_stop_flow_commands() {
 
 #[test]
 fn flows_saved_in_collections_move_to_the_flows_folder() {
-    // Before any other command, which would create the flows folder.
-    let cli = Cli(tempdir().unwrap());
+    let cli = Cli::new();
     let collection = cli.0.path().join("collections").join("API");
     std::fs::create_dir_all(&collection).unwrap();
     std::fs::write(

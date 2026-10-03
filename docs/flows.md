@@ -148,8 +148,7 @@ See the [CLI guide](cli.md) for the rest.
 
 A flow is a TOML file in `~/.request-eagle/flows`, named after the flow when
 it was created. Renaming a flow keeps its file. Flows that version 0.1.22
-saved in collections move to this folder the first time a newer version
-starts.
+saved in collections move to this folder when a newer version starts.
 
 ```toml
 id = "6c1d…"
