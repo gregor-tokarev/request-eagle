@@ -324,10 +324,14 @@ impl CollectionPanel {
                 window.focus(&this.focus, cx);
                 this.select_row(row, cx);
 
-                // Branches expand or collapse; collections and requests open a tab.
+                // Branches expand or collapse; requests and the collections a
+                // click leaves expanded open a tab.
                 if this.tree.items[index].is_branch() {
                     this.toggle(index, cx);
                     this.clicked_branch = Some(this.tree.items[index].path.clone());
+                }
+                if this.query.is_empty() && this.collapsed.contains(&index) {
+                    return;
                 }
                 this.open(index, cx);
             }))

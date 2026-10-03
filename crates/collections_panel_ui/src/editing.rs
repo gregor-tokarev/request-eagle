@@ -332,13 +332,7 @@ impl CollectionPanel {
             .collect();
 
         self.tree = Arc::new(CollectionTree::new(&self.collections));
-        self.collapsed = self
-            .tree
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| collapsed.contains(&item.path).then_some(index))
-            .collect();
+        self.collapsed = self.tree.branches_at(&collapsed);
         self.selected = selected.and_then(|path| self.tree.index_of(path));
         let browsing = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
         self.unfiltered_rows = Some(browsing.clone());

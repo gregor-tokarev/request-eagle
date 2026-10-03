@@ -143,6 +143,9 @@ pub(crate) struct SavedSidebar {
     pub(crate) environments: bool,
     pub(crate) flows: bool,
     pub(crate) history: bool,
+    /// The collections and folders collapsed in the collections tree.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) collapsed: Vec<PathBuf>,
 }
 
 impl Default for SavedSidebar {
@@ -153,6 +156,7 @@ impl Default for SavedSidebar {
             environments: true,
             flows: true,
             history: true,
+            collapsed: Vec::new(),
         }
     }
 }

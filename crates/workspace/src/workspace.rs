@@ -98,7 +98,8 @@ impl Workspace {
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
 
-        let sidebar = cx.new(|cx| CollectionPanel::new(collections, window, cx));
+        let sidebar =
+            cx.new(|cx| CollectionPanel::new(collections, sidebar_state.collapsed, window, cx));
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
                 CollectionPanelEvent::OpenCollection {
@@ -330,6 +331,15 @@ impl Workspace {
                 environments: self.environments_open,
                 flows: self.flows_open,
                 history: self.history_open,
+                // JSON holds only UTF-8 paths. Folders with other names
+                // expand again, rather than failing the whole save.
+                collapsed: self
+                    .sidebar
+                    .read(cx)
+                    .collapsed_paths()
+                    .into_iter()
+                    .filter(|path| path.to_str().is_some())
+                    .collect(),
             },
             tabs: self.main_view.read(cx).saved_tabs(cx),
             selected_tab: self.main_view.read(cx).selected,
