@@ -5,6 +5,7 @@ use std::{
     time::SystemTime,
 };
 
+use collection::{Collections, FileEntry, SavedLocation};
 use environment::EnvironmentSessions;
 use flow::{Block, BlockKind, BlockType, Connection, Flow};
 use gpui_kit::component::{
@@ -12,7 +13,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Auth, HttpRequest};
+use request::{Auth, HttpRequest, Request};
 
 use super::{
     blocks, editing,
@@ -38,13 +39,49 @@ pub struct FlowRequest {
     pub collection_auth: Auth,
 }
 
-/// Where a flow finds the saved requests its blocks send. The workspace
-/// reads them from the collections sidebar.
-pub trait FlowRequests {
+impl FlowRequest {
     /// Every saved HTTP request, in the sidebar's order.
-    fn all(&self, cx: &App) -> Vec<FlowRequest>;
+    pub(super) fn all(collections: &Collections) -> Vec<Self> {
+        collections
+            .registry()
+            .collections()
+            .iter()
+            .flat_map(|collection| {
+                collections
+                    .requests_in(&collection.path)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(location, file)| Self::new(location, file, collection.auth()))
+            })
+            .collect()
+    }
 
-    fn find(&self, id: &str, cx: &App) -> Option<FlowRequest>;
+    pub(super) fn find(collections: &Collections, id: &str) -> Option<Self> {
+        let (collection, file) = collections.registry().request_by_id(id)?;
+
+        Self::new(collections.location(file)?, file, collection.auth())
+    }
+
+    fn new(location: SavedLocation, file: &FileEntry, collection_auth: &Auth) -> Option<Self> {
+        let Request::Http(request) = &file.request else {
+            return None;
+        };
+
+        let mut breadcrumb = location.collection_name();
+        for folder in location.folders() {
+            breadcrumb.push_str(" › ");
+            breadcrumb.push_str(&folder);
+        }
+
+        Some(Self {
+            id: location.id,
+            name: location.name.into(),
+            location: breadcrumb.into(),
+            collection: location.collection,
+            request: request.clone(),
+            collection_auth: collection_auth.clone(),
+        })
+    }
 }
 
 /// An input or output of a block.
@@ -170,7 +207,7 @@ pub struct FlowEditor {
     pub(super) picker: Option<Picker>,
     pub(super) inspector: Option<Inspector>,
     pub(super) run: RunState,
-    pub(super) requests: Rc<dyn FlowRequests>,
+    pub(super) collections: Entity<Collections>,
     pub(super) sessions: EnvironmentSessions,
     pub(super) environments: Option<Entity<Environments>>,
     pub(super) focus: FocusHandle,
@@ -201,7 +238,7 @@ impl FlowEditor {
         path: PathBuf,
         id: SharedString,
         flow: Flow,
-        requests: Rc<dyn FlowRequests>,
+        collections: Entity<Collections>,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
@@ -228,7 +265,7 @@ impl FlowEditor {
             picker: None,
             inspector: None,
             run: RunState::default(),
-            requests,
+            collections,
             sessions,
             environments,
             focus: cx.focus_handle(),
@@ -312,9 +349,7 @@ impl FlowEditor {
             if let BlockKind::HttpRequest { request: id } = &block.kind
                 && !self.request_info.contains_key(id)
             {
-                let info = self
-                    .requests
-                    .find(id, cx)
+                let info = FlowRequest::find(self.collections.read(cx), id)
                     .map(|saved| self.describe_request(saved));
                 self.request_info.insert(id.clone(), info);
             }
@@ -476,7 +511,9 @@ impl FlowEditor {
         if let BlockKind::HttpRequest { request } = &block.kind {
             let name = match self.request_info.get(request) {
                 Some(info) => info.as_ref().map(|info| info.name.clone()),
-                None => self.requests.find(request, cx).map(|saved| saved.name),
+                None => {
+                    FlowRequest::find(self.collections.read(cx), request).map(|saved| saved.name)
+                }
             };
             if let Some(name) = name {
                 return name;
@@ -763,7 +800,7 @@ impl FlowEditor {
             .map(|name| name.into_owned())
             .collect();
         if let BlockKind::HttpRequest { request } = kind
-            && let Some(saved) = self.requests.find(request, cx)
+            && let Some(saved) = FlowRequest::find(self.collections.read(cx), request)
         {
             for variable in flow::request_variables(&saved.request, &saved.collection_auth) {
                 if !inputs.contains(&variable) {

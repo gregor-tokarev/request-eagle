@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gpui_kit::{App, Context, SharedString, Task};
+use gpui_kit::{App, SharedString, Task};
 
 use super::{
-    CollectionPanel, CollectionPanelEvent,
+    CollectionPanel,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -52,25 +52,6 @@ impl CollectionPanel {
 
         cx.background_executor()
             .spawn(async move { request_matches(&tree, &query, limit) })
-    }
-
-    /// Open a collection or request in a tab, as if its row were activated.
-    pub fn open_at(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(index) = self.tree.index_of(path) {
-            self.open(index, cx);
-        }
-    }
-
-    /// The event that would open the collection or request at `path`, for a
-    /// caller that opens the page itself. None when nothing is saved there.
-    pub fn open_event_at(&self, path: &Path) -> Option<CollectionPanelEvent> {
-        self.open_event(self.tree.index_of(path)?)
-    }
-
-    /// The event that runs the requests of the collection or folder at
-    /// `path`, for a caller that opens the runner itself.
-    pub fn run_event_at(&self, path: &Path) -> Option<CollectionPanelEvent> {
-        self.run_event(self.tree.index_of(path)?)
     }
 }
 

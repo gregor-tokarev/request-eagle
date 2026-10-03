@@ -1,4 +1,4 @@
-use collections_panel_ui::{CollectionPanel, SaveDestination};
+use collection::{Collections, SaveDestination};
 use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
@@ -10,7 +10,7 @@ use crate::main_view::MainView;
 
 pub(crate) fn open(
     main: Entity<MainView>,
-    sidebar: Entity<CollectionPanel>,
+    collections: Entity<Collections>,
     tab_id: u64,
     name: Option<SharedString>,
     request: request::Request,
@@ -47,11 +47,11 @@ pub(crate) fn open(
                 })
             })
             .collect();
-        let destinations = sidebar.read(cx).save_destinations();
+        let destinations = collections.read(cx).save_destinations();
         let selected = None;
         SaveRequestDialog {
             main,
-            sidebar,
+            collections,
             tab_id,
             request,
             name,
@@ -75,7 +75,7 @@ pub(crate) fn open(
 
 struct SaveRequestDialog {
     main: Entity<MainView>,
-    sidebar: Entity<CollectionPanel>,
+    collections: Entity<Collections>,
     tab_id: u64,
     request: request::Request,
     name: Entity<InputState>,
@@ -105,28 +105,24 @@ impl SaveRequestDialog {
             return;
         };
         let name = self.name.read(cx).value().to_string();
-        let mut request = self.request.clone();
-
         // Files picked before the collection was known are stored relative to it.
-        if let Some(collection) = destination.path.ancestors().nth(destination.folders.len()) {
-            match &mut request {
-                request::Request::Grpc(grpc) => {
-                    grpc.definition = grpc.definition.relative_to(collection);
-                }
-                request::Request::Http(http) => {
-                    http.body = http.body.as_ref().map(|body| body.relative_to(collection));
-                }
-                request::Request::WebSocket(_) => {}
-            }
-        }
+        let request = self.request.relative_to(&destination.collection);
 
-        let result = self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.save_new_request(&destination.path, &name, request, window, cx)
+        let result = self.collections.update(cx, |collections, cx| {
+            collections.create_request_with(&destination.path, &name, request, cx)
         });
-        match result {
-            Ok(file) => {
+        let saved = result.map(|path| {
+            let (location, file) = self
+                .collections
+                .read(cx)
+                .request(&path)
+                .expect("saved request exists");
+            (location, file.request.clone())
+        });
+        match saved {
+            Ok((location, request)) => {
                 self.main.update(cx, |main, cx| {
-                    main.attach_saved_request(self.tab_id, &file, &destination, window, cx)
+                    main.attach_saved_request(self.tab_id, location, &request, window, cx)
                 });
                 window.close_dialog(cx);
             }
@@ -150,9 +146,9 @@ impl Render for SaveRequestDialog {
             .filter(|(_, destination)| {
                 let inside = match current {
                     Some(parent) => destination.path.parent() == Some(parent.path.as_path()),
-                    None => destination.folders.is_empty(),
+                    None => destination.is_collection(),
                 };
-                inside && destination.name.to_lowercase().contains(&query)
+                inside && destination.name().to_lowercase().contains(&query)
             })
             .collect();
         let mut breadcrumbs = h_flex().gap_1().child(
@@ -171,7 +167,7 @@ impl Render for SaveRequestDialog {
                 .enumerate()
                 .filter(|(_, destination)| current.path.starts_with(&destination.path))
             {
-                let label = ancestor.name.clone();
+                let label = ancestor.name();
                 breadcrumbs = breadcrumbs
                     .child(
                         Icon::new(IconName::ChevronRight)
@@ -265,7 +261,7 @@ impl Render for SaveRequestDialog {
                                         )
                                     })
                                     .children(visible.into_iter().map(|(index, destination)| {
-                                        let label = destination.name.clone();
+                                        let label = SharedString::from(destination.name());
                                         Button::new(("save-destination", index))
                                             .debug_selector(move || {
                                                 format!("save-destination-{index}")
@@ -315,12 +311,12 @@ impl Render for SaveRequestDialog {
                             .accessibility_label("New collection")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 match this
-                                    .sidebar
-                                    .update(cx, |sidebar, cx| sidebar.create_save_collection(cx))
+                                    .collections
+                                    .update(cx, |collections, cx| collections.create_collection(cx))
                                 {
                                     Ok(path) => {
                                         this.destinations =
-                                            this.sidebar.read(cx).save_destinations();
+                                            this.collections.read(cx).save_destinations();
                                         this.selected = this
                                             .destinations
                                             .iter()

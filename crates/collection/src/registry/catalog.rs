@@ -8,7 +8,7 @@ use environment::Environment;
 
 use crate::{Collection, Entry, FileEntry};
 
-pub(super) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
+pub(crate) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
 #[derive(Default)]
 pub struct CollectionRegistry {
@@ -121,7 +121,7 @@ impl CollectionRegistry {
         }
     }
 
-    fn entry(&self, path: &Path) -> Option<&Entry> {
+    pub(crate) fn entry(&self, path: &Path) -> Option<&Entry> {
         self.collections.iter().find_map(|collection| {
             path.starts_with(&collection.path)
                 .then(|| find(&collection.entries, path))

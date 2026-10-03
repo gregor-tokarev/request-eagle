@@ -11,6 +11,7 @@ use thiserror::Error;
 use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
+use crate::location::directory_name;
 use crate::toml_merge::merge_table;
 use crate::{CollectionEditError, DirEntry, Entry, FileEntry, SkippedPath};
 use request::{Auth, RequestScripts};
@@ -272,7 +273,7 @@ fn load_directory(
 
     Ok(DirEntry {
         path: path.to_path_buf(),
-        name: file_name(path),
+        name: directory_name(path),
         entries,
     })
 }
@@ -461,13 +462,6 @@ fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
     }
 
     result
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or(path.as_os_str())
-        .to_string_lossy()
-        .into_owned()
 }
 
 impl CollectionLoadError {

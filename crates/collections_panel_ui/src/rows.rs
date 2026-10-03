@@ -11,7 +11,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{
     actions::{DeleteItem, RenameItem},
     dragging::DraggedItem,
-    panel::CollectionPanel,
+    panel::{CollectionPanel, CollectionPanelEvent},
     tree::ItemKind,
 };
 use collection::MovePlacement;
@@ -471,14 +471,8 @@ impl CollectionPanel {
                             let view = run_view.clone();
                             let path = run_path.clone();
                             window.defer(cx, move |_, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    if let Some(event) = this
-                                        .tree
-                                        .index_of(&path)
-                                        .and_then(|index| this.run_event(index))
-                                    {
-                                        cx.emit(event);
-                                    }
+                                let _ = view.update(cx, |_, cx| {
+                                    cx.emit(CollectionPanelEvent::Run(path));
                                 });
                             });
                         }),

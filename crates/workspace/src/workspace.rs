@@ -11,7 +11,7 @@ use crate::{
     session::{SavedSidebar, SavedWindow, Session},
     top_panel::TopPanel,
 };
-use collection::CollectionRegistry;
+use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
 use flow::{FlowLibrary, SavedFlow};
@@ -25,7 +25,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_history::History;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
-use tab_ui::{Environments, RequestLocation};
+use tab_ui::Environments;
 use updater::Updater;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -98,106 +98,21 @@ impl Workspace {
         // The bottom panel is cached, so it observes the visibility itself.
         let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
 
-        let sidebar =
-            cx.new(|cx| CollectionPanel::new(collections, sidebar_state.collapsed, window, cx));
+        let collections = cx.new(|_| Collections::new(collections));
+        let sidebar = cx.new(|cx| {
+            CollectionPanel::new(collections.clone(), sidebar_state.collapsed, window, cx)
+        });
         let sidebar_subscription =
             cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
-                CollectionPanelEvent::OpenCollection {
-                    path,
-                    name,
-                    variables,
-                    shared,
-                } => {
+                CollectionPanelEvent::Open(path) => {
                     this.main_view.update(cx, |view, cx| {
-                        view.open_collection(
-                            path,
-                            name.clone(),
-                            variables.clone(),
-                            shared.clone(),
-                            window,
-                            cx,
-                        );
+                        view.open_saved(path, window, cx);
                         view.prepare_active_tab(window, cx);
                     });
                 }
-                CollectionPanelEvent::CollectionDeleted { path } => {
-                    this.main_view
-                        .update(cx, |view, cx| view.close_collection(path, cx));
-                }
-                CollectionPanelEvent::CollectionRenamed {
-                    previous_path,
-                    path,
-                    name,
-                } => {
+                CollectionPanelEvent::Run(path) => {
                     this.main_view.update(cx, |view, cx| {
-                        view.relocate_collection(previous_path, path, name.clone(), window, cx);
-                    });
-                }
-                CollectionPanelEvent::FolderRelocated {
-                    previous_path,
-                    path,
-                    name,
-                    collection,
-                } => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.relocate_runners(previous_path, path, name.clone(), collection, cx);
-                    });
-                }
-                CollectionPanelEvent::RequestRelocated {
-                    id,
-                    previous_path,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                } => {
-                    let location = RequestLocation {
-                        path: path.clone(),
-                        id: id.clone(),
-                        name: name.clone(),
-                        collection: collection.clone(),
-                        folders: folders.clone(),
-                    };
-
-                    this.main_view.update(cx, |view, cx| {
-                        view.relocate_request(previous_path, location, cx);
-                    });
-                }
-                CollectionPanelEvent::OpenRequest {
-                    id,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                    request,
-                } => {
-                    let location = RequestLocation {
-                        path: path.clone(),
-                        id: id.clone(),
-                        name: name.clone(),
-                        collection: collection.clone(),
-                        folders: folders.clone(),
-                    };
-
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_request(location, request, cx);
-                        view.prepare_active_tab(window, cx);
-                    });
-                }
-                CollectionPanelEvent::RunRequests {
-                    path,
-                    name,
-                    collection,
-                    requests,
-                } => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_runner(
-                            path.clone(),
-                            name.clone(),
-                            collection.clone(),
-                            requests.clone(),
-                            cx,
-                        );
+                        view.open_runner(path, cx);
                         view.prepare_active_tab(window, cx);
                     });
                 }
@@ -269,7 +184,7 @@ impl Workspace {
         let main_view = cx.new(|cx| {
             MainView::new(
                 environments,
-                sidebar.clone(),
+                collections,
                 flow_panel.clone(),
                 history.clone(),
                 tabs,

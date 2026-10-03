@@ -11,7 +11,7 @@ use preferences::Preferences;
 use request::RequestExecutor;
 use serde_json::Value;
 
-use super::{FlowEditor, preview};
+use super::{FlowEditor, editor::FlowRequest, preview};
 use crate::{cookies::Cookies, variables::VariableScope};
 
 /// The most entries the run log keeps. A long loop logs much more; the
@@ -249,7 +249,7 @@ impl FlowEditor {
             if requests.contains_key(id) {
                 continue;
             }
-            let Some(saved) = self.requests.find(id, cx) else {
+            let Some(saved) = FlowRequest::find(self.collections.read(cx), id) else {
                 continue;
             };
 

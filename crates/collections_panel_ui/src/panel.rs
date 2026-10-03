@@ -1,10 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
+    collections::HashSet,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use collection::{CollectionRegistry, FileEntry, MovePlacement, SharedSettings};
+use collection::{Collections, CollectionsEvent, MovePlacement};
 
 use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
@@ -12,7 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{HttpRequest, Request};
+use request::HttpRequest;
 
 use super::{
     actions::{DeleteItem, RenameItem},
@@ -20,75 +20,26 @@ use super::{
     tree::{CollectionTree, ItemKind},
 };
 
+/// What the user asked of the sidebar. Changes to collections themselves are
+/// `CollectionsEvent`s.
 // Events are passed on one at a time, so boxing the request would not help.
 #[allow(clippy::large_enum_variant)]
 pub enum CollectionPanelEvent {
-    OpenCollection {
-        path: PathBuf,
-        name: SharedString,
-        variables: HashMap<String, String>,
-        /// The scripts and authorization it shares with its requests.
-        shared: SharedSettings,
-    },
-    CollectionRenamed {
-        previous_path: PathBuf,
-        path: PathBuf,
-        name: SharedString,
-    },
-    CollectionDeleted {
-        path: PathBuf,
-    },
-    /// A folder was renamed or moved. Its requests' relocations follow.
-    FolderRelocated {
-        previous_path: PathBuf,
-        path: PathBuf,
-        name: SharedString,
-        /// The directory of the collection it is in now.
-        collection: PathBuf,
-    },
-    RequestRelocated {
-        id: SharedString,
-        previous_path: PathBuf,
-        path: PathBuf,
-        name: SharedString,
-        collection: SharedString,
-        folders: Vec<SharedString>,
-    },
-    OpenRequest {
-        id: SharedString,
-        path: PathBuf,
-        name: SharedString,
-        collection: SharedString,
-        folders: Vec<SharedString>,
-        request: Request,
-    },
+    /// Open the collection or request at the path in a tab.
+    Open(PathBuf),
+    /// Open the Collection Runner for the collection's or folder's requests.
+    Run(PathBuf),
     /// A request imported without saving it, such as a pasted cURL command.
     OpenUnsavedRequest(HttpRequest),
     /// Imported environments were added to the environments directory.
     EnvironmentsImported,
-    /// Open the Collection Runner for a collection's or folder's requests.
-    RunRequests {
-        /// The collection or folder.
-        path: PathBuf,
-        name: SharedString,
-        /// The directory of the collection that stores the requests.
-        collection: PathBuf,
-        /// In tree order.
-        requests: Vec<RunnableRequest>,
-    },
-}
-
-/// A saved request of a collection or folder that is run.
-#[derive(Clone)]
-pub struct RunnableRequest {
-    pub file: FileEntry,
-    /// The folders between the collection and the request.
-    pub folders: Vec<SharedString>,
 }
 
 /// The collections tree and its search, editing, and drag interactions.
 pub struct CollectionPanel {
-    pub(super) collections: CollectionRegistry,
+    pub(super) collections: Entity<Collections>,
+    /// The revision of the collections that the tree shows.
+    pub(super) revision: u64,
     pub(super) rename: Option<RenameEditor>,
     pub(super) pending_delete: Option<PathBuf>,
     /// The row whose "…" menu is open, which keeps its button shown.
@@ -112,6 +63,7 @@ pub struct CollectionPanel {
     pub(super) rows_task: Option<Task<()>>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
+    _collections_subscription: Subscription,
 }
 
 impl EventEmitter<CollectionPanelEvent> for CollectionPanel {}
@@ -120,12 +72,18 @@ impl CollectionPanel {
     /// `collapsed` holds the paths of the collections and folders that start
     /// collapsed, as `collapsed_paths` gave them in the last session.
     pub fn new(
-        collections: CollectionRegistry,
+        collections: Entity<Collections>,
         collapsed: Vec<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let tree = Arc::new(CollectionTree::new(&collections));
+        let (tree, revision) = {
+            let collections = collections.read(cx);
+            (
+                Arc::new(CollectionTree::new(collections.registry())),
+                collections.revision(),
+            )
+        };
         let collapsed = tree.branches_at(&collapsed.into_iter().collect());
         let visible = Arc::new(tree.visible_rows(&collapsed, ""));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter collections"));
@@ -145,9 +103,12 @@ impl CollectionPanel {
         let focus_subscription = cx.on_focus(&focus, window, |this, _, cx| {
             this.select_row(this.selected_row().unwrap_or(0), cx);
         });
+        let collections_subscription =
+            cx.subscribe_in(&collections, window, Self::on_collections_event);
 
         Self {
             collections,
+            revision,
             rename: None,
             pending_delete: None,
             menu_row: None,
@@ -167,7 +128,73 @@ impl CollectionPanel {
             rows_task: None,
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
+            _collections_subscription: collections_subscription,
         }
+    }
+
+    /// Follow changes made elsewhere, such as a request saved or renamed in
+    /// its tab. The tree already shows the changes made from it.
+    fn on_collections_event(
+        &mut self,
+        _: &Entity<Collections>,
+        event: &CollectionsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let revision = self.collections.read(cx).revision();
+        if revision == self.revision {
+            return;
+        }
+
+        match event {
+            // Saving a request changes at most its own row.
+            CollectionsEvent::RequestSaved(path) if revision == self.revision + 1 => {
+                self.revision = revision;
+                self.update_request_row(path, cx);
+            }
+            CollectionsEvent::Created(path) => self.reveal(path, None, window, cx),
+            CollectionsEvent::CollectionRenamed {
+                previous_path,
+                path,
+            }
+            | CollectionsEvent::FolderRelocated {
+                previous_path,
+                path,
+                ..
+            } => {
+                let selected = self.selected.map(|index| {
+                    let selected = &self.tree.items[index].path;
+                    match selected.strip_prefix(previous_path) {
+                        Ok(relative) => path.join(relative),
+                        Err(_) => selected.clone(),
+                    }
+                });
+                self.rebuild_tree(selected.as_deref(), Some((previous_path, path)), cx);
+            }
+            CollectionsEvent::RequestSaved(_)
+            | CollectionsEvent::RequestRelocated { .. }
+            | CollectionsEvent::Deleted(_) => {
+                let selected = self
+                    .selected
+                    .map(|index| self.tree.items[index].path.clone());
+                self.rebuild_tree(selected.as_deref(), None, cx);
+            }
+        }
+    }
+
+    fn update_request_row(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let collections = self.collections.read(cx);
+        let Some(file) = collections.registry().file(path) else {
+            return;
+        };
+        if !self.tree.request_changed(file) {
+            return;
+        }
+
+        // Cancel any result computed from the previous search documents.
+        self.rows_task = None;
+        Arc::make_mut(&mut self.tree).update_request(file);
+        self.refresh_rows(false, cx);
     }
 
     pub fn collection_count(&self) -> usize {
@@ -279,88 +306,13 @@ impl CollectionPanel {
         }
     }
 
-    /// The saved collections, for pages that read them, such as flows
-    /// choosing the requests they send.
-    pub fn registry(&self) -> &CollectionRegistry {
-        &self.collections
-    }
-
     /// Open a collection or request row in a tab; folder rows have no page.
     pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(event) = self.open_event(index) {
-            cx.emit(event);
-        }
-    }
-
-    /// The event that opens a collection or request row's page.
-    pub(super) fn open_event(&self, index: usize) -> Option<CollectionPanelEvent> {
         let item = &self.tree.items[index];
 
-        match item.kind {
-            ItemKind::Collection => {
-                let collection = self
-                    .collections
-                    .collections()
-                    .iter()
-                    .find(|collection| collection.path == item.path)?;
-
-                Some(CollectionPanelEvent::OpenCollection {
-                    path: item.path.clone(),
-                    name: item.label.clone(),
-                    variables: collection.local_env().entries.clone(),
-                    shared: SharedSettings {
-                        scripts: collection.scripts().clone(),
-                        auth: collection.auth().clone(),
-                    },
-                })
-            }
-            ItemKind::Folder | ItemKind::Empty => None,
-            ItemKind::Request(_) => {
-                let file = self.collections.file(&item.path)?;
-                let (collection, folders) = self.tree.location(index);
-
-                Some(CollectionPanelEvent::OpenRequest {
-                    id: file.id.clone().into(),
-                    path: item.path.clone(),
-                    name: item.label.clone(),
-                    collection,
-                    folders,
-                    request: file.request.clone(),
-                })
-            }
+        if matches!(item.kind, ItemKind::Collection | ItemKind::Request(_)) {
+            cx.emit(CollectionPanelEvent::Open(item.path.clone()));
         }
-    }
-
-    /// The event that runs a collection or folder row's requests.
-    pub(super) fn run_event(&self, index: usize) -> Option<CollectionPanelEvent> {
-        let item = &self.tree.items[index];
-        if !item.is_branch() {
-            return None;
-        }
-
-        let mut root = index;
-        while let Some(parent) = self.tree.items[root].parent {
-            root = parent;
-        }
-
-        let requests = (index + 1..item.end)
-            .filter(|&child| matches!(self.tree.items[child].kind, ItemKind::Request(_)))
-            .filter_map(|child| {
-                let file = self.collections.file(&self.tree.items[child].path)?;
-
-                Some(RunnableRequest {
-                    file: file.clone(),
-                    folders: self.tree.location(child).1,
-                })
-            })
-            .collect();
-
-        Some(CollectionPanelEvent::RunRequests {
-            path: item.path.clone(),
-            name: item.label.clone(),
-            collection: self.tree.items[root].path.clone(),
-            requests,
-        })
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -508,6 +460,8 @@ impl Focusable for CollectionPanel {
 
 impl Render for CollectionPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let skipped = self.collections.read(cx).registry().skipped().len();
+
         v_flex()
             .debug_selector(|| "collections-sidebar".into())
             .size_full()
@@ -537,7 +491,7 @@ impl Render for CollectionPanel {
                 )
             })
             // Only the count: request-eagle-cli tells agents which files and why.
-            .when(!self.collections.skipped().is_empty(), |this| {
+            .when(skipped > 0, |this| {
                 this.child(
                     h_flex()
                         .debug_selector(|| "collections-skipped".into())
@@ -547,7 +501,7 @@ impl Render for CollectionPanel {
                         .text_xs()
                         .text_color(cx.theme().danger)
                         .child(Icon::new(IconName::TriangleAlert).xsmall())
-                        .child(match self.collections.skipped().len() {
+                        .child(match skipped {
                             1 => "Couldn't load 1 file".to_owned(),
                             count => format!("Couldn't load {count} files"),
                         }),

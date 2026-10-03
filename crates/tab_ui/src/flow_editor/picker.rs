@@ -149,8 +149,7 @@ impl FlowEditor {
             .collect();
         if picker.from.as_ref().is_none_or(|from| from.output) {
             items.extend(
-                self.requests
-                    .all(cx)
+                FlowRequest::all(self.collections.read(cx))
                     .into_iter()
                     .filter(|request| {
                         query.is_empty()

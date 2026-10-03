@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 
 use super::fields::{FieldsChanged, RequestFields, SendCookiesChanged};
 use super::path_variables::{PathVariableChanged, PathVariables};
@@ -12,6 +11,7 @@ use crate::{
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
+use collection::SavedLocation;
 use environment::EnvironmentSessions;
 use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::{
@@ -33,36 +33,10 @@ pub(crate) enum RequestSection {
     Settings,
 }
 
-/// Where a saved request is stored, and how the collections sidebar names it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RequestLocation {
-    pub path: PathBuf,
-    pub id: SharedString,
-    pub name: SharedString,
-    pub collection: SharedString,
-    pub folders: Vec<SharedString>,
-}
-
-impl RequestLocation {
-    /// The directory of the collection that stores the request.
-    pub fn collection_path(&self) -> Option<PathBuf> {
-        self.path
-            .ancestors()
-            .nth(self.folders.len() + 1)
-            .map(Path::to_path_buf)
-    }
-
-    /// The collection environment that the request's variables resolve from.
-    pub(crate) fn environment_path(&self) -> Option<PathBuf> {
-        self.collection_path()
-            .map(|collection| collection.join("environment.toml"))
-    }
-}
-
 /// An editable HTTP request snapshot owned by one tab, independent of collection storage.
 pub struct RequestDraft {
     /// Unsaved drafts have no location.
-    pub location: Option<RequestLocation>,
+    pub location: Option<SavedLocation>,
     /// The name given to the request in its tab before it is saved.
     pub name: Option<SharedString>,
     pub request: HttpRequest,
@@ -154,14 +128,12 @@ impl RequestDraft {
     /// session values and the active global environment.
     pub fn new(
         mut request: HttpRequest,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let environment_path = location
-            .as_ref()
-            .and_then(RequestLocation::environment_path);
+        let environment_path = location.as_ref().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
         let mut subscriptions: Vec<_> = environments
             .iter()
@@ -238,12 +210,8 @@ impl RequestDraft {
     /// collection.
     pub(super) fn sent_request(&self) -> HttpRequest {
         let mut request = self.request.clone();
-        let collection = self
-            .location
-            .as_ref()
-            .and_then(RequestLocation::collection_path);
-        if let (Some(body), Some(collection)) = (&mut request.body, collection) {
-            *body = body.resolved_from(&collection);
+        if let (Some(body), Some(location)) = (&mut request.body, &self.location) {
+            *body = body.resolved_from(&location.collection);
         }
 
         request
@@ -262,7 +230,7 @@ impl RequestDraft {
     /// have changed.
     fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
         let inherited = self.location.as_ref().map(|location| Inherited {
-            name: location.collection.clone(),
+            name: location.collection_name().into(),
             auth: self.variables.read(cx).collection_auth(),
         });
         if inherited == self.inherited {
@@ -320,8 +288,8 @@ impl RequestDraft {
     }
 
     /// Follow the saved request to its current file and name.
-    pub fn set_location(&mut self, location: RequestLocation, cx: &mut Context<Self>) {
-        let path = location.environment_path();
+    pub fn set_location(&mut self, location: SavedLocation, cx: &mut Context<Self>) {
+        let path = Some(location.environment_path());
         let session = self.variable_sessions.for_path(path.as_deref());
 
         self.variables.update(cx, |scope, cx| {

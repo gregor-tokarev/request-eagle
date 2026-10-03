@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use collection::Collection;
+use collection::{Collection, directory_name};
 use environment::GlobalEnvironments;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
@@ -14,10 +14,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use import::{Import, ImportError};
 
-use super::{
-    panel::{CollectionPanel, CollectionPanelEvent},
-    tree::path_name,
-};
+use super::panel::{CollectionPanel, CollectionPanelEvent};
 
 impl CollectionPanel {
     /// Opens a dialog that imports Postman collections and environments, from
@@ -75,9 +72,8 @@ impl CollectionPanel {
             return;
         };
 
-        for collection in collections {
-            self.collections.add_collection(collection);
-        }
+        self.collections
+            .update(cx, |store, cx| store.add_collections(collections, cx));
         self.rename = None;
         self.pending_delete = None;
         self.error = None;
@@ -259,6 +255,8 @@ impl ImportDialog {
         let directory = panel
             .read(cx)
             .collections
+            .read(cx)
+            .registry()
             .directory()
             .map(Path::to_path_buf);
         let environments = self.environments.clone();
@@ -272,7 +270,7 @@ impl ImportDialog {
                     .flat_map(|path| import::sources(path))
                     .map(|path| {
                         let read = import::read(&path).map_err(|error| error.to_string());
-                        (Some(path_name(&path)), read)
+                        (Some(directory_name(&path)), read)
                     })
                     .collect(),
             };
@@ -326,7 +324,7 @@ impl ImportDialog {
 
         let names: Vec<_> = collections
             .iter()
-            .map(|collection| path_name(&collection.path))
+            .map(|collection| directory_name(&collection.path))
             .collect();
         panel.update(cx, |panel, cx| {
             panel.add_imported_collections(collections, window, cx)
@@ -460,7 +458,7 @@ fn save(
                 .write(directory)
                 .map_err(|error| format!("Could not import the collection: {error}"))?;
 
-            let name = path_name(&collection.path);
+            let name = directory_name(&collection.path);
             outcome.skipped.extend(
                 import
                     .skipped
