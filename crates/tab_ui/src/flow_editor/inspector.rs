@@ -79,8 +79,8 @@ pub(super) struct Inspector {
     /// in the run log.
     run: Option<Entity<EditorState>>,
     /// The run chosen in the run log, and how long into the flow's run it
-    /// finished.
-    chosen_run: Option<(Duration, Arc<BlockRun>)>,
+    /// finished. Its data may have been let go to keep memory in check.
+    chosen_run: Option<(Duration, Option<Arc<BlockRun>>)>,
     /// The saved requests are listed to choose another.
     choosing_request: bool,
     /// Settings whose text cannot apply, such as a number that is not one.
@@ -148,7 +148,20 @@ impl FlowEditor {
             .filter(|inspector| inspector.block == id)
         {
             inspector.run = view;
-            inspector.chosen_run = Some((at, run));
+            inspector.chosen_run = Some((at, Some(run)));
+        }
+        cx.notify();
+    }
+
+    /// Show that the data of a run chosen in the run log was let go.
+    pub(super) fn show_released(&mut self, id: &str, at: Duration, cx: &mut Context<Self>) {
+        if let Some(inspector) = self
+            .inspector
+            .as_mut()
+            .filter(|inspector| inspector.block == id)
+        {
+            inspector.run = None;
+            inspector.chosen_run = Some((at, None));
         }
         cx.notify();
     }
@@ -1000,46 +1013,59 @@ impl FlowEditor {
             | BlockKind::Now => panel,
         };
 
+        // The run chosen in the run log, or the last one.
         let shown = inspector
             .chosen_run
             .as_ref()
             .map(|(at, run)| (Some(*at), run.clone()))
             .or_else(|| {
                 let last = self.run.blocks.get(&inspector.block)?.last.clone()?;
-                Some((None, last))
+                Some((None, Some(last)))
             });
 
         Some(
             panel
-                .when_some(
-                    inspector.run.as_ref().zip(shown),
-                    |this, (run, (at, shown))| {
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .child(section_title(&match at {
-                                    Some(at) => format!("Run at {:.3}s", at.as_secs_f64()),
-                                    None => "Last run".to_owned(),
-                                }))
-                                .child(run_summary(&shown, cx))
-                                .child(
-                                    div()
-                                        .h(rems(16.))
-                                        .rounded(theme.radius_tokens().md)
-                                        .border_1()
-                                        .border_color(theme.border)
-                                        .overflow_hidden()
-                                        .child(
-                                            Editor::new(run)
-                                                .h_full()
-                                                .bordered(false)
-                                                .readonly(true)
-                                                .text_xs(),
-                                        ),
-                                ),
-                        )
-                    },
-                )
+                .when_some(shown, |this, (at, shown)| {
+                    let title = match at {
+                        Some(at) => format!("Run at {:.3}s", at.as_secs_f64()),
+                        None => "Last run".to_owned(),
+                    };
+                    let details = match (shown, inspector.run.as_ref()) {
+                        // A run that arrived since the inspector opened
+                        // shows once the flow's run ends.
+                        (Some(_), None) => return this,
+                        (Some(shown), Some(run)) => v_flex()
+                            .gap_1()
+                            .child(run_summary(&shown, cx))
+                            .child(
+                                div()
+                                    .h(rems(16.))
+                                    .rounded(theme.radius_tokens().md)
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .overflow_hidden()
+                                    .child(
+                                        Editor::new(run)
+                                            .h_full()
+                                            .bordered(false)
+                                            .readonly(true)
+                                            .text_xs(),
+                                    ),
+                            )
+                            .into_any_element(),
+                        (None, _) => div()
+                            .debug_selector(|| "flow-run-released".into())
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(
+                                "This run's data was let go to keep memory in check. \
+                                 Later runs keep theirs.",
+                            )
+                            .into_any_element(),
+                    };
+
+                    this.child(v_flex().gap_1().child(section_title(&title)).child(details))
+                })
                 .into_any_element(),
         )
     }

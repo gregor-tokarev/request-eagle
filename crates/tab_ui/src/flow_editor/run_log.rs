@@ -7,7 +7,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use super::{FlowEditor, run::LogKind};
+use super::{
+    FlowEditor,
+    run::{LogKind, RunData},
+};
 
 impl FlowEditor {
     /// The entries the run log shows: all of them, or the selected block's.
@@ -151,7 +154,11 @@ impl FlowEditor {
             LogKind::Failed => theme.danger,
         };
         let block = entry.block.clone();
-        let run = entry.run.clone();
+        let (run, released) = match &entry.run {
+            RunData::Kept(run, _) => (Some(run.clone()), false),
+            RunData::Released => (None, true),
+            RunData::None => (None, false),
+        };
         let at = entry.at;
 
         h_flex()
@@ -205,8 +212,10 @@ impl FlowEditor {
                         if this.flow.block(&block).is_some() {
                             this.set_selection(vec![block.clone()], window, cx);
                             this.reveal(&block, cx);
-                            if let Some(run) = &run {
-                                this.show_run(&block, run.clone(), at, window, cx);
+                            match &run {
+                                Some(run) => this.show_run(&block, run.clone(), at, window, cx),
+                                None if released => this.show_released(&block, at, cx),
+                                None => {}
                             }
                         }
                     }))

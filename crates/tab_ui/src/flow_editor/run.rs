@@ -107,7 +107,17 @@ pub(super) struct LogEntry {
     pub index: usize,
     /// The run the entry tells of, which the inspector shows when the entry
     /// is chosen.
-    pub run: Option<Arc<BlockRun>>,
+    pub run: RunData,
+}
+
+/// What a log entry keeps of the run it tells of.
+pub(super) enum RunData {
+    /// It tells of no block's run, such as the end of the flow's run.
+    None,
+    /// The run, and about how many bytes its data takes.
+    Kept(Arc<BlockRun>, usize),
+    /// The run's data was let go to keep memory in check.
+    Released,
 }
 
 impl RunState {
@@ -143,7 +153,13 @@ impl FlowEditor {
         let (sender, mut events) = futures::channel::mpsc::unbounded();
         let run = cx.background_executor().spawn(async move {
             flow::run(flow, options, move |event| {
-                let _ = sender.unbounded_send(event);
+                // Sizing a large response takes a while, so it happens here
+                // rather than where the interface draws.
+                let size = match &event {
+                    RunEvent::Finished(run) => run_size(run),
+                    _ => 0,
+                };
+                let _ = sender.unbounded_send((event, size));
             })
             .await
         });
@@ -188,13 +204,7 @@ impl FlowEditor {
             .started
             .map(|started| started.elapsed())
             .unwrap_or_default();
-        self.log(
-            at,
-            String::new(),
-            LogKind::Notice,
-            "Run stopped".into(),
-            None,
-        );
+        self.log(at, String::new(), LogKind::Notice, "Run stopped".into());
         Cookies::changed(cx);
         self.refresh_inspector(window, cx);
         cx.notify();
@@ -282,8 +292,8 @@ impl FlowEditor {
         })
     }
 
-    fn receive(&mut self, events: Vec<RunEvent>, cx: &mut Context<Self>) {
-        for event in events {
+    fn receive(&mut self, events: Vec<(RunEvent, usize)>, cx: &mut Context<Self>) {
+        for (event, size) in events {
             match event {
                 RunEvent::Started { block } => {
                     self.run.blocks.entry(block).or_default().running = true;
@@ -291,7 +301,7 @@ impl FlowEditor {
                 RunEvent::Log { block, value, at } => {
                     let text = preview::compact(&value, 400);
                     let index = self.run.blocks.get(&block).map_or(0, |status| status.runs) + 1;
-                    self.log_run(at, block, LogKind::Logged, text, index, None);
+                    self.log_run(at, block, LogKind::Logged, text, index, RunData::None);
                 }
                 RunEvent::Finished(run) => {
                     let run = Arc::new(run);
@@ -346,13 +356,15 @@ impl FlowEditor {
                             entry.block == run.block
                                 && entry.kind == LogKind::Logged
                                 && entry.index == index
-                        }) && entry.run.is_none()
+                        }) && matches!(entry.run, RunData::None)
                         {
-                            entry.run = Some(run.clone());
-                            self.run.retained += run_size(&run);
+                            entry.run = RunData::Kept(run.clone(), size);
+                            self.run.retained += size;
+                            self.release_runs();
                         }
                     } else {
-                        self.log_run(run.at, run.block.clone(), kind, text, index, Some(run));
+                        let data = RunData::Kept(run.clone(), size);
+                        self.log_run(run.at, run.block.clone(), kind, text, index, data);
                     }
                 }
             }
@@ -387,7 +399,7 @@ impl FlowEditor {
             } else {
                 LogKind::Notice
             };
-        self.log(summary.elapsed, String::new(), kind, text.into(), None);
+        self.log(summary.elapsed, String::new(), kind, text.into());
         self.run.summary = Some(summary);
 
         // Request scripts may have changed cookies and variables that other
@@ -398,15 +410,8 @@ impl FlowEditor {
         cx.notify();
     }
 
-    fn log(
-        &mut self,
-        at: Duration,
-        block: String,
-        kind: LogKind,
-        text: SharedString,
-        run: Option<Arc<BlockRun>>,
-    ) {
-        self.log_run(at, block, kind, text, 0, run);
+    fn log(&mut self, at: Duration, block: String, kind: LogKind, text: SharedString) {
+        self.log_run(at, block, kind, text, 0, RunData::None);
     }
 
     fn log_run(
@@ -416,9 +421,11 @@ impl FlowEditor {
         kind: LogKind,
         text: SharedString,
         index: usize,
-        run: Option<Arc<BlockRun>>,
+        run: RunData,
     ) {
-        self.run.retained += run.as_deref().map_or(0, run_size);
+        if let RunData::Kept(_, size) = &run {
+            self.run.retained += size;
+        }
         self.run.log.push(LogEntry {
             at,
             block,
@@ -431,19 +438,25 @@ impl FlowEditor {
         if self.run.log.len() > LOG_LIMIT {
             let excess = self.run.log.len() - LOG_LIMIT;
             for entry in self.run.log.drain(..excess) {
-                self.run.retained -= entry.run.as_deref().map_or(0, run_size);
+                if let RunData::Kept(_, size) = entry.run {
+                    self.run.retained -= size;
+                }
             }
             self.run.dropped += excess;
         }
+        self.release_runs();
+    }
 
-        // Earlier entries let go of their data first. Each block's last
-        // run stays with its status.
+    /// Let earlier entries go of their run data while the log keeps too
+    /// much. Each block's last run stays with its status.
+    fn release_runs(&mut self) {
         let mut entries = self.run.log.iter_mut();
         while self.run.retained > RUN_DATA_LIMIT
             && let Some(entry) = entries.next()
         {
-            if let Some(run) = entry.run.take() {
-                self.run.retained -= run_size(&run);
+            if let RunData::Kept(_, size) = entry.run {
+                self.run.retained -= size;
+                entry.run = RunData::Released;
             }
         }
     }
