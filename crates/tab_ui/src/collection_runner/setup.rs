@@ -655,7 +655,6 @@ impl CollectionRunner {
                                 .gap_2()
                                 .child(
                                     Checkbox::new(setting.id)
-                                        .small()
                                         .min_w_0()
                                         .label(setting.label)
                                         .checked(checked)

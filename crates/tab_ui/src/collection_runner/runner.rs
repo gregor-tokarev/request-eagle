@@ -872,6 +872,8 @@ impl CollectionRunner {
         });
         let send = context.executor.execute(request.request.clone(), variables);
         run.sending = true;
+        // The header names the request being sent.
+        cx.notify();
 
         Some((position, cx.background_spawn(send)))
     }

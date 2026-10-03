@@ -166,15 +166,19 @@ impl CollectionRunner {
                     ),
             )
             .child(
+                // The steps move under the address when both do not fit.
                 h_flex()
                     .flex_none()
                     .min_w_0()
+                    .flex_wrap()
                     .items_start()
-                    .gap_3()
+                    .gap_x_3()
+                    .gap_y_1()
                     .child(
                         div()
                             .flex_1()
-                            .min_w_0()
+                            .min_w(rems(12.))
+                            .max_w_full()
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(SelectableText::new("run-detail-url", url)),
@@ -227,6 +231,7 @@ impl CollectionRunner {
                 .ghost()
                 .xsmall()
                 .icon(icon)
+                .accessibility_label(tooltip)
                 .tooltip(tooltip)
                 .disabled(to.is_none())
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -326,6 +331,8 @@ impl CollectionRunner {
                 Tabs::new("run-detail-sections")
                     .flex()
                     .flex_none()
+                    .flex_wrap()
+                    .min_w_0()
                     .gap_1()
                     .children(
                         [(false, "Test Results", tests), (true, "Console", logs)].map(

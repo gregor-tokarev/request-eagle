@@ -85,12 +85,10 @@ impl ResultsState {
     fn add(&mut self, run: &Run, index: usize) {
         let result = &run.results[index];
         // Why an iteration ended early follows the result that ended it.
-        let notes = run
-            .notes
-            .iter()
-            .enumerate()
-            .filter(|(_, (after, _))| *after == index)
-            .map(|(note, _)| ResultRow::Note(note));
+        // Notes are kept in the order of their results.
+        let notes = run.notes.partition_point(|(after, _)| *after < index)
+            ..run.notes.partition_point(|(after, _)| *after <= index);
+        let notes = notes.map(ResultRow::Note);
 
         if self.filter == ResultFilter::Console {
             for (report_index, report) in result.scripts.iter().enumerate() {
