@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use flow::BlockKind;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -8,7 +11,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use super::{
     FlowEditor,
     actions::*,
-    editor::{Drag, PortRef, connection_between},
+    editor::{Drag, Hover, PortRef, connection_between},
     geometry,
     picker::Picker,
     zoom::Zoom,
@@ -17,6 +20,18 @@ use crate::SendRequest;
 
 /// Canvas pixels between the dots of the background grid.
 const GRID: f32 = 24.;
+/// How close to the canvas's edge a drag pans it, in screen pixels, and how
+/// fast at most, in screen pixels a frame.
+const EDGE: f32 = 40.;
+const EDGE_SPEED: f32 = 18.;
+/// The smallest a Note can be resized to.
+const NOTE_MIN: Size<f32> = Size {
+    width: 160.,
+    height: 72.,
+};
+
+/// The curves of a connection, with the color and width to draw them.
+type WirePaint = (Vec<[Point<f32>; 4]>, Hsla, f32);
 
 /// A connection being drawn, from its port to where it ends.
 struct PendingWire {
@@ -77,6 +92,7 @@ impl FlowEditor {
                 pointer: position,
                 detached,
             });
+            self.start_edge_pan(window, cx);
             cx.notify();
             return;
         }
@@ -92,11 +108,12 @@ impl FlowEditor {
             self.select(&id, additive, window, cx);
             if self.selection.contains(&id) {
                 let origins = self
-                    .selection
-                    .iter()
+                    .moving_blocks()
+                    .into_iter()
                     .filter_map(|id| {
-                        let block = self.flow.block(id)?;
-                        Some((id.clone(), point(block.x, block.y)))
+                        let block = self.flow.block(&id)?;
+                        let origin = point(block.x, block.y);
+                        Some((id, origin))
                     })
                     .collect();
                 self.drag = Some(Drag::Move {
@@ -104,6 +121,7 @@ impl FlowEditor {
                     origins,
                     moved: false,
                 });
+                self.start_edge_pan(window, cx);
             }
             return;
         }
@@ -122,6 +140,7 @@ impl FlowEditor {
                 end: position,
                 kept: self.selection.clone(),
             });
+            self.start_edge_pan(window, cx);
         } else {
             if !self.selection.is_empty() || self.selected_connection.is_some() {
                 self.set_selection(Vec::new(), window, cx);
@@ -133,7 +152,128 @@ impl FlowEditor {
         cx.notify();
     }
 
+    /// The selected blocks, and the blocks inside the selected Notes, which
+    /// move with them.
+    fn moving_blocks(&self) -> Vec<String> {
+        let mut moving = self.selection.clone();
+        for id in &self.selection {
+            let Some(frame) = self
+                .flow
+                .block(id)
+                .filter(|block| matches!(block.kind, BlockKind::Note { .. }))
+                .and_then(|block| self.layouts.get(&block.id))
+            else {
+                continue;
+            };
+            for block in &self.flow.blocks {
+                if !moving.contains(&block.id)
+                    && self
+                        .layouts
+                        .get(&block.id)
+                        .is_some_and(|layout| geometry::contains(&frame.bounds, &layout.bounds))
+                {
+                    moving.push(block.id.clone());
+                }
+            }
+        }
+        moving
+    }
+
+    /// Begin resizing a Note from its corner.
+    pub(super) fn start_resize(
+        &mut self,
+        id: &str,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus, cx);
+        self.picker = None;
+        let Some(layout) = self.layouts.get(id) else {
+            return;
+        };
+        let size = layout.bounds.size;
+
+        self.select(id, false, window, cx);
+        self.drag = Some(Drag::Resize {
+            block: id.to_owned(),
+            start: self.canvas_position(event.position),
+            size,
+            resized: false,
+        });
+        self.start_edge_pan(window, cx);
+        cx.notify();
+    }
+
+    /// Pan the canvas while a drag is held near its edge, so blocks and
+    /// connections can be taken past what is in view.
+    fn start_edge_pan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.edge_pan = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let going = this
+                    .update_in(cx, |this, window, cx| this.edge_pan_step(window, cx))
+                    .unwrap_or(false);
+                if !going {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Pan a step toward the edge the pointer is near. Returns whether the
+    /// drag goes on.
+    fn edge_pan_step(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.drag.is_none() {
+            return false;
+        }
+        let Some(pointer) = self.pointer else {
+            return true;
+        };
+
+        let speed = |inside: Pixels| {
+            let inside = f32::from(inside);
+            if inside < EDGE {
+                EDGE_SPEED * (1. - inside.max(0.) / EDGE)
+            } else {
+                0.
+            }
+        };
+        let bounds = self.view;
+        let dx = speed(pointer.x - bounds.left()) - speed(bounds.right() - pointer.x);
+        let dy = speed(pointer.y - bounds.top()) - speed(bounds.bottom() - pointer.y);
+        if dx == 0. && dy == 0. {
+            return true;
+        }
+
+        self.viewport.pan(point(px(dx), px(dy)), self.rem);
+        self.drag_to(pointer, window, cx);
+        cx.notify();
+        true
+    }
+
+    /// Note what the pointer is over, to highlight its connections.
+    fn hover_at(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.pointer = Some(position);
+        if self.drag.is_some() {
+            return;
+        }
+
+        let at = self.canvas_position(position);
+        let hover = match self.block_at(at) {
+            Some(block) => Some(Hover::Block(block)),
+            None => self.connection_at(at).map(Hover::Connection),
+        };
+        if hover != self.hover {
+            self.hover = hover;
+            cx.notify();
+        }
+    }
+
     fn drag_to(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        self.pointer = Some(position);
         let pointer = self.canvas_position(position);
 
         match &mut self.drag {
@@ -166,13 +306,46 @@ impl FlowEditor {
                 }
             }
             Some(Drag::Connect { pointer: end, .. }) => *end = pointer,
+            Some(Drag::Resize {
+                block,
+                start,
+                size,
+                resized,
+            }) => {
+                if !*resized {
+                    *resized = true;
+                    self.history.record(&self.flow, None);
+                }
+                let width = (size.width + pointer.x - start.x)
+                    .max(NOTE_MIN.width)
+                    .round();
+                let height = (size.height + pointer.y - start.y)
+                    .max(NOTE_MIN.height)
+                    .round();
+                let id = block.clone();
+                if let Some(BlockKind::Note {
+                    width: note_width,
+                    height: note_height,
+                    ..
+                }) = self.flow.block_mut(&id).map(|block| &mut block.kind)
+                {
+                    *note_width = Some(width);
+                    *note_height = Some(height);
+                }
+            }
             Some(Drag::Select { start, end, kept }) => {
                 *end = pointer;
                 let area = geometry::rectangle(*start, *end);
                 let mut selection = kept.clone();
                 for block in &self.flow.blocks {
+                    // A Note is selected only whole, so a box drawn inside
+                    // the section it frames picks the blocks there.
+                    let reached = |bounds: &Bounds<f32>| match block.kind {
+                        BlockKind::Note { .. } => geometry::contains(&area, bounds),
+                        _ => geometry::intersects(&area, bounds),
+                    };
                     if let Some(layout) = self.layouts.get(&block.id)
-                        && geometry::intersects(&area, &layout.bounds)
+                        && reached(&layout.bounds)
                         && !selection.contains(&block.id)
                     {
                         selection.push(block.id.clone());
@@ -191,6 +364,7 @@ impl FlowEditor {
         let Some(drag) = self.drag.take() else {
             return;
         };
+        self.edge_pan = None;
         let pointer = self.canvas_position(position);
 
         match drag {
@@ -227,7 +401,15 @@ impl FlowEditor {
                     (None, _) => {}
                 }
             }
-            Drag::Move { moved: true, .. } => self.history.seal(),
+            Drag::Move { moved: true, .. } => {
+                self.history.seal();
+                // Blocks moved by hand stay where they were put.
+                self.pending_reveal = None;
+            }
+            Drag::Resize { resized: true, .. } => {
+                self.history.seal();
+                self.pending_reveal = None;
+            }
             _ => {}
         }
 
@@ -360,12 +542,17 @@ impl FlowEditor {
         let scale = self.viewport.scale(self.rem);
 
         // Only blocks in view are built; connections are drawn from layouts.
+        // Notes are built first, so they lie behind the blocks they frame.
         let visible = (self.view.size.width > px(0.))
             .then(|| self.viewport.visible(self.view.size, self.rem));
-        let blocks: Vec<AnyElement> = self
+        let (notes, others): (Vec<_>, Vec<_>) = self
             .flow
             .blocks
             .iter()
+            .partition(|block| matches!(block.kind, BlockKind::Note { .. }));
+        let blocks: Vec<AnyElement> = notes
+            .into_iter()
+            .chain(others)
             .filter_map(|block| {
                 let layout = self.layouts.get(&block.id)?;
                 if let Some(visible) = &visible
@@ -377,7 +564,7 @@ impl FlowEditor {
             })
             .collect();
 
-        let wires = self.wire_paths(cx);
+        let (wires, emphasized) = self.wire_paths(cx);
         let theme = cx.theme();
         let pending = self.pending_wire();
         let marquee = match &self.drag {
@@ -415,11 +602,11 @@ impl FlowEditor {
             .on_action(cx.listener(|this, _: &UndoFlowEdit, window, cx| this.undo(window, cx)))
             .on_action(cx.listener(|this, _: &RedoFlowEdit, window, cx| this.redo(window, cx)))
             .on_action(cx.listener(|this, _: &AddBlock, window, cx| {
-                let center = this.view_center();
-                this.open_picker(center, None, window, cx);
+                let at = this.add_position();
+                this.open_picker(at, None, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_by(1.25, cx)))
-            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_by(0.8, cx)))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_step(true, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_step(false, cx)))
             .on_action(cx.listener(|this, _: &ZoomToFit, window, cx| this.zoom_to_fit(window, cx)))
             .on_action(cx.listener(|this, _: &ArrangeBlocks, window, cx| this.arrange(window, cx)))
             .on_action(cx.listener(|this, _: &StopFlow, window, cx| this.stop(window, cx)))
@@ -505,6 +692,16 @@ impl FlowEditor {
                 }),
             )
             .on_scroll_wheel(cx.listener(Self::scroll))
+            .on_mouse_move(
+                cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                    this.hover_at(event.position, cx)
+                }),
+            )
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered && this.hover.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .child(
                 canvas(
                     {
@@ -520,6 +717,16 @@ impl FlowEditor {
                                     window.request_animation_frame();
                                 } else if resized {
                                     // What was culled for the old size may now be in view.
+                                    window.request_animation_frame();
+                                }
+
+                                // Bring a block into view once the canvas has
+                                // its size, after any drag that holds it.
+                                if this.drag.is_none()
+                                    && bounds.size.width > px(0.)
+                                    && let Some(id) = this.pending_reveal.take()
+                                    && this.reveal_now(&id)
+                                {
                                     window.request_animation_frame();
                                 }
                             });
@@ -541,10 +748,10 @@ impl FlowEditor {
                             }
                         });
 
-                        for (curve, color, width) in &wires {
-                            paint_curve(
+                        for (curves, color, width) in &wires {
+                            paint_curves(
                                 bounds.origin,
-                                curve,
+                                curves,
                                 viewport,
                                 rem,
                                 *color,
@@ -557,9 +764,9 @@ impl FlowEditor {
                             // Like Postman, a connection that is not joined
                             // to anything yet is dashed and ends in a ring
                             // at the pointer.
-                            paint_curve(
+                            paint_curves(
                                 bounds.origin,
-                                &pending.curve,
+                                std::slice::from_ref(&pending.curve),
                                 viewport,
                                 rem,
                                 pending_color,
@@ -636,6 +843,32 @@ impl FlowEditor {
                 self.rem * self.viewport.zoom,
                 div().absolute().inset_0().children(blocks),
             ))
+            // The connections of what is selected or under the pointer are
+            // drawn over the blocks too, so they can be followed past them.
+            .when(!emphasized.is_empty(), |this| {
+                this.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            for (curves, color, width) in &emphasized {
+                                paint_curves(
+                                    bounds.origin,
+                                    curves,
+                                    viewport,
+                                    rem,
+                                    *color,
+                                    *width,
+                                    false,
+                                    window,
+                                );
+                            }
+                        },
+                    )
+                    .absolute()
+                    .inset_0()
+                    .size_full(),
+                )
+            })
             .when(self.flow.blocks.is_empty(), |this| {
                 this.child(
                     v_flex()
@@ -663,53 +896,71 @@ impl FlowEditor {
         }
     }
 
-    /// The curves of every connection with the color and width to draw it.
-    fn wire_paths(&self, cx: &App) -> Vec<([Point<f32>; 4], Hsla, f32)> {
+    /// The curves of every connection in view with the color and width to
+    /// draw them, and those to draw again over the blocks: the connections
+    /// of what is selected or under the pointer. After a run, connections
+    /// that carried data are colored, red for failures.
+    fn wire_paths(&self, cx: &App) -> (Vec<WirePaint>, Vec<WirePaint>) {
         let theme = cx.theme();
         let visible = (self.view.size.width > px(0.))
             .then(|| self.viewport.visible(self.view.size, self.rem));
+        let hovered_block = match &self.hover {
+            Some(Hover::Block(block)) => Some(block),
+            _ => None,
+        };
+        let mut wires = Vec::new();
+        let mut emphasized = Vec::new();
 
-        self.flow
-            .connections
-            .iter()
+        for connection in &self.flow.connections {
             // A connection being pulled off its input is drawn to the pointer instead.
-            .filter(|connection| {
-                !matches!(&self.drag, Some(Drag::Connect { detached: Some(detached), .. }) if detached == *connection)
-            })
-            .filter_map(|connection| {
-                let curve = self.wire(connection)?;
-                // A curve stays within its control points.
-                let reach = geometry::union(curve.map(|corner| Bounds {
-                    origin: point(corner.x - 4., corner.y - 4.),
-                    size: size(8., 8.),
-                }))?;
-                if visible
-                    .as_ref()
-                    .is_some_and(|visible| !geometry::intersects(visible, &reach))
-                {
-                    return None;
-                }
+            if matches!(&self.drag, Some(Drag::Connect { detached: Some(detached), .. }) if detached == connection)
+            {
+                continue;
+            }
+            let Some(curves) = self.wire(connection) else {
+                continue;
+            };
+            // A curve stays within its control points.
+            let reach = geometry::union(curves.iter().flatten().map(|corner| Bounds {
+                origin: point(corner.x - 4., corner.y - 4.),
+                size: size(8., 8.),
+            }));
+            if let (Some(visible), Some(reach)) = (&visible, &reach)
+                && !geometry::intersects(visible, reach)
+            {
+                continue;
+            }
 
-                let carried = self
-                    .run
-                    .blocks
-                    .get(&connection.from)
-                    .is_some_and(|status| status.sent(&connection.output));
-                let (color, width) = if self.selected_connection.as_ref() == Some(connection) {
-                    (theme.ring, 3.)
-                } else if self.selection.contains(&connection.from)
-                    || self.selection.contains(&connection.to)
-                {
-                    (theme.ring, 2.)
-                } else if carried {
-                    (theme.muted_foreground, 2.)
-                } else {
-                    (theme.muted_foreground.opacity(0.55), 1.5)
-                };
+            let carried = self
+                .run
+                .blocks
+                .get(&connection.from)
+                .is_some_and(|status| status.sent(&connection.output));
+            let (color, width) = if carried && connection.output == "fail" {
+                (theme.danger, 2.)
+            } else if carried {
+                (theme.success.opacity(0.5), 2.)
+            } else {
+                (theme.muted_foreground.opacity(0.55), 1.5)
+            };
 
-                Some((curve, color, width))
-            })
-            .collect()
+            let selected = self.selected_connection.as_ref() == Some(connection);
+            let touches = |block: &String| *block == connection.from || *block == connection.to;
+            let highlighted = selected
+                || self.hover == Some(Hover::Connection(connection.clone()))
+                || self.selection.iter().any(touches)
+                || hovered_block.is_some_and(touches);
+
+            if highlighted {
+                // Faint over the blocks, so text it crosses stays readable.
+                emphasized.push((curves.clone(), theme.ring.opacity(0.4), 1.5));
+                wires.push((curves, theme.ring, if selected { 3. } else { 2. }));
+            } else {
+                wires.push((curves, color, width));
+            }
+        }
+
+        (wires, emphasized)
     }
 
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -797,7 +1048,9 @@ impl FlowEditor {
             .when_some(
                 self.run.summary.as_ref().filter(|_| !running),
                 |this, summary| {
-                    let failed = summary.failures > 0 || summary.stopped.is_some();
+                    let failed = summary.failures > 0
+                        || summary.stopped.is_some()
+                        || self.run.failed_requests > 0;
                     this.child(
                         div()
                             .debug_selector(|| "flow-run-summary".into())
@@ -816,11 +1069,7 @@ impl FlowEditor {
                                 super::run::format_duration(summary.elapsed),
                                 summary.block_runs,
                                 if summary.block_runs == 1 { "" } else { "s" },
-                                if summary.failures > 0 {
-                                    format!(", {} failed", summary.failures)
-                                } else {
-                                    String::new()
-                                }
+                                super::run::failures(summary.failures, self.run.failed_requests),
                             )),
                     )
                 },
@@ -832,7 +1081,7 @@ impl FlowEditor {
                     .icon(Icon::default().path("icons/zoom-out.svg"))
                     .accessibility_label("Zoom out")
                     .tooltip_with_action("Zoom out", &ZoomOut, Some("FlowCanvas"))
-                    .on_click(cx.listener(|this, _, _, cx| this.zoom_by(0.8, cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.zoom_step(false, cx))),
             )
             .child(
                 Button::new("flow-zoom-reset")
@@ -841,10 +1090,7 @@ impl FlowEditor {
                     .ghost()
                     .label(format!("{:.0}%", self.viewport.zoom * 100.))
                     .tooltip("Zoom to 100%")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let zoom = 1. / this.viewport.zoom;
-                        this.zoom_by(zoom, cx);
-                    })),
+                    .on_click(cx.listener(|this, _, _, cx| this.zoom_to(1., cx))),
             )
             .child(
                 Button::new("flow-zoom-in")
@@ -853,7 +1099,7 @@ impl FlowEditor {
                     .icon(Icon::default().path("icons/zoom-in.svg"))
                     .accessibility_label("Zoom in")
                     .tooltip_with_action("Zoom in", &ZoomIn, Some("FlowCanvas"))
-                    .on_click(cx.listener(|this, _, _, cx| this.zoom_by(1.25, cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.zoom_step(true, cx))),
             )
             .child(
                 Button::new("flow-fit")
@@ -914,10 +1160,11 @@ fn paint_grid(
     }
 }
 
+/// Paint a connection's curves as one line.
 #[allow(clippy::too_many_arguments)]
-fn paint_curve(
+fn paint_curves(
     origin: Point<Pixels>,
-    curve: &[Point<f32>; 4],
+    curves: &[[Point<f32>; 4]],
     viewport: geometry::Viewport,
     rem: Pixels,
     color: Hsla,
@@ -925,13 +1172,18 @@ fn paint_curve(
     dashed: bool,
     window: &mut Window,
 ) {
-    let [start, first, second, end] = curve.map(|point| origin + viewport.to_view(point, rem));
+    let Some(first) = curves.first() else {
+        return;
+    };
     let mut path = PathBuilder::stroke(px(width));
     if dashed {
         path = path.dash_array(&[px(6.), px(4.)]);
     }
-    path.move_to(start);
-    path.cubic_bezier_to(end, first, second);
+    path.move_to(origin + viewport.to_view(first[0], rem));
+    for curve in curves {
+        let [_, control, other, end] = curve.map(|point| origin + viewport.to_view(point, rem));
+        path.cubic_bezier_to(end, control, other);
+    }
 
     if let Ok(path) = path.build() {
         window.paint_path(path, color);

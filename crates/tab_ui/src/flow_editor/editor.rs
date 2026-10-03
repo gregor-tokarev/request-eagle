@@ -1,8 +1,15 @@
-use std::{collections::HashMap, path::PathBuf, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+};
 
 use environment::EnvironmentSessions;
 use flow::{Block, BlockKind, BlockType, Connection, Flow};
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{
+    resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
+    v_flex,
+};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Auth, HttpRequest};
 
@@ -14,7 +21,7 @@ use super::{
     picker::Picker,
     run::RunState,
 };
-use crate::Environments;
+use crate::{Environments, variables::VariableScope};
 
 /// A saved HTTP request that flows can send.
 #[derive(Clone)]
@@ -48,10 +55,16 @@ pub(super) struct PortRef {
 }
 
 /// What an HTTP Request block shows of its request.
+#[derive(Clone)]
 pub(super) struct RequestInfo {
     pub method: &'static str,
     pub name: SharedString,
+    /// Its URL as saved, variables and all.
+    pub path: SharedString,
     pub variables: Vec<SharedString>,
+    /// Variables its collection or the active environment give a value,
+    /// which an unconnected input sends.
+    pub defined: Rc<HashSet<String>>,
 }
 
 /// What the canvas draws for a block this frame.
@@ -59,8 +72,8 @@ pub(super) struct Layout {
     pub inputs: Vec<SharedString>,
     pub outputs: Vec<SharedString>,
     pub bounds: Bounds<f32>,
-    /// The method of an HTTP Request block's request, and its name.
-    pub request: Option<(&'static str, SharedString)>,
+    /// The request an HTTP Request block sends.
+    pub request: Option<RequestInfo>,
 }
 
 impl Layout {
@@ -102,6 +115,20 @@ pub(super) enum Drag {
         /// What was selected before, which a Shift-drag adds to.
         kept: Vec<String>,
     },
+    /// A Note's corner being dragged to resize it.
+    Resize {
+        block: String,
+        start: Point<f32>,
+        size: Size<f32>,
+        resized: bool,
+    },
+}
+
+/// What the pointer is over, whose connections the canvas highlights.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Hover {
+    Block(String),
+    Connection(Connection),
 }
 
 /// A flow's canvas, editing its blocks and connections, and its runs.
@@ -136,6 +163,19 @@ pub struct FlowEditor {
     pub(super) log_scroll: UniformListScrollHandle,
     /// The view fits the flow once its size is known.
     pub(super) fitted: bool,
+    pub(super) hover: Option<Hover>,
+    /// Where the pointer last was over the canvas, in the window, where
+    /// blocks added from the keyboard go.
+    pub(super) pointer: Option<Point<Pixels>>,
+    /// A block to bring into view once the canvas has its new size, such as
+    /// one the inspector opened beside.
+    pub(super) pending_reveal: Option<String>,
+    /// Pans the canvas while a drag is held at its edge.
+    pub(super) edge_pan: Option<Task<()>>,
+    /// The run log shows only the selected block's entries.
+    pub(super) log_filtered: bool,
+    pub(super) inspector_split: Entity<ResizableState>,
+    pub(super) log_split: Entity<ResizableState>,
 }
 
 impl FlowEditor {
@@ -172,6 +212,13 @@ impl FlowEditor {
             log_open: false,
             log_scroll: UniformListScrollHandle::new(),
             fitted: false,
+            hover: None,
+            pointer: None,
+            pending_reveal: None,
+            edge_pan: None,
+            log_filtered: false,
+            inspector_split: cx.new(|_| ResizableState::default()),
+            log_split: cx.new(|_| ResizableState::default()),
         }
     }
 
@@ -241,14 +288,10 @@ impl FlowEditor {
             if let BlockKind::HttpRequest { request: id } = &block.kind
                 && !self.request_info.contains_key(id)
             {
-                let info = self.requests.find(id, cx).map(|saved| RequestInfo {
-                    method: saved.request.method.as_str(),
-                    name: saved.name,
-                    variables: flow::request_variables(&saved.request, &saved.collection_auth)
-                        .into_iter()
-                        .map(SharedString::from)
-                        .collect(),
-                });
+                let info = self
+                    .requests
+                    .find(id, cx)
+                    .map(|saved| self.describe_request(saved, cx));
                 self.request_info.insert(id.clone(), info);
             }
         }
@@ -278,7 +321,7 @@ impl FlowEditor {
                             inputs.push(variable.clone());
                         }
                     }
-                    request = Some((info.method, info.name.clone()));
+                    request = Some(info.clone());
                 }
 
                 // A connected input stays while its variable is out of the
@@ -297,13 +340,19 @@ impl FlowEditor {
                 .map(|name| SharedString::from(name.into_owned()))
                 .collect();
             let rows = inputs.len().max(outputs.len());
+            let message = self
+                .run
+                .blocks
+                .get(&block.id)
+                .and_then(|status| status.last.as_ref())
+                .is_some_and(|run| run.error.is_some() || run.notice.is_some());
 
             layouts.insert(
                 block.id.clone(),
                 Layout {
                     bounds: Bounds {
                         origin: point(block.x, block.y),
-                        size: geometry::block_size(&block.kind, rows),
+                        size: geometry::block_size(&block.kind, rows, message),
                     },
                     inputs,
                     outputs,
@@ -313,6 +362,56 @@ impl FlowEditor {
         }
 
         self.layouts = layouts;
+    }
+
+    /// What an HTTP Request block shows of a saved request, with the
+    /// variables its collection and the active environment fill.
+    fn describe_request(&self, saved: FlowRequest, cx: &App) -> RequestInfo {
+        let environment = saved.collection.join("environment.toml");
+        let scope = VariableScope {
+            path: Some(environment.clone()),
+            session: self.sessions.for_path(Some(&environment)),
+            environments: self.environments.clone(),
+            names: None,
+        };
+        let defined = scope
+            .values(cx)
+            .map(|values| values.into_keys().collect())
+            .unwrap_or_default();
+
+        RequestInfo {
+            method: saved.request.method.as_str(),
+            path: SharedString::from(saved.request.path.clone()),
+            variables: flow::request_variables(&saved.request, &saved.collection_auth)
+                .into_iter()
+                .map(SharedString::from)
+                .collect(),
+            defined: Rc::new(defined),
+            name: saved.name,
+        }
+    }
+
+    /// The name a block goes by on the canvas and in the run log: its own
+    /// title, the name of the request an HTTP Request block sends, or its
+    /// type's name.
+    pub(super) fn block_title(&self, block: &Block, cx: &App) -> SharedString {
+        if let Some(title) = block
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+        {
+            return SharedString::from(title.to_owned());
+        }
+        if let BlockKind::HttpRequest { request } = &block.kind {
+            let name = match self.request_info.get(request) {
+                Some(info) => info.as_ref().map(|info| info.name.clone()),
+                None => self.requests.find(request, cx).map(|saved| saved.name),
+            };
+            if let Some(name) = name {
+                return name;
+            }
+        }
+        SharedString::from(block.title().to_owned())
     }
 
     /// The port nearest to a canvas position, within reach of the pointer.
@@ -361,16 +460,27 @@ impl FlowEditor {
         }
     }
 
-    /// The topmost block at a canvas position.
+    /// The topmost block at a canvas position. Notes lie behind the other
+    /// blocks.
     pub(super) fn block_at(&self, position: Point<f32>) -> Option<String> {
-        self.flow.blocks.iter().rev().find_map(|block| {
-            let bounds = self.layouts.get(&block.id)?.bounds;
-            (position.x >= bounds.origin.x
-                && position.x <= bounds.origin.x + bounds.size.width
-                && position.y >= bounds.origin.y
-                && position.y <= bounds.origin.y + bounds.size.height)
-                .then(|| block.id.clone())
-        })
+        let at = |block: &&Block| {
+            self.layouts.get(&block.id).is_some_and(|layout| {
+                let bounds = layout.bounds;
+                position.x >= bounds.origin.x
+                    && position.x <= bounds.origin.x + bounds.size.width
+                    && position.y >= bounds.origin.y
+                    && position.y <= bounds.origin.y + bounds.size.height
+            })
+        };
+        let note = |block: &&Block| matches!(block.kind, BlockKind::Note { .. });
+
+        let blocks = self.flow.blocks.iter().rev();
+        blocks
+            .clone()
+            .filter(|block| !note(block))
+            .find(at)
+            .or_else(|| blocks.filter(note).find(at))
+            .map(|block| block.id.clone())
     }
 
     /// The connection nearest to a canvas position, within reach of the pointer.
@@ -389,8 +499,8 @@ impl FlowEditor {
             .map(|(_, connection)| connection.clone())
     }
 
-    /// The curve of a connection between the ports it joins.
-    pub(super) fn wire(&self, connection: &Connection) -> Option<[Point<f32>; 4]> {
+    /// The curves of a connection between the ports it joins.
+    pub(super) fn wire(&self, connection: &Connection) -> Option<Vec<[Point<f32>; 4]>> {
         let from = self.layouts.get(&connection.from)?;
         let to = self.layouts.get(&connection.to)?;
         let output = from
@@ -402,9 +512,11 @@ impl FlowEditor {
             .iter()
             .position(|input| *input == connection.input)?;
 
-        Some(geometry::wire(
+        let bottom = |layout: &Layout| layout.bounds.origin.y + layout.bounds.size.height;
+        Some(geometry::route(
             from.output_position(output),
             to.input_position(input),
+            (bottom(from), bottom(to)),
         ))
     }
 
@@ -467,6 +579,13 @@ impl FlowEditor {
     ) -> String {
         let id = self.flow.next_block_id();
         let loops = matches!(kind, BlockKind::For | BlockKind::Repeat);
+        let position = self.free_spot(&kind, position);
+        let collect_position = loops.then(|| {
+            self.free_spot(
+                &BlockType::Collect.block_kind(),
+                point(position.x + 520., position.y),
+            )
+        });
         let block = Block {
             id: id.clone(),
             title: None,
@@ -506,14 +625,14 @@ impl FlowEditor {
 
                 // Like Postman, a new loop comes with the Collect block that
                 // ends it.
-                if loops {
+                if let Some(at) = collect_position {
                     let collect = flow.next_block_id();
                     added.push(collect.clone());
                     flow.blocks.push(Block {
                         id: collect,
                         title: None,
-                        x: position.x + 520.,
-                        y: position.y,
+                        x: at.x,
+                        y: at.y,
                         kind: BlockType::Collect.block_kind(),
                     });
                 }
@@ -523,7 +642,29 @@ impl FlowEditor {
         self.forget_runs(&added);
 
         self.set_selection(vec![id.clone()], window, cx);
+        self.pending_reveal = Some(id.clone());
         id
+    }
+
+    /// Where a new block can go at or just below `position` without covering
+    /// another block. Notes may be covered; they frame blocks.
+    fn free_spot(&self, kind: &BlockKind, position: Point<f32>) -> Point<f32> {
+        let rows = kind.inputs().len().max(kind.outputs().len()).max(1);
+        editing::free_spot(
+            &self.taken(),
+            geometry::block_size(kind, rows, false),
+            position,
+        )
+    }
+
+    /// Where the blocks other than Notes are.
+    fn taken(&self) -> Vec<Bounds<f32>> {
+        self.flow
+            .blocks
+            .iter()
+            .filter(|block| !matches!(block.kind, BlockKind::Note { .. }))
+            .filter_map(|block| Some(self.layouts.get(&block.id)?.bounds))
+            .collect()
     }
 
     /// New blocks can take the IDs of deleted ones; they have not run.
@@ -595,10 +736,27 @@ impl FlowEditor {
     }
 
     fn insert_copy(&mut self, copied: Flow, window: &mut Window, cx: &mut Context<Self>) {
+        // Copies go beside their originals, but not over another block.
+        let group: Vec<Bounds<f32>> = copied
+            .blocks
+            .iter()
+            .filter(|block| !matches!(block.kind, BlockKind::Note { .. }))
+            .map(|block| Bounds {
+                origin: point(block.x, block.y),
+                size: self
+                    .layouts
+                    .get(&block.id)
+                    .filter(|layout| layout.bounds.origin == point(block.x, block.y))
+                    .map(|layout| layout.bounds.size)
+                    .unwrap_or_else(|| geometry::block_size(&block.kind, 1, false)),
+            })
+            .collect();
+        let offset = editing::free_offset(&self.taken(), &group, point(32., 32.));
+
         let mut pasted = Vec::new();
         self.edit(
             None,
-            |flow| pasted = editing::paste(flow, copied, point(32., 32.)),
+            |flow| pasted = editing::paste(flow, copied, offset),
             cx,
         );
         self.forget_runs(&pasted);
@@ -642,7 +800,7 @@ impl FlowEditor {
                     sizes
                         .get(&block.id)
                         .copied()
-                        .unwrap_or_else(|| geometry::block_size(&block.kind, 1))
+                        .unwrap_or_else(|| geometry::block_size(&block.kind, 1, false))
                 })
             },
             cx,
@@ -651,11 +809,16 @@ impl FlowEditor {
         self.zoom_to_fit(window, cx);
     }
 
-    pub(super) fn zoom_by(&mut self, factor: f32, cx: &mut Context<Self>) {
+    /// Zoom around the middle of the view.
+    pub(super) fn zoom_to(&mut self, zoom: f32, cx: &mut Context<Self>) {
         let center = point(self.view.size.width / 2., self.view.size.height / 2.);
-        let zoom = self.viewport.zoom * factor;
         self.viewport.zoom_around(zoom, center, self.rem);
         cx.notify();
+    }
+
+    /// Zoom in or out to the next step.
+    pub(super) fn zoom_step(&mut self, zoom_in: bool, cx: &mut Context<Self>) {
+        self.zoom_to(geometry::step_zoom(self.viewport.zoom, zoom_in), cx);
     }
 
     pub(super) fn zoom_to_fit(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -668,24 +831,52 @@ impl FlowEditor {
         cx.notify();
     }
 
-    /// Move the view so a block is in it, unless it already is.
+    /// Move the view so a block is in it, close enough to read, unless it
+    /// already is. The view moves once the canvas has its size, which
+    /// showing the inspector beside it may change.
     pub(super) fn reveal(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(layout) = self.layouts.get(id) else {
-            return;
-        };
-        let visible = self.viewport.visible(self.view.size, self.rem);
-        let bounds = layout.bounds;
-        let inside = bounds.origin.x >= visible.origin.x
-            && bounds.origin.y >= visible.origin.y
-            && bounds.origin.x + bounds.size.width <= visible.origin.x + visible.size.width
-            && bounds.origin.y + bounds.size.height <= visible.origin.y + visible.size.height;
-
-        if !inside {
-            self.viewport.origin = point(
-                bounds.origin.x + bounds.size.width / 2. - visible.size.width / 2.,
-                bounds.origin.y + bounds.size.height / 2. - visible.size.height / 2.,
+        if self.viewport.zoom < geometry::DETAIL_ZOOM
+            && let Some(layout) = self.layouts.get(id)
+        {
+            let center = point(
+                layout.bounds.origin.x + layout.bounds.size.width / 2.,
+                layout.bounds.origin.y + layout.bounds.size.height / 2.,
             );
-            cx.notify();
+            self.viewport.zoom = 1.;
+            let visible = self.viewport.visible(self.view.size, self.rem);
+            self.viewport.origin = point(
+                center.x - visible.size.width / 2.,
+                center.y - visible.size.height / 2.,
+            );
+        }
+        self.pending_reveal = Some(id.to_owned());
+        cx.notify();
+    }
+
+    /// Move the view as little as it takes to show a block. Returns whether
+    /// it moved.
+    pub(super) fn reveal_now(&mut self, id: &str) -> bool {
+        let Some(layout) = self.layouts.get(id) else {
+            return false;
+        };
+        match self
+            .viewport
+            .revealing(layout.bounds, self.view.size, self.rem)
+        {
+            Some(viewport) => {
+                self.viewport = viewport;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Where blocks added from the keyboard go: under the pointer when it
+    /// is over the canvas, or the middle of the view.
+    pub(super) fn add_position(&self) -> Point<f32> {
+        match self.pointer {
+            Some(pointer) if self.view.contains(&pointer) => self.canvas_position(pointer),
+            _ => self.view_center(),
         }
     }
 
@@ -717,6 +908,21 @@ impl Render for FlowEditor {
         self.rem = window.rem_size();
         self.update_layouts(cx);
 
+        let rem = window.rem_size();
+        let inspector = self.render_inspector(cx);
+        let inspected = inspector.is_some();
+        let canvas = h_resizable("flow-inspector-split")
+            .with_state(&self.inspector_split)
+            .child(self.render_canvas(window, cx))
+            .child(
+                resizable_panel()
+                    .visible(inspected)
+                    .flex_none()
+                    .size(rems(22.).to_pixels(rem))
+                    .size_range(rems(16.).to_pixels(rem)..rems(44.).to_pixels(rem))
+                    .children(inspector),
+            );
+
         v_flex()
             .debug_selector(|| "flow-editor".into())
             .size_full()
@@ -724,14 +930,20 @@ impl Render for FlowEditor {
             .min_h_0()
             .child(self.render_toolbar(cx))
             .child(
-                h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .child(self.render_canvas(window, cx))
-                    .children(self.render_inspector(cx)),
+                div().flex_1().min_h_0().min_w_0().overflow_hidden().child(
+                    v_resizable("flow-log-split")
+                        .with_state(&self.log_split)
+                        .child(canvas)
+                        .child(
+                            resizable_panel()
+                                .visible(self.log_open)
+                                .flex_none()
+                                .size(rems(13.).to_pixels(rem))
+                                .size_range(rems(7.).to_pixels(rem)..rems(48.).to_pixels(rem))
+                                .when(self.log_open, |this| this.child(self.render_run_log(cx))),
+                        ),
+                ),
             )
-            .when(self.log_open, |this| this.child(self.render_run_log(cx)))
     }
 }
 

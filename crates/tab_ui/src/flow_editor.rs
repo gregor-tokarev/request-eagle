@@ -16,6 +16,8 @@ mod run_log;
 mod zoom;
 
 #[cfg(test)]
+mod blocks_tests;
+#[cfg(test)]
 mod editing_tests;
 #[cfg(test)]
 mod geometry_tests;
@@ -23,6 +25,8 @@ mod geometry_tests;
 mod inspector_tests;
 #[cfg(test)]
 mod preview_tests;
+#[cfg(test)]
+mod run_tests;
 
 pub use actions::*;
 pub use editor::{FlowEditor, FlowRequest, FlowRequests};

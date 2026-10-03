@@ -15,29 +15,42 @@ its row in the sidebar opens, renames, duplicates or deletes it.
 
 | Action | How |
 | --- | --- |
-| Add a block | Right-click the canvas, choose **Block** in the toolbar, or press `A`. Type to search blocks and saved requests; Enter adds the highlighted one. |
+| Add a block | Right-click the canvas, choose **Block** in the toolbar, or press `A` to add one under the pointer. Type to search blocks and saved requests, which the picker lists by group; Enter adds the highlighted one. New blocks make room rather than cover others. |
 | Connect | Drag from an output to an input. The connection is dashed until it reaches a port it can join. Dropping on a block joins its first free input; dropping on empty canvas opens the picker, which the connection leads to, and connects the new block. |
 | Move a connection | Drag it off the input it ends at. |
 | Select | Click a block or a connection. Shift-click or Ctrl/Cmd-click adds blocks; Shift-drag selects an area. |
-| Move | Drag a block. Every selected block moves with it. Arrow keys nudge the selection; with Shift, further. |
+| Move | Drag a block. Every selected block moves with it, and dragging to the edge of the canvas pans it. Arrow keys nudge the selection; with Shift, further. |
+| Frame a section | Drag a Note's corner to resize it around blocks. Its first line names the section, and the blocks inside move with it. |
+| Follow connections | Point at a block or a connection, or select one, to highlight its connections, also where they pass behind other blocks. A connection back to an earlier block runs below them. |
 | Pan | Drag empty canvas, drag with the middle button, scroll a trackpad, or Shift-scroll a mouse wheel. |
-| Zoom | Scroll a mouse wheel, pinch a trackpad, Ctrl/Cmd-scroll, the toolbar, `Ctrl/Cmd =` and `Ctrl/Cmd -`. `Ctrl/Cmd 0` shows the whole flow. |
+| Zoom | Scroll a mouse wheel, pinch a trackpad, Ctrl/Cmd-scroll, the toolbar, `Ctrl/Cmd =` and `Ctrl/Cmd -`, which step through fixed zooms. The zoom in the toolbar goes back to 100%, and `Ctrl/Cmd 0` shows the whole flow. Zoomed far out, blocks show only their titles. |
 | Delete | Backspace or Delete removes the selection. |
 | Copy, paste, duplicate | `Ctrl/Cmd C`, `Ctrl/Cmd V`, `Ctrl/Cmd D`. Copies keep the connections between the copied blocks. |
 | Undo, redo | `Ctrl/Cmd Z`, `Ctrl/Cmd Shift Z`. |
-| Arrange | **Arrange** places blocks in columns so connections run left to right. |
+| Arrange | **Arrange** places blocks in columns so connections run left to right. Notes stay around the blocks they frame. |
 
 Selecting one block opens its settings on the right, with what it received
-and sent in the last run. Shortcuts can be changed in the keyboard settings.
+and sent in the last run. An HTTP Request block goes by the name of its
+request unless it has its own title, and dims the variables its collection
+or the active environment already fill. The settings panel and the run log
+can be resized by dragging their edges. Shortcuts can be changed in the
+keyboard settings.
 
 ## Running
 
 Click **Run** or press `Ctrl/Cmd Enter`. The flow runs as it is in the
 editor, saved or not, with the environment selected in the tab bar. Blocks
 show a spinner while they work, a check and their run count when they ran,
-and their error when they failed. Connections that carried data are drawn
-brighter, Display blocks show what they received last, and the run log lists
-every block's run with what it sent.
+and their error when they failed. HTTP Request blocks show the status they
+received, in red when the request failed and went out of Fail, and the
+toolbar counts failed requests. Connections that carried data are colored,
+red when they carried a failure, and Display blocks show what they received
+last.
+
+The run log lists every block's run with what it sent, numbering the runs of
+blocks that ran more than once, as in a loop. Choosing an entry selects its
+block and shows that run in the settings panel; **Selected block only** keeps
+to the selected block's entries.
 
 A run sends requests like their tabs do: their collection's variables, the
 active environment, session values set by scripts, the cookie jar and the
@@ -93,7 +106,7 @@ runs, which ends a loop that never does.
 | Create Variable | Value | Stores a value under a name and sends it from every Get Variable block of that name. |
 | Get Variable | → Value | |
 | Output | one per name | What a run returns, for example to the CLI. |
-| Note | | Text on the canvas. |
+| Note | | Text on the canvas. Its first line is a heading. Resized around blocks, it frames them as a section. |
 
 An HTTP Request block sends:
 

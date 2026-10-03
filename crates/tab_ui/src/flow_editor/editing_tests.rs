@@ -1,7 +1,8 @@
-use flow::{Block, BlockType, Connection, Flow};
-use gpui_kit::{point, size};
+use flow::{Block, BlockKind, BlockType, Connection, Flow};
+use gpui_kit::{Bounds, point, size};
 
-use super::editing::{arrange, copy, from_clipboard, paste, to_clipboard};
+use super::editing::{arrange, copy, free_offset, free_spot, from_clipboard, paste, to_clipboard};
+use super::geometry;
 use super::history::History;
 
 fn block(id: &str, block_type: BlockType, x: f32) -> Block {
@@ -90,6 +91,77 @@ fn arranges_blocks_left_to_right_even_with_a_cycle() {
     assert!(x("b4") < x("b1"));
     assert!(x("b1") < x("b2"));
     assert!(x("b2") < x("b3"));
+}
+
+#[test]
+fn arranging_keeps_notes_around_the_blocks_they_frame() {
+    let mut flow = sample();
+    // The Note frames b1 and b2 but not b3.
+    flow.blocks.push(Block {
+        id: "b4".to_owned(),
+        title: None,
+        x: -50.,
+        y: -80.,
+        kind: BlockKind::Note {
+            text: "Section".to_owned(),
+            width: Some(700.),
+            height: Some(300.),
+        },
+    });
+    let size_of = |block: &Block| match &block.kind {
+        BlockKind::Note { width, height, .. } => size(width.unwrap(), height.unwrap()),
+        _ => size(200., 100.),
+    };
+
+    arrange(&mut flow, size_of);
+
+    let bounds = |id: &str| {
+        let block = flow.block(id).unwrap();
+        Bounds {
+            origin: point(block.x, block.y),
+            size: size_of(block),
+        }
+    };
+    let frame = bounds("b4");
+    assert!(geometry::contains(&frame, &bounds("b1")));
+    assert!(geometry::contains(&frame, &bounds("b2")));
+    assert!(bounds("b1").origin.x < bounds("b2").origin.x);
+    // The Note takes its blocks' place: what they lead to comes after it,
+    // rather than among them.
+    assert!(bounds("b3").origin.x >= frame.origin.x + frame.size.width);
+}
+
+#[test]
+fn new_blocks_go_to_the_nearest_free_place_below() {
+    let taken = [Bounds {
+        origin: point(0., 0.),
+        size: size(200., 100.),
+    }];
+
+    // A free place stays as it is.
+    assert_eq!(
+        free_spot(&taken, size(100., 50.), point(400., 0.)),
+        point(400., 0.)
+    );
+    // Over a block, the new one moves below it, keeping a gap.
+    let spot = free_spot(&taken, size(100., 50.), point(50., 20.));
+    assert_eq!(spot.x, 50.);
+    assert!(spot.y >= 100. + 16.);
+
+    // A copied group moves down together until none of it covers a block.
+    let group = [
+        Bounds {
+            origin: point(0., 0.),
+            size: size(200., 100.),
+        },
+        Bounds {
+            origin: point(300., 0.),
+            size: size(200., 100.),
+        },
+    ];
+    let offset = free_offset(&taken, &group, point(32., 32.));
+    assert_eq!(offset.x, 32.);
+    assert!(offset.y >= 100. + 16.);
 }
 
 #[test]

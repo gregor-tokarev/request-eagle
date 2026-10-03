@@ -14,8 +14,23 @@ pub(super) const PORT: f32 = 10.;
 /// How close a pointer must be to a port or connection to grab it, in
 /// screen pixels.
 pub(super) const GRAB: f32 = 12.;
-pub(super) const MIN_ZOOM: f32 = 0.25;
+pub(super) const MIN_ZOOM: f32 = 0.1;
+/// Below this zoom, text would be too small to read, so blocks are drawn as
+/// shapes with their titles. Large flows stay fast when the whole flow is in
+/// view.
+pub(super) const DETAIL_ZOOM: f32 = 0.5;
 pub(super) const MAX_ZOOM: f32 = 2.;
+/// The zooms the zoom buttons and shortcuts step through. 50% is the first
+/// that shows blocks' text.
+const ZOOM_STEPS: [f32; 10] = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1., 1.25, 1.5, 2.];
+/// The space below a block's ports for a message of its last run, such as
+/// an error.
+pub(super) const MESSAGE: f32 = 36.;
+/// The space below the ports of a block that shows nothing else.
+const BODYLESS: f32 = 8.;
+/// How far below the lower of two blocks a connection back to an earlier
+/// block runs.
+const LOOP_DROP: f32 = 40.;
 /// How much a notch of a mouse wheel zooms, as a natural logarithm: about
 /// 16%.
 const WHEEL_ZOOM: f32 = 0.15;
@@ -23,41 +38,81 @@ const WHEEL_ZOOM: f32 = 0.15;
 pub(super) const NOTCH_LINES: f32 = if cfg!(target_os = "macos") { 1. } else { 3. };
 
 pub(super) fn width(kind: &BlockKind) -> f32 {
-    match kind.block_type() {
-        BlockType::Start
-        | BlockType::HttpRequest
-        | BlockType::Evaluate
-        | BlockType::If
-        | BlockType::Condition
-        | BlockType::Validate
-        | BlockType::Record
-        | BlockType::List
-        | BlockType::Template
-        | BlockType::Display
-        | BlockType::Note => 288.,
-        _ => 208.,
+    match kind {
+        BlockKind::Note { width, .. } => width.unwrap_or(NOTE_SIZE.width),
+        _ => match kind.block_type() {
+            BlockType::Start
+            | BlockType::HttpRequest
+            | BlockType::Evaluate
+            | BlockType::If
+            | BlockType::Condition
+            | BlockType::Validate
+            | BlockType::Record
+            | BlockType::List
+            | BlockType::Template
+            | BlockType::Display => 288.,
+            _ => 208.,
+        },
     }
 }
 
-/// The height below the ports: a block's summary, or a Display block's data.
+/// The size of a Note that has not been resized.
+pub(super) const NOTE_SIZE: Size<f32> = Size {
+    width: 288.,
+    height: 148.,
+};
+
+/// The height below the ports: a block's summary, or a Display block's
+/// data. Blocks whose ports say all there is to say have none.
 pub(super) fn body_height(kind: &BlockKind) -> f32 {
     match kind.block_type() {
         BlockType::Display => 176.,
-        BlockType::Note => 112.,
-        BlockType::Evaluate
+        BlockType::Start
+        | BlockType::Evaluate
         | BlockType::If
-        | BlockType::Condition
         | BlockType::Template
-        | BlockType::Validate
-        | BlockType::Record
-        | BlockType::List => 56.,
+        | BlockType::Record => 56.,
+        BlockType::Or
+        | BlockType::Repeat
+        | BlockType::For
+        | BlockType::Collect
+        | BlockType::Log
+        | BlockType::Null
+        | BlockType::Now
+        | BlockType::Output
+        | BlockType::Condition => BODYLESS,
         _ => 36.,
     }
 }
 
-/// A block's size with `rows` rows of ports.
-pub(super) fn block_size(kind: &BlockKind, rows: usize) -> Size<f32> {
-    size(width(kind), HEADER + ROW * rows as f32 + body_height(kind))
+/// A block's size with `rows` rows of ports, and room for a message of its
+/// last run when it has one.
+pub(super) fn block_size(kind: &BlockKind, rows: usize, message: bool) -> Size<f32> {
+    if let BlockKind::Note { height, .. } = kind {
+        return size(width(kind), height.unwrap_or(NOTE_SIZE.height));
+    }
+
+    let body = if message && body_height(kind) < MESSAGE {
+        MESSAGE
+    } else {
+        body_height(kind)
+    };
+    size(width(kind), HEADER + ROW * rows as f32 + body)
+}
+
+/// The zoom a zoom button goes to from `zoom`: the next step in or out.
+pub(super) fn step_zoom(zoom: f32, zoom_in: bool) -> f32 {
+    // Zooms a pinch left between steps go to the nearest step past them.
+    let next = if zoom_in {
+        ZOOM_STEPS.iter().copied().find(|step| *step > zoom + 0.005)
+    } else {
+        ZOOM_STEPS
+            .iter()
+            .copied()
+            .rev()
+            .find(|step| *step < zoom - 0.005)
+    };
+    next.unwrap_or(zoom)
 }
 
 /// How far down a block the port of a row is.
@@ -170,6 +225,39 @@ impl Viewport {
         }
     }
 
+    /// The view moved as little as it takes to show `bounds` with a margin,
+    /// or nothing when it already does. Bounds larger than the view show
+    /// from their top-left corner.
+    pub fn revealing(&self, bounds: Bounds<f32>, view: Size<Pixels>, rem: Pixels) -> Option<Self> {
+        let margin = 24.;
+        let visible = self.visible(view, rem);
+        let axis = |start: f32, length: f32, shown: f32, shown_length: f32| {
+            if length + margin * 2. > shown_length || start < shown + margin {
+                start - margin
+            } else if start + length > shown + shown_length - margin {
+                start + length + margin - shown_length
+            } else {
+                shown
+            }
+        };
+        let origin = point(
+            axis(
+                bounds.origin.x,
+                bounds.size.width,
+                visible.origin.x,
+                visible.size.width,
+            ),
+            axis(
+                bounds.origin.y,
+                bounds.size.height,
+                visible.origin.y,
+                visible.size.height,
+            ),
+        );
+
+        (origin != self.origin).then_some(Self { origin, ..*self })
+    }
+
     /// The canvas area a view of `view` pixels shows.
     pub fn visible(&self, view: Size<Pixels>, rem: Pixels) -> Bounds<f32> {
         let scale = self.scale(rem);
@@ -209,6 +297,41 @@ pub(super) fn wire(from: Point<f32>, to: Point<f32>) -> [Point<f32>; 4] {
     ]
 }
 
+/// The curves a connection between two blocks is drawn with. A connection
+/// back to an input left of its output, such as one closing a loop, runs
+/// below both blocks, whose bottoms are `bottoms`, rather than behind them.
+pub(super) fn route(from: Point<f32>, to: Point<f32>, bottoms: (f32, f32)) -> Vec<[Point<f32>; 4]> {
+    if to.x >= from.x + 48. {
+        return vec![wire(from, to)];
+    }
+
+    let below = bottoms.0.max(bottoms.1) + LOOP_DROP;
+    let bend = 48.;
+    let line = |a: Point<f32>, b: Point<f32>| {
+        [
+            a,
+            point(a.x + (b.x - a.x) / 3., a.y),
+            point(a.x + (b.x - a.x) * 2. / 3., b.y),
+            b,
+        ]
+    };
+    let down = point(from.x, below);
+    let up = point(to.x, below);
+
+    vec![
+        // Out to the right and down below the blocks.
+        [
+            from,
+            point(from.x + bend, from.y),
+            point(from.x + bend, below),
+            down,
+        ],
+        line(down, up),
+        // Up and into the input from the left.
+        [up, point(to.x - bend, below), point(to.x - bend, to.y), to],
+    ]
+}
+
 /// The points along a connection's curve, for drawing and hit testing.
 pub(super) fn wire_points(curve: &[Point<f32>; 4], segments: usize) -> Vec<Point<f32>> {
     (0..=segments)
@@ -224,11 +347,16 @@ pub(super) fn wire_points(curve: &[Point<f32>; 4], segments: usize) -> Vec<Point
         .collect()
 }
 
-/// How far a position is from a connection's curve.
-pub(super) fn distance_to_wire(position: Point<f32>, curve: &[Point<f32>; 4]) -> f32 {
-    wire_points(curve, 32)
-        .windows(2)
-        .map(|segment| distance_to_segment(position, segment[0], segment[1]))
+/// How far a position is from a connection's curves.
+pub(super) fn distance_to_wire(position: Point<f32>, curves: &[[Point<f32>; 4]]) -> f32 {
+    curves
+        .iter()
+        .flat_map(|curve| {
+            wire_points(curve, 32)
+                .windows(2)
+                .map(|segment| distance_to_segment(position, segment[0], segment[1]))
+                .collect::<Vec<_>>()
+        })
         .fold(f32::INFINITY, f32::min)
 }
 
@@ -251,6 +379,14 @@ pub(super) fn rectangle(a: Point<f32>, b: Point<f32>) -> Bounds<f32> {
         origin: point(a.x.min(b.x), a.y.min(b.y)),
         size: size((a.x - b.x).abs(), (a.y - b.y).abs()),
     }
+}
+
+/// Whether `inner` lies wholly within `outer`.
+pub(super) fn contains(outer: &Bounds<f32>, inner: &Bounds<f32>) -> bool {
+    inner.origin.x >= outer.origin.x
+        && inner.origin.y >= outer.origin.y
+        && inner.origin.x + inner.size.width <= outer.origin.x + outer.size.width
+        && inner.origin.y + inner.size.height <= outer.origin.y + outer.size.height
 }
 
 pub(super) fn intersects(a: &Bounds<f32>, b: &Bounds<f32>) -> bool {

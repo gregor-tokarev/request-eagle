@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use flow::{BlockKind, DisplayFormat, Field, Flow, TemplateFormat};
+use flow::{Block, BlockKind, BlockRun, BlockType, DisplayFormat, Field, Flow, TemplateFormat};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -13,7 +13,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_label;
 use serde_json::Value;
 
-use super::{FlowEditor, blocks, preview};
+use super::{FlowEditor, blocks, preview, run::format_duration};
 
 /// How long the FQL preview waits for typing to pause before evaluating.
 const PREVIEW_DELAY: Duration = Duration::from_millis(150);
@@ -75,8 +75,14 @@ pub(super) struct Inspector {
     /// Evaluates the preview away from the interface; replacing it drops
     /// a result that is out of date.
     preview_task: Option<Task<()>>,
-    /// The last run's inputs and outputs.
+    /// The inputs and outputs of the run shown: the last one, or one chosen
+    /// in the run log.
     run: Option<Entity<EditorState>>,
+    /// The run chosen in the run log, and how long into the flow's run it
+    /// finished.
+    chosen_run: Option<(Duration, Arc<BlockRun>)>,
+    /// The saved requests are listed to choose another.
+    choosing_request: bool,
     /// Settings whose text cannot apply, such as a number that is not one.
     /// The block keeps its previous value until they are fixed.
     pub errors: Vec<(Setting, String)>,
@@ -119,9 +125,32 @@ impl FlowEditor {
             Some(id) => {
                 self.inspector = Some(self.build_inspector(&id, window, cx));
                 self.update_preview(&id, cx);
+                // The inspector may open over the block.
+                self.pending_reveal = Some(id);
             }
             None => self.inspector = None,
         }
+    }
+
+    /// Show a run chosen in the run log in the inspector of its block.
+    pub(super) fn show_run(
+        &mut self,
+        id: &str,
+        run: Arc<BlockRun>,
+        at: Duration,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = Some(self.run_view(&run, window, cx));
+        if let Some(inspector) = self
+            .inspector
+            .as_mut()
+            .filter(|inspector| inspector.block == id)
+        {
+            inspector.run = view;
+            inspector.chosen_run = Some((at, run));
+        }
+        cx.notify();
     }
 
     /// Show the latest run in the inspector.
@@ -134,9 +163,10 @@ impl FlowEditor {
             return;
         };
 
-        let run = self.run_view(&id, window, cx);
+        let run = self.last_run_view(&id, window, cx);
         if let Some(inspector) = &mut self.inspector {
             inspector.run = run;
+            inspector.chosen_run = None;
         }
         self.update_preview(&id, cx);
     }
@@ -169,6 +199,8 @@ impl FlowEditor {
             preview: None,
             preview_task: None,
             run: None,
+            chosen_run: None,
+            choosing_request: false,
             errors: Vec::new(),
             _subscriptions: Vec::new(),
         };
@@ -192,10 +224,18 @@ impl FlowEditor {
             inspector.editors.push((setting, Editing::Line(input)));
         };
 
+        // An HTTP Request block goes by its request's name until titled.
+        let untitled = self.block_title(
+            &Block {
+                title: None,
+                ..block.clone()
+            },
+            cx,
+        );
         line(
             Setting::Title,
             block.title.as_deref().unwrap_or_default(),
-            block.kind.block_type().name(),
+            &untitled,
             window,
             cx,
         );
@@ -236,7 +276,7 @@ impl FlowEditor {
                     line(
                         Setting::FieldValue(index),
                         &field.value,
-                        "Value when not connected",
+                        "Default value",
                         window,
                         cx,
                     );
@@ -244,13 +284,7 @@ impl FlowEditor {
             }
             BlockKind::List { items } => {
                 for (index, item) in items.iter().enumerate() {
-                    line(
-                        Setting::Item(index),
-                        item,
-                        "Value when not connected",
-                        window,
-                        cx,
-                    );
+                    line(Setting::Item(index), item, "Default value", window, cx);
                 }
             }
             BlockKind::Output { names } => {
@@ -271,6 +305,7 @@ impl FlowEditor {
                 EditorState::new(window, cx)
                     .language(language.to_owned())
                     .line_number(false)
+                    .folding(false)
                     .soft_wrap(true)
                     .placeholder(placeholder.to_owned())
                     .default_value(value.to_owned())
@@ -335,7 +370,7 @@ impl FlowEditor {
                 window,
                 cx,
             ),
-            BlockKind::Note { text } => {
+            BlockKind::Note { text, .. } => {
                 code(Setting::Note, text, "text", "Write a note", window, cx)
             }
             _ => {}
@@ -354,18 +389,28 @@ impl FlowEditor {
             inspector.request_search = Some(search);
         }
 
-        inspector.run = self.run_view(id, window, cx);
+        inspector.run = self.last_run_view(id, window, cx);
         inspector
     }
 
     /// A read-only view of the block's last run.
-    fn run_view(
+    fn last_run_view(
         &self,
         id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<EditorState>> {
-        let run = self.run.blocks.get(id)?.last.as_ref()?;
+        let run = self.run.blocks.get(id)?.last.clone()?;
+        Some(self.run_view(&run, window, cx))
+    }
+
+    /// A read-only view of what a run sent and received.
+    fn run_view(
+        &self,
+        run: &BlockRun,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
         let object = |values: &[(String, std::sync::Arc<Value>)]| {
             Value::Object(
                 values
@@ -374,17 +419,14 @@ impl FlowEditor {
                     .collect(),
             )
         };
-        // Large responses would make the view slow to lay out.
-        let text = preview::json(
-            &serde_json::json!({
-                "inputs": object(&run.inputs),
-                "outputs": object(&run.outputs),
-            }),
-            true,
-            256 * 1024,
-        );
+        // What a block sent matters most, so it comes first. Large responses
+        // would make the view slow to lay out.
+        let mut shown = serde_json::Map::new();
+        shown.insert("outputs".to_owned(), object(&run.outputs));
+        shown.insert("inputs".to_owned(), object(&run.inputs));
+        let text = preview::json(&Value::Object(shown), true, 256 * 1024);
 
-        Some(cx.new(|cx| {
+        cx.new(|cx| {
             let mut editor = EditorState::new(window, cx)
                 .language("json")
                 .line_number(false)
@@ -392,7 +434,7 @@ impl FlowEditor {
                 .default_value(text);
             editor.set_readonly(true, cx);
             editor
-        }))
+        })
     }
 
     /// Evaluate the block's FQL with the inputs of its last run, or check
@@ -576,11 +618,7 @@ impl FlowEditor {
         let panel = v_flex()
             .id("flow-inspector")
             .debug_selector(|| "flow-inspector".into())
-            .flex_none()
-            .w(rems(22.))
-            // Leave the canvas room in a narrow window.
-            .max_w(relative(0.5))
-            .h_full()
+            .size_full()
             .border_l_1()
             .border_color(theme.border)
             .bg(theme.background)
@@ -592,29 +630,76 @@ impl FlowEditor {
             let title = |id: &str| {
                 self.flow
                     .block(id)
-                    .map(|block| block.title().to_owned())
+                    .map(|block| self.block_title(block, cx))
                     .unwrap_or_default()
             };
             let connection = connection.clone();
+            // What the connection carried last, if its output sent.
+            let carried = self
+                .run
+                .blocks
+                .get(&connection.from)
+                .and_then(|status| status.last.as_ref())
+                .and_then(|run| {
+                    run.outputs
+                        .iter()
+                        .find(|(name, _)| *name == connection.output)
+                        .map(|(_, value)| preview::pretty(value))
+                });
             return Some(
                 panel
-                    .child(section_title("Connection"))
-                    .child(div().text_sm().child(format!(
-                        "{} · {} → {} · {}",
-                        title(&connection.from),
-                        blocks::port_label(&connection.output.clone().into()),
-                        title(&connection.to),
-                        blocks::port_label(&connection.input.clone().into()),
-                    )))
                     .child(
-                        Button::new("flow-delete-connection")
-                            .danger()
-                            .label("Delete connection")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.delete_selection(window, cx)
-                                }),
+                        h_flex()
+                            .gap_2()
+                            .child(div().flex_1().child(section_title("Connection")))
+                            .child(
+                                Button::new("flow-delete-connection")
+                                    .debug_selector(|| "flow-delete-connection".into())
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(Icon::default().path("icons/trash.svg"))
+                                    .accessibility_label("Delete connection")
+                                    .tooltip("Delete connection")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.delete_selection(window, cx)
+                                    })),
                             ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .text_sm()
+                            .child(format!(
+                                "From {} · {}",
+                                title(&connection.from),
+                                blocks::port_label(&connection.output.clone().into())
+                            ))
+                            .child(format!(
+                                "To {} · {}",
+                                title(&connection.to),
+                                blocks::port_label(&connection.input.clone().into())
+                            )),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(section_title("Last value"))
+                            .child(match carried {
+                                Some(value) => div()
+                                    .debug_selector(|| "flow-connection-value".into())
+                                    .p_2()
+                                    .max_h(rems(24.))
+                                    .overflow_hidden()
+                                    .rounded(theme.radius_tokens().md)
+                                    .bg(theme.muted)
+                                    .font_family(theme.mono_font_family.clone())
+                                    .text_xs()
+                                    .child(value),
+                                None => div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Nothing went through it in the last run."),
+                            }),
                     )
                     .into_any_element(),
             );
@@ -675,7 +760,7 @@ impl FlowEditor {
                     }
                     Editing::Code(editor) => Some(
                         div()
-                            .h(rems(8.))
+                            .h(code_height(setting, &editor.read(cx).value()))
                             .rounded(theme.radius_tokens().md)
                             .border_1()
                             .border_color(theme.border)
@@ -723,7 +808,10 @@ impl FlowEditor {
                         .text_color(theme.muted_foreground)
                         .child(block_type.description()),
                 )
-                .child(labeled("Title", field(Setting::Title)));
+                // A Note's first line is its heading, so it needs no title.
+                .when(block_type != BlockType::Note, |this| {
+                    this.child(labeled("Title", field(Setting::Title)))
+                });
 
         if let Some(variables) = block.kind.variables() {
             let rows = (0..variables.len()).map(|index| {
@@ -902,7 +990,12 @@ impl FlowEditor {
                     }))
                     .child(add_button(&id, List::Outputs, "Add output", cx)),
             ),
-            BlockKind::Note { .. } => panel.child(labeled("Text", field(Setting::Note))),
+            BlockKind::Note { .. } => panel.child(labeled_note(
+                "Text",
+                field(Setting::Note),
+                "The first line is its heading. Drag its corner to frame blocks; they move with it.",
+                cx,
+            )),
             BlockKind::Or
             | BlockKind::Repeat
             | BlockKind::For
@@ -912,27 +1005,46 @@ impl FlowEditor {
             | BlockKind::Now => panel,
         };
 
+        let shown = inspector
+            .chosen_run
+            .as_ref()
+            .map(|(at, run)| (Some(*at), run.clone()))
+            .or_else(|| {
+                let last = self.run.blocks.get(&inspector.block)?.last.clone()?;
+                Some((None, last))
+            });
+
         Some(
             panel
-                .when_some(inspector.run.as_ref(), |this, run| {
-                    this.child(
-                        v_flex().gap_1().child(section_title("Last run")).child(
-                            div()
-                                .h(rems(16.))
-                                .rounded(theme.radius_tokens().md)
-                                .border_1()
-                                .border_color(theme.border)
-                                .overflow_hidden()
+                .when_some(
+                    inspector.run.as_ref().zip(shown),
+                    |this, (run, (at, shown))| {
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .child(section_title(&match at {
+                                    Some(at) => format!("Run at {:.3}s", at.as_secs_f64()),
+                                    None => "Last run".to_owned(),
+                                }))
+                                .child(run_summary(&shown, cx))
                                 .child(
-                                    Editor::new(run)
-                                        .h_full()
-                                        .bordered(false)
-                                        .readonly(true)
-                                        .text_xs(),
+                                    div()
+                                        .h(rems(16.))
+                                        .rounded(theme.radius_tokens().md)
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .overflow_hidden()
+                                        .child(
+                                            Editor::new(run)
+                                                .h_full()
+                                                .bordered(false)
+                                                .readonly(true)
+                                                .text_xs(),
+                                        ),
                                 ),
-                        ),
-                    )
-                })
+                        )
+                    },
+                )
                 .into_any_element(),
         )
     }
@@ -994,9 +1106,39 @@ impl FlowEditor {
             .take(30)
             .collect();
 
+        // Once a request is chosen, the others are listed only to change it.
+        let listing = chosen.is_none() || inspector.choosing_request;
+        let toggle = chosen.is_some().then(|| {
+            Button::new("flow-change-request")
+                .debug_selector(|| "flow-change-request".into())
+                .xsmall()
+                .ghost()
+                .label(if inspector.choosing_request {
+                    "Cancel"
+                } else {
+                    "Change"
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if let Some(inspector) = &mut this.inspector {
+                        inspector.choosing_request = !inspector.choosing_request;
+                        if inspector.choosing_request
+                            && let Some(search) = &inspector.request_search
+                        {
+                            search.update(cx, |search, cx| search.focus(window, cx));
+                        }
+                    }
+                    cx.notify();
+                }))
+        });
+
         v_flex()
             .gap_2()
-            .child(section_title("Request"))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().flex_1().child(section_title("Request")))
+                    .children(toggle),
+            )
             .child(match &chosen {
                 Some(request) => v_flex()
                     .gap_1()
@@ -1039,9 +1181,9 @@ impl FlowEditor {
                 div()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child("Success sends 2xx responses, Fail the others. Each {{variable}} is an input; a connected value replaces it."),
+                    .child("Success sends 2xx responses, Fail the others. Every variable of the request is an input; a connected value replaces its own."),
             )
-            .children(inspector.request_search.as_ref().map(|search| {
+            .when(listing, |this| this.children(inspector.request_search.as_ref().map(|search| {
                 Input::new(search).prefix(IconName::Search)
             }))
             .child(
@@ -1081,9 +1223,12 @@ impl FlowEditor {
                                         *request = request_id;
                                     }
                                 }, cx);
+                                if let Some(inspector) = &mut this.inspector {
+                                    inspector.choosing_request = false;
+                                }
                             }))
                     })),
-            )
+            ))
             .into_any_element()
     }
 }
@@ -1230,7 +1375,7 @@ pub(super) fn apply(flow: &mut Flow, id: &str, setting: Setting, value: String) 
                     renamed = Some((false, std::mem::replace(name, value.clone()), value));
                 }
             }
-            (Setting::Note, BlockKind::Note { text }) => *text = value,
+            (Setting::Note, BlockKind::Note { text, .. }) => *text = value,
             _ => {}
         }
     }
@@ -1365,6 +1510,99 @@ pub(super) fn change_list(flow: &mut Flow, id: &str, list: List, remove: Option<
         },
         _ => {}
     }
+}
+
+/// How tall a code editor is for its text: as many lines as it holds,
+/// between a few and a screenful, so short settings take little room.
+fn code_height(setting: Setting, text: &str) -> Rems {
+    // About how many characters fit on a line of the inspector's width.
+    const LINE_LENGTH: usize = 34;
+    const LINE: f32 = 1.3125;
+    const PADDING: f32 = 1.;
+
+    let (fewest, most) = match setting {
+        Setting::Expression | Setting::Condition(_) | Setting::Text => (1, 12),
+        Setting::Schema => (6, 24),
+        _ => (3, 16),
+    };
+    let lines: usize = text
+        .split('\n')
+        .map(|line| line.chars().count().div_ceil(LINE_LENGTH).max(1))
+        .sum();
+
+    rems(lines.clamp(fewest, most) as f32 * LINE + PADDING)
+}
+
+/// How a run went, in a line: its HTTP status, the outputs it sent from or
+/// why it failed, and how long it took.
+fn run_summary(run: &BlockRun, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let row = h_flex().gap_2().flex_wrap().text_xs();
+
+    if let Some(error) = &run.error {
+        return row
+            .text_color(theme.danger)
+            .child(SharedString::from(error.clone()))
+            .into_any_element();
+    }
+
+    let failed = run.outputs.iter().any(|(name, _)| name == "fail");
+    let http = run
+        .outputs
+        .first()
+        .and_then(|(_, value)| value.pointer("/http/status"))
+        .and_then(Value::as_u64);
+    let chip = |text: String, color: Hsla| {
+        div()
+            .px_1p5()
+            .rounded(theme.radius_tokens().sm)
+            .bg(color.opacity(0.14))
+            .text_color(color)
+            .font_weight(FontWeight::MEDIUM)
+            .child(text)
+    };
+
+    row.when_some(http, |this, status| {
+        this.child(chip(
+            format!("HTTP {status}"),
+            if failed { theme.danger } else { theme.success },
+        ))
+    })
+    .children(run.outputs.iter().map(|(name, _)| {
+        chip(
+            format!("→ {}", blocks::port_label(&name.clone().into())),
+            if name == "fail" {
+                theme.danger
+            } else {
+                theme.muted_foreground
+            },
+        )
+    }))
+    .when(run.outputs.is_empty(), |this| {
+        this.child(
+            div()
+                .text_color(theme.muted_foreground)
+                .child("Sent nothing on"),
+        )
+    })
+    .child(
+        div()
+            .text_color(theme.muted_foreground)
+            .child(format_duration(run.elapsed)),
+    )
+    .when_some(run.notice.clone(), |this, notice| {
+        this.child(
+            div()
+                .w_full()
+                .text_color(if http.is_none() && failed {
+                    theme.danger
+                } else {
+                    theme.warning
+                })
+                .child(SharedString::from(notice)),
+        )
+    })
+    .into_any_element()
 }
 
 fn section_title(title: &str) -> impl IntoElement {

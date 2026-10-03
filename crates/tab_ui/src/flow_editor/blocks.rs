@@ -3,23 +3,32 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, spinner::Spinner, v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request_eagle_theme::method_color;
+use request_eagle_theme::{method_color, method_label};
+use serde_json::Value;
 
 use super::{
     FlowEditor,
     editor::Layout,
-    geometry::{BASE_REM, HEADER, PORT, ROW, port_offset},
+    geometry::{BASE_REM, DETAIL_ZOOM, HEADER, PORT, ROW, body_height, port_offset},
     preview,
     run::BlockStatus,
 };
 
-/// Below this zoom, text would be too small to read, so blocks are drawn as
-/// shapes only. Large flows stay fast when the whole flow is in view.
-const DETAIL_ZOOM: f32 = 0.5;
+/// Zoomed-out blocks show their titles only when they are at least this
+/// wide on screen, in interface pixels.
+const OUTLINE_TITLE_WIDTH: f32 = 36.;
 
 /// Canvas pixels as rems, which the zoomed canvas scales.
 fn units(value: f32) -> Rems {
     rems(value / BASE_REM)
+}
+
+impl FlowEditor {
+    /// Interface pixels, which keep their size on screen at every zoom but
+    /// follow the interface font size.
+    fn screen(&self, value: f32) -> Pixels {
+        self.rem * (value / BASE_REM)
+    }
 }
 
 pub(super) fn icon(block_type: BlockType) -> &'static str {
@@ -80,19 +89,20 @@ impl FlowEditor {
         layout: &Layout,
         cx: &Context<Self>,
     ) -> AnyElement {
+        if matches!(block.kind, BlockKind::Note { .. }) {
+            return self.note_element(block, layout, cx);
+        }
+        if self.viewport.zoom < DETAIL_ZOOM {
+            return self.block_outline(block, layout, cx);
+        }
+
         let theme = cx.theme();
-        let block_type = block.kind.block_type();
         let selected = self.selection.contains(&block.id);
         let status = self.run.blocks.get(&block.id);
         let origin = self.viewport.to_view(layout.bounds.origin, self.rem);
         let id = block.id.clone();
         let rows = layout.inputs.len().max(layout.outputs.len());
-        let note = block_type == BlockType::Note;
         let connecting = self.connecting_port();
-
-        if self.viewport.zoom < DETAIL_ZOOM {
-            return self.block_outline(block, layout, cx);
-        }
 
         div()
             .id(SharedString::from(format!("flow-block-{}", block.id)))
@@ -110,11 +120,7 @@ impl FlowEditor {
             .rounded(theme.radius_tokens().lg)
             .border_1()
             .border_color(if selected { theme.ring } else { theme.border })
-            .bg(if note {
-                theme.warning.opacity(0.12)
-            } else {
-                theme.popover
-            })
+            .bg(theme.popover)
             .shadow_sm()
             .text_color(theme.popover_foreground)
             .on_mouse_down(
@@ -124,7 +130,7 @@ impl FlowEditor {
                     this.press(event, Some(id.clone()), window, cx);
                 }),
             )
-            .child(self.block_header(block, status, cx))
+            .child(self.block_header(block, layout, status, cx))
             .children((0..rows).map(|row| {
                 h_flex()
                     .flex_none()
@@ -132,14 +138,17 @@ impl FlowEditor {
                     .px(units(12.))
                     .gap(units(8.))
                     .text_xs()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .text_color(theme.muted_foreground)
-                            .children(layout.inputs.get(row).map(port_label)),
-                    )
+                    // A row without an input leaves its output the whole width.
+                    .when_some(layout.inputs.get(row), |this, name| {
+                        this.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_color(theme.muted_foreground)
+                                .child(self.input_label(block, layout, name, cx)),
+                        )
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -148,14 +157,22 @@ impl FlowEditor {
                             .text_right()
                             .children(layout.outputs.get(row).map(|name| {
                                 let sent = status.is_some_and(|status| status.sent(name));
+                                let label = output_label(block, name);
                                 div()
+                                    .when(label.1, |this| {
+                                        this.font_family(theme.mono_font_family.clone())
+                                    })
                                     .when(!sent, |this| this.text_color(theme.muted_foreground))
                                     .when(sent, |this| this.font_weight(FontWeight::MEDIUM))
-                                    .child(port_label(name))
+                                    // A request or a check that failed sent from Fail.
+                                    .when(sent && name.as_ref() == "fail", |this| {
+                                        this.text_color(theme.danger)
+                                    })
+                                    .child(label.0)
                             })),
                     )
             }))
-            .child(self.block_body(block, layout, status, cx))
+            .children(self.block_body(block, layout, status, cx))
             .children(layout.inputs.iter().enumerate().map(|(index, name)| {
                 let connected = self.flow.connection_into(&block.id, name).is_some();
                 let target = connecting.as_ref().is_some_and(|port| {
@@ -181,23 +198,73 @@ impl FlowEditor {
             .into_any_element()
     }
 
-    /// A block without its text, for when the canvas is zoomed far out.
+    /// An input's name. Variables the request's collection or the active
+    /// environment fill are dimmed while nothing is connected to them.
+    fn input_label(
+        &self,
+        block: &Block,
+        layout: &Layout,
+        name: &SharedString,
+        cx: &App,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let filled = layout
+            .request
+            .as_ref()
+            .is_some_and(|request| request.defined.contains(name.as_ref()))
+            && self.flow.connection_into(&block.id, name).is_none();
+
+        if !filled {
+            return div()
+                .text_ellipsis()
+                .child(port_label(name))
+                .into_any_element();
+        }
+
+        h_flex()
+            .gap(units(4.))
+            .min_w_0()
+            .child(
+                div()
+                    .min_w_0()
+                    .text_ellipsis()
+                    .opacity(0.6)
+                    .child(port_label(name)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px(units(4.))
+                    .rounded(theme.radius_tokens().sm)
+                    .border_1()
+                    .border_color(theme.border)
+                    .opacity(0.8)
+                    .child("env"),
+            )
+            .into_any_element()
+    }
+
+    /// A block without its text, for when the canvas is zoomed far out. It
+    /// keeps its title while there is room for it.
     fn block_outline(&self, block: &Block, layout: &Layout, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let block_type = block.kind.block_type();
         let selected = self.selection.contains(&block.id);
         let status = self.run.blocks.get(&block.id);
         let origin = self.viewport.to_view(layout.bounds.origin, self.rem);
+        let scale = self.viewport.scale(self.rem);
         let id = block.id.clone();
         let state = status.map(|status| {
             if status.running {
                 theme.info
-            } else if status.failed() {
+            } else if status.troubled() {
                 theme.danger
             } else {
                 theme.success
             }
         });
+        let titled =
+            layout.bounds.size.width * scale >= f32::from(self.screen(OUTLINE_TITLE_WIDTH));
 
         div()
             .id(SharedString::from(format!("flow-block-{}", block.id)))
@@ -206,6 +273,7 @@ impl FlowEditor {
             .top(origin.y)
             .w(units(layout.bounds.size.width))
             .h(units(layout.bounds.size.height))
+            .overflow_hidden()
             .rounded(theme.radius_tokens().lg)
             .border_1()
             .border_color(if selected { theme.ring } else { theme.border })
@@ -222,34 +290,160 @@ impl FlowEditor {
                     .h(units(HEADER))
                     .px(units(12.))
                     .justify_end()
-                    .rounded_t(theme.radius_tokens().lg)
                     .bg(color(block_type, cx).opacity(0.3))
                     .children(state.map(|state| div().size(units(12.)).rounded_full().bg(state))),
             )
-            .children(layout.inputs.iter().enumerate().map(|(index, name)| {
-                let connected = self.flow.connection_into(&block.id, name).is_some();
-                port_dot(0., port_offset(index), connected, false, cx)
-            }))
-            .children(layout.outputs.iter().enumerate().map(|(index, _)| {
-                port_dot(
-                    layout.bounds.size.width,
-                    port_offset(index),
-                    false,
-                    false,
-                    cx,
+            // Unlike the rest of the block, the title keeps its size on
+            // screen, so it stays readable.
+            .when(titled, |this| {
+                this.child(
+                    div()
+                        .px(self.screen(3.))
+                        .pt(self.screen(1.))
+                        .text_size(self.screen(10.))
+                        .line_height(self.screen(12.))
+                        .text_ellipsis()
+                        .text_color(theme.foreground)
+                        .child(self.block_title(block, cx)),
                 )
-            }))
+            })
+            .into_any_element()
+    }
+
+    /// A Note: text in a frame, behind the blocks it frames. Its corner
+    /// resizes it.
+    fn note_element(&self, block: &Block, layout: &Layout, cx: &Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let selected = self.selection.contains(&block.id);
+        let origin = self.viewport.to_view(layout.bounds.origin, self.rem);
+        let id = block.id.clone();
+        let resized = block.id.clone();
+        let text = match &block.kind {
+            BlockKind::Note { text, .. } => text.as_str(),
+            _ => "",
+        };
+        let (heading, rest) = text.split_once('\n').unwrap_or((text, ""));
+        let heading = SharedString::from(heading.trim().to_owned());
+        let detail = self.viewport.zoom >= DETAIL_ZOOM;
+
+        div()
+            .id(SharedString::from(format!("flow-block-{}", block.id)))
+            .debug_selector({
+                let id = block.id.clone();
+                move || format!("flow-block-{id}")
+            })
+            .absolute()
+            .left(origin.x)
+            .top(origin.y)
+            .w(units(layout.bounds.size.width))
+            .h(units(layout.bounds.size.height))
+            .when(detail, |this| this.overflow_hidden())
+            .rounded(theme.radius_tokens().lg)
+            .border_1()
+            .border_color(if selected {
+                theme.ring
+            } else {
+                theme.warning.opacity(0.35)
+            })
+            .bg(theme.warning.opacity(0.07))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.press(event, Some(id.clone()), window, cx);
+                }),
+            )
+            .child(if detail {
+                v_flex()
+                    .p(units(12.))
+                    .gap(units(4.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.foreground)
+                            .when(heading.is_empty(), |this| {
+                                this.font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.muted_foreground)
+                            })
+                            .child(if heading.is_empty() {
+                                SharedString::from("Note")
+                            } else {
+                                heading
+                            }),
+                    )
+                    .when(!rest.trim().is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(SharedString::from(rest.trim().to_owned())),
+                        )
+                    })
+                    .into_any_element()
+            } else {
+                // Zoomed out, a Note names its section above it at a
+                // readable size, where the blocks it frames leave it be.
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(-self.screen(18.))
+                    .w_full()
+                    .h(self.screen(16.))
+                    .text_size(self.screen(13.))
+                    .line_height(self.screen(16.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.foreground)
+                    .text_ellipsis()
+                    .child(heading)
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .id(SharedString::from(format!("flow-note-resize-{}", block.id)))
+                    .debug_selector({
+                        let id = block.id.clone();
+                        move || format!("flow-note-resize-{id}")
+                    })
+                    .absolute()
+                    .right_0()
+                    .bottom_0()
+                    .size(units(16.))
+                    .cursor(CursorStyle::ResizeUpLeftDownRight)
+                    .child(
+                        div()
+                            .absolute()
+                            .right(units(4.))
+                            .bottom(units(4.))
+                            .size(units(6.))
+                            .border_r_2()
+                            .border_b_2()
+                            .border_color(theme.warning.opacity(0.6)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.start_resize(&resized, event, window, cx);
+                        }),
+                    ),
+            )
             .into_any_element()
     }
 
     fn block_header(
         &self,
         block: &Block,
+        layout: &Layout,
         status: Option<&BlockStatus>,
         cx: &App,
     ) -> impl IntoElement {
         let theme = cx.theme();
         let block_type = block.kind.block_type();
+        let custom = block
+            .title
+            .as_deref()
+            .is_some_and(|title| !title.trim().is_empty());
 
         h_flex()
             .flex_none()
@@ -265,55 +459,42 @@ impl FlowEditor {
                     .flex_none()
                     .text_color(color(block_type, cx)),
             )
+            .when_some(layout.request.as_ref(), |this, request| {
+                this.child(div().flex_none().child(method_label(request.method, cx)))
+            })
             .child(
                 div()
-                    .flex_1()
                     .min_w_0()
                     .text_sm()
                     .font_weight(FontWeight::MEDIUM)
                     .text_ellipsis()
-                    .child(SharedString::from(block.title().to_owned())),
+                    .child(self.block_title(block, cx)),
             )
-            .when_some(status, |this, status| {
-                if status.running {
-                    this.child(Spinner::new().xsmall().color(theme.info))
-                } else if status.failed() {
-                    this.child(
-                        Icon::default()
-                            .path("icons/circle-alert.svg")
-                            .size(units(14.))
-                            .text_color(theme.danger),
-                    )
-                } else if status.runs > 0 {
-                    this.child(
-                        h_flex()
-                            .flex_none()
-                            .gap(units(4.))
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .when(status.runs > 1, |this| {
-                                this.child(format!("×{}", status.runs))
-                            })
-                            .child(
-                                Icon::new(IconName::Check)
-                                    .size(units(14.))
-                                    .text_color(theme.success),
-                            ),
-                    )
-                } else {
-                    this
-                }
+            // A block with its own title still says what it is.
+            .when(custom && block_type != BlockType::HttpRequest, |this| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(block_type.name()),
+                )
             })
+            .child(div().flex_1())
+            .children(status.and_then(|status| status_badge(block, status, cx)))
     }
 
+    /// What a block shows below its ports: a summary of its settings, a
+    /// Display block's data, or a message of its last run.
     fn block_body(
         &self,
         block: &Block,
         layout: &Layout,
         status: Option<&BlockStatus>,
         cx: &App,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let theme = cx.theme();
+        let last = status.and_then(|status| status.last.as_ref());
         let body = div()
             .flex_1()
             .min_h_0()
@@ -323,50 +504,45 @@ impl FlowEditor {
             .text_xs()
             .text_color(theme.muted_foreground);
 
-        if let Some(error) = status
-            .and_then(|status| status.last.as_ref())
-            .and_then(|run| run.error.clone())
-        {
-            return body
-                .text_color(theme.danger)
-                .child(SharedString::from(error))
-                .into_any_element();
+        if let Some(error) = last.and_then(|run| run.error.clone()) {
+            return Some(
+                body.text_color(theme.danger)
+                    .line_clamp(2)
+                    .child(SharedString::from(error))
+                    .into_any_element(),
+            );
         }
 
+        // Settings shown on two lines where the block has room for them.
+        let lines = if body_height(&block.kind) >= 56. {
+            2
+        } else {
+            1
+        };
         let code = |text: &str| {
             div()
                 .font_family(theme.mono_font_family.clone())
-                .line_clamp(2)
+                .line_clamp(lines)
                 .text_ellipsis()
                 .child(SharedString::from(text.to_owned()))
+                .into_any_element()
         };
+        let text = |text: String| div().text_ellipsis().child(text).into_any_element();
 
         let content = match &block.kind {
-            BlockKind::Start { input } => {
-                if input.trim().is_empty() {
-                    div().child("Sends the run's input").into_any_element()
-                } else {
-                    code(input).into_any_element()
-                }
-            }
-            BlockKind::HttpRequest { request } => match &layout.request {
-                Some((method, name)) => h_flex()
-                    .gap(units(6.))
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(method_color(method, cx))
-                            .child(*method),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .text_color(theme.foreground)
-                            .child(name.clone()),
-                    )
+            BlockKind::Start { input } => Some(if input.trim().is_empty() {
+                text("Sends the run's input".to_owned())
+            } else {
+                code(input)
+            }),
+            BlockKind::HttpRequest { request } => Some(match &layout.request {
+                // The header names the request, unless the block has its own title.
+                Some(info) if block.title.as_deref().is_some_and(|t| !t.trim().is_empty()) => div()
+                    .text_ellipsis()
+                    .text_color(theme.foreground)
+                    .child(info.name.clone())
                     .into_any_element(),
+                Some(info) => code(&info.path),
                 None if request.is_empty() => div()
                     .text_color(theme.warning)
                     .child("Choose a request")
@@ -375,96 +551,208 @@ impl FlowEditor {
                     .text_color(theme.danger)
                     .child("The request is no longer saved")
                     .into_any_element(),
-            },
-            BlockKind::Evaluate { expression, .. } => code(expression).into_any_element(),
-            BlockKind::If { condition, .. } => code(condition).into_any_element(),
-            BlockKind::Condition { conditions, .. } => div()
-                .child(format!(
-                    "{} condition{}, then Default",
-                    conditions.len(),
-                    if conditions.len() == 1 { "" } else { "s" }
-                ))
-                .into_any_element(),
-            BlockKind::Validate { .. } => div().child("Checks a JSON Schema").into_any_element(),
-            BlockKind::Delay { milliseconds } => div()
-                .child(format!("Waits {milliseconds} ms"))
-                .into_any_element(),
-            BlockKind::Or => div().child("Sends what arrives").into_any_element(),
-            BlockKind::Repeat => div().child("Sends each index").into_any_element(),
-            BlockKind::For => div().child("Sends each item").into_any_element(),
-            BlockKind::Collect => div().child("Gathers the loop's results").into_any_element(),
+            }),
+            BlockKind::Evaluate { expression, .. } => Some(code(expression)),
+            BlockKind::If { condition, .. } => Some(code(condition)),
+            BlockKind::Validate { schema } => Some(match schema_summary(schema) {
+                Ok(summary) => text(summary),
+                Err(error) => div()
+                    .text_ellipsis()
+                    .text_color(theme.danger)
+                    .child(error)
+                    .into_any_element(),
+            }),
+            BlockKind::Delay { milliseconds } => Some(text(format!("Waits {milliseconds} ms"))),
             BlockKind::Display { .. } => {
-                return body
-                    .text_color(theme.foreground)
-                    .child(match status.and_then(|status| status.display.as_ref()) {
-                        Some((_, display)) => display_element(display, cx),
-                        None => div()
-                            .text_color(theme.muted_foreground)
-                            .child("Run the flow to see its data")
-                            .into_any_element(),
-                    })
-                    .into_any_element();
+                return Some(
+                    body.text_color(theme.foreground)
+                        .child(match status.and_then(|status| status.display.as_ref()) {
+                            Some((_, display)) => display_element(display, cx),
+                            None => div()
+                                .text_color(theme.muted_foreground)
+                                .child("Run the flow to see its data")
+                                .into_any_element(),
+                        })
+                        .into_any_element(),
+                );
             }
-            BlockKind::Log => div().child("Writes to the run log").into_any_element(),
-            BlockKind::String { value } => code(&format!("\"{value}\"")).into_any_element(),
-            BlockKind::Number { value } => code(&value.to_string()).into_any_element(),
-            BlockKind::Boolean { value } => code(&value.to_string()).into_any_element(),
-            BlockKind::Null => code("null").into_any_element(),
-            BlockKind::Now => div().child("The time it runs").into_any_element(),
-            BlockKind::Date { value } => code(value).into_any_element(),
-            BlockKind::Select { path } => {
-                if path.trim().is_empty() {
-                    div().child("All of the data").into_any_element()
-                } else {
-                    code(path).into_any_element()
-                }
-            }
-            BlockKind::Record { fields } => code(&format!(
+            BlockKind::String { value } => Some(code(&format!("\"{value}\""))),
+            BlockKind::Number { value } => Some(code(&value.to_string())),
+            BlockKind::Boolean { value } => Some(code(&value.to_string())),
+            BlockKind::Date { value } => Some(code(value)),
+            BlockKind::Select { path } => Some(if path.trim().is_empty() {
+                text("All of the data".to_owned())
+            } else {
+                code(path)
+            }),
+            BlockKind::Record { fields } => Some(code(&format!(
                 "{{ {} }}",
                 fields
                     .iter()
                     .map(|field| field.key.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
-            ))
-            .into_any_element(),
-            BlockKind::List { items } => div()
-                .child(format!(
-                    "{} item{}",
-                    items.len(),
-                    if items.len() == 1 { "" } else { "s" }
-                ))
-                .into_any_element(),
-            BlockKind::Template { template, .. } => code(template).into_any_element(),
-            BlockKind::SetVariable { name } | BlockKind::GetVariable { name } => {
-                code(name).into_any_element()
-            }
-            BlockKind::Output { .. } => div().child("Returns the run's results").into_any_element(),
-            BlockKind::Note { text } => {
-                return body
-                    .text_sm()
-                    .text_color(theme.foreground)
-                    .child(SharedString::from(text.clone()))
-                    .into_any_element();
-            }
+            ))),
+            BlockKind::List { items } => Some(text(format!(
+                "{} item{}",
+                items.len(),
+                if items.len() == 1 { "" } else { "s" }
+            ))),
+            BlockKind::Template { template, .. } => Some(code(template)),
+            BlockKind::SetVariable { name } | BlockKind::GetVariable { name } => Some(code(name)),
+            // Their ports say all there is to know.
+            BlockKind::Or
+            | BlockKind::Repeat
+            | BlockKind::For
+            | BlockKind::Collect
+            | BlockKind::Log
+            | BlockKind::Null
+            | BlockKind::Now
+            | BlockKind::Output { .. }
+            | BlockKind::Condition { .. }
+            | BlockKind::Note { .. } => None,
         };
+        let notice = last.and_then(|run| run.notice.clone());
 
-        body.child(content)
-            .when_some(
-                status
-                    .and_then(|status| status.last.as_ref())
-                    .and_then(|run| run.notice.clone()),
-                |this, notice| {
+        if content.is_none() && notice.is_none() {
+            return None;
+        }
+
+        Some(
+            body.children(content)
+                .when_some(notice, |this, notice| {
                     this.child(
                         div()
                             .text_color(theme.warning)
                             .text_ellipsis()
                             .child(SharedString::from(notice)),
                     )
-                },
-            )
-            .into_any_element()
+                })
+                .into_any_element(),
+        )
     }
+}
+
+/// How the last run went, in the header: the HTTP status a request
+/// received, or whether the block failed, and how often it ran.
+fn status_badge(block: &Block, status: &BlockStatus, cx: &App) -> Option<AnyElement> {
+    let theme = cx.theme();
+
+    if status.running {
+        return Some(Spinner::new().xsmall().color(theme.info).into_any_element());
+    }
+    if status.runs == 0 {
+        return None;
+    }
+
+    let troubled = status.troubled();
+    let mark = match (&block.kind, status.http_status()) {
+        (BlockKind::HttpRequest { .. }, http) => {
+            let color = if troubled {
+                theme.danger
+            } else {
+                theme.success
+            };
+            div()
+                .flex_none()
+                .px(units(6.))
+                .rounded_full()
+                .bg(color.opacity(0.14))
+                .text_color(color)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(match http {
+                    Some(code) => code.to_string(),
+                    None => "Error".to_owned(),
+                })
+                .into_any_element()
+        }
+        _ if troubled => Icon::default()
+            .path("icons/circle-alert.svg")
+            .size(units(14.))
+            .text_color(theme.danger)
+            .into_any_element(),
+        _ => Icon::new(IconName::Check)
+            .size(units(14.))
+            .text_color(theme.success)
+            .into_any_element(),
+    };
+
+    Some(
+        h_flex()
+            .flex_none()
+            .gap(units(4.))
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .when(status.runs > 1, |this| {
+                this.child(format!("×{}", status.runs))
+            })
+            .child(mark)
+            .into_any_element(),
+    )
+}
+
+/// An output's label, and whether it is code. A Condition block's outputs
+/// show the conditions they stand for.
+fn output_label(block: &Block, name: &SharedString) -> (SharedString, bool) {
+    if let BlockKind::Condition { conditions, .. } = &block.kind
+        && let Some(index) = name
+            .strip_prefix("condition")
+            .and_then(|number| number.parse::<usize>().ok())
+        && let Some(condition) = conditions
+            .get(index.wrapping_sub(1))
+            .map(|condition| condition.trim())
+            .filter(|condition| !condition.is_empty())
+    {
+        return (SharedString::from(condition.replace('\n', " ")), true);
+    }
+
+    (port_label(name), false)
+}
+
+/// What a JSON Schema checks, in a few words, such as `object · requires
+/// body, id`, or why it is not a schema.
+pub(super) fn schema_summary(schema: &str) -> Result<String, String> {
+    let schema: Value =
+        serde_json::from_str(schema).map_err(|_| "The schema is not JSON".to_owned())?;
+    let Value::Object(schema) = schema else {
+        return match schema {
+            Value::Bool(true) => Ok("Accepts anything".to_owned()),
+            Value::Bool(false) => Ok("Accepts nothing".to_owned()),
+            _ => Err("A schema is an object".to_owned()),
+        };
+    };
+
+    let names = |value: Option<&Value>| -> Vec<String> {
+        match value {
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect(),
+            Some(Value::String(name)) => vec![name.clone()],
+            _ => Vec::new(),
+        }
+    };
+    let mut parts = Vec::new();
+    let types = names(schema.get("type"));
+    if !types.is_empty() {
+        parts.push(types.join(" or "));
+    }
+    let required = names(schema.get("required"));
+    if !required.is_empty() {
+        parts.push(format!("requires {}", required.join(", ")));
+    } else if let Some(Value::Object(properties)) = schema.get("properties") {
+        parts.push(format!(
+            "{} propert{}",
+            properties.len(),
+            if properties.len() == 1 { "y" } else { "ies" }
+        ));
+    }
+
+    Ok(if parts.is_empty() {
+        "Checks a JSON Schema".to_owned()
+    } else {
+        parts.join(" · ")
+    })
 }
 
 /// Ports a block type names itself read as words; variables, fields and
