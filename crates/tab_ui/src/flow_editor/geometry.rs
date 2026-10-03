@@ -3,7 +3,7 @@
 //! canvas scales with the interface font like the rest of the app.
 
 use flow::{BlockKind, BlockType};
-use gpui_kit::{Bounds, Pixels, Point, Size, point, px, size};
+use gpui_kit::{Bounds, Modifiers, Pixels, Point, ScrollDelta, Size, point, px, size};
 
 /// The interface font size that canvas positions are measured at.
 pub(super) const BASE_REM: f32 = 16.;
@@ -16,6 +16,9 @@ pub(super) const PORT: f32 = 10.;
 pub(super) const GRAB: f32 = 12.;
 pub(super) const MIN_ZOOM: f32 = 0.25;
 pub(super) const MAX_ZOOM: f32 = 2.;
+/// How much a notch of a mouse wheel zooms, as a natural logarithm: about
+/// 16%.
+const WHEEL_ZOOM: f32 = 0.15;
 
 pub(super) fn width(kind: &BlockKind) -> f32 {
     match kind.block_type() {
@@ -115,6 +118,35 @@ impl Viewport {
         let after = self.to_canvas(anchor, rem);
         self.origin.x += before.x - after.x;
         self.origin.y += before.y - after.y;
+    }
+
+    /// Follow a scroll over the view. A mouse wheel zooms around `anchor`
+    /// and a trackpad pans; the wheel scrolls by lines and the trackpad by
+    /// pixels. Shift makes the wheel pan, and Ctrl/Cmd makes the trackpad
+    /// zoom.
+    pub fn scroll(
+        &mut self,
+        delta: ScrollDelta,
+        modifiers: Modifiers,
+        anchor: Point<Pixels>,
+        line_height: Pixels,
+        rem: Pixels,
+    ) {
+        let pixels = delta.pixel_delta(line_height);
+        // A wheel that only scrolls sideways, such as a tilt wheel, pans.
+        let wheel = !delta.precise() && !modifiers.shift && pixels.y != px(0.);
+        if !wheel && !modifiers.secondary() && !modifiers.control {
+            self.pan(pixels, rem);
+            return;
+        }
+
+        // Each wheel notch zooms by the same step, however many lines the
+        // system scrolls for it.
+        let factor = match delta {
+            ScrollDelta::Lines(lines) => (lines.y.clamp(-1., 1.) * WHEEL_ZOOM).exp(),
+            ScrollDelta::Pixels(pixels) => (f32::from(pixels.y) * 0.004).exp(),
+        };
+        self.zoom_around(self.zoom * factor, anchor, rem);
     }
 
     /// The view that shows `content` whole in a view of `view` pixels, at

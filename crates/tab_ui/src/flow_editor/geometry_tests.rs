@@ -1,5 +1,5 @@
 use flow::BlockType;
-use gpui_kit::{Bounds, point, px, size};
+use gpui_kit::{Bounds, Modifiers, ScrollDelta, point, px, size};
 
 use super::geometry::*;
 
@@ -53,6 +53,86 @@ fn panning_moves_by_screen_pixels() {
 
     // 2× zoom at a 24 px font is 3 screen pixels per canvas pixel.
     assert!(close(viewport.origin.x, -10.) && close(viewport.origin.y, 20.));
+}
+
+#[test]
+fn a_mouse_wheel_zooms_around_the_pointer() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+    let mut viewport = Viewport::default();
+    let under = viewport.to_canvas(anchor, rem);
+
+    viewport.scroll(
+        ScrollDelta::Lines(point(0., 1.)),
+        Modifiers::none(),
+        anchor,
+        line,
+        rem,
+    );
+    let notch = viewport.zoom;
+    assert!(notch > 1.1 && notch < 1.25);
+    let after = viewport.to_canvas(anchor, rem);
+    assert!(close(under.x, after.x) && close(under.y, after.y));
+
+    // A notch zooms the same however many lines the system scrolls for it.
+    let mut three = Viewport::default();
+    three.scroll(
+        ScrollDelta::Lines(point(0., 3.)),
+        Modifiers::none(),
+        anchor,
+        line,
+        rem,
+    );
+    assert!(close(three.zoom, notch));
+
+    viewport.scroll(
+        ScrollDelta::Lines(point(0., -1.)),
+        Modifiers::none(),
+        anchor,
+        line,
+        rem,
+    );
+    assert!(close(viewport.zoom, 1.));
+}
+
+#[test]
+fn a_mouse_wheel_pans_with_shift_or_sideways() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+
+    for (delta, modifiers) in [
+        (point(1., 0.), Modifiers::shift()),
+        (point(0., 1.), Modifiers::shift()),
+        (point(1., 0.), Modifiers::none()),
+    ] {
+        let mut viewport = Viewport::default();
+        viewport.scroll(ScrollDelta::Lines(delta), modifiers, anchor, line, rem);
+
+        assert_eq!(viewport.zoom, 1.);
+        assert_ne!(viewport.origin, Viewport::default().origin);
+    }
+}
+
+#[test]
+fn a_trackpad_pans_and_zooms_with_ctrl_or_cmd() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+    let swipe = ScrollDelta::Pixels(point(px(30.), px(-60.)));
+
+    let mut viewport = Viewport::default();
+    viewport.scroll(swipe, Modifiers::none(), anchor, line, rem);
+    assert_eq!(viewport.zoom, 1.);
+    let origin = Viewport::default().origin;
+    assert!(close(viewport.origin.x, origin.x - 30.) && close(viewport.origin.y, origin.y + 60.));
+
+    for modifiers in [Modifiers::control(), Modifiers::secondary_key()] {
+        let mut viewport = Viewport::default();
+        viewport.scroll(swipe, modifiers, anchor, line, rem);
+        assert!(viewport.zoom < 1.);
+    }
 }
 
 #[test]
