@@ -33,6 +33,13 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
+# Dev and test builds keep full debug info for our own crates only. Dependencies
+# get line tables, so backtraces still show file and line. Full dependency debug
+# info made every test binary close to 1 GB, and relinking dozens of them per
+# test run wrote tens of GB to the build machine's SSD.
+[profile.dev.package."*"]
+debug = "line-tables-only"
+
 [workspace.dependencies]
 anyhow = "1"
 gpui-kit = { version = "=0.6.2", default-features = false }
