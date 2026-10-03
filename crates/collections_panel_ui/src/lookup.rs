@@ -66,6 +66,12 @@ impl CollectionPanel {
     pub fn open_event_at(&self, path: &Path) -> Option<CollectionPanelEvent> {
         self.open_event(self.tree.index_of(path)?)
     }
+
+    /// The event that runs the requests of the collection or folder at
+    /// `path`, for a caller that opens the runner itself.
+    pub fn run_event_at(&self, path: &Path) -> Option<CollectionPanelEvent> {
+        self.run_event(self.tree.index_of(path)?)
+    }
 }
 
 fn request_matches(tree: &CollectionTree, query: &str, limit: usize) -> Vec<RequestMatch> {

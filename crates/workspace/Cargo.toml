@@ -9,6 +9,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 environment = { path = "../environment" }
 collection = { path = "../collection" }
 collections_panel_ui = { path = "../collections_panel_ui" }
+flow = { path = "../flow" }
 futures = "0.3"
 request = { path = "../request" }
 request_history = { package = "history", path = "../history" }

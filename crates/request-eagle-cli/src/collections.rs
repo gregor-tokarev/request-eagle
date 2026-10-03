@@ -24,7 +24,7 @@ pub fn load(root: &Path) -> Result<CollectionRegistry> {
     Ok(registry)
 }
 
-fn lock_for_edit(root: &Path) -> Result<fs::File> {
+pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
     // Serialize CLI edits before loading the registry, so parallel invocations
     // cannot save stale ordering or act on a moved/deleted snapshot.
     fs::create_dir_all(root)?;
@@ -61,6 +61,7 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
                 "path": path,
                 "variables": collection.local_env().entries,
                 "scripts": {"pre_request": scripts.pre_request, "post_response": scripts.post_response},
+                "auth": collection.auth(),
                 "entries": entries(&collection.entries),
             }));
         }
@@ -137,6 +138,7 @@ fn entries(items: &[Entry]) -> Vec<Value> {
             value["kind"] = json!("request");
             value
         }
+        Entry::Flow(flow) => json!({"kind": "flow", "path": flow.path, "id": flow.id, "name": flow.name}),
         Entry::Directory(folder) => json!({"kind": "folder", "path": folder.path, "name": folder.name, "entries": entries(&folder.entries)}),
     }).collect()
 }
@@ -145,6 +147,7 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
     for entry in items {
         match entry {
             Entry::Directory(folder) => list_requests(&folder.entries, collection, query, output),
+            Entry::Flow(_) => {}
             Entry::File(file) => {
                 let value = match &file.request {
                     Request::Http(request) => {

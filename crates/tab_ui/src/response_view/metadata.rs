@@ -160,7 +160,7 @@ impl ResponseView {
     }
 }
 
-fn status_color(status: StatusCode, cx: &App) -> Hsla {
+pub(crate) fn status_color(status: StatusCode, cx: &App) -> Hsla {
     if status.is_success() {
         cx.theme().success
     } else if status.is_redirection() {

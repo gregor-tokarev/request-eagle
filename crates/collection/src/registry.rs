@@ -12,6 +12,8 @@ pub use mutations::CollectionEditError;
 #[cfg(test)]
 mod creation_tests;
 #[cfg(test)]
+mod flow_tests;
+#[cfg(test)]
 mod importing_tests;
 #[cfg(test)]
 mod mutation_tests;

@@ -759,3 +759,67 @@ fn grpc_scripts_are_saved_and_need_approval_to_run() {
         "{denied}"
     );
 }
+
+#[test]
+fn authorizations_are_saved_and_runs_send_the_collections() {
+    let cli = Cli::new();
+    cli.call(json!({"command":"settings.proxy","mode":"disabled"}));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut received = Vec::new();
+        let mut buffer = [0; 1024];
+        while !received.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).unwrap();
+            assert_ne!(count, 0);
+            received.extend_from_slice(&buffer[..count]);
+        }
+        assert!(
+            String::from_utf8(received)
+                .unwrap()
+                .contains("\r\nauthorization: Bearer s3cret\r\n")
+        );
+        socket
+            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+            .unwrap();
+    });
+    let collection = cli.collection();
+    let directory = Path::new(collection.as_str().unwrap());
+    fs::write(
+        directory.join("environment.toml"),
+        format!("base = {url:?}\ntoken = \"s3cret\"\n"),
+    )
+    .unwrap();
+    fs::write(
+        directory.join(".request-eagle-collection.toml"),
+        "[auth]\ntype = \"bearer\"\ntoken = \"{{token}}\"\n",
+    )
+    .unwrap();
+
+    let details = cli.call(json!({"command":"collections.get","path":collection}));
+    assert_eq!(
+        details["auth"],
+        json!({"type": "bearer", "token": "{{token}}"})
+    );
+
+    // Requests inherit the collection's authorization unless they set one.
+    let created = cli.create(&collection, json!({"method":"GET", "url":"{{base}}/me"}));
+    assert!(created["request"].get("auth").is_none(), "{created}");
+    let response =
+        cli.call(json!({"command":"requests.run","path":created["path"],"timeout_ms":5000}));
+    server.join().unwrap();
+    assert_eq!(response["status"], 204);
+
+    let auth = json!({"type": "basic", "username": "me", "password": "{{password}}"});
+    let updated = cli.call(json!({
+        "command":"requests.update", "path":created["path"], "expected_id":created["id"],
+        "request":{"method":"GET", "url":"{{base}}/me", "auth":auth}
+    }));
+    assert_eq!(updated["request"]["auth"], auth);
+    let read = cli.call(json!({"command":"requests.get","path":created["path"]}));
+    assert_eq!(read["request"]["auth"], auth);
+}

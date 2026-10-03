@@ -2,6 +2,7 @@ mod collections;
 mod commands;
 mod cookies;
 mod execution;
+mod flows;
 mod settings;
 
 use clap::{Parser, Subcommand, error::ErrorKind};
@@ -20,10 +21,11 @@ use std::{
         "{} (format {FORMAT_VERSION})",
         option_env!("REQUEST_EAGLE_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
     ),
-    about = "Manage Request Eagle's saved collections, requests and settings",
+    about = "Manage Request Eagle's saved collections, requests, flows and settings",
     arg_required_else_help = true,
     after_help = "Use schema to discover commands and exact inputs. Run requests with requests.run;\n\
         it waits for completion and returns the HTTP response, body and script results.\n\
+        Run flows with flows.run, after flows.blocks describes their blocks.\n\
         Output is JSON except help/version. Exit 0: success; 1: operation failed;\n\
         2: invalid input. HTTP error statuses remain successful executions.\n\
         The desktop app does not need to be running. Quit it before editing its files\n\
@@ -80,6 +82,21 @@ fn main() {
                             trust_scripts,
                             variables,
                             timeout_ms,
+                        )
+                        .await
+                    }
+                    command @ (Command::FlowsList { .. }
+                    | Command::FlowsGet { .. }
+                    | Command::FlowsCreate { .. }
+                    | Command::FlowsUpdate { .. }
+                    | Command::FlowsBlocks {}
+                    | Command::FlowsRun { .. }
+                    | Command::FqlEvaluate { .. }) => {
+                        flows::dispatch(
+                            &collections,
+                            &preferences,
+                            &data.join("cookies.json"),
+                            command,
                         )
                         .await
                     }

@@ -7,9 +7,11 @@ use std::{
 use environment::EnvironmentSaveError;
 use thiserror::Error;
 
-use crate::collection::{is_reserved, load_file, save_file};
-use crate::{CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry};
-use request::{Request, RequestScripts};
+use crate::collection::{is_reserved, load_file, load_item, save_file, save_flow};
+use crate::{
+    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry, SharedSettings,
+};
+use request::Request;
 
 impl CollectionRegistry {
     /// Saves a request without replacing its identity or externally edited metadata.
@@ -35,6 +37,46 @@ impl CollectionRegistry {
         }
 
         self.update_file(path, expected_id, |file| file.name = name.to_owned())
+    }
+
+    /// Saves a flow, unless its file now holds a different flow.
+    pub fn update_flow(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        flow: flow::Flow,
+    ) -> Result<(), CollectionEditError> {
+        self.update_flow_file(path, expected_id, |entry| entry.flow = flow)
+    }
+
+    fn update_flow_file(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        change: impl FnOnce(&mut crate::FlowEntry),
+    ) -> Result<(), CollectionEditError> {
+        for collection in &mut self.collections {
+            if let Some(Entry::Flow(entry)) = find_entry(&mut collection.entries, path) {
+                if entry.id != expected_id {
+                    return Err(CollectionEditError::FlowReplaced);
+                }
+
+                let Entry::Flow(mut updated) = load_item(path)? else {
+                    return Err(CollectionEditError::FlowReplaced);
+                };
+                if updated.id != expected_id {
+                    return Err(CollectionEditError::FlowReplaced);
+                }
+
+                change(&mut updated);
+                save_flow(&updated)?;
+                *entry = updated;
+
+                return Ok(());
+            }
+        }
+
+        Err(CollectionEditError::NotFound)
     }
 
     /// Changes the latest content of a request file, keeping comments and
@@ -68,18 +110,19 @@ impl CollectionRegistry {
     }
 
     /// Saves the collection's variables to `environment.toml` and its scripts
-    /// to the settings file, leaving unchanged files as they are.
+    /// and authorization to the settings file, leaving unchanged files as
+    /// they are.
     pub fn update_collection(
         &mut self,
         path: &Path,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
     ) -> Result<(), CollectionEditError> {
         self.collections
             .iter_mut()
             .find(|collection| collection.path == path)
             .ok_or(CollectionEditError::NotFound)?
-            .save_settings(variables, scripts)
+            .save_settings(variables, shared)
     }
 
     /// Request names live in TOML; collection and folder names live on disk.
@@ -107,6 +150,11 @@ impl CollectionRegistry {
                         updated.name = name.to_owned();
                         save_file(&mut updated)?;
                         *file = updated;
+                        return Ok(path.to_path_buf());
+                    }
+                    Entry::Flow(entry) => {
+                        let id = entry.id.clone();
+                        self.update_flow_file(path, &id, |entry| entry.name = name.to_owned())?;
                         return Ok(path.to_path_buf());
                     }
                     Entry::Directory(folder) => {
@@ -199,6 +247,7 @@ pub(super) fn find_entry<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'
     for entry in entries {
         match entry {
             Entry::File(file) if file.path == path => return Some(entry),
+            Entry::Flow(flow) if flow.path == path => return Some(entry),
             Entry::Directory(folder) if folder.path == path => return Some(entry),
             Entry::Directory(folder) => {
                 if let Some(entry) = find_entry(&mut folder.entries, path) {
@@ -216,6 +265,7 @@ fn delete_entry(entries: &mut Vec<Entry>, path: &Path) -> Result<bool, io::Error
     for index in 0..entries.len() {
         match &mut entries[index] {
             Entry::File(file) if file.path == path => fs::remove_file(path)?,
+            Entry::Flow(flow) if flow.path == path => fs::remove_file(path)?,
             Entry::Directory(folder) if folder.path == path => fs::remove_dir_all(path)?,
             Entry::Directory(folder) => {
                 if delete_entry(&mut folder.entries, path)? {
@@ -237,6 +287,7 @@ pub(super) fn rebase_entries(entries: &mut [Entry], old: &Path, new: &Path) {
     for entry in entries {
         match entry {
             Entry::File(file) => rebase_path(&mut file.path, old, new),
+            Entry::Flow(flow) => rebase_path(&mut flow.path, old, new),
             Entry::Directory(folder) => {
                 rebase_path(&mut folder.path, old, new);
                 rebase_entries(&mut folder.entries, old, new);
@@ -267,6 +318,8 @@ pub enum CollectionEditError {
     NotFound,
     #[error("This request was replaced by a different request. Your edits have not been saved.")]
     RequestReplaced,
+    #[error("This flow was replaced by a different flow. Your edits have not been saved.")]
+    FlowReplaced,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
     #[error("{0}")]

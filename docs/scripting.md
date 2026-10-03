@@ -42,7 +42,8 @@ the first one that has the name:
 
 | API | Scope |
 | --- | --- |
-| `pm.variables` | Overrides that last for the current execution only. |
+| `pm.variables` | Overrides that last for the current execution only, or in the [Collection Runner](collection-runner.md) for the whole run. |
+| `pm.iterationData` | In the [Collection Runner](collection-runner.md), the data file's row for the iteration. It has `get`, `has`, `unset`, `toObject` and `replaceIn`. |
 | `pm.environment` | The selected environment, then the collection's variables. |
 | `pm.collectionVariables` | The collection's `environment.toml`. |
 | `pm.globals` | Values every collection shares. They start empty when the workspace opens. |
@@ -199,12 +200,28 @@ if (!pm.environment.get("token")) {
 
 The primary request and post-response script do not run.
 
-Request Eagle sends one request at a time, so
-`pm.execution.setNextRequest(name)` and `postman.setNextRequest(name)` have
-no effect, as in Postman outside the Collection Runner. The legacy `postman`
-object also has `getEnvironmentVariable`, `setEnvironmentVariable`,
-`clearEnvironmentVariable`, `getGlobalVariable`, `setGlobalVariable` and
-`clearGlobalVariable`.
+In the [Collection Runner](collection-runner.md),
+`pm.execution.setNextRequest(name)` and `postman.setNextRequest(name)` choose
+the request that runs next; a request sent on its own ignores them, as in
+Postman. The legacy `postman` object also has `getEnvironmentVariable`,
+`setEnvironmentVariable`, `clearEnvironmentVariable`, `getGlobalVariable`,
+`setGlobalVariable` and `clearGlobalVariable`.
+
+## Know where a script runs
+
+`pm.info` describes the current execution:
+
+| Field | Value |
+| --- | --- |
+| `eventName` | `prerequest` or `test`, for a post-response script. |
+| `requestName` / `requestId` | The saved request's name and ID. |
+| `iteration` / `iterationCount` | The Collection Runner's iteration, counting from 0, and how many it runs. A request sent on its own runs iteration 0 of 1. |
+
+```js
+if (pm.info.iteration > 0) {
+    pm.execution.skipRequest("Checked in the first iteration");
+}
+```
 
 ## gRPC scripts
 

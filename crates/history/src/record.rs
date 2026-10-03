@@ -116,6 +116,7 @@ impl Response {
             }),
             elapsed: self.elapsed,
             scripts: Vec::new(),
+            sent: None,
         }
     }
 }

@@ -4,10 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use collection::{CollectionEditError, FileEntry};
+use collection::{CollectionEditError, FileEntry, SharedSettings};
 
 use gpui_kit::{Context, SharedString, Window};
-use request::{Request, RequestScripts};
+use request::Request;
 
 use super::{CollectionPanel, tree::ItemKind};
 
@@ -44,6 +44,16 @@ impl CollectionPanel {
         Ok(())
     }
 
+    /// Save a flow tab's blocks and connections.
+    pub fn save_flow(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        flow: flow::Flow,
+    ) -> Result<(), CollectionEditError> {
+        self.collections.update_flow(path, expected_id, flow)
+    }
+
     /// Save a collection tab's edits, renaming its directory when the name
     /// changed. Returns the collection's path after the save.
     pub fn save_collection(
@@ -51,7 +61,7 @@ impl CollectionPanel {
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
         // Rename first: an invalid or taken name then fails before any file
@@ -73,7 +83,7 @@ impl CollectionPanel {
         };
 
         self.collections
-            .update_collection(&destination, variables, scripts)?;
+            .update_collection(&destination, variables, shared)?;
 
         Ok(destination)
     }

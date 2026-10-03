@@ -7,9 +7,9 @@ use std::{
 
 use futures::{SinkExt as _, StreamExt as _};
 use request::{
-    ExecutionError, Field, ProxyMode, RequestPreferences, RequestVariables, StatusCode,
-    WebSocketClose, WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage,
-    WebSocketRequest,
+    ApiKeyAuth, Auth, AuthKind, AuthLocation, BearerAuth, ExecutionError, Field, PasswordAuth,
+    ProxyMode, RequestPreferences, RequestVariables, StatusCode, WebSocketClose,
+    WebSocketConnection, WebSocketEventKind, WebSocketEvents, WebSocketMessage, WebSocketRequest,
 };
 use tokio_tungstenite::{
     WebSocketStream,
@@ -175,6 +175,7 @@ fn messages_stream_in_both_directions_until_the_server_closes() {
             url: format!("{url}/feed#ignored"),
             headers: vec![Field::new("X-Token", "{{token}}")],
             query: vec![Field::new("room", "{{room}}")],
+            auth: Default::default(),
             message: String::new(),
             settings: Default::default(),
         },
@@ -579,6 +580,7 @@ fn the_editor_previews_handshake_headers() {
     let preview = request::websocket_handshake_headers(
         "example.com/socket",
         &[Field::new("Upgrade", "websocket")],
+        &Auth::Inherit,
     );
     assert_eq!(
         preview,
@@ -591,6 +593,162 @@ fn the_editor_previews_handshake_headers() {
         ]
     );
 
-    let templated = request::websocket_handshake_headers("wss://{{host}}/socket", &[]);
+    let templated =
+        request::websocket_handshake_headers("wss://{{host}}/socket", &[], &Auth::Inherit);
     assert_eq!(templated[0], ("Host".into(), "Resolved on connect".into()));
+
+    // The authorization replaces credentials written in the URL.
+    let authorized = request::websocket_handshake_headers(
+        "wss://user:pass@example.com/socket",
+        &[],
+        &Auth::Bearer(BearerAuth {
+            token: "token".into(),
+        }),
+    );
+    let authorization: Vec<_> = authorized
+        .iter()
+        .filter(|(name, _)| name == "Authorization")
+        .collect();
+    assert_eq!(
+        authorization,
+        [&("Authorization".to_owned(), "Bearer token".to_owned())]
+    );
+
+    let signed = request::websocket_handshake_headers(
+        "wss://example.com/socket",
+        &[],
+        &AuthKind::Jwt.new_auth(),
+    );
+    assert!(signed.contains(&("Authorization".into(), "Calculated on connect".into())));
+}
+
+#[test]
+fn handshakes_send_the_authorization_the_request_inherits() {
+    let url = serve(|mut socket, handshake| async move {
+        socket.send(Message::text(handshake)).await.unwrap();
+    });
+    let inherited =
+        variables(&[("token", "secret")]).with_collection_auth(Auth::ApiKey(ApiKeyAuth {
+            key: "api_key".into(),
+            value: "{{token}}".into(),
+            add_to: AuthLocation::Query,
+        }));
+    let (_connection, mut events) = WebSocketConnection::open(
+        WebSocketRequest {
+            url: format!("{url}/feed?room=1"),
+            ..WebSocketRequest::default()
+        },
+        inherited,
+        &preferences(),
+    );
+
+    smol::block_on(async {
+        connected(&mut events).await;
+        let WebSocketEventKind::Received(message) = next(&mut events).await else {
+            panic!("expected the server's message");
+        };
+        assert_eq!(message, text("/feed?room=1&api_key=secret "));
+    });
+
+    // A request's own authorization replaces the collection's.
+    let url = serve(|_, _| async {});
+    let collection = variables(&[]).with_collection_auth(Auth::Bearer(BearerAuth {
+        token: "collection".into(),
+    }));
+    let (_connection, mut events) = WebSocketConnection::open(
+        WebSocketRequest {
+            url,
+            auth: Auth::Basic(PasswordAuth {
+                username: "user".into(),
+                password: "pass".into(),
+            }),
+            ..WebSocketRequest::default()
+        },
+        collection,
+        &preferences(),
+    );
+
+    smol::block_on(async {
+        let WebSocketEventKind::Connected(handshake) = next(&mut events).await else {
+            panic!("expected a connection");
+        };
+        assert!(
+            handshake
+                .request_headers
+                .contains(&("Authorization".into(), "Basic dXNlcjpwYXNz".into()))
+        );
+    });
+}
+
+#[test]
+// The handshake callback returns tokio-tungstenite's own error response.
+#[allow(clippy::result_large_err)]
+fn digest_handshakes_answer_the_servers_challenge() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("ws://{}/socket", listener.local_addr().unwrap());
+
+    reqwest_client::runtime().spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+
+        // The first handshake is challenged.
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut byte)
+                .await
+                .unwrap();
+            head.push(byte[0]);
+        }
+        tokio::io::AsyncWriteExt::write_all(
+            &mut stream,
+            b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"eagle\", nonce=\"abc\", qop=\"auth\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        drop(stream);
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut authorization = String::new();
+        let mut socket =
+            tokio_tungstenite::accept_hdr_async(stream, |request: &Request, response: Response| {
+                authorization = request.headers()["authorization"]
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+                Ok(response)
+            })
+            .await
+            .unwrap();
+        socket.send(Message::text(authorization)).await.unwrap();
+    });
+
+    let (_connection, mut events) = WebSocketConnection::open(
+        WebSocketRequest {
+            url,
+            auth: Auth::Digest(PasswordAuth {
+                username: "user".into(),
+                password: "pass".into(),
+            }),
+            ..WebSocketRequest::default()
+        },
+        variables(&[]),
+        &preferences(),
+    );
+
+    smol::block_on(async {
+        connected(&mut events).await;
+        let WebSocketEventKind::Received(WebSocketMessage::Text(authorization)) =
+            next(&mut events).await
+        else {
+            panic!("expected the server's message");
+        };
+        assert!(
+            authorization.starts_with(
+                "Digest username=\"user\", realm=\"eagle\", nonce=\"abc\", uri=\"/socket\", qop=auth"
+            ),
+            "{authorization}"
+        );
+    });
 }

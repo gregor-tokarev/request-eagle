@@ -9,11 +9,14 @@ anyhow.workspace = true
 base64 = "0.22"
 brotli-decompressor = "5"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # RFC 6265 storage and matching for the cookie jar.
 cookie_store = { version = "0.22.1", default-features = false, features = ["serde_json", "preserve_order"] }
 environment = { path = "../environment" }
 flate2 = "1"
 futures = "0.3"
+# Digest authentication's MD5 algorithms, which ring leaves out.
+md-5 = "0.10"
 percent-encoding = "2"
 # The media type of a file sent as a body or form field, by its extension.
 mime_guess = "2"
@@ -53,7 +56,6 @@ zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 brotli = "8"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 h2 = "0.4"
 rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }

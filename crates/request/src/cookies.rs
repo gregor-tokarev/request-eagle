@@ -176,6 +176,60 @@ impl CookieJar {
         Ok(())
     }
 
+    /// An unsaved jar that starts with this jar's cookies. Later changes to
+    /// either jar leave the other as it is.
+    pub fn copy(&self) -> Self {
+        let cookies = self
+            .0
+            .cookies
+            .lock()
+            .unwrap()
+            .iter_unexpired()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Self(Arc::new(Jar {
+            cookies: Mutex::new(store(&cookies)),
+            ..Default::default()
+        }))
+    }
+
+    /// Keep `other`'s cookies too. Each replaces the cookie with its domain,
+    /// path and name.
+    pub fn extend(&self, other: &CookieJar) {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return;
+        }
+
+        let added = other
+            .0
+            .cookies
+            .lock()
+            .unwrap()
+            .iter_unexpired()
+            .cloned()
+            .collect::<Vec<_>>();
+        if added.is_empty() {
+            return;
+        }
+
+        let mut cookies = self.0.cookies.lock().unwrap();
+        let mut merged = cookies.iter_unexpired().cloned().collect::<Vec<_>>();
+
+        for cookie in added {
+            let added_key = key(&cookie);
+            self.track(&added_key, false);
+
+            match merged.iter().position(|kept| key(kept) == added_key) {
+                Some(position) => merged[position] = cookie,
+                None => merged.push(cookie),
+            }
+        }
+
+        *cookies = store(&merged);
+        self.changed();
+    }
+
     /// Changes whenever cookies are stored or deleted.
     pub fn revision(&self) -> u64 {
         self.0.revision.load(Ordering::SeqCst)

@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     sync::{Arc, OnceLock},
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use futures::channel::mpsc::unbounded;
@@ -20,8 +20,8 @@ use super::{
     transport::{self, Target},
 };
 use crate::{
-    CookieJar, Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
-    scripts::CallScripts,
+    Auth, CookieJar, Field, RequestExecutor, RequestPreferences, RequestVariables, ScriptReport,
+    auth::Credential, scripts::CallScripts,
 };
 
 /// Server reflection gives up here unless the request timeout is shorter.
@@ -127,7 +127,7 @@ impl GrpcClient {
                 .and_then(|request| {
                     Ok(Definition::Reflection(
                         Box::new(self.target(&request)?),
-                        metadata(&request.metadata)?,
+                        metadata(&request.metadata, &request.auth)?,
                     ))
                 }),
         };
@@ -284,7 +284,7 @@ impl GrpcClient {
             .resolve_grpc(request, !kind.streams_requests())
             .map_err(GrpcError::Variables)?;
         let target = self.target(&resolved)?;
-        let metadata = metadata(&resolved.metadata)?;
+        let metadata = metadata(&resolved.metadata, &resolved.auth)?;
 
         // Scripts that follow the call see each event before passing it on,
         // and the values generated for it.
@@ -462,10 +462,14 @@ fn resolve_path(path: &Path, collection: Option<&Path>) -> Result<PathBuf, GrpcE
         })
 }
 
-fn metadata(fields: &[Field]) -> Result<MetadataMap, GrpcError> {
+/// The request's metadata, with the credentials of its resolved
+/// authorization.
+fn metadata(fields: &[Field], auth: &Auth) -> Result<MetadataMap, GrpcError> {
     let mut headers = HeaderMap::new();
+    let credentials = auth_metadata(fields, auth).map_err(GrpcError::Auth)?;
 
-    for (name, value) in Field::enabled(fields) {
+    let sent = Field::enabled(fields).map(|(name, value)| (name.to_owned(), value.to_owned()));
+    for (name, value) in sent.chain(credentials) {
         let name = name.trim();
 
         if name.is_empty() {
@@ -480,6 +484,29 @@ fn metadata(fields: &[Field]) -> Result<MetadataMap, GrpcError> {
     }
 
     Ok(MetadataMap::from_headers(headers))
+}
+
+/// The credentials of a resolved authorization as metadata, unless the
+/// request's own metadata sets them.
+pub(crate) fn auth_metadata(
+    metadata: &[Field],
+    auth: &Auth,
+) -> Result<Vec<(String, String)>, String> {
+    let overridden = auth.credential_name().is_some_and(|(_, credential)| {
+        Field::enabled(metadata).any(|(name, _)| name.trim().eq_ignore_ascii_case(credential))
+    });
+    if overridden {
+        return Ok(Vec::new());
+    }
+
+    Ok(auth
+        .credentials(None, SystemTime::now())?
+        .into_iter()
+        .map(|credential| match credential {
+            // A call has no query, so its parameters are metadata too.
+            Credential::Header(name, value) | Credential::Query(name, value) => (name, value),
+        })
+        .collect())
 }
 
 /// Run on the shared Tokio runtime, which the gRPC transport requires.

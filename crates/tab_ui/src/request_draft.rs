@@ -15,4 +15,5 @@ mod variable_tests;
 
 pub(crate) use controls::request_header;
 pub use draft::{RequestDraft, RequestLocation};
+pub(crate) use execution::active_jar;
 pub(crate) use fields::{FieldsChanged, RequestFields};

@@ -1,6 +1,6 @@
 (function (input, pm, tools) {
     "use strict";
-    const {entries, readBody, responseObject, skip, warn, cookies: jar} = tools;
+    const {entries, readBody, responseObject, skip, setNextRequest, warn, cookies: jar} = tools;
     let url = input.url;
     const query = input.query;
     const extraQuery = entries(query);
@@ -257,11 +257,10 @@
             },
         };
     };
-    // Sending one request has no next request to set, as in Postman outside
-    // the Collection Runner.
-    pm.execution = input.response ? {setNextRequest() {}} : {
+    // Only the Collection Runner follows the next request, as in Postman.
+    pm.execution = input.response ? {setNextRequest} : {
         skipRequest(reason = "Skipped by pre-request script") { skip(reason); },
-        setNextRequest() {},
+        setNextRequest,
     };
     if (input.response) {
         pm.response = responseObject(input.response, () => readBody(true));

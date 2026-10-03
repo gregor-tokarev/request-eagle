@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use environment::{EnvironmentSession, VariableError, VariableResolver, VariableScopes};
 use url::form_urlencoded;
 
-use crate::{Body, Field, GrpcRequest, HttpRequest, RequestScripts, WebSocketRequest};
+use crate::{
+    Auth, Body, ExecutionInfo, Field, GrpcRequest, HttpRequest, LocalVariables, RequestScripts,
+    WebSocketRequest,
+};
 
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
@@ -14,10 +17,15 @@ pub struct RequestVariables {
     pub(crate) scopes: VariableScopes,
     pub(crate) session: Option<EnvironmentSession>,
     pub(crate) collection_scripts: Result<RequestScripts, String>,
+    /// What requests that inherit their authorization send.
+    pub(crate) collection_auth: Auth,
     pub(crate) environment_error: Option<String>,
     /// Values `{{$name}}` resolves to instead of generating new ones, set by
     /// a gRPC call's Before invoke script for the whole call.
     pub(crate) generated: BTreeMap<String, String>,
+    pub(crate) iteration_data: BTreeMap<String, serde_json::Value>,
+    pub(crate) info: ExecutionInfo,
+    pub(crate) locals: Option<LocalVariables>,
 }
 
 impl RequestVariables {
@@ -42,6 +50,57 @@ impl RequestVariables {
     pub fn with_collection_scripts(mut self, scripts: Result<RequestScripts, String>) -> Self {
         self.collection_scripts = scripts;
         self
+    }
+
+    /// Fill `{{name}}` with these values for this send, over every scope,
+    /// as a pre-request script's `pm.variables.set` does. A flow fills a
+    /// request's variables from its block's inputs this way.
+    pub fn with_local_values(mut self, values: impl IntoIterator<Item = (String, String)>) -> Self {
+        let locals = self.locals.get_or_insert_with(LocalVariables::default);
+        let mut current = locals.get();
+        for (name, value) in values {
+            self.values.insert(name.clone(), value.clone());
+            current.insert(name, value);
+        }
+        locals.set(current);
+
+        self
+    }
+
+    /// Values of a Collection Runner's data file row. `{{name}}` prefers them
+    /// to every scope, and scripts read them with `pm.iterationData`, typed
+    /// as a JSON file gives them.
+    pub fn with_iteration_data(mut self, data: BTreeMap<String, serde_json::Value>) -> Self {
+        self.iteration_data = data;
+        self
+    }
+
+    /// What `pm.info` tells the request's scripts.
+    pub fn with_info(mut self, info: ExecutionInfo) -> Self {
+        self.info = info;
+        self
+    }
+
+    /// Start with the `pm.variables` values that earlier requests left in
+    /// `locals`, and leave this request's there once each phase succeeds.
+    pub fn with_local_variables(mut self, locals: LocalVariables) -> Self {
+        self.locals = Some(locals);
+        self
+    }
+
+    /// Requests that inherit their authorization send the collection's.
+    pub fn with_collection_auth(mut self, auth: Auth) -> Self {
+        self.collection_auth = auth;
+        self
+    }
+
+    /// The authorization a request sends: its own, or its collection's
+    /// when it inherits it, with only the fields that sending uses.
+    pub fn effective_auth(&self, auth: &Auth) -> Auth {
+        match auth {
+            Auth::Inherit => self.collection_auth.sending(),
+            auth => auth.sending(),
+        }
     }
 
     /// Read the collection's variables and the active environment with the
@@ -75,8 +134,12 @@ impl RequestVariables {
             scopes,
             session,
             collection_scripts: Ok(RequestScripts::default()),
+            collection_auth: Auth::Inherit,
             environment_error,
             generated: BTreeMap::new(),
+            iteration_data: BTreeMap::new(),
+            info: ExecutionInfo::default(),
+            locals: None,
         }
     }
 
@@ -92,8 +155,11 @@ impl RequestVariables {
     /// variables such as `{{$guid}}` stay as written, since they differ on
     /// every use, unless a Before invoke script set them for the call.
     pub fn grpc_target_key(&self, request: &GrpcRequest) -> Option<Vec<String>> {
+        // Servers may require credentials to answer reflection.
+        let auth = self.effective_auth(&request.auth).texts();
         let texts = std::iter::once(request.url.as_str())
-            .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]));
+            .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]))
+            .chain(auth.iter().map(String::as_str));
         let mut resolver = self.resolver();
 
         for text in texts.clone() {
@@ -135,6 +201,17 @@ impl RequestVariables {
             field.value = resolve(&field.value)?;
         }
 
+        // Metadata that sends the credential itself takes precedence, so the
+        // authorization's variables need no values.
+        request.auth = self.effective_auth(&request.auth);
+        let own_credential = request.auth.credential_name().is_some_and(|(_, name)| {
+            Field::enabled(&request.metadata).any(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+        });
+        if own_credential {
+            request.auth = Auth::None;
+        }
+        request.auth.resolve_with(&mut resolve)?;
+
         if message {
             request.message = resolve(&request.message)?;
         }
@@ -174,7 +251,7 @@ impl RequestVariables {
         let mut request = request.clone();
         request.headers.retain(|field| field.enabled);
         request.query.retain(|field| field.enabled);
-
+        request.auth = self.effective_auth(&request.auth);
         let mut resolve = || {
             request.url = resolve_url(&request.url, &mut resolver)?;
 
@@ -183,7 +260,15 @@ impl RequestVariables {
                 field.value = resolver.resolve(&field.value)?;
             }
 
-            Ok(())
+            if crate::auth::sends_own_credential(
+                &request.auth,
+                &request.url,
+                &request.query,
+                &request.headers,
+            ) {
+                request.auth = Auth::None;
+            }
+            request.auth.resolve_with(|text| resolver.resolve(text))
         };
 
         resolve()
@@ -339,6 +424,18 @@ impl HttpRequest {
             field.key = resolver.resolve(&field.key)?;
             field.value = resolver.resolve(&field.value)?;
         }
+
+        // A header or parameter that sends the credential itself takes
+        // precedence, so the authorization's variables need no values.
+        if crate::auth::sends_own_credential(
+            &request.auth,
+            &request.path,
+            &request.query,
+            &request.headers,
+        ) {
+            request.auth = Auth::None;
+        }
+        request.auth.resolve_with(|text| resolver.resolve(text))?;
 
         match &mut request.body {
             Some(Body::Raw { text, .. }) if body_changed || text.contains("{{") => {

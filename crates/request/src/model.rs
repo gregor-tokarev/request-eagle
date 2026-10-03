@@ -74,6 +74,8 @@ pub struct HttpRequest {
     /// a value is sent as written.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_variables: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "crate::Auth::is_inherit")]
+    pub auth: crate::Auth,
     #[serde(default, skip_serializing_if = "crate::RequestScripts::is_empty")]
     pub scripts: crate::RequestScripts,
     #[serde(default, skip_serializing_if = "HttpSettings::is_default")]
@@ -189,6 +191,8 @@ pub struct WebSocketRequest {
     pub headers: Vec<Field>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query: Vec<Field>,
+    #[serde(default, skip_serializing_if = "crate::Auth::is_inherit")]
+    pub auth: crate::Auth,
     /// Saved with the request, so it can be sent again after reopening it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub message: String,

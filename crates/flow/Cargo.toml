@@ -1,0 +1,24 @@
+[package]
+name = "flow"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+environment = { path = "../environment" }
+fql = { path = "../fql" }
+futures = "0.3"
+jsonschema = { version = "0.56", default-features = false, features = ["idna"] }
+request = { path = "../request" }
+# Describes the saved flow format for the CLI's command schema.
+schemars = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+smol = "2"
+
+[features]
+schema = ["dep:schemars"]
+
+[dev-dependencies]
+toml = "1.1.3"

@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 collection = { path = "../collection" }
 environment = { path = "../environment" }
+flow = { path = "../flow" }
 gpui-kit = { workspace = true, features = ["component"] }
 import = { path = "../import" }
 keybindings_service = { path = "../keybindings_service" }

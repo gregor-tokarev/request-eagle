@@ -145,6 +145,7 @@ fn generated_values_are_shared_by_scripts_and_wire_templates_for_one_send() {
                     ],
                     query: vec![Field::new("id", "{{$guid}}")],
                     path_variables: Vec::new(),
+                    auth: Default::default(),
                     body: Some(Body::json("{{$guid}}/{{$guid}}")),
                     scripts: request::RequestScripts {
                         pre_request: pre,
@@ -305,6 +306,7 @@ fn sends_a_snapshot_with_encoded_query_repeated_headers_and_binary_body() {
             scripts: Default::default(),
             query: vec![Field::new("tag", "a & b"), Field::new("tag", "c+d")],
             path_variables: Vec::new(),
+            auth: Default::default(),
             settings: HttpSettings::default(),
         };
         let result = executor().execute(request, no_variables()).await.unwrap();
@@ -1804,5 +1806,46 @@ fn a_missing_body_file_stops_the_send() {
                 .starts_with("could not read /no/such/eagle.bin:"),
             "{error}"
         );
+    });
+}
+
+#[test]
+fn reports_the_request_as_it_went_out() {
+    smol::block_on(async {
+        let (url, server) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+        let variables = RequestVariables::new(
+            HashMap::from([
+                ("base".to_owned(), url.clone()),
+                ("user".to_owned(), "ada".to_owned()),
+            ]),
+            None,
+        );
+
+        let execution = executor()
+            .execute(
+                HttpRequest {
+                    method: Method::Post,
+                    path: "{{base}}/users/:id".into(),
+                    path_variables: vec![("id".into(), "{{user}}".into())],
+                    body: Some(Body::json(r#"{"name": "{{user}}"}"#)),
+                    scripts: request::RequestScripts {
+                        pre_request: r#"pm.request.headers.add({key: "X-Run", value: "1"});"#
+                            .into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                variables,
+            )
+            .await
+            .unwrap();
+        server.await;
+
+        let sent = execution.sent.unwrap();
+        assert_eq!(sent.path, format!("{url}/users/ada"));
+        let headers = Field::enabled(&sent.headers).collect::<Vec<_>>();
+        assert!(headers.contains(&("X-Run", "1")));
+        assert!(headers.contains(&("Content-Type", "application/json")));
+        assert_eq!(sent.body, Some(Body::json(r#"{"name": "ada"}"#)));
     });
 }

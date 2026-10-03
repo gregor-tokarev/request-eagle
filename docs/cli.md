@@ -1,8 +1,8 @@
 # Request Eagle CLI
 
 `request-eagle-cli` is an optional standalone binary for AI agents. It manages
-saved collections and requests, runs them, and edits settings, without the
-desktop app or a display.
+saved collections, requests and flows, runs them, and edits settings, without
+the desktop app or a display.
 
 ## Install
 
@@ -74,6 +74,12 @@ script results.
 - HTTP requests can set their own `timeout_ms`, `follow_redirects` and
   `verify_certificates`. Fields left out follow `settings.request`, and the
   `timeout_ms` of `requests.run` replaces both for that run.
+- Requests can set an `auth`, such as `{"type": "bearer", "token":
+  "{{token}}"}`. Without one, a request inherits its collection's, which
+  `collections.get` shows; `{"type": "none"}` sends none. Kinds are `api_key`,
+  `bearer`, `basic`, `digest`, `oauth1`, `oauth2`, `jwt` and `aws_signature`;
+  gRPC requests cannot use `digest`, `oauth1` or `aws_signature`. OAuth 2.0
+  sends its saved `access_token`; get a new one in the app.
 - `settings.request` takes `ca_certificates`, a PEM file of certificate
   authorities trusted in addition to the system's.
   `settings.client_certificates.add` checks a client certificate's files and
@@ -90,5 +96,17 @@ script results.
   the same sites, as the app does. `cookies.list` shows them and
   `cookies.delete` removes a domain's cookies, or one by name. Turn the jar off
   with `settings.request` and `"cookie_jar": false`.
+- Flows have their own commands. `flows.blocks` describes every block type
+  with its inputs, outputs and settings; `flows.get` also lists the variables
+  of each request a flow's HTTP Request blocks send, which are their inputs.
+  `flows.update` replaces the complete flow and checks its connections.
+  `flows.run` takes `input` for its Start blocks and returns what its Output
+  blocks received, each block's last run and the Log blocks' values. A flow
+  whose requests have scripts runs only with `trust_scripts: true`. A run that
+  completes exits 0 with `status` `succeeded`, `failed` when a block failed,
+  or `stopped` at its `timeout_ms` (5 minutes by default). See the
+  [flows guide](flows.md).
+- `fql.evaluate` evaluates FQL, the JSONata-based language of Evaluate
+  blocks, against JSON `input`, to try an expression before saving it.
 - Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
   `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.

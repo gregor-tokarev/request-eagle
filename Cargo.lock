@@ -284,6 +284,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "ar_archive_writer"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73cd58deff2140a0a8eae87e417bd01db68a33e148aa93d1e8cd837e55e312b6"
+dependencies = [
+ "object 0.39.1",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -747,7 +756,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "miniz_oxide",
- "object",
+ "object 0.37.3",
  "rustc-demangle",
  "windows-link 0.2.1",
 ]
@@ -1351,6 +1360,7 @@ name = "collection"
 version = "0.1.0"
 dependencies = [
  "environment",
+ "flow",
  "request",
  "serde",
  "serde_json",
@@ -1366,6 +1376,7 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "environment",
+ "flow",
  "gpui-kit",
  "import",
  "keybindings_service",
@@ -1765,6 +1776,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "csv"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52cd9d68cf7efc6ddfaaee42e7288d3a99d613d4b50f76ce9827ae0c6e14f938"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde_core",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704a3c26996a80471189265814dbc2c257598b96b8a7feae2d31ace646bb9782"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -2356,6 +2388,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
 
 [[package]]
+name = "flow"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "environment",
+ "fql",
+ "futures",
+ "jsonschema",
+ "request",
+ "schemars",
+ "serde",
+ "serde_json",
+ "smol",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
 name = "fluent-uri"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2480,6 +2530,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fql"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "indexmap",
+ "percent-encoding",
+ "regex",
+ "serde_json",
+ "stacker",
+ "typed-arena",
 ]
 
 [[package]]
@@ -5683,6 +5747,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "oid-registry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6436,6 +6509,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "psm"
+version = "0.1.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dcd034599e63b970727f70d79e02d62390a4a84f7c6b827c27c46d5ac3fa622"
+dependencies = [
+ "ar_archive_writer",
+ "cc",
+]
+
+[[package]]
 name = "pulp"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6977,6 +7060,7 @@ dependencies = [
  "hyper-util",
  "ipnet",
  "jsonschema",
+ "md-5",
  "mime_guess",
  "p12-keystore",
  "percent-encoding",
@@ -7043,6 +7127,8 @@ dependencies = [
  "collection",
  "dirs 6.0.0",
  "environment",
+ "flow",
+ "fql",
  "futures",
  "preferences",
  "rcgen",
@@ -8013,6 +8099,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "stacker"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "707f49d46706bacf8a2b00d51dace3f9de527c13eec3778f570c411f89e69967"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8326,8 +8425,11 @@ dependencies = [
  "anyhow",
  "chrono",
  "collection",
+ "csv",
  "encoding_rs",
  "environment",
+ "flow",
+ "fql",
  "futures",
  "gpui-kit",
  "hayro",
@@ -9031,6 +9133,12 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "typeid"
@@ -10563,6 +10671,7 @@ dependencies = [
  "collection",
  "collections_panel_ui",
  "environment",
+ "flow",
  "futures",
  "gpui-kit",
  "history",

@@ -97,6 +97,27 @@ impl EnvironmentSession {
             .sum()
     }
 
+    /// A session that starts with this session's changes and keeps its
+    /// later changes to itself, globals included.
+    pub fn fork(&self) -> Self {
+        // In the order `apply` locks them, so the copy is consistent.
+        let globals = self.globals.lock();
+        let collection = self.collection.lock();
+        let environment = self.environment.lock();
+        let copy = |values: &BTreeMap<String, Option<String>>| {
+            Arc::new(Changes {
+                values: Mutex::new(values.clone()),
+                revision: AtomicU64::new(0),
+            })
+        };
+
+        Self {
+            globals: copy(&globals),
+            collection: copy(&collection),
+            environment: copy(&environment),
+        }
+    }
+
     /// Each scope's file values with the session's changes over them.
     /// Globals have no file.
     pub fn scopes(

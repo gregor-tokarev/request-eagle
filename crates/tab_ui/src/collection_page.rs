@@ -3,6 +3,8 @@ use std::{
     path::PathBuf,
 };
 
+use collection::SharedSettings;
+use environment::EnvironmentSessions;
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
@@ -12,14 +14,18 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::RequestScripts;
+use request::{Auth, RequestScripts};
 
+use crate::Environments;
+use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::variable_table::{VariableTable, VariablesChanged};
+use crate::variables::VariableScope;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CollectionSection {
     Variables,
+    Auth,
     Scripts,
 }
 
@@ -29,10 +35,15 @@ pub struct CollectionSettings {
     pub name: String,
     pub variables: Vec<(String, String)>,
     pub scripts: RequestScripts,
+    /// What requests that inherit their authorization send.
+    pub auth: Auth,
 }
 
 /// Emitted by the page's Save button. The workspace owns collection storage.
 pub struct SaveCollection;
+
+/// Emitted by the page's Run button, to open the collection's runner.
+pub struct RunCollection;
 
 /// A collection's name, variables and scripts, edited in one tab and saved together.
 pub struct CollectionPage {
@@ -43,25 +54,47 @@ pub struct CollectionPage {
     name: Option<Entity<InputState>>,
     variables: Option<Entity<VariableTable>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
+    auth: Option<Entity<AuthEditor>>,
+    /// What the authorization's `{{variables}}` resolve from.
+    scope: Entity<VariableScope>,
+    sessions: EnvironmentSessions,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<SaveCollection> for CollectionPage {}
+impl EventEmitter<RunCollection> for CollectionPage {}
 
 impl CollectionPage {
+    /// The authorization's variables resolve from the collection's saved
+    /// variables, their session values and the active global environment.
     pub fn new(
         path: PathBuf,
         name: String,
         variables: HashMap<String, String>,
-        scripts: RequestScripts,
+        shared: SharedSettings,
+        sessions: EnvironmentSessions,
+        environments: Option<Entity<Environments>>,
+        cx: &mut Context<Self>,
     ) -> Self {
         let mut variables: Vec<_> = variables.into_iter().collect();
         variables.sort();
         let saved = CollectionSettings {
             name,
             variables,
-            scripts,
+            scripts: shared.scripts,
+            // A collection has no parent to inherit from.
+            auth: match shared.auth {
+                Auth::Inherit => Auth::None,
+                auth => auth,
+            },
         };
+        let environment_path = path.join("environment.toml");
+        let scope = cx.new(|_| VariableScope {
+            session: sessions.for_path(Some(&environment_path)),
+            path: Some(environment_path),
+            environments,
+            names: None,
+        });
 
         Self {
             path,
@@ -71,8 +104,23 @@ impl CollectionPage {
             name: None,
             variables: None,
             scripts: None,
+            auth: None,
+            scope,
+            sessions,
             _subscriptions: Vec::new(),
         }
+    }
+
+    /// Follow the collection's directory, where its variables are.
+    fn set_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let environment_path = path.join("environment.toml");
+        let session = self.sessions.for_path(Some(&environment_path));
+        self.scope.update(cx, |scope, cx| {
+            scope.path = Some(environment_path);
+            scope.session = session;
+            scope.changed(cx);
+        });
+        self.path = path;
     }
 
     /// The saved name, which the workspace shows as the tab title.
@@ -98,7 +146,7 @@ impl CollectionPage {
         settings: CollectionSettings,
         cx: &mut Context<Self>,
     ) {
-        self.path = path;
+        self.set_path(path, cx);
         self.saved = settings;
         cx.notify();
     }
@@ -111,7 +159,7 @@ impl CollectionPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.path = path;
+        self.set_path(path, cx);
 
         if self.draft.name == self.saved.name {
             self.draft.name = name.clone();
@@ -132,11 +180,38 @@ impl CollectionPage {
             CollectionSection::Variables => {
                 self.variables_state(window, cx);
             }
+            CollectionSection::Auth => {
+                self.auth_editor(cx)
+                    .update(cx, |auth, cx| auth.prepare(window, cx));
+            }
             CollectionSection::Scripts => {
                 self.script_editor(cx)
                     .update(cx, |scripts, cx| scripts.editor(window, cx));
             }
         }
+    }
+
+    fn auth_editor(&mut self, cx: &mut Context<Self>) -> Entity<AuthEditor> {
+        self.auth
+            .get_or_insert_with(|| {
+                let auth = cx.new(|_| {
+                    AuthEditor::new(
+                        self.draft.auth.clone(),
+                        AuthTarget::Collection,
+                        self.scope.clone(),
+                    )
+                });
+                self._subscriptions.push(cx.subscribe(
+                    &auth,
+                    |this, _, event: &AuthChanged, cx| {
+                        this.draft.auth = event.0.clone();
+                        cx.notify();
+                    },
+                ));
+
+                auth
+            })
+            .clone()
     }
 
     fn name_state(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
@@ -234,6 +309,16 @@ impl CollectionPage {
             )
             .child(div().flex_1())
             .child(
+                Button::new("run-collection")
+                    .debug_selector(|| "run-collection".into())
+                    .ghost()
+                    .flex_none()
+                    .icon(Icon::default().path("icons/square-play.svg"))
+                    .label("Run")
+                    .tooltip("Run collection")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(RunCollection))),
+            )
+            .child(
                 Button::new("save-collection")
                     .debug_selector(|| "save-collection".into())
                     .primary()
@@ -254,6 +339,7 @@ impl CollectionPage {
                 CollectionSection::Variables,
                 self.draft.variables.len(),
             ),
+            ("Auth", CollectionSection::Auth, 0),
             ("Scripts", CollectionSection::Scripts, scripts),
         ];
 
@@ -341,6 +427,7 @@ impl Render for CollectionPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match self.section {
             CollectionSection::Variables => self.variables_section(window, cx),
+            CollectionSection::Auth => self.auth_editor(cx).into_any_element(),
             CollectionSection::Scripts => self.script_editor(cx).into_any_element(),
         };
 

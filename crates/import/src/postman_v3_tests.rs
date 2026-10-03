@@ -2,8 +2,8 @@ use std::{fs, path::Path};
 
 use collection::ImportedItem;
 use request::{
-    Body, Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings, HttpRequest, Method,
-    Request, WebSocketRequest,
+    Auth, BearerAuth, Body, Field, GrpcDefinition, GrpcRequest, GrpcScripts, GrpcSettings,
+    HttpRequest, Method, PasswordAuth, Request, WebSocketRequest,
 };
 
 use crate::{ImportError, document_tests::read_collection};
@@ -112,6 +112,12 @@ order: 1000
     assert_eq!(import.collection.name, "Shop API");
     assert_eq!(import.collection.variables["host"], "localhost:50051");
     assert_eq!(
+        import.collection.auth,
+        Auth::Bearer(BearerAuth {
+            token: "{{token}}".into()
+        })
+    );
+    assert_eq!(
         import.collection.scripts.pre_request,
         "pm.variables.set('run', 1);"
     );
@@ -123,15 +129,15 @@ order: 1000
             tls: true,
             method: "shop.v1.ProductService/GetProduct".into(),
             message: "{\n  \"id\": \"7\"\n}".into(),
-            // The collection's authorization is sent as metadata.
             metadata: vec![
                 Field::new("x-request-id", "{{$guid}}"),
                 Field {
                     enabled: false,
                     ..Field::new("x-debug", "1")
                 },
-                Field::new("Authorization", "Bearer {{token}}"),
             ],
+            // The request inherits the collection's authorization.
+            auth: Auth::Inherit,
             definition: GrpcDefinition::ProtoFile {
                 path: "/work/shop/api/product.proto".into(),
                 import_paths: Vec::new(),
@@ -305,13 +311,17 @@ order: 2000
     // JSON bodies are sent as JSON without a header of their own.
     assert_eq!(
         add.headers,
-        [
-            Field {
-                enabled: false,
-                ..Field::new("X-Debug", "1")
-            },
-            Field::new("Authorization", "Basic YWRtaW46c2VjcmV0"),
-        ]
+        [Field {
+            enabled: false,
+            ..Field::new("X-Debug", "1")
+        }]
+    );
+    assert_eq!(
+        add.auth,
+        Auth::Basic(PasswordAuth {
+            username: "admin".into(),
+            password: "secret".into(),
+        })
     );
 
     let find = http(&pets[1]);
@@ -332,6 +342,8 @@ order: 2000
         WebSocketRequest {
             url: "wss://pets.test/updates".into(),
             headers: vec![Field::new("Authorization", "Bearer {{token}}")],
+            // Postman sends WebSocket handshakes no inherited authorization.
+            auth: Auth::None,
             ..WebSocketRequest::default()
         }
     );
@@ -395,12 +407,19 @@ auth:
 
     let import = read_collection(&collection).unwrap();
     let items = &import.collection.items;
-    let bearer = |token: &str| vec![Field::new("Authorization", format!("Bearer {token}"))];
+    let bearer = |token: &str| {
+        Auth::Bearer(BearerAuth {
+            token: token.into(),
+        })
+    };
 
-    assert_eq!(grpc(&items[0]).metadata, bearer("ONE"));
-    assert_eq!(grpc(&items[1]).metadata, bearer("TWO"));
+    // The collection's first authorization is its own, which requests
+    // inherit; others become the requests' own.
+    assert_eq!(import.collection.auth, bearer("ONE"));
+    assert_eq!(grpc(&items[0]).auth, Auth::Inherit);
+    assert_eq!(grpc(&items[1]).auth, bearer("TWO"));
     let (_, admin) = folder(&items[2]);
-    assert_eq!(http(&admin[0]).headers, bearer("TWO"));
+    assert_eq!(http(&admin[0]).auth, bearer("TWO"));
 }
 
 #[test]

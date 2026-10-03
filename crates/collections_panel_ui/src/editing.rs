@@ -12,7 +12,7 @@ use gpui_kit::{
 
 use super::{
     panel::{CollectionPanel, CollectionPanelEvent},
-    tree::CollectionTree,
+    tree::{CollectionTree, ItemKind},
 };
 
 pub(super) struct RenameEditor {
@@ -62,6 +62,18 @@ impl CollectionPanel {
             "New WebSocket",
             request::WebSocketRequest::default().into(),
         );
+        self.finish_creation(result, window, cx);
+    }
+
+    pub(super) fn create_flow(
+        &mut self,
+        parent: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self
+            .collections
+            .create_flow(parent, "New Flow", flow::Flow::starter());
         self.finish_creation(result, window, cx);
     }
 
@@ -186,6 +198,32 @@ impl CollectionPanel {
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
         self.collections.rename_request(path, expected_id, name)?;
+
+        let selected = self
+            .selected
+            .map(|index| self.tree.items[index].path.clone());
+        self.rebuild_tree(selected.as_deref(), Some((path, path)), cx);
+
+        Ok(())
+    }
+
+    /// Rename a saved flow outside the tree, such as from its tab, unless
+    /// its file now holds another flow.
+    pub fn rename_flow(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        if self
+            .collections
+            .flow(path)
+            .is_none_or(|flow| flow.id != expected_id)
+        {
+            return Err(CollectionEditError::FlowReplaced);
+        }
+        self.collections.rename(path, name)?;
 
         let selected = self
             .selected
@@ -352,6 +390,20 @@ impl CollectionPanel {
                     path: destination.to_path_buf(),
                     name: collection.label.clone(),
                 });
+            } else if let Some(index) = self.tree.index_of(destination)
+                && self.tree.items[index].kind == ItemKind::Folder
+            {
+                let mut root = index;
+                while let Some(parent) = self.tree.items[root].parent {
+                    root = parent;
+                }
+
+                cx.emit(CollectionPanelEvent::FolderRelocated {
+                    previous_path: previous.to_path_buf(),
+                    path: destination.to_path_buf(),
+                    name: self.tree.items[index].label.clone(),
+                    collection: self.tree.items[root].path.clone(),
+                });
             }
 
             for (index, item) in self.tree.items.iter().enumerate() {
@@ -361,13 +413,23 @@ impl CollectionPanel {
                 let Ok(relative) = item.path.strip_prefix(destination) else {
                     continue;
                 };
-                let Some(file) = self.collections.file(&item.path) else {
+                // Flows follow their tabs like requests.
+                let Some(id) = self
+                    .collections
+                    .file(&item.path)
+                    .map(|file| file.id.clone())
+                    .or_else(|| {
+                        self.collections
+                            .flow(&item.path)
+                            .map(|flow| flow.id.clone())
+                    })
+                else {
                     continue;
                 };
                 let (collection, folders) = self.tree.location(index);
 
                 cx.emit(CollectionPanelEvent::RequestRelocated {
-                    id: file.id.clone().into(),
+                    id: id.into(),
                     // Joining an empty path would add a trailing separator.
                     previous_path: if relative.as_os_str().is_empty() {
                         previous.to_path_buf()

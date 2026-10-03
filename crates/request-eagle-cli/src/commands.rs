@@ -67,6 +67,62 @@ pub enum Command {
         variables: HashMap<String, String>,
         timeout_ms: Option<u64>,
     },
+    /// Saved flows, which connect blocks such as HTTP requests, FQL and loops
+    /// like Postman Flows. Lists the flows of every collection, or of one.
+    #[serde(rename = "flows.list")]
+    FlowsList {
+        collection: Option<PathBuf>,
+        #[serde(default)]
+        query: String,
+    },
+    /// A flow's blocks and connections, with the name, URL and variables of
+    /// each request its HTTP Request blocks send.
+    #[serde(rename = "flows.get")]
+    FlowsGet { path: PathBuf },
+    /// Create a flow in a collection or folder. Without `flow` it holds a
+    /// Start block.
+    #[serde(rename = "flows.create")]
+    FlowsCreate {
+        parent: PathBuf,
+        name: String,
+        flow: Option<flow::Flow>,
+    },
+    /// Replace a saved flow's blocks and connections. Read flows.get first to
+    /// obtain its ID and contents.
+    #[serde(rename = "flows.update")]
+    FlowsUpdate {
+        path: PathBuf,
+        expected_id: String,
+        flow: flow::Flow,
+    },
+    /// Every block type with its settings, inputs, outputs and defaults.
+    #[serde(rename = "flows.blocks")]
+    FlowsBlocks {},
+    /// Run a saved flow and return what its Output blocks received, each
+    /// block's last run and the Log blocks' values. `input` is what Start
+    /// blocks send; `variables` override the collection's for its requests,
+    /// like an active environment. Requests use the app's cookie jar unless
+    /// cookie_jar is off. The run stops after timeout_ms [default: 300000].
+    #[serde(rename = "flows.run")]
+    FlowsRun {
+        path: PathBuf,
+        input: Option<Value>,
+        #[serde(default)]
+        trust_scripts: bool,
+        #[serde(default)]
+        variables: HashMap<String, String>,
+        timeout_ms: Option<u64>,
+    },
+    /// Evaluate an FQL (JSONata) expression, as Evaluate blocks do. The
+    /// fields of `input` are the expression's variables; `bindings` are
+    /// available as `$name`. An undefined result has `"defined": false`.
+    #[serde(rename = "fql.evaluate")]
+    FqlEvaluate {
+        expression: String,
+        input: Option<Value>,
+        #[serde(default)]
+        bindings: HashMap<String, Value>,
+    },
     #[serde(rename = "settings.get")]
     SettingsGet {},
     #[serde(rename = "settings.request")]
@@ -163,6 +219,14 @@ pub struct GrpcRequestInput {
     #[serde(default)]
     #[schemars(with = "Vec<FieldSchema>")]
     pub metadata: Vec<Field>,
+    /// The authorization, as `requests.get` shows it, such as
+    /// `{"type": "bearer", "token": "{{token}}"}`. Left out, the request
+    /// inherits its collection's; `{"type": "none"}` sends none. Kinds:
+    /// api_key, bearer, basic, digest, oauth1, oauth2, jwt and aws_signature
+    /// (gRPC requests cannot use digest, oauth1 or aws_signature).
+    #[serde(default, skip_serializing_if = "request::Auth::is_inherit")]
+    #[schemars(with = "Option<Value>")]
+    pub auth: request::Auth,
     /// A `.proto` file; relative paths resolve from the collection directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proto_file: Option<PathBuf>,
@@ -219,6 +283,15 @@ pub struct RequestInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_variables: Vec<(String, String)>,
     pub body: Option<Body>,
+    /// The authorization, as `requests.get` shows it, such as
+    /// `{"type": "bearer", "token": "{{token}}"}`. Left out, the request
+    /// inherits its collection's; `{"type": "none"}` sends none. Kinds:
+    /// api_key, bearer, basic, digest, oauth1, oauth2, jwt and aws_signature
+    /// (gRPC requests cannot use digest, oauth1 or aws_signature).
+    #[serde(default, skip_serializing_if = "request::Auth::is_inherit")]
+    #[schemars(with = "Option<Value>")]
+    pub auth: request::Auth,
+
     #[serde(default)]
     pub pre_request: String,
     #[serde(default)]
@@ -351,6 +424,7 @@ pub fn schema() -> Value {
         "output": {"version": FORMAT_VERSION, "ok": true, "result": "command-specific JSON"},
         "error": {"version": FORMAT_VERSION, "ok": false, "error": {"code": "stable_code", "message": "details"}},
         "limits": {"input_bytes": MAX_INPUT_BYTES},
-        "workflow": ["collections.list", "requests.list", "requests.get", "requests.update", "requests.run"]
+        "workflow": ["collections.list", "requests.list", "requests.get", "requests.update", "requests.run"],
+        "flows": ["flows.blocks", "flows.list", "flows.get", "flows.update", "flows.run", "fql.evaluate"]
     })
 }

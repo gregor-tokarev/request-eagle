@@ -7,8 +7,8 @@ mod toml_merge;
 #[cfg(test)]
 mod tests;
 
-pub use collection::{Collection, CollectionLoadError, CollectionSaveError};
-pub use entry::{DirEntry, Entry, FileEntry};
+pub use collection::{Collection, CollectionLoadError, CollectionSaveError, SharedSettings};
+pub use entry::{DirEntry, Entry, FileEntry, FlowEntry};
 pub use registry::{
     CollectionEditError, CollectionRegistry, ImportedCollection, ImportedItem, MovePlacement,
     SkippedPath,

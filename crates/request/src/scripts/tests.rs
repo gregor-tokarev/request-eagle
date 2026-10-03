@@ -284,6 +284,7 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
         let execution = Execution {
             elapsed: Duration::ZERO,
             scripts: Vec::new(),
+            sent: None,
             response: Response::Http(HttpResponse {
                 status: StatusCode::OK,
                 version: Version::HTTP_11,
@@ -297,6 +298,8 @@ fn unread_bodies_can_exceed_the_js_heap_and_keep_their_buffers() {
             session: None,
             collection_post_response: String::new(),
             response_url: None,
+            info: Default::default(),
+            locals: None,
         };
         let mut result = post_response(
             request.clone(),
@@ -426,6 +429,7 @@ fn response_tests_keep_failures_logs_and_response_data() {
         let execution = Execution {
             elapsed: Duration::from_millis(42),
             scripts,
+            sent: None,
             response: Response::Http(HttpResponse {
                 status: StatusCode::CREATED,
                 version: Version::HTTP_11,
