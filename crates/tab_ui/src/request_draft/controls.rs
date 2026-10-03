@@ -11,6 +11,7 @@ use request_eagle_theme::{method_color, protocol_icon};
 
 use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;
+use crate::storage::Storage;
 use crate::variable_input::with_variables;
 use collection::SavedLocation;
 
@@ -18,15 +19,11 @@ use collection::SavedLocation;
 /// unsaved request shows the name given in its tab.
 pub(crate) fn request_header(
     protocol: &'static str,
-    location: Option<&SavedLocation>,
-    name: Option<&SharedString>,
+    storage: &Storage,
     cx: &App,
 ) -> impl IntoElement + use<> {
-    let name: SharedString = match (location, name) {
-        (Some(location), _) => location.name.clone().into(),
-        (None, Some(name)) => name.clone(),
-        (None, None) => "Untitled Request".into(),
-    };
+    let location = storage.location();
+    let name = storage.name().unwrap_or_else(|| "Untitled Request".into());
 
     h_flex()
         .flex_none()

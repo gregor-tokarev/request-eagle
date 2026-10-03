@@ -7,7 +7,7 @@ use std::{
 
 use collection::{Collections, FileEntry, SavedLocation};
 use environment::EnvironmentSessions;
-use flow::{Block, BlockKind, BlockType, Connection, Flow};
+use flow::{Block, BlockKind, BlockType, Connection, Flow, SavedFlow};
 use gpui_kit::component::{
     resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
     v_flex,
@@ -187,6 +187,7 @@ pub struct FlowEditor {
     pub path: PathBuf,
     /// Tells the flow apart from another one saved at the same path later.
     pub id: SharedString,
+    pub name: SharedString,
     pub(super) flow: Flow,
     saved: Flow,
     pub(super) viewport: Viewport,
@@ -235,9 +236,7 @@ pub struct FlowEditor {
 
 impl FlowEditor {
     pub fn new(
-        path: PathBuf,
-        id: SharedString,
-        flow: Flow,
+        saved: SavedFlow,
         collections: Entity<Collections>,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
@@ -248,10 +247,11 @@ impl FlowEditor {
             .map(|environments| cx.observe(environments, |_, _, cx| cx.notify()));
 
         Self {
-            path,
-            id,
-            saved: flow.clone(),
-            flow,
+            path: saved.path,
+            id: saved.id.into(),
+            name: saved.name.into(),
+            saved: saved.flow.clone(),
+            flow: saved.flow,
             viewport: Viewport::default(),
             selection: Vec::new(),
             selected_connection: None,
@@ -292,6 +292,12 @@ impl FlowEditor {
     }
 
     /// Show changes kept from the last session over the saved flow.
+    /// Follow a rename made in the sidebar or the tab.
+    pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        self.name = name;
+        cx.notify();
+    }
+
     pub fn restore_draft(&mut self, flow: Flow, cx: &mut Context<Self>) {
         self.flow = flow;
         cx.notify();

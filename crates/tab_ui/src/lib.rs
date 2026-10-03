@@ -26,6 +26,7 @@ mod request_settings;
 mod response_view;
 mod script_editor;
 mod section_count;
+mod storage;
 mod variable_input;
 mod variable_table;
 mod variables;
@@ -49,4 +50,5 @@ pub use flow_editor::{
 pub use grpc_draft::GrpcDraft;
 pub use request_draft::RequestDraft;
 pub use request_sent::RequestSent;
+pub use storage::Storage;
 pub use websocket_draft::WebSocketDraft;

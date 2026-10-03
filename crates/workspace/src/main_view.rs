@@ -20,7 +20,7 @@ use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
     EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
-    SaveCollection, WebSocketDraft,
+    SaveCollection, Storage, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -73,9 +73,9 @@ impl Page {
     /// Where a request tab's file is saved.
     pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a SavedLocation> {
         match self {
-            Page::Request(draft) => draft.read(cx).location.as_ref(),
-            Page::Grpc(draft) => draft.read(cx).location.as_ref(),
-            Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
+            Page::Request(draft) => draft.read(cx).storage.location(),
+            Page::Grpc(draft) => draft.read(cx).storage.location(),
+            Page::WebSocket(draft) => draft.read(cx).storage.location(),
             Page::Flow(_)
             | Page::Collection(_)
             | Page::Runner(_)
@@ -116,31 +116,32 @@ impl Page {
 
     /// The tab as the next launch reopens it.
     fn saved(&self, title: &SharedString, cx: &App) -> SavedTab {
-        let request = |location: &Option<SavedLocation>,
-                       name: &Option<SharedString>,
-                       request: request::Request| SavedTab::Request {
+        let request = |storage: &Storage, request: request::Request| SavedTab::Request {
             title: title.to_string(),
-            file: location.as_ref().map(|location| SavedFile {
+            file: storage.location().map(|location| SavedFile {
                 path: location.path.clone(),
                 id: location.id.clone(),
                 collection: location.collection.clone(),
             }),
-            name: name.as_ref().map(ToString::to_string),
-            draft: (location.is_none() || self.is_dirty(cx)).then_some(request),
+            name: match storage {
+                Storage::Unsaved { name } => name.as_ref().map(ToString::to_string),
+                Storage::Saved(_) => None,
+            },
+            draft: (storage.location().is_none() || self.is_dirty(cx)).then_some(request),
         };
 
         match self {
             Page::Request(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.location, &draft.name, draft.request.clone().into())
+                request(&draft.storage, draft.request.clone().into())
             }
             Page::Grpc(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.location, &draft.name, draft.request.clone().into())
+                request(&draft.storage, draft.request.clone().into())
             }
             Page::WebSocket(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.location, &draft.name, draft.request.clone().into())
+                request(&draft.storage, draft.request.clone().into())
             }
             Page::Flow(editor) => {
                 let editor = editor.read(cx);
@@ -163,6 +164,35 @@ impl Page {
         }
     }
 
+    /// The name a page gives its tab. Pages without one keep the title their
+    /// tab opened with, such as Untitled 2.
+    fn title(&self, cx: &App) -> Option<SharedString> {
+        match self {
+            Page::Request(draft) => draft.read(cx).storage.name(),
+            Page::Grpc(draft) => draft.read(cx).storage.name(),
+            Page::WebSocket(draft) => draft.read(cx).storage.name(),
+            Page::Flow(editor) => Some(editor.read(cx).name.clone()),
+            Page::Collection(page) => Some(page.read(cx).name().to_owned().into()),
+            Page::Runner(runner) => Some(runner.read(cx).name().clone()),
+            Page::Environment(editor) => Some(editor.read(cx).name.clone()),
+            Page::Cookies(_) => None,
+        }
+    }
+
+    /// A request tab's request, as edited.
+    fn request(&self, cx: &App) -> Option<request::Request> {
+        match self {
+            Page::Request(draft) => Some(draft.read(cx).request.clone().into()),
+            Page::Grpc(draft) => Some(draft.read(cx).request.clone().into()),
+            Page::WebSocket(draft) => Some(draft.read(cx).request.clone().into()),
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => None,
+        }
+    }
+
     fn icon(&self) -> Option<&'static str> {
         match self {
             Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
@@ -174,16 +204,19 @@ impl Page {
         }
     }
 
-    /// Redraw the tab strip only when the tab's label or dirty marker changes.
+    /// Redraw the tab strip only when the tab's title, label or dirty marker
+    /// changes.
     fn observe(&self, id: u64, cx: &mut Context<MainView>) -> Subscription {
         let on_change = move |this: &mut MainView, cx: &mut Context<MainView>| {
             let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) else {
                 return;
             };
+            let title = tab.page.title(cx).unwrap_or_else(|| tab.title.clone());
             let label = tab.page.label(cx);
             let dirty = tab.page.is_dirty(cx);
 
-            if tab.label != label || tab.dirty != dirty {
+            if tab.title != title || tab.label != label || tab.dirty != dirty {
+                tab.title = title;
                 tab.label = label;
                 tab.dirty = dirty;
                 cx.notify();
@@ -404,7 +437,7 @@ impl MainView {
                 match (saved, draft) {
                     (Some((location, request)), draft) => {
                         let title = location.name.clone().into();
-                        self.restore_request(title, draft, request, Some(location), cx);
+                        self.restore_request(title, draft, request, Storage::Saved(location), cx);
                     }
                     // Changes to a request whose file is gone reopen unsaved,
                     // still finding the files they refer to.
@@ -414,19 +447,7 @@ impl MainView {
                             None => draft,
                         };
                         let name = unsaved_name.or_else(|| file.is_some().then(|| title.clone()));
-                        let empty = match &draft {
-                            request::Request::Http(_) => request::Request::Http(Default::default()),
-                            request::Request::Grpc(_) => request::Request::Grpc(Default::default()),
-                            request::Request::WebSocket(_) => {
-                                request::Request::WebSocket(Default::default())
-                            }
-                        };
-                        let index =
-                            self.restore_request(title.into(), Some(draft), empty, None, cx);
-
-                        if let Some(name) = name {
-                            self.tabs[index].page.set_name(name.into(), cx);
-                        }
+                        self.open_unsaved_copy(title.into(), draft, name.map(Into::into), cx);
                     }
                     (None, None) => return false,
                 }
@@ -478,14 +499,14 @@ impl MainView {
         title: SharedString,
         draft: Option<request::Request>,
         saved: request::Request,
-        location: Option<SavedLocation>,
+        storage: Storage,
         cx: &mut Context<Self>,
     ) -> usize {
         let index = match draft.unwrap_or_else(|| saved.clone()) {
-            request::Request::Http(request) => self.open_draft(title, request, location, cx),
-            request::Request::Grpc(request) => self.open_grpc_draft(title, request, location, cx),
+            request::Request::Http(request) => self.open_draft(title, request, storage, cx),
+            request::Request::Grpc(request) => self.open_grpc_draft(title, request, storage, cx),
             request::Request::WebSocket(request) => {
-                self.open_websocket(title, request, location, cx)
+                self.open_websocket(title, request, storage, cx)
             }
         };
 
@@ -503,6 +524,24 @@ impl MainView {
         }
 
         index
+    }
+
+    /// Open a request's changes as an unsaved request, such as one whose file
+    /// is gone. They are measured from an empty request of its protocol.
+    fn open_unsaved_copy(
+        &mut self,
+        title: SharedString,
+        draft: request::Request,
+        name: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let empty = match &draft {
+            request::Request::Http(_) => request::Request::Http(Default::default()),
+            request::Request::Grpc(_) => request::Request::Grpc(Default::default()),
+            request::Request::WebSocket(_) => request::Request::WebSocket(Default::default()),
+        };
+
+        self.restore_request(title, Some(draft), empty, Storage::Unsaved { name }, cx)
     }
 
     /// The open tabs, as the next launch reopens them.
@@ -525,7 +564,7 @@ impl MainView {
 
         self.tabs.push(PageTab {
             id,
-            title: title.into(),
+            title: page.title(cx).unwrap_or_else(|| title.into()),
             label: page.label(cx),
             dirty: page.is_dirty(cx),
             page,
@@ -571,15 +610,16 @@ impl MainView {
         }
 
         let title: SharedString = location.name.clone().into();
+        let storage = Storage::Saved(location);
         match request {
             request::Request::Http(request) => {
-                self.open_draft(title, request.clone(), Some(location), cx);
+                self.open_draft(title, request.clone(), storage, cx);
             }
             request::Request::Grpc(request) => {
-                self.open_grpc_draft(title, request.clone(), Some(location), cx);
+                self.open_grpc_draft(title, request.clone(), storage, cx);
             }
             request::Request::WebSocket(request) => {
-                self.open_websocket(title, request.clone(), Some(location), cx);
+                self.open_websocket(title, request.clone(), storage, cx);
             }
         }
     }
@@ -652,10 +692,7 @@ impl MainView {
         location: SavedLocation,
         cx: &mut Context<Self>,
     ) {
-        let tab = &mut self.tabs[index];
-        tab.title = location.name.clone().into();
-
-        match &tab.page {
+        match &self.tabs[index].page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
             Page::WebSocket(draft) => {
@@ -679,20 +716,11 @@ impl MainView {
         let collections = self.collections.clone();
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
-        let id = saved.id.into();
-        let editor = cx.new(|cx| {
-            FlowEditor::new(
-                saved.path,
-                id,
-                saved.flow,
-                collections,
-                sessions,
-                Some(environments),
-                cx,
-            )
-        });
+        let title = saved.name.clone();
+        let editor =
+            cx.new(|cx| FlowEditor::new(saved, collections, sessions, Some(environments), cx));
 
-        self.open_tab(saved.name, Page::Flow(editor), cx)
+        self.open_tab(title, Page::Flow(editor), cx)
     }
 
     fn flow_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
@@ -707,15 +735,13 @@ impl MainView {
 
     /// Follow a flow renamed in the sidebar or its tab.
     pub(crate) fn rename_flow(&mut self, path: &Path, name: SharedString, cx: &mut Context<Self>) {
-        for tab in &mut self.tabs {
+        for tab in &self.tabs {
             if let Page::Flow(editor) = &tab.page
                 && editor.read(cx).path == path
             {
-                tab.title = name.clone();
+                editor.update(cx, |editor, cx| editor.set_name(name.clone(), cx));
             }
         }
-
-        cx.notify();
     }
 
     /// Close the tab of a flow deleted in the sidebar.
@@ -850,8 +876,9 @@ impl MainView {
         })
     }
 
-    /// Close the pages of a deleted collection or folder, so a later one at
-    /// the same path cannot reuse their stale settings.
+    /// Close the tabs of a deleted collection, folder or request, so a later
+    /// one at the same path cannot reuse their stale settings. Requests with
+    /// unsaved changes stay open as unsaved requests instead.
     fn close_deleted(&mut self, path: &Path, cx: &mut Context<Self>) {
         if let Some(index) = self.collection_tab(path, cx) {
             self.remove_tab(index, cx);
@@ -864,6 +891,34 @@ impl MainView {
         }) {
             self.remove_tab(index, cx);
         }
+
+        for index in (0..self.tabs.len()).rev() {
+            let page = &self.tabs[index].page;
+            let Some(location) = page
+                .location(cx)
+                .filter(|location| location.path.starts_with(path))
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(request) = page.request(cx).filter(|_| page.is_dirty(cx)) else {
+                self.remove_tab(index, cx);
+                continue;
+            };
+
+            // Reopen the changes unsaved in the same place, still finding the
+            // files they refer to.
+            let selected = self.selected;
+            let copy = self.open_unsaved_copy(
+                self.tabs[index].title.clone(),
+                request.resolved_from(&location.collection),
+                Some(location.name.into()),
+                cx,
+            );
+            self.tabs[index] = self.tabs.remove(copy);
+            self.selected = selected;
+            self.scroll_to_tab = selected;
+        }
     }
 
     fn relocate_collection(
@@ -874,20 +929,15 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         self.relocate_runners(previous_path, path, path, cx);
-        let name: SharedString = directory_name(path).into();
 
         let Some(index) = self.collection_tab(previous_path, cx) else {
             return;
         };
-        let tab = &mut self.tabs[index];
-        tab.title = name.clone();
-
-        if let Page::Collection(page) = &tab.page {
+        if let Page::Collection(page) = &self.tabs[index].page {
             page.update(cx, |page, cx| {
-                page.relocate(path.to_path_buf(), name.to_string(), window, cx)
+                page.relocate(path.to_path_buf(), directory_name(path), window, cx)
             });
         }
-        cx.notify();
     }
 
     /// Follow a collection or folder renamed or moved in the runners of it
@@ -901,15 +951,13 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         let name: SharedString = directory_name(path).into();
-        for tab in &mut self.tabs {
+        for tab in &self.tabs {
             if let Page::Runner(runner) = &tab.page {
-                tab.title = runner.update(cx, |runner, cx| {
-                    runner.relocate(previous_path, path, name.clone(), collection, cx);
-                    runner.name().clone()
+                runner.update(cx, |runner, cx| {
+                    runner.relocate(previous_path, path, name.clone(), collection, cx)
                 });
             }
         }
-        cx.notify();
     }
 
     pub(crate) fn new_tab(&mut self, cx: &mut Context<Self>) {
@@ -924,7 +972,7 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         let title = format!("Untitled {}", self.next_id);
-        self.open_draft(title.into(), request, None, cx);
+        self.open_draft(title.into(), request, Storage::Unsaved { name: None }, cx);
 
         if let Some(Page::Request(draft)) = self.tabs.last().map(|tab| &tab.page) {
             draft.update(cx, |draft, cx| draft.mark_saved(Default::default(), cx));
@@ -933,20 +981,25 @@ impl MainView {
 
     pub(crate) fn new_websocket_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
-        self.open_websocket(title.into(), Default::default(), None, cx);
+        self.open_websocket(
+            title.into(),
+            Default::default(),
+            Storage::Unsaved { name: None },
+            cx,
+        );
     }
 
     fn open_websocket(
         &mut self,
         title: SharedString,
         request: request::WebSocketRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let draft =
-            cx.new(|cx| WebSocketDraft::new(request, location, sessions, Some(environments), cx));
+            cx.new(|cx| WebSocketDraft::new(request, storage, sessions, Some(environments), cx));
 
         self.open_tab(title, Page::WebSocket(draft), cx)
     }
@@ -955,33 +1008,37 @@ impl MainView {
         &mut self,
         title: SharedString,
         request: request::HttpRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let draft =
-            cx.new(|cx| RequestDraft::new(request, location, sessions, Some(environments), cx));
+            cx.new(|cx| RequestDraft::new(request, storage, sessions, Some(environments), cx));
 
         self.open_tab(title, Page::Request(draft), cx)
     }
 
     pub(crate) fn new_grpc_tab(&mut self, cx: &mut Context<Self>) {
         let title = format!("Untitled {}", self.next_id);
-        self.open_grpc_draft(title.into(), Default::default(), None, cx);
+        self.open_grpc_draft(
+            title.into(),
+            Default::default(),
+            Storage::Unsaved { name: None },
+            cx,
+        );
     }
 
     fn open_grpc_draft(
         &mut self,
         title: SharedString,
         request: request::GrpcRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
-        let draft =
-            cx.new(|cx| GrpcDraft::new(request, location, sessions, Some(environments), cx));
+        let draft = cx.new(|cx| GrpcDraft::new(request, storage, sessions, Some(environments), cx));
 
         self.open_tab(title, Page::Grpc(draft), cx)
     }
@@ -1008,10 +1065,13 @@ impl MainView {
             "" => format!("Untitled {}", self.next_id).into(),
             address => address.to_owned().into(),
         };
+        let storage = Storage::Unsaved { name: None };
         let index = match record.request {
-            request::Request::Http(request) => self.open_draft(title, request, None, cx),
-            request::Request::Grpc(request) => self.open_grpc_draft(title, request, None, cx),
-            request::Request::WebSocket(request) => self.open_websocket(title, request, None, cx),
+            request::Request::Http(request) => self.open_draft(title, request, storage, cx),
+            request::Request::Grpc(request) => self.open_grpc_draft(title, request, storage, cx),
+            request::Request::WebSocket(request) => {
+                self.open_websocket(title, request, storage, cx)
+            }
         };
 
         if let Page::Request(draft) = &self.tabs[index].page {
@@ -1099,13 +1159,9 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            EnvironmentsEvent::Renamed { to, .. } => {
-                // Only the environment's editor renames it, and it already
-                // uses the new name.
-                if let Some((index, _)) = self.environment_tab(to, cx) {
-                    self.tabs[index].title = to.clone();
-                }
-            }
+            // Only the environment's editor renames it, and its tab follows
+            // the editor's name.
+            EnvironmentsEvent::Renamed { .. } => {}
             EnvironmentsEvent::Deleted(name) => {
                 if let Some((index, _)) = self.environment_tab(name, cx) {
                     self.remove_tab(index, cx);
@@ -1244,7 +1300,6 @@ impl MainView {
 
                 match result {
                     Ok((path, settings)) => {
-                        self.tabs[index].title = settings.name.clone().into();
                         page.update(cx, |page, cx| page.mark_saved(path, settings, cx));
                         self.close_saved_tab(index, window, cx);
                     }
@@ -1281,30 +1336,27 @@ impl MainView {
             }
             Page::Request(draft) => {
                 let request = draft.read(cx).request.clone();
-                let location = draft.read(cx).location.clone();
-                let name = draft.read(cx).name.clone();
+                let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
             }
             Page::Grpc(draft) => {
                 let request = draft.read(cx).request.clone();
-                let location = draft.read(cx).location.clone();
-                let name = draft.read(cx).name.clone();
+                let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
             }
             Page::WebSocket(draft) => {
                 let request = draft.read(cx).request.clone();
-                let location = draft.read(cx).location.clone();
-                let name = draft.read(cx).name.clone();
+                let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, location, name, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -1320,23 +1372,25 @@ impl MainView {
     fn save_request_at(
         &mut self,
         tab_id: u64,
-        location: Option<SavedLocation>,
-        name: Option<SharedString>,
+        storage: Storage,
         request: request::Request,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(location) = location else {
-            save_request::open(
-                cx.entity(),
-                self.collections.clone(),
-                tab_id,
-                name,
-                request,
-                window,
-                cx,
-            );
-            return false;
+        let location = match storage {
+            Storage::Saved(location) => location,
+            Storage::Unsaved { name } => {
+                save_request::open(
+                    cx.entity(),
+                    self.collections.clone(),
+                    tab_id,
+                    name,
+                    request,
+                    window,
+                    cx,
+                );
+                return false;
+            }
         };
 
         let result = self.collections.update(cx, |collections, cx| {
@@ -1504,10 +1558,7 @@ impl MainView {
                     self.save_error = Some(format!("Could not rename request: {error}"));
                 }
             }
-            None => {
-                tab.title = name.clone().into();
-                tab.page.set_name(name.into(), cx);
-            }
+            None => tab.page.set_name(name.into(), cx),
         }
     }
 

@@ -105,8 +105,8 @@ impl RequestDraft {
         cx: &mut Context<Self>,
     ) {
         let Some(collection) = self
-            .location
-            .as_ref()
+            .storage
+            .location()
             .map(|location| location.collection.clone())
         else {
             return;
@@ -361,8 +361,8 @@ impl RequestDraft {
     }
 
     fn stored_path(&self, path: PathBuf) -> PathBuf {
-        self.location
-            .as_ref()
+        self.storage
+            .location()
             .and_then(|location| path.strip_prefix(&location.collection).ok())
             .map(Path::to_path_buf)
             .unwrap_or(path)
