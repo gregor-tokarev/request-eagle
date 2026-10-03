@@ -65,7 +65,7 @@ fn report(name: &str, run: &Run) -> Value {
     json!({
         "name": name,
         "source": "Runner",
-        "environment": run.environment,
+        "environment": run.environment.as_deref().unwrap_or("none"),
         "startedAt": run.started_at.to_rfc3339(),
         "iterations": run.iterations,
         "duration": run.duration().as_millis(),

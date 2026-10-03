@@ -65,6 +65,10 @@ fn files_without_rows_or_objects_are_refused() {
         parse(Path::new("data.json"), br#"[{"id": 1}, 2]"#),
         Err("Item 2 of the JSON data file is not an object.".into())
     );
+    assert_eq!(
+        parse(Path::new("notes.txt"), b"hello\n"),
+        Err("The data file has no rows. Choose a CSV file whose first row names the columns, or a JSON array of objects.".into())
+    );
     assert!(parse(Path::new("data.json"), b"[").is_err());
     assert!(parse(Path::new("data.csv"), &[0xff, 0xfe]).is_err());
 }

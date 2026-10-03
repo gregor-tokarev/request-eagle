@@ -1,6 +1,7 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui_kit::component::{
+    alert::Alert,
     button::*,
     checkbox::Checkbox,
     input::NumberInput,
@@ -11,25 +12,45 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_label;
 
+use super::detail::empty_state;
+use super::results::request_title;
 use super::runner::{CollectionRunner, RunOptions};
 
-/// A request of the run sequence being dragged to another place.
+/// A request of the run sequence being dragged to another place, drawn
+/// like its row next to the pointer.
 #[derive(Clone)]
 pub(super) struct DraggedRequest {
     index: usize,
+    method: SharedString,
     label: SharedString,
+    /// Where the pointer took hold of the row.
+    offset: Point<Pixels>,
 }
 
 impl Render for DraggedRequest {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+
+        // The preview starts where the row did, so the pointer's offset in
+        // the row brings it to the pointer.
         div()
-            .px_3()
-            .py_1()
-            .rounded(cx.theme().radius_tokens().md)
-            .bg(cx.theme().secondary)
-            .text_color(cx.theme().secondary_foreground)
-            .text_sm()
-            .child(self.label.clone())
+            .pl(self.offset.x + px(8.))
+            .pt(self.offset.y + px(8.))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .px_3()
+                    .py_1()
+                    .rounded(theme.radius_tokens().md)
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.popover)
+                    .shadow_md()
+                    .text_sm()
+                    .text_color(theme.popover_foreground)
+                    .child(method_label(self.method.clone(), cx))
+                    .child(self.label.clone()),
+            )
     }
 }
 
@@ -87,7 +108,18 @@ fn info(id: impl Into<ElementId>, text: &'static str, cx: &App) -> impl IntoElem
         .flex_none()
         .text_color(cx.theme().muted_foreground)
         .child(Icon::new(IconName::Info).size_3p5())
-        .tooltip(move |window, cx| Tooltip::new(text).build(window, cx))
+        .tooltip(move |window, cx| wrapped_tooltip(text, window, cx))
+}
+
+/// A tooltip whose text wraps rather than running across the window.
+pub(super) fn wrapped_tooltip(
+    text: impl Into<SharedString>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyView {
+    let text = text.into();
+
+    Tooltip::element(move |_, _| div().max_w(rems(20.)).child(text.clone())).build(window, cx)
 }
 
 /// A configuration field's label, with what it means.
@@ -98,6 +130,23 @@ fn label(text: &'static str, id: &'static str, tooltip: &'static str, cx: &App) 
         .font_weight(FontWeight::MEDIUM)
         .child(text)
         .child(info(id, tooltip, cx))
+}
+
+/// The bar at the top of each pane, with the pane's name.
+fn pane_header(name: &'static str, cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .h_10()
+        .px_4()
+        .gap_2()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .flex_none()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(name),
+        )
 }
 
 impl CollectionRunner {
@@ -129,15 +178,29 @@ impl CollectionRunner {
         let id = request.id.clone();
         let drag = DraggedRequest {
             index,
+            method: request.request.method.as_str().into(),
             label: request.name.clone(),
+            offset: Point::default(),
         };
 
         div()
             .h_8()
             .w_full()
             .px_2()
+            // A line between rows shows where the dragged request lands.
+            .drag_over::<DraggedRequest>(move |slot, drag: &DraggedRequest, _, cx| {
+                if drag.index < index {
+                    slot.border_b_2().border_color(cx.theme().info)
+                } else if drag.index > index {
+                    slot.border_t_2().border_color(cx.theme().info)
+                } else {
+                    slot
+                }
+            })
+            .on_drop(cx.listener(move |this, drag: &DraggedRequest, _, cx| {
+                this.move_item(drag.index, index, cx);
+            }))
             .child(
-                // The rounded row takes the drop highlight.
                 h_flex()
                     .id(ElementId::Name(format!("run-sequence-{id}").into()))
                     .debug_selector(move || format!("run-sequence-{index}"))
@@ -166,31 +229,26 @@ impl CollectionRunner {
                             })),
                     )
                     .child(
-                        div()
-                            .flex_none()
-                            .w(rems(3.5))
-                            .child(method_label(request.request.method.as_str(), cx)),
-                    )
-                    .child(
+                        // A request left out of the run fades as a whole.
                         h_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_1()
-                            .overflow_hidden()
-                            .children(request.folders.iter().map(|folder| {
-                                h_flex()
-                                    .flex_none()
-                                    .gap_1()
-                                    .text_color(theme.muted_foreground)
-                                    .child(folder.clone())
-                                    .child(Icon::new(IconName::ChevronRight).size_3())
-                            }))
+                            .gap_3()
+                            .when(!selected, |request| request.opacity(0.5))
                             .child(
                                 div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .when(!selected, |name| name.text_color(theme.muted_foreground))
-                                    .child(request.name.clone()),
+                                    .flex_none()
+                                    .w(rems(3.5))
+                                    .child(method_label(request.request.method.as_str(), cx)),
+                            )
+                            .child(
+                                request_title(
+                                    ("run-sequence-title", index),
+                                    request,
+                                    self.folder_depth(),
+                                    cx,
+                                )
+                                .flex_1(),
                             ),
                     )
                     .child(
@@ -199,17 +257,12 @@ impl CollectionRunner {
                             .size_3p5()
                             .text_color(theme.muted_foreground),
                     )
-                    .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
-                    .drag_over::<DraggedRequest>(move |row, drag: &DraggedRequest, _, cx| {
-                        if drag.index == index {
-                            row
-                        } else {
-                            row.bg(cx.theme().info.opacity(0.2))
-                        }
-                    })
-                    .on_drop(cx.listener(move |this, drag: &DraggedRequest, _, cx| {
-                        this.move_item(drag.index, index, cx);
-                    })),
+                    .on_drag(drag, |drag, offset, _, cx| {
+                        cx.new(|_| DraggedRequest {
+                            offset,
+                            ..drag.clone()
+                        })
+                    }),
             )
             .into_any_element()
     }
@@ -228,78 +281,122 @@ impl CollectionRunner {
             })
             .collect();
         let empty = numbers.is_empty();
+        let selected = self.selected_count();
+        let all_selected = selected == self.sequence.len();
+        let left_out = match self.other_protocols {
+            0 => None,
+            1 => Some(
+                "1 gRPC or WebSocket request is left out. The runner sends HTTP requests."
+                    .to_owned(),
+            ),
+            count => Some(format!(
+                "{count} gRPC and WebSocket requests are left out. The runner sends HTTP requests."
+            )),
+        };
+        let kind = if self.path == self.collection {
+            "collection"
+        } else {
+            "folder"
+        };
 
         v_flex()
             .debug_selector(|| "run-sequence".into())
             .flex_1()
-            .min_w(rems(9.))
+            .min_w_0()
             .h_full()
             .border_r_1()
             .border_color(theme.border)
             .child(
-                h_flex()
-                    .flex_none()
-                    .h_10()
-                    .px_4()
-                    .gap_1()
+                pane_header("Run sequence", cx)
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.muted_foreground)
-                            .child("Run Sequence"),
-                    )
-                    .child(
-                        Button::new("deselect-all")
-                            .debug_selector(|| "run-sequence-deselect-all".into())
-                            .ghost()
-                            .small()
-                            .flex_none()
-                            .label("Deselect All")
-                            .disabled(empty)
-                            .on_click(cx.listener(|this, _, _, cx| this.select_all(false, cx))),
-                    )
-                    .child(divider(cx))
-                    .child(
-                        Button::new("select-all")
-                            .debug_selector(|| "run-sequence-select-all".into())
-                            .ghost()
-                            .small()
-                            .flex_none()
-                            .label("Select All")
-                            .disabled(empty)
-                            .on_click(cx.listener(|this, _, _, cx| this.select_all(true, cx))),
-                    )
-                    .child(divider(cx))
-                    .child(
-                        Button::new("reset-sequence")
-                            .debug_selector(|| "run-sequence-reset".into())
-                            .ghost()
-                            .small()
-                            .flex_none()
-                            .label("Reset")
-                            .tooltip("Restore the collection's order and select every request")
-                            .disabled(empty)
-                            .on_click(cx.listener(|this, _, _, cx| this.reset_sequence(cx))),
-                    ),
+                    .when(!empty, |header| {
+                        header
+                            .child(
+                                div()
+                                    .debug_selector(|| "run-sequence-count".into())
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!(
+                                        "{selected} of {} selected",
+                                        self.sequence.len()
+                                    )),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("select-all")
+                                    .debug_selector(move || {
+                                        if all_selected {
+                                            "run-sequence-deselect-all".into()
+                                        } else {
+                                            "run-sequence-select-all".into()
+                                        }
+                                    })
+                                    .ghost()
+                                    .small()
+                                    .flex_none()
+                                    .label(if all_selected {
+                                        "Deselect All"
+                                    } else {
+                                        "Select All"
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_all(!all_selected, cx)
+                                    })),
+                            )
+                            .child(divider(cx))
+                            .child(
+                                Button::new("reset-sequence")
+                                    .debug_selector(|| "run-sequence-reset".into())
+                                    .ghost()
+                                    .small()
+                                    .flex_none()
+                                    .label("Reset")
+                                    .tooltip(
+                                        "Restore the collection's order and select every request",
+                                    )
+                                    .disabled(self.is_original())
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.reset_sequence(cx)),
+                                    ),
+                            )
+                    }),
             )
+            .when_some(left_out.clone().filter(|_| !empty), |pane, note| {
+                pane.child(
+                    h_flex()
+                        .debug_selector(|| "run-sequence-left-out".into())
+                        .flex_none()
+                        .gap_2()
+                        .px_4()
+                        .py_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(Icon::new(IconName::Info).size_3p5().flex_none())
+                        .child(div().min_w_0().child(note)),
+                )
+            })
             .child(
                 div()
                     .debug_selector(|| "run-sequence-list".into())
                     .relative()
+                    .flex()
                     .flex_1()
                     .min_h_0()
-                    .pb_2()
                     .child(if empty {
-                        div()
-                            .px_4()
-                            .py_2()
-                            .text_color(theme.muted_foreground)
-                            .child("There are no HTTP requests to run here.")
-                            .into_any_element()
+                        match left_out {
+                            Some(note) => empty_state(
+                                Icon::new(IconName::Inbox).text_color(theme.muted_foreground),
+                                "No HTTP requests to run",
+                                Some(note.into()),
+                            ),
+                            None => empty_state(
+                                Icon::new(IconName::Inbox).text_color(theme.muted_foreground),
+                                "No requests yet",
+                                Some(format!("Add requests to this {kind} to run them.").into()),
+                            ),
+                        }
                     } else {
                         uniform_list(
                             "run-sequence-list",
@@ -311,6 +408,8 @@ impl CollectionRunner {
                             }),
                         )
                         .size_full()
+                        .pt_1()
+                        .pb_2()
                         .track_scroll(&self.sequence_scroll)
                         .into_any_element()
                     })
@@ -318,24 +417,6 @@ impl CollectionRunner {
                         list.child(Scrollbar::vertical(&self.sequence_scroll))
                     }),
             )
-            .when(self.other_protocols > 0, |pane| {
-                pane.child(
-                    div()
-                        .flex_none()
-                        .px_4()
-                        .py_2()
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(match self.other_protocols {
-                            1 => "1 gRPC or WebSocket request is left out. The runner sends HTTP requests.".to_owned(),
-                            count => format!(
-                                "{count} gRPC and WebSocket requests are left out. The runner sends HTTP requests."
-                            ),
-                        }),
-                )
-            })
     }
 
     fn configuration(
@@ -347,22 +428,18 @@ impl CollectionRunner {
         let delay = self.delay_state(window, cx);
         let selected = self.selected_count();
         let preparing = self.preparing.is_some();
+        // Nothing here can run, so nothing here can be set.
+        let nothing = self.sequence.is_empty();
         let muted = cx.theme().muted_foreground;
-        let danger = cx.theme().danger;
 
         let content = v_flex()
             .id("run-configuration")
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .overflow_y_scrollbar()
             .px_4()
             .py_3()
             .gap_4()
-            .child(
-                div()
-                    .text_base()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Run configuration"),
-            )
             .child(
                 v_flex()
                     .gap_1()
@@ -375,7 +452,8 @@ impl CollectionRunner {
                     .child(
                         div()
                             .debug_selector(|| "run-iterations".into())
-                            .child(NumberInput::new(&iterations)),
+                            .w(rems(10.))
+                            .child(NumberInput::new(&iterations).disabled(nothing)),
                     ),
             )
             .child(
@@ -390,23 +468,29 @@ impl CollectionRunner {
                     .child(
                         div()
                             .debug_selector(|| "run-delay".into())
+                            .w(rems(10.))
                             .child(
                                 NumberInput::new(&delay)
+                                    .disabled(nothing)
                                     .suffix(div().text_color(muted).child("ms")),
                             ),
                     ),
             )
-            .child(self.data_field(cx))
-            .child(self.advanced_settings(cx))
+            .child(self.data_field(nothing, cx))
+            .child(self.advanced_settings(nothing, cx))
             .child(
                 v_flex()
+                    .w_full()
                     .gap_2()
                     .items_start()
                     .child(
+                        // Long names shorten so the button stays in the pane.
                         Button::new("start-run")
                             .debug_selector(|| "start-run".into())
                             .primary()
-                            .icon(IconName::Play)
+                            .min_w_0()
+                            .max_w_full()
+                            .icon(Icon::default().path("icons/square-play.svg"))
                             .label(if preparing {
                                 format!("Preparing {} to run…", self.name)
                             } else {
@@ -415,27 +499,36 @@ impl CollectionRunner {
                             .loading(preparing)
                             .disabled(selected == 0 || preparing)
                             .tooltip(if selected == 0 {
-                                "Select a request to run"
+                                "Select a request to run".to_owned()
                             } else {
-                                "Run the selected requests"
+                                format!("Run the selected requests of {}", self.title())
                             })
                             .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
                     )
                     .when_some(self.start_error.clone(), |field, error| {
-                        field.child(div().text_xs().text_color(danger).child(error))
+                        field.child(
+                            div()
+                                .debug_selector(|| "run-start-error".into())
+                                .w_full()
+                                .child(Alert::error("run-start-error", error).small()),
+                        )
                     }),
             );
 
-        // The pane narrows with the window down to its minimum.
-        div()
+        // The configuration gives up its width first, down to its minimum,
+        // so the requests stay readable.
+        v_flex()
             .debug_selector(|| "run-configuration".into())
-            .w(rems(26.))
+            .flex_none()
+            .w(relative(0.38))
             .min_w(rems(15.))
+            .max_w(rems(26.))
             .h_full()
+            .child(pane_header("Run configuration", cx))
             .child(content)
     }
 
-    fn data_field(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn data_field(&self, nothing: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();
 
         v_flex()
@@ -443,45 +536,63 @@ impl CollectionRunner {
             .child(label(
                 "Test data file",
                 "data-file-info",
-                "Each CSV row or JSON object gives one iteration its values, which requests use as {{variables}} and scripts read with pm.iterationData.",
+                "A CSV file whose first row names its columns, or a JSON array of objects. Each row gives one iteration its values, which requests use as {{variables}} and scripts read with pm.iterationData.",
                 cx,
             ))
-            .child(
-                div()
-                    .text_color(theme.muted_foreground)
-                    .child("Only JSON and CSV files are accepted."),
-            )
             .child(match &self.data {
-                Some(data) => h_flex()
-                    .debug_selector(|| "run-data-file".into())
-                    .gap_2()
-                    .child(Icon::new(IconName::FileText).text_color(theme.muted_foreground))
-                    .child(div().min_w_0().truncate().child(data.name.clone()))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(theme.muted_foreground)
-                            .child(match data.rows.len() {
-                                1 => "1 row".to_owned(),
-                                rows => format!("{rows} rows"),
-                            }),
-                    )
-                    .child(
-                        Button::new("remove-data-file")
-                            .debug_selector(|| "remove-data-file".into())
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::Close)
-                            .tooltip("Remove the data file")
-                            .on_click(cx.listener(|this, _, _, cx| this.remove_data_file(cx))),
-                    )
-                    .into_any_element(),
+                // As tall as the button it replaces, so nothing below moves.
+                Some(data) => {
+                    let name = data.name.clone();
+
+                    h_flex()
+                        .id("run-data-file")
+                        .debug_selector(|| "run-data-file".into())
+                        .h_8()
+                        .w_full()
+                        .min_w_0()
+                        .pl_2()
+                        .pr_1()
+                        .gap_2()
+                        .rounded(theme.radius_tokens().md)
+                        .border_1()
+                        .border_color(theme.input)
+                        .child(
+                            Icon::new(IconName::FileText)
+                                .size_4()
+                                .flex_none()
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child(div().flex_1().min_w_0().truncate().child(data.name.clone()))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(match data.rows.len() {
+                                    1 => "1 row".to_owned(),
+                                    rows => format!("{rows} rows"),
+                                }),
+                        )
+                        .child(
+                            Button::new("remove-data-file")
+                                .debug_selector(|| "remove-data-file".into())
+                                .ghost()
+                                .xsmall()
+                                .flex_none()
+                                .icon(IconName::Close)
+                                .tooltip("Remove the data file")
+                                .on_click(cx.listener(|this, _, _, cx| this.remove_data_file(cx))),
+                        )
+                        .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
+                        .into_any_element()
+                }
                 None => h_flex()
                     .child(
                         Button::new("select-data-file")
                             .debug_selector(|| "select-data-file".into())
                             .outline()
                             .label("Select File")
+                            .disabled(nothing)
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.choose_data_file(window, cx)),
                             ),
@@ -499,22 +610,30 @@ impl CollectionRunner {
             })
     }
 
-    fn advanced_settings(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn advanced_settings(&self, nothing: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let open = self.advanced;
+        let theme = cx.theme();
 
         v_flex()
             .gap_2()
             .items_start()
             .child(
+                // Starts at the same edge as the other fields' labels.
                 Button::new("advanced-settings")
                     .debug_selector(|| "advanced-settings".into())
-                    .ghost()
-                    .icon(if open {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
+                    .text()
+                    .small()
+                    .text_color(theme.muted_foreground)
+                    .font_weight(FontWeight::MEDIUM)
                     .label("Advanced settings")
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .size_3p5(),
+                    )
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.advanced = !this.advanced;
                         cx.notify();
@@ -524,7 +643,6 @@ impl CollectionRunner {
                 section.child(
                     v_flex()
                         .w_full()
-                        .pl_2()
                         .gap_2()
                         .children(SETTINGS.iter().map(|setting| {
                             let mut options = self.options;
@@ -532,13 +650,16 @@ impl CollectionRunner {
                             let value = setting.value;
 
                             h_flex()
+                                .w_full()
                                 .items_start()
-                                .gap_1()
+                                .gap_2()
                                 .child(
                                     Checkbox::new(setting.id)
+                                        .small()
                                         .min_w_0()
                                         .label(setting.label)
                                         .checked(checked)
+                                        .disabled(nothing)
                                         .on_click(cx.listener(
                                             move |this, checked: &bool, _, cx| {
                                                 *value(&mut this.options) = *checked;
@@ -546,7 +667,9 @@ impl CollectionRunner {
                                             },
                                         )),
                                 )
-                                // Level with the label's first line.
+                                // The icons line up, level with the labels'
+                                // first lines.
+                                .child(div().flex_1())
                                 .child(div().mt_0p5().child(info(
                                     (setting.id, 1usize),
                                     setting.description,

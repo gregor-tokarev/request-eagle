@@ -115,7 +115,8 @@ pub(super) struct Run {
     delay: Duration,
     data: Option<Arc<[DataRow]>>,
     pub options: RunOptions,
-    pub environment: SharedString,
+    /// The environment the run used, if any.
+    pub environment: Option<SharedString>,
     pub started_at: chrono::DateTime<chrono::Local>,
     /// Time spent running, leaving out pauses.
     elapsed: Duration,
@@ -136,6 +137,27 @@ impl Run {
 
     pub fn is_active(&self) -> bool {
         matches!(self.status, RunStatus::Running | RunStatus::Paused)
+    }
+
+    /// The request being sent now.
+    pub fn in_flight(&self) -> Option<&RunRequest> {
+        self.sending
+            .then(|| self.cursor.next())
+            .flatten()
+            .map(|position| &self.requests[position.index])
+    }
+
+    /// The iteration being sent, or the last one once the run ends.
+    pub fn current_iteration(&self) -> usize {
+        self.cursor
+            .next()
+            .or_else(|| self.results.last().map(|result| result.position))
+            .map_or(0, |position| position.iteration)
+    }
+
+    /// How many requests the run sends when no script chooses another.
+    pub fn planned(&self) -> usize {
+        self.requests.len() * self.iterations
     }
 
     /// The iteration's data file row. Iterations past the last row reuse it.
@@ -186,6 +208,9 @@ pub struct CollectionRunner {
     pub(super) results: super::results::ResultsState,
     pub(super) detail: Option<Entity<ResponseView>>,
     pub(super) detail_task: Option<Task<()>>,
+    /// Whether a result without a kept response shows its console rather
+    /// than its tests.
+    pub(super) detail_console: bool,
     sessions: EnvironmentSessions,
     environments: Entity<Environments>,
     _subscriptions: Vec<Subscription>,
@@ -248,6 +273,7 @@ impl CollectionRunner {
             results: Default::default(),
             detail: None,
             detail_task: None,
+            detail_console: false,
             sessions,
             environments,
             _subscriptions: subscriptions,
@@ -257,6 +283,23 @@ impl CollectionRunner {
     /// The collection's or folder's name, which the tab shows.
     pub fn name(&self) -> &SharedString {
         &self.name
+    }
+
+    /// The collection's name, followed by the folder's when a folder runs.
+    pub(super) fn title(&self) -> SharedString {
+        if self.path == self.collection {
+            self.name.clone()
+        } else {
+            format!("{} › {}", self.collection_name, self.name).into()
+        }
+    }
+
+    /// How many of a request's folders are the run's own: the folder that
+    /// runs and the folders it is in.
+    pub(super) fn folder_depth(&self) -> usize {
+        self.path
+            .strip_prefix(&self.collection)
+            .map_or(0, |folder| folder.components().count())
     }
 
     /// Show the collection's or folder's requests as the sidebar has them
@@ -426,6 +469,17 @@ impl CollectionRunner {
 
     pub(super) fn selected_count(&self) -> usize {
         self.sequence.iter().filter(|item| item.selected).count()
+    }
+
+    /// Whether the sequence is the collection's order with every request
+    /// selected, which Reset restores.
+    pub(super) fn is_original(&self) -> bool {
+        self.sequence.len() == self.original.len()
+            && self
+                .sequence
+                .iter()
+                .zip(&self.original)
+                .all(|(item, request)| item.selected && item.request.id == request.id)
     }
 
     pub(super) fn select_all(&mut self, selected: bool, cx: &mut Context<Self>) {
@@ -667,7 +721,7 @@ impl CollectionRunner {
             delay: self.delay_value(cx),
             data: self.data.as_ref().map(|data| data.rows.clone()),
             options,
-            environment: environment.unwrap_or_else(|| "none".into()),
+            environment,
             started_at: chrono::Local::now(),
             elapsed: Duration::ZERO,
             resumed_at: None,
