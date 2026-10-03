@@ -1360,7 +1360,6 @@ name = "collection"
 version = "0.1.0"
 dependencies = [
  "environment",
- "flow",
  "request",
  "serde",
  "serde_json",
@@ -1376,7 +1375,6 @@ version = "0.1.0"
 dependencies = [
  "collection",
  "environment",
- "flow",
  "gpui-kit",
  "import",
  "keybindings_service",
@@ -2402,7 +2400,9 @@ dependencies = [
  "serde",
  "serde_json",
  "smol",
+ "thiserror 2.0.18",
  "toml 1.1.3+spec-1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -7099,6 +7099,7 @@ dependencies = [
  "chrono",
  "collection",
  "environment",
+ "flow",
  "gpui-fps",
  "gpui-kit",
  "gpui-pre-reqwest-client",

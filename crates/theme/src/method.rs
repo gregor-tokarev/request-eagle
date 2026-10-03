@@ -27,8 +27,9 @@ pub fn protocol_icon(protocol: &str, cx: &App) -> Icon {
     }
 }
 
-/// A request's HTTP method in its color. gRPC and WebSocket requests have no
-/// method and show their protocol's icon instead.
+/// A request's HTTP method in its color, with the longest methods shortened
+/// as in Postman. gRPC and WebSocket requests have no method and show their
+/// protocol's icon instead.
 pub fn method_label(method: impl Into<SharedString>, cx: &App) -> AnyElement {
     let method = method.into();
 
@@ -38,10 +39,16 @@ pub fn method_label(method: impl Into<SharedString>, cx: &App) -> AnyElement {
             .into_any_element();
     }
 
+    let label = match method.as_ref() {
+        "DELETE" => "DEL".into(),
+        "OPTIONS" => "OPT".into(),
+        _ => method.clone(),
+    };
+
     div()
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(method_color(&method, cx))
-        .child(method)
+        .child(label)
         .into_any_element()
 }

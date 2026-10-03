@@ -14,7 +14,7 @@ use super::{
     picker::Picker,
     run::RunState,
 };
-use crate::{Environments, RequestLocation};
+use crate::Environments;
 
 /// A saved HTTP request that flows can send.
 #[derive(Clone)]
@@ -106,7 +106,10 @@ pub(super) enum Drag {
 
 /// A flow's canvas, editing its blocks and connections, and its runs.
 pub struct FlowEditor {
-    pub location: RequestLocation,
+    /// Where the flow is saved. Renaming a flow keeps its file.
+    pub path: PathBuf,
+    /// Tells the flow apart from another one saved at the same path later.
+    pub id: SharedString,
     pub(super) flow: Flow,
     saved: Flow,
     pub(super) viewport: Viewport,
@@ -137,7 +140,8 @@ pub struct FlowEditor {
 
 impl FlowEditor {
     pub fn new(
-        location: RequestLocation,
+        path: PathBuf,
+        id: SharedString,
         flow: Flow,
         requests: Rc<dyn FlowRequests>,
         sessions: EnvironmentSessions,
@@ -145,7 +149,8 @@ impl FlowEditor {
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
-            location,
+            path,
+            id,
             saved: flow.clone(),
             flow,
             viewport: Viewport::default(),
@@ -186,12 +191,6 @@ impl FlowEditor {
 
     pub fn mark_saved(&mut self, flow: Flow, cx: &mut Context<Self>) {
         self.saved = flow;
-        cx.notify();
-    }
-
-    /// Follow a rename or move made in the sidebar.
-    pub fn set_location(&mut self, location: RequestLocation, cx: &mut Context<Self>) {
-        self.location = location;
         cx.notify();
     }
 
@@ -354,10 +353,10 @@ impl FlowEditor {
         nearest.map(|(_, port)| port)
     }
 
-    /// The port a connection being drawn would join, under the pointer.
+    /// The port a connection being drawn would join if it was dropped now.
     pub(super) fn connecting_port(&self) -> Option<PortRef> {
         match &self.drag {
-            Some(Drag::Connect { from, pointer, .. }) => self.port_at(*pointer, !from.output),
+            Some(Drag::Connect { from, pointer, .. }) => self.drop_port(from, *pointer),
             _ => None,
         }
     }

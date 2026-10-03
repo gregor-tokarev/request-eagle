@@ -68,10 +68,10 @@ pub enum Command {
         timeout_ms: Option<u64>,
     },
     /// Saved flows, which connect blocks such as HTTP requests, FQL and loops
-    /// like Postman Flows. Lists the flows of every collection, or of one.
+    /// like Postman Flows. They are saved apart from collections, in the
+    /// data directory's flows folder.
     #[serde(rename = "flows.list")]
     FlowsList {
-        collection: Option<PathBuf>,
         #[serde(default)]
         query: String,
     },
@@ -79,11 +79,9 @@ pub enum Command {
     /// each request its HTTP Request blocks send.
     #[serde(rename = "flows.get")]
     FlowsGet { path: PathBuf },
-    /// Create a flow in a collection or folder. Without `flow` it holds a
-    /// Start block.
+    /// Create a flow. Without `flow` it holds a Start block.
     #[serde(rename = "flows.create")]
     FlowsCreate {
-        parent: PathBuf,
         name: String,
         flow: Option<flow::Flow>,
     },
@@ -95,6 +93,16 @@ pub enum Command {
         expected_id: String,
         flow: flow::Flow,
     },
+    /// Rename a saved flow. Its path stays the same.
+    #[serde(rename = "flows.rename")]
+    FlowsRename {
+        path: PathBuf,
+        expected_id: String,
+        name: String,
+    },
+    /// Permanently remove a saved flow.
+    #[serde(rename = "flows.delete")]
+    FlowsDelete { path: PathBuf, confirm: bool },
     /// Every block type with its settings, inputs, outputs and defaults.
     #[serde(rename = "flows.blocks")]
     FlowsBlocks {},
@@ -437,6 +445,6 @@ pub fn schema() -> Value {
         "error": {"version": FORMAT_VERSION, "ok": false, "error": {"code": "stable_code", "message": "details"}},
         "limits": {"input_bytes": MAX_INPUT_BYTES},
         "workflow": ["collections.list", "requests.list", "requests.get", "requests.update", "requests.run"],
-        "flows": ["flows.blocks", "flows.list", "flows.get", "flows.update", "flows.run", "fql.evaluate"]
+        "flows": ["flows.blocks", "flows.list", "flows.get", "flows.create", "flows.update", "flows.rename", "flows.delete", "flows.run", "fql.evaluate"]
     })
 }

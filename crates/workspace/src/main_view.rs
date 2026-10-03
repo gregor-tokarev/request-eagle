@@ -15,6 +15,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
+use crate::flow_panel::FlowPanel;
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
@@ -73,14 +74,17 @@ impl Page {
         }
     }
 
-    /// Where a request or flow tab's file is saved.
+    /// Where a request tab's file is saved.
     pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
         match self {
             Page::Request(draft) => draft.read(cx).location.as_ref(),
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
             Page::WebSocket(draft) => draft.read(cx).location.as_ref(),
-            Page::Flow(editor) => Some(&editor.read(cx).location),
-            Page::Collection(_) | Page::Runner(_) | Page::Environment(_) | Page::Cookies(_) => None,
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => None,
         }
     }
 
@@ -105,7 +109,7 @@ impl Page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::Grpc(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
             Page::WebSocket(draft) => draft.update(cx, |draft, cx| draft.set_name(name, cx)),
-            // Flows are always saved, so they are renamed in their collection.
+            // Flows are always saved, so they are renamed in the sidebar.
             Page::Flow(_)
             | Page::Collection(_)
             | Page::Runner(_)
@@ -145,11 +149,8 @@ impl Page {
             Page::Flow(editor) => {
                 let editor = editor.read(cx);
                 SavedTab::Flow {
-                    file: SavedFile {
-                        path: editor.location.path.clone(),
-                        id: editor.location.id.to_string(),
-                        collection: editor.location.collection_path().unwrap_or_default(),
-                    },
+                    path: editor.path.clone(),
+                    id: editor.id.to_string(),
                     draft: editor.is_dirty().then(|| Box::new(editor.flow().clone())),
                 }
             }
@@ -309,6 +310,8 @@ pub(crate) struct MainView {
     environment_picker: Entity<EnvironmentPicker>,
     /// Stores saved requests and collections.
     sidebar: Entity<CollectionPanel>,
+    /// Stores saved flows.
+    flows: Entity<FlowPanel>,
     /// Keeps the requests that tabs send.
     history: Entity<HistoryPanel>,
     _environment_subscriptions: [Subscription; 2],
@@ -317,9 +320,12 @@ pub(crate) struct MainView {
 impl MainView {
     /// Reopens `tabs`, the tabs open when the app last closed, or opens an
     /// empty request when none of them can be opened.
+    // The sidebar's sections are handed over once, at startup.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         environments: Entity<Environments>,
         sidebar: Entity<CollectionPanel>,
+        flows: Entity<FlowPanel>,
         history: Entity<HistoryPanel>,
         tabs: Vec<SavedTab>,
         selected_tab: Option<usize>,
@@ -351,6 +357,7 @@ impl MainView {
             environments,
             environment_picker,
             sidebar,
+            flows,
             history,
             _environment_subscriptions: [picker_subscription, environments_subscription],
         };
@@ -485,30 +492,18 @@ impl MainView {
 
                 self.open_tab(name, Page::Environment(editor), cx);
             }
-            SavedTab::Flow { file, draft } => {
-                let Some(CollectionPanelEvent::OpenFlow {
-                    id,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                    flow,
-                }) = self.sidebar.read(cx).open_event_at(&file.path)
+            SavedTab::Flow { path, id, draft } => {
+                let Some(saved) = self
+                    .flows
+                    .read(cx)
+                    .get(&path)
+                    .filter(|saved| saved.id == id)
+                    .cloned()
                 else {
                     return false;
                 };
-                if id.as_ref() != file.id {
-                    return false;
-                }
 
-                let location = RequestLocation {
-                    path,
-                    id,
-                    name,
-                    collection,
-                    folders,
-                };
-                let index = self.open_flow(location, flow, cx);
+                let index = self.open_flow(saved, cx);
                 if let (Some(draft), Page::Flow(editor)) = (draft, &self.tabs[index].page) {
                     editor.update(cx, |editor, cx| editor.restore_draft(*draft, cx));
                 }
@@ -664,20 +659,17 @@ impl MainView {
             Page::WebSocket(draft) => {
                 draft.update(cx, |draft, cx| draft.set_location(location, cx))
             }
-            Page::Flow(editor) => editor.update(cx, |editor, cx| editor.set_location(location, cx)),
-            Page::Collection(_) | Page::Runner(_) | Page::Environment(_) | Page::Cookies(_) => {}
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => {}
         }
     }
 
     /// Show a saved flow, reusing its tab when it is open. Returns the tab's index.
-    pub(crate) fn open_flow(
-        &mut self,
-        location: RequestLocation,
-        flow: flow::Flow,
-        cx: &mut Context<Self>,
-    ) -> usize {
-        if let Some(index) = self.request_tab(&location.path, &location.id, cx) {
-            self.set_request_location(index, location, cx);
+    pub(crate) fn open_flow(&mut self, saved: flow::SavedFlow, cx: &mut Context<Self>) -> usize {
+        if let Some(index) = self.flow_tab(&saved.path, &saved.id, cx) {
             self.select_tab(index, cx);
             return index;
         }
@@ -686,11 +678,53 @@ impl MainView {
             std::rc::Rc::new(crate::flow_requests::SidebarRequests(self.sidebar.clone()));
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
-        let title = location.name.clone();
-        let editor = cx
-            .new(|cx| FlowEditor::new(location, flow, requests, sessions, Some(environments), cx));
+        let id = saved.id.into();
+        let editor = cx.new(|cx| {
+            FlowEditor::new(
+                saved.path,
+                id,
+                saved.flow,
+                requests,
+                sessions,
+                Some(environments),
+                cx,
+            )
+        });
 
-        self.open_tab(title, Page::Flow(editor), cx)
+        self.open_tab(saved.name, Page::Flow(editor), cx)
+    }
+
+    fn flow_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
+        self.tabs.iter().position(|tab| match &tab.page {
+            Page::Flow(editor) => {
+                let editor = editor.read(cx);
+                editor.path == path && editor.id.as_ref() == id
+            }
+            _ => false,
+        })
+    }
+
+    /// Follow a flow renamed in the sidebar or its tab.
+    pub(crate) fn rename_flow(&mut self, path: &Path, name: SharedString, cx: &mut Context<Self>) {
+        for tab in &mut self.tabs {
+            if let Page::Flow(editor) = &tab.page
+                && editor.read(cx).path == path
+            {
+                tab.title = name.clone();
+            }
+        }
+
+        cx.notify();
+    }
+
+    /// Close the tab of a flow deleted in the sidebar.
+    pub(crate) fn close_flow(&mut self, path: &Path, cx: &mut Context<Self>) {
+        while let Some(index) = self.tabs.iter().position(|tab| match &tab.page {
+            Page::Flow(editor) => editor.read(cx).path == path,
+            _ => false,
+        }) {
+            self.remove_tab(index, cx);
+        }
     }
 
     pub(crate) fn open_collection(
@@ -1223,19 +1257,18 @@ impl MainView {
             // The jar saves itself whenever it changes.
             Page::Runner(_) | Page::Cookies(_) => {}
             Page::Flow(editor) => {
-                let (location, flow, check) = {
+                let (path, id, flow, check) = {
                     let editor = editor.read(cx);
                     (
-                        editor.location.clone(),
+                        editor.path.clone(),
+                        editor.id.clone(),
                         editor.flow().clone(),
                         editor.check(),
                     )
                 };
                 let result = check.and_then(|()| {
-                    self.sidebar
-                        .update(cx, |sidebar, _| {
-                            sidebar.save_flow(&location.path, &location.id, flow.clone())
-                        })
+                    self.flows
+                        .update(cx, |flows, _| flows.save(&path, &id, flow.clone()))
                         .map_err(|error| error.to_string())
                 });
 
@@ -1452,21 +1485,31 @@ impl MainView {
             return;
         }
 
-        let flow = matches!(tab.page, Page::Flow(_));
+        if let Page::Flow(editor) = &tab.page {
+            // The tab follows the sidebar's rename event.
+            let (path, id) = {
+                let editor = editor.read(cx);
+                (editor.path.clone(), editor.id.clone())
+            };
+            let result = self
+                .flows
+                .update(cx, |flows, cx| flows.rename(&path, &id, &name, cx));
+
+            if let Err(error) = result {
+                self.save_error = Some(format!("Could not rename flow: {error}"));
+            }
+            return;
+        }
+
         match tab.page.location(cx).cloned() {
             // The tab follows the sidebar's relocation event.
             Some(location) => {
                 let result = self.sidebar.update(cx, |sidebar, cx| {
-                    if flow {
-                        sidebar.rename_flow(&location.path, &location.id, &name, cx)
-                    } else {
-                        sidebar.rename_request(&location.path, &location.id, &name, cx)
-                    }
+                    sidebar.rename_request(&location.path, &location.id, &name, cx)
                 });
 
                 if let Err(error) = result {
-                    let item = if flow { "flow" } else { "request" };
-                    self.save_error = Some(format!("Could not rename {item}: {error}"));
+                    self.save_error = Some(format!("Could not rename request: {error}"));
                 }
             }
             None => {

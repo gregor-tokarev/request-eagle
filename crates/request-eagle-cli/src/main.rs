@@ -76,6 +76,7 @@ fn main() {
                     } => {
                         execution::run(
                             &collections,
+                            &data.join("flows"),
                             &preferences,
                             &data.join("cookies.json"),
                             &path,
@@ -89,10 +90,13 @@ fn main() {
                     | Command::FlowsGet { .. }
                     | Command::FlowsCreate { .. }
                     | Command::FlowsUpdate { .. }
+                    | Command::FlowsRename { .. }
+                    | Command::FlowsDelete { .. }
                     | Command::FlowsBlocks {}
                     | Command::FlowsRun { .. }
                     | Command::FqlEvaluate { .. }) => {
                         flows::dispatch(
+                            &data.join("flows"),
                             &collections,
                             &preferences,
                             &data.join("cookies.json"),
@@ -111,7 +115,7 @@ fn main() {
                     | Command::SettingsClientCertificatesRemove { .. }) => {
                         settings::dispatch(&preferences, command).await
                     }
-                    command => collections::dispatch(&collections, command),
+                    command => collections::dispatch(&collections, &data.join("flows"), command),
                 }
             }) {
                 Ok(value) => (0, success(value).to_string()),

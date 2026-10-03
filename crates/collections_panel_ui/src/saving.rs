@@ -44,16 +44,6 @@ impl CollectionPanel {
         Ok(())
     }
 
-    /// Save a flow tab's blocks and connections.
-    pub fn save_flow(
-        &mut self,
-        path: &Path,
-        expected_id: &str,
-        flow: flow::Flow,
-    ) -> Result<(), CollectionEditError> {
-        self.collections.update_flow(path, expected_id, flow)
-    }
-
     /// Save a collection tab's edits, renaming its directory when the name
     /// changed. Returns the collection's path after the save.
     pub fn save_collection(

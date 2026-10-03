@@ -81,12 +81,30 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".request-eagle/collections"));
-    let collections = collection::CollectionRegistry::from_path(collections_directory);
+    let mut collections = collection::CollectionRegistry::from_path(&collections_directory);
+    let flows_directory = home.join(".request-eagle/flows");
+    let moved = flow::move_flows_out_of_collections(
+        collections
+            .skipped()
+            .iter()
+            .map(|skipped| skipped.path.as_path()),
+        &flows_directory,
+    );
+    if !moved.is_empty() {
+        for path in &moved {
+            eprintln!("Moved a flow out of its collection to {}", path.display());
+        }
+        collections = collection::CollectionRegistry::from_path(&collections_directory);
+    }
     for skipped in collections.skipped() {
         eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
     }
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
+    let flows = flow::FlowLibrary::load(flows_directory);
+    for skipped in flows.skipped() {
+        eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
+    }
     let cookies_path = home.join(".request-eagle/cookies.json");
     let cookies = request::CookieJar::open(&cookies_path).map_err(|error| {
         // The unreadable file stays as it is.
@@ -109,6 +127,7 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
         let workspace = workspace::init(
             collections,
             environments,
+            flows,
             cookies,
             history,
             updater,

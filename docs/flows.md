@@ -6,16 +6,17 @@ of other blocks on the left. Flows chain saved requests, reshape their
 responses with FQL, branch, loop and collect results, without writing a
 script.
 
-Right-click a collection or folder in the sidebar and choose **New Flow**. A
-flow is saved in its collection next to the requests it sends, and opens in
-its own tab.
+Click **+** in the **Flows** section of the sidebar, or run **New flow** from
+the command palette. As in Postman, flows are kept apart from collections: a
+flow can send requests saved in any collection. It opens in its own tab, and
+its row in the sidebar opens, renames, duplicates or deletes it.
 
 ## The canvas
 
 | Action | How |
 | --- | --- |
 | Add a block | Right-click the canvas, choose **Block** in the toolbar, or press `A`. Type to search blocks and saved requests; Enter adds the highlighted one. |
-| Connect | Drag from an output to an input. Dropping on a block joins its first free input; dropping on empty canvas opens the picker and connects the new block. |
+| Connect | Drag from an output to an input. The connection is dashed until it reaches a port it can join. Dropping on a block joins its first free input; dropping on empty canvas opens the picker, which the connection leads to, and connects the new block. |
 | Move a connection | Drag it off the input it ends at. |
 | Select | Click a block or a connection. Shift-click or Ctrl/Cmd-click adds blocks; Shift-drag selects an area. |
 | Move | Drag a block. Every selected block moves with it. Arrow keys nudge the selection; with Shift, further. |
@@ -145,8 +146,9 @@ See the [CLI guide](cli.md) for the rest.
 
 ## The file
 
-A flow is a TOML file in its collection, with a `flow` table where a request
-has a `request` table:
+A flow is a TOML file in `~/.request-eagle/flows`, named after the flow when
+it was created. Renaming a flow keeps its file. Flows that version 0.1.22
+saved in collections move to this folder when a newer version starts.
 
 ```toml
 id = "6c1d…"

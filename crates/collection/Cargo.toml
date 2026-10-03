@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 environment = { path = "../environment" }
-flow = { path = "../flow" }
 request = { path = "../request" }
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true

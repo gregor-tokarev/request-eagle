@@ -62,14 +62,6 @@ pub enum CollectionPanelEvent {
         folders: Vec<SharedString>,
         request: Request,
     },
-    OpenFlow {
-        id: SharedString,
-        path: PathBuf,
-        name: SharedString,
-        collection: SharedString,
-        folders: Vec<SharedString>,
-        flow: flow::Flow,
-    },
     /// A request imported without saving it, such as a pasted cURL command.
     OpenUnsavedRequest(HttpRequest),
     /// Imported environments were added to the environments directory.
@@ -99,6 +91,8 @@ pub struct CollectionPanel {
     pub(super) collections: CollectionRegistry,
     pub(super) rename: Option<RenameEditor>,
     pub(super) pending_delete: Option<PathBuf>,
+    /// The row whose "…" menu is open, which keeps its button shown.
+    pub(super) menu_row: Option<PathBuf>,
     pub(super) drop_target: Option<(usize, MovePlacement)>,
     pub(super) error: Option<String>,
     pub(super) tree: Arc<CollectionTree>,
@@ -152,6 +146,7 @@ impl CollectionPanel {
             collections,
             rename: None,
             pending_delete: None,
+            menu_row: None,
             drop_target: None,
             error: None,
             tree,
@@ -274,7 +269,7 @@ impl CollectionPanel {
         &self.collections
     }
 
-    /// Open a collection, request or flow row in a tab; folder rows have no page.
+    /// Open a collection or request row in a tab; folder rows have no page.
     pub(super) fn open(&mut self, index: usize, cx: &mut Context<Self>) {
         if let Some(event) = self.open_event(index) {
             cx.emit(event);
@@ -303,20 +298,7 @@ impl CollectionPanel {
                     },
                 })
             }
-            ItemKind::Folder => None,
-            ItemKind::Flow => {
-                let entry = self.collections.flow(&item.path)?;
-                let (collection, folders) = self.tree.location(index);
-
-                Some(CollectionPanelEvent::OpenFlow {
-                    id: entry.id.clone().into(),
-                    path: item.path.clone(),
-                    name: item.label.clone(),
-                    collection,
-                    folders,
-                    flow: entry.flow.clone(),
-                })
-            }
+            ItemKind::Folder | ItemKind::Empty => None,
             ItemKind::Request(_) => {
                 let file = self.collections.file(&item.path)?;
                 let (collection, folders) = self.tree.location(index);
@@ -384,14 +366,26 @@ impl CollectionPanel {
         }
 
         match event.keystroke.key.as_str() {
-            "down" => self.select_row(
-                self.selected_row()
-                    .map_or(0, |row| (row + 1).min(self.visible.len() - 1)),
-                cx,
-            ),
-            "up" => self.select_row(row.saturating_sub(1), cx),
+            "down" => {
+                let next = match self.selected_row() {
+                    Some(row) => self.item_row(row + 1, true),
+                    None => Some(0),
+                };
+                if let Some(row) = next {
+                    self.select_row(row, cx);
+                }
+            }
+            "up" => {
+                if let Some(row) = row.checked_sub(1).and_then(|row| self.item_row(row, false)) {
+                    self.select_row(row, cx);
+                }
+            }
             "home" => self.select_row(0, cx),
-            "end" => self.select_row(self.visible.len() - 1, cx),
+            "end" => {
+                if let Some(row) = self.item_row(self.visible.len() - 1, false) {
+                    self.select_row(row, cx);
+                }
+            }
             "enter" => self.open(index, cx),
             "space" => self.toggle(index, cx),
             "right" => {
@@ -400,6 +394,7 @@ impl CollectionPanel {
                 } else if self.tree.items[index].is_branch()
                     && row + 1 < self.visible.len()
                     && self.visible[row + 1] < self.tree.items[index].end
+                    && self.tree.items[self.visible[row + 1]].kind != ItemKind::Empty
                 {
                     self.select_row(row + 1, cx);
                 }
@@ -420,6 +415,19 @@ impl CollectionPanel {
         }
 
         cx.stop_propagation();
+    }
+
+    /// The nearest row from `row` on, forward or back, that holds an item.
+    /// The placeholders of empty branches only show a message, so keys
+    /// skip them.
+    fn item_row(&self, row: usize, forward: bool) -> Option<usize> {
+        let holds_item = |row: &usize| self.tree.items[self.visible[*row]].kind != ItemKind::Empty;
+
+        if forward {
+            (row..self.visible.len()).find(holds_item)
+        } else {
+            (0..=row.min(self.visible.len() - 1)).rev().find(holds_item)
+        }
     }
 
     fn rename_selected(&mut self, _: &RenameItem, window: &mut Window, cx: &mut Context<Self>) {
@@ -463,7 +471,10 @@ impl CollectionPanel {
 
         let row = match event.keystroke.key.as_str() {
             "down" | "enter" => 0,
-            "up" => self.visible.len() - 1,
+            "up" => match self.item_row(self.visible.len() - 1, false) {
+                Some(row) => row,
+                None => return,
+            },
             _ => return,
         };
 
