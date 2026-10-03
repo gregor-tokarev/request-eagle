@@ -14,6 +14,7 @@ use gpui_kit::*;
 use request::{Auth, Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
 
 use super::definition::DefinitionState;
+use super::invocation::Call;
 use super::methods::{MethodList, method_list};
 use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
@@ -62,21 +63,11 @@ pub struct GrpcDraft {
     pub(super) server_name: Option<Entity<InputState>>,
     pub(super) max_message: Option<Entity<InputState>>,
     pub(super) timeout: Option<Entity<InputState>>,
-    pub(crate) definition: DefinitionState,
-    /// The settings the current definition was loaded or is loading for.
-    pub(super) definition_source: Option<super::definition::DefinitionSource>,
-    /// What the URL and metadata resolved to when reflection loaded.
-    pub(super) reflected_target: Option<Vec<String>>,
-    pub(super) definition_task: Option<Task<()>>,
-    /// Invoke once the definition finishes loading.
-    pub(super) invoke_when_loaded: bool,
+    pub(super) definition: DefinitionState,
     pub(super) variables: Entity<VariableScope>,
     variable_sessions: EnvironmentSessions,
     pub(crate) response: Entity<GrpcResponse>,
-    pub(crate) call: Option<request::GrpcCall>,
-    pub(super) call_task: Option<Task<()>>,
-    /// A message that could not be sent on the open stream.
-    pub(super) send_error: Option<SharedString>,
+    pub(super) call: Call,
     pub(super) client: Option<(RequestPreferences, GrpcClient)>,
     split: Entity<ResizableState>,
     /// The call as a grpcurl command, beside the request while open.
@@ -175,16 +166,10 @@ impl GrpcDraft {
             max_message: None,
             timeout: None,
             definition: DefinitionState::Idle,
-            definition_source: None,
-            reflected_target: None,
-            definition_task: None,
-            invoke_when_loaded: false,
             variables,
             variable_sessions: sessions,
             response,
-            call: None,
-            call_task: None,
-            send_error: None,
+            call: Call::Idle,
             client: None,
             split,
             code_snippet: SnippetPanel::default(),
@@ -329,7 +314,7 @@ impl GrpcDraft {
     /// The selected method's kind, once the definition describes it.
     pub(crate) fn method_kind(&self) -> Option<MethodKind> {
         match &self.definition {
-            DefinitionState::Loaded(definition) => definition
+            DefinitionState::Loaded { definition, .. } => definition
                 .method(self.request.method.trim())
                 .map(|method| method.kind),
             _ => None,
@@ -365,10 +350,7 @@ impl GrpcDraft {
         }
 
         // Load the services of a request opened with a URL or `.proto` file.
-        if matches!(self.definition, DefinitionState::Idle)
-            && self.definition_task.is_none()
-            && self.current_source().is_some()
-        {
+        if matches!(self.definition, DefinitionState::Idle) && self.current_source().is_some() {
             self.load_definition(false, window, cx);
         }
     }
@@ -486,7 +468,9 @@ impl GrpcDraft {
                     this.message_json_valid =
                         serde_json::from_str::<serde_json::Value>(&value).is_ok();
                     this.request.message = value.to_string();
-                    this.send_error = None;
+                    if let Call::Open { send_error, .. } = &mut this.call {
+                        *send_error = None;
+                    }
                     cx.notify();
                 }
             }),

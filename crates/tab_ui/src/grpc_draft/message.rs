@@ -3,6 +3,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use super::definition::DefinitionState;
 use super::draft::GrpcDraft;
+use super::invocation::Call;
 use crate::variable_input::with_variables;
 
 impl GrpcDraft {
@@ -16,18 +17,19 @@ impl GrpcDraft {
         let message = self.message_state(window, cx);
         let vim = self.message_vim.clone().unwrap();
         let mouse_vim = vim.clone();
-        let has_example = matches!(&self.definition, DefinitionState::Loaded(definition)
+        let has_example = matches!(&self.definition, DefinitionState::Loaded { definition, .. }
             if definition.method(self.request.method.trim()).is_some());
-        let streams_requests = self
-            .call
-            .as_ref()
+        let (call, send_error) = match &self.call {
+            Call::Open {
+                call, send_error, ..
+            } => (Some(call), send_error.clone()),
+            _ => (None, None),
+        };
+        let streams_requests = call
             .map(|call| call.kind.streams_requests())
             .or_else(|| self.method_kind().map(|kind| kind.streams_requests()))
             .unwrap_or(false);
-        let sending = self
-            .call
-            .as_ref()
-            .is_some_and(|call| call.kind.streams_requests() && call.is_sending());
+        let sending = call.is_some_and(|call| call.kind.streams_requests() && call.is_sending());
 
         v_flex()
             .size_full()
@@ -93,7 +95,7 @@ impl GrpcDraft {
                     )
                     .children(self.message_vim.clone())
                     .child(div().flex_1())
-                    .when_some(self.send_error.clone(), |row, error| {
+                    .when_some(send_error, |row, error| {
                         row.child(
                             div()
                                 .debug_selector(|| "grpc-send-error".into())

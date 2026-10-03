@@ -215,8 +215,10 @@ impl GrpcResponse {
         }
     }
 
-    pub(crate) fn cancel(&mut self, call_started: bool, cx: &mut Context<Self>) {
-        if call_started {
+    /// A started call ends its stream with the cancellation. A call still
+    /// being prepared leaves the response empty.
+    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.state, CallState::Running) {
             self.push(Entry {
                 kind: EntryKind::Error,
                 at: SystemTime::now(),

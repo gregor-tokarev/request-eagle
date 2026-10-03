@@ -14,6 +14,27 @@ use crate::cookies::Cookies;
 /// Events handled in one update, so fast streams do not redraw per message.
 const EVENT_BATCH: usize = 256;
 
+/// What the draft's call is doing. Replacing a running call drops its task,
+/// which interrupts a Before invoke script, and its call, which resets the
+/// stream on the server.
+// Each draft has one, so boxing the call would not save memory.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum Call {
+    Idle,
+    /// Invoke once the service definition loads.
+    AwaitingDefinition,
+    /// Running the Before invoke script, loading the definition the call
+    /// needs, or starting the call.
+    Starting(Task<()>),
+    /// The call started; the task shows its events until it ends.
+    Open {
+        call: GrpcCall,
+        _task: Task<()>,
+        /// A message that could not be sent on the open stream.
+        send_error: Option<SharedString>,
+    },
+}
+
 impl GrpcDraft {
     /// A client for the current request preferences, reused until they change.
     pub(super) fn client(&mut self, cx: &App) -> GrpcClient {
@@ -35,29 +56,27 @@ impl GrpcDraft {
     /// Whether a call is starting or open, including while its definition
     /// loads or its Before invoke script runs.
     pub(super) fn is_running(&self) -> bool {
-        self.call.is_some() || self.call_task.is_some() || self.invoke_when_loaded
+        !matches!(self.call, Call::Idle)
     }
 
     /// The send shortcut invokes the method, or sends the composed message
     /// while a client stream is open.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match &self.call {
-            Some(call) if call.kind.streams_requests() && call.is_sending() => {
+            Call::Open { call, .. } if call.kind.streams_requests() && call.is_sending() => {
                 self.send_message(window, cx)
             }
-            _ if self.is_running() => {}
-            _ => self.invoke(window, cx),
+            Call::Idle => self.invoke(window, cx),
+            _ => {}
         }
     }
 
     /// Start a call. The service definition is loaded first when the request
     /// settings changed since it was last loaded.
     pub fn invoke(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.call.is_some() || self.call_task.is_some() {
+        if !matches!(self.call, Call::Idle) {
             return;
         }
-
-        self.send_error = None;
 
         let missing = if self.request.method.trim().is_empty() {
             Some("Select a method to invoke")
@@ -85,12 +104,18 @@ impl GrpcDraft {
 
         // Variables can point reflection at another server, such as after
         // the active environment changed. Load that server's services.
-        let target_changed = reflected_target(&self.request, &variables) != self.reflected_target;
+        let target = reflected_target(&self.request, &variables);
+        let target_changed = match &self.definition {
+            DefinitionState::Loading { target: loaded, .. }
+            | DefinitionState::Loaded { target: loaded, .. } => *loaded != target,
+            _ => false,
+        };
 
         if !self.definition_is_current() || target_changed {
             // A failed load is retried, as Invoke is the user asking again.
-            let reload = target_changed || matches!(self.definition, DefinitionState::Failed(_));
-            self.invoke_when_loaded = true;
+            let reload =
+                target_changed || matches!(self.definition, DefinitionState::Failed { .. });
+            self.call = Call::AwaitingDefinition;
             self.response.update(cx, |response, cx| {
                 response.wait("Loading the service definition…".into(), cx)
             });
@@ -99,7 +124,7 @@ impl GrpcDraft {
             return;
         }
 
-        let DefinitionState::Loaded(definition) = &self.definition else {
+        let DefinitionState::Loaded { definition, .. } = &self.definition else {
             return;
         };
         let definition = definition.clone();
@@ -112,7 +137,7 @@ impl GrpcDraft {
             cx.background_executor()
                 .spawn(client.invoke(&self.request, variables, &definition));
 
-        self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.call = Call::Starting(cx.spawn_in(window, async move |this, cx| {
             let result = invoke.await;
             Self::follow(this, result, server, sent, cx).await;
         }));
@@ -133,9 +158,9 @@ impl GrpcDraft {
         let source = self.current_source();
         let sent = self.sent();
         let loaded = match &self.definition {
-            DefinitionState::Loaded(definition) if self.definition_is_current() => {
-                Some((definition.clone(), self.reflected_target.clone()))
-            }
+            DefinitionState::Loaded {
+                definition, target, ..
+            } if self.definition_is_current() => Some((definition.clone(), target.clone())),
             _ => None,
         };
         // Scripts run off the main thread. Dropping the task interrupts them.
@@ -146,7 +171,7 @@ impl GrpcDraft {
         self.response.update(cx, |response, cx| {
             response.wait("Running the Before invoke script…".into(), cx)
         });
-        self.call_task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.call = Call::Starting(cx.spawn_in(window, async move |this, cx| {
             let prepared = match prepare.await {
                 Ok(prepared) => prepared,
                 Err(error) => return Self::follow(this, Err(error), "".into(), sent, cx).await,
@@ -231,11 +256,19 @@ impl GrpcDraft {
                     let kind = call.kind;
                     this.response
                         .update(cx, |response, cx| response.start(kind, server, window, cx));
-                    this.call = Some(call);
+
+                    // The task that started the call goes on to show its events.
+                    if let Call::Starting(task) = std::mem::replace(&mut this.call, Call::Idle) {
+                        this.call = Call::Open {
+                            call,
+                            _task: task,
+                            send_error: None,
+                        };
+                    }
                     Some(events)
                 }
                 Err(error) => {
-                    this.call_task = None;
+                    this.call = Call::Idle;
                     this.response
                         .update(cx, |response, cx| response.fail_invoke(error, cx));
                     None
@@ -274,8 +307,7 @@ impl GrpcDraft {
                 // Messages redraw only the response; the draft changes
                 // when the call ends.
                 if finished {
-                    this.call = None;
-                    this.call_task = None;
+                    this.call = Call::Idle;
                     this.redraw(cx);
                 }
             });
@@ -292,33 +324,33 @@ impl GrpcDraft {
     /// Send the composed message on the open stream.
     pub(super) fn send_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.message_state(window, cx).read(cx).value();
-        let Some(call) = &mut self.call else {
+        let Call::Open {
+            call, send_error, ..
+        } = &mut self.call
+        else {
             return;
         };
 
-        self.send_error = call.send(&text).err().map(|error| error.to_string().into());
+        *send_error = call.send(&text).err().map(|error| error.to_string().into());
         self.redraw(cx);
     }
 
     /// Tell the server the client has finished sending.
     pub(super) fn end_stream(&mut self, cx: &mut Context<Self>) {
-        if let Some(call) = &mut self.call {
+        if let Call::Open {
+            call, send_error, ..
+        } = &mut self.call
+        {
             call.end();
+            *send_error = None;
         }
 
-        self.send_error = None;
         self.redraw(cx);
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
-        self.invoke_when_loaded = false;
-
-        // Dropping the call resets its stream on the server, and dropping
-        // its task interrupts a Before invoke script that is still running.
-        let started = self.call.take().is_some();
-        self.call_task = None;
-        self.response
-            .update(cx, |response, cx| response.cancel(started, cx));
+        self.call = Call::Idle;
+        self.response.update(cx, |response, cx| response.cancel(cx));
 
         self.redraw(cx);
     }
