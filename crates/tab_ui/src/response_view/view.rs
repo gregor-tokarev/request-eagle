@@ -249,17 +249,22 @@ impl ResponseView {
             .as_ref()
             .map_or(0, |content| content.cookies.len());
 
+        // In a narrow pane the tabs wrap rather than clip, and the metadata
+        // goes to its own line, starting where the tabs do.
         h_flex()
             .flex_none()
             .min_w_0()
             .min_h_11()
-            .gap_3()
+            .gap_x_3()
+            .gap_y_1()
             .flex_wrap()
+            .justify_between()
             .child(
                 Tabs::new("response-sections")
                     .flex()
                     .flex_row()
-                    .flex_none()
+                    .flex_wrap()
+                    .min_w_0()
                     .gap_1()
                     .children(
                         [
@@ -318,7 +323,6 @@ impl ResponseView {
                         }),
                     ),
             )
-            .child(div().flex_1())
             .when(self.content.is_some(), |row| {
                 match self.events.as_ref().map(|events| events.read(cx)) {
                     Some(events) if events.is_open() => row.child(self.stream_status(true, cx)),

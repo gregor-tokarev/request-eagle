@@ -11,10 +11,11 @@ pub(crate) fn parse(path: &Path, bytes: &[u8]) -> Result<Vec<DataRow>, String> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| "The data file is not UTF-8 text.".to_owned())?
         .trim_start_matches('\u{feff}');
-    let json = path
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-        || text.trim_start().starts_with('[');
+    let extension = |name: &str| {
+        path.extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(name))
+    };
+    let json = extension("json") || text.trim_start().starts_with('[');
 
     let rows = if json {
         json_rows(text)?
@@ -23,7 +24,12 @@ pub(crate) fn parse(path: &Path, bytes: &[u8]) -> Result<Vec<DataRow>, String> {
     };
 
     if rows.is_empty() {
-        return Err("The data file has no rows.".into());
+        // A file of another kind reads as CSV with only a header.
+        return Err(if json || extension("csv") {
+            "The data file has no rows.".into()
+        } else {
+            "The data file has no rows. Choose a CSV file whose first row names the columns, or a JSON array of objects.".into()
+        });
     }
 
     Ok(rows)

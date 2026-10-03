@@ -462,7 +462,11 @@ impl CollectionPanel {
                 // bar's new tab menu, and folders their tree icon.
                 menu.item(
                     PopupMenuItem::new(run_label)
-                        .icon(Icon::new(IconName::Play).text_color(cx.theme().muted_foreground))
+                        .icon(
+                            Icon::default()
+                                .path("icons/square-play.svg")
+                                .text_color(cx.theme().muted_foreground),
+                        )
                         .on_click(move |_, window, cx| {
                             let view = run_view.clone();
                             let path = run_path.clone();

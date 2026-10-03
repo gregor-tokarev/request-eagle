@@ -1,6 +1,9 @@
 use request::{ExecutionError, NextRequest, ScriptLog, ScriptPhase, ScriptReport};
 
-use super::run::{Cursor, Kept, Outcome, Position, RunRequest, RunResult, Totals, chosen_request};
+use super::run::{
+    Cursor, Kept, Outcome, Position, RunRequest, RunResult, Totals, chosen_request, count_label,
+    duration_label, failure_summary,
+};
 
 fn requests(names: &[&str]) -> Vec<RunRequest> {
     names
@@ -261,7 +264,49 @@ fn totals_count_tests_skips_errors_and_response_times() {
     ));
 
     assert_eq!((totals.passed, totals.failed, totals.tests()), (1, 1, 2));
+    assert_eq!((totals.passing_requests, totals.failing_requests), (1, 1));
     assert_eq!((totals.skipped, totals.errors), (1, 1));
     assert_eq!(totals.average(), Some(std::time::Duration::from_millis(10)));
     assert_eq!(Totals::default().average(), None);
+}
+
+#[test]
+fn durations_read_the_same_everywhere() {
+    use std::time::Duration;
+
+    assert_eq!(duration_label(Duration::from_millis(28)), "28 ms");
+    assert_eq!(duration_label(Duration::from_millis(1073)), "1.07 s");
+    assert_eq!(duration_label(Duration::from_millis(8851)), "8.85 s");
+    assert_eq!(duration_label(Duration::from_secs(125)), "2 min 05 s");
+}
+
+#[test]
+fn common_transport_failures_are_summarized() {
+    assert_eq!(
+        failure_summary(
+            "HTTP transport failed: error sending request: client error (Connect): tcp connect error: Connection refused (os error 111)"
+        ),
+        "Connection refused"
+    );
+    assert_eq!(
+        failure_summary(
+            "HTTP transport failed: error sending request: client error (Connect): dns error: failed to lookup address information: Name or service not known"
+        ),
+        "Host not found"
+    );
+    assert_eq!(
+        failure_summary("Unknown variable {{baseUrl}}."),
+        "Unknown variable {{baseUrl}}."
+    );
+    assert_eq!(
+        failure_summary("request timed out after 30s"),
+        "request timed out after 30s"
+    );
+}
+
+#[test]
+fn large_counts_keep_their_thousands_apart() {
+    assert_eq!(count_label(7), "7");
+    assert_eq!(count_label(1000), "1,000");
+    assert_eq!(count_label(1_000_000), "1,000,000");
 }

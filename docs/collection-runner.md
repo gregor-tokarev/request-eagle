@@ -11,10 +11,11 @@ Right-click a collection or folder in the sidebar and choose **Run
 collection** or **Run folder**, or click **Run** on a collection's page. The
 runner opens in a tab with:
 
-- **Run Sequence**: the HTTP requests in the collection's order. Clear a
-  request's checkbox to leave it out, or drag a request to send it at another
-  point. **Deselect All**, **Select All** and **Reset** change every request
-  at once; Reset also restores the collection's order. gRPC and WebSocket
+- **Run sequence**: the HTTP requests in the collection's order, with how
+  many of them are selected. Clear a request's checkbox to leave it out, or
+  drag a request to send it at another point. **Select All** (or **Deselect
+  All** once every request is selected) and **Reset** change every request at
+  once; Reset also restores the collection's order. gRPC and WebSocket
   requests are left out.
 - **Iterations**: how many times the sequence runs.
 - **Delay**: how long to wait between requests, in milliseconds.
@@ -31,16 +32,20 @@ bar. Values a script sets with `pm.variables` last for the whole run.
 
 The results show how many tests passed and failed, how long the run took and
 the average response time. Requests are listed by iteration with their status
-and tests. **Passed**, **Failed**, **Skipped** and **Errors** narrow the list;
-**Console log** shows what scripts logged.
+and tests. **Passed**, **Failed**, **Skipped** and **Errors** narrow the list
+to the requests with a passing test, a failing test, a skip or an error, and
+each counts the requests it lists. **Console log** shows what scripts logged.
 
 Click a request to see its response beside the list: its body, cookies and
 headers, the request as it was sent, its test results and its console. Use
-the numbers on the left to see the same request in other iterations.
+the arrows above the response to see the same request in other iterations.
+Without a kept response, its test results and console are still there.
 
-While a run is going, **Pause** waits after the current request and
-**Stop** ends the run. **Run Again** repeats the run; **New Run** returns to
-the configuration.
+While a run is going, a bar shows its progress and the results name the
+request being sent. **Pause** waits after the current request and **Stop**
+ends the run. **Run Again** repeats the run; **New Run** returns to the
+configuration. **Export Results** saves the results as JSON; click the saved
+file's name to show it in its folder.
 
 ## Use a data file
 
@@ -81,7 +86,9 @@ if (body.next) {
 ```
 
 The last choice of a request's scripts wins. A folder's run can only go to
-requests in that folder. Sending one request on its own ignores the choice.
+requests in that folder. When the chosen request is not in the run, the
+iteration ends and the results say why. Sending one request on its own
+ignores the choice.
 
 ## Advanced settings
 

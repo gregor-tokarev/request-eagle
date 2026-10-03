@@ -244,24 +244,40 @@ impl RunResult {
 /// take longer as the run grows.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Totals {
+    /// Tests that passed and failed.
     pub passed: usize,
     pub failed: usize,
+    /// Requests with a test that passed, and with one that failed.
+    pub passing_requests: usize,
+    pub failing_requests: usize,
     /// Requests that a pre-request script skipped.
     pub skipped: usize,
     /// Requests that could not be sent or whose scripts failed.
     pub errors: usize,
+    /// Lines the scripts logged.
+    pub logs: usize,
     responses: u32,
     elapsed: Duration,
 }
 
 impl Totals {
     pub fn add(&mut self, result: &RunResult) {
+        let (mut passed, mut failed) = (0, 0);
         for test in result.tests() {
             match test.error {
-                None => self.passed += 1,
-                Some(_) => self.failed += 1,
+                None => passed += 1,
+                Some(_) => failed += 1,
             }
         }
+        self.passed += passed;
+        self.failed += failed;
+        self.passing_requests += usize::from(passed > 0);
+        self.failing_requests += usize::from(failed > 0);
+        self.logs += result
+            .scripts
+            .iter()
+            .map(|report| report.logs.len())
+            .sum::<usize>();
 
         match result.outcome {
             Outcome::Response { elapsed, .. } => {
@@ -283,4 +299,58 @@ impl Totals {
     pub fn average(&self) -> Option<Duration> {
         (self.responses > 0).then(|| self.elapsed / self.responses)
     }
+}
+
+/// A duration as the runner writes every time: `539 ms`, `1.07 s` or
+/// `2 min 05 s`.
+pub(crate) fn duration_label(duration: Duration) -> String {
+    let milliseconds = duration.as_millis();
+
+    if milliseconds < 1000 {
+        format!("{milliseconds} ms")
+    } else if milliseconds < 60_000 {
+        format!("{:.2} s", duration.as_secs_f64())
+    } else {
+        let seconds = duration.as_secs();
+        format!("{} min {:02} s", seconds / 60, seconds % 60)
+    }
+}
+
+/// A count with its thousands apart, such as `1,000,000`.
+pub(crate) fn count_label(count: usize) -> String {
+    let digits = count.to_string();
+    let mut label = String::with_capacity(digits.len() + digits.len() / 3);
+
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            label.push(',');
+        }
+        label.push(digit);
+    }
+
+    label
+}
+
+/// What went wrong with a request that could not be sent, in a few words
+/// when the HTTP client's message has a common cause. Other messages are
+/// already short and stay as they are.
+pub(crate) fn failure_summary(message: &str) -> &str {
+    if !message.starts_with("HTTP transport failed") {
+        return message;
+    }
+
+    let lower = message.to_lowercase();
+    let causes = [
+        ("connection refused", "Connection refused"),
+        ("dns error", "Host not found"),
+        ("failed to lookup address", "Host not found"),
+        ("connection reset", "Connection reset"),
+        ("certificate", "Certificate not trusted"),
+        ("timed out", "Timed out"),
+    ];
+
+    causes
+        .into_iter()
+        .find(|(cause, _)| lower.contains(cause))
+        .map_or(message, |(_, summary)| summary)
 }
