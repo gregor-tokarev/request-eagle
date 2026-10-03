@@ -176,8 +176,8 @@ impl RequestExecutor {
 }
 
 /// Send a resolved request with its encoded body: add its authorization's
-/// credentials, send it with the cookie jar's cookies at each redirect, and
-/// send it again to answer a Digest challenge. Also returns where the
+/// credentials, send it with the cookie jar at every hop of its redirects,
+/// and send it again to answer a Digest challenge. Also returns where the
 /// response came from, and the time from sending the request until the
 /// complete response was read. `request` keeps the credentials it was sent
 /// with.

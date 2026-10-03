@@ -86,15 +86,19 @@ impl<'js> Network<'js> {
                     headers: input.headers.into_iter().map(Field::from).collect(),
                     ..Default::default()
                 };
+                // Sent as written: encoding would add a Content-Type the
+                // script did not set.
                 let body = input.body.map(bytes::Bytes::from);
                 let started = Instant::now();
                 let sent = send(&http, &mut request, body, None);
-                let response = with_timeout(timeout, None, sent).await.map_err(|error| match error {
-                    ExecutionError::Timeout { timeout } => {
-                        format!("Script HTTP request timed out after {timeout:?}")
-                    }
-                    error => error.to_string(),
-                });
+                let response = with_timeout(timeout, None, sent)
+                    .await
+                    .map_err(|error| match error {
+                        ExecutionError::Timeout { timeout } => {
+                            format!("Script HTTP request timed out after {timeout:?}")
+                        }
+                        error => error.to_string(),
+                    });
                 let result = response.and_then(|(response, _, _)| {
                     let total = response_bytes.get().saturating_add(response.body.len());
                     response_bytes.set(total);
