@@ -300,18 +300,21 @@ pub fn move_flows_out_of_collections<'a>(
 /// Moves a flow's file to a free name in `directory`. The new name is a
 /// link to the file, which appears whole, never replaces another file and
 /// keeps its permissions; across filesystems, a complete copy is linked
-/// instead. The original goes only while it still holds what was moved, so
-/// a flow saved meanwhile, or moved by another start at the same time, keeps
+/// instead, or renamed where links are not supported, as on FAT drives.
+/// The original goes only while it still holds what was moved, so a flow
+/// saved meanwhile, or moved by another start at the same time, keeps
 /// exactly one copy.
 pub(crate) fn move_flow(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
     let to = match link_to_free_name(from, directory, stem) {
         Ok(to) => to,
         Err(_) => {
             let temporary = directory.join(format!(".request-eagle-{}.tmp", Uuid::new_v4()));
-            let linked = fs::copy(from, &temporary)
-                .and_then(|_| link_to_free_name(&temporary, directory, stem));
+            let published = fs::copy(from, &temporary).and_then(|_| {
+                link_to_free_name(&temporary, directory, stem)
+                    .or_else(|_| rename_to_free_name(&temporary, directory, stem))
+            });
             let _ = fs::remove_file(&temporary);
-            linked?
+            published?
         }
     };
 
@@ -334,12 +337,7 @@ pub(crate) fn move_flow(from: &Path, directory: &Path, stem: &str) -> io::Result
 /// Links `from` as `stem.toml` in `directory`, or `stem 2.toml` and so on
 /// when the name is taken.
 fn link_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
-    for number in 1.. {
-        let to = match number {
-            1 => directory.join(format!("{stem}.{EXTENSION}")),
-            number => directory.join(format!("{stem} {number}.{EXTENSION}")),
-        };
-
+    for to in free_names(directory, stem) {
         match fs::hard_link(from, &to) {
             Ok(()) => return Ok(to),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -348,6 +346,26 @@ fn link_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<Pa
     }
 
     unreachable!()
+}
+
+/// Renames `from`, a file in `directory`, to the first name that no file
+/// has. Unlike a link, a rename replaces a file another start created after
+/// the check, so it is only for drives without links.
+fn rename_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
+    let to = free_names(directory, stem)
+        .find(|to| !to.exists())
+        .expect("names never run out");
+    fs::rename(from, &to)?;
+
+    Ok(to)
+}
+
+/// `stem.toml`, `stem 2.toml`, `stem 3.toml` and so on in `directory`.
+fn free_names(directory: &Path, stem: &str) -> impl Iterator<Item = PathBuf> {
+    (1..).map(move |number| match number {
+        1 => directory.join(format!("{stem}.{EXTENSION}")),
+        number => directory.join(format!("{stem} {number}.{EXTENSION}")),
+    })
 }
 
 fn read(path: &Path) -> Result<SavedFlow, FlowLibraryError> {

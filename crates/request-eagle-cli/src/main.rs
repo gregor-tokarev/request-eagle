@@ -66,17 +66,6 @@ fn main() {
             command,
         }) => {
             let preferences = preferences::PreferencesFile::new(&data);
-            // Like the app, move flows that 0.1.22 saved in collections,
-            // which the collections cannot load. A flow that cannot be moved
-            // is reported by the collections.
-            let registry = collection::CollectionRegistry::from_path(&collections);
-            flow::move_flows_out_of_collections(
-                registry
-                    .skipped()
-                    .iter()
-                    .map(|skipped| skipped.path.as_path()),
-                &data.join("flows"),
-            );
             match smol::block_on(async {
                 match *command {
                     Command::RequestsRun {
@@ -87,6 +76,7 @@ fn main() {
                     } => {
                         execution::run(
                             &collections,
+                            &data.join("flows"),
                             &preferences,
                             &data.join("cookies.json"),
                             &path,
@@ -125,7 +115,7 @@ fn main() {
                     | Command::SettingsClientCertificatesRemove { .. }) => {
                         settings::dispatch(&preferences, command).await
                     }
-                    command => collections::dispatch(&collections, command),
+                    command => collections::dispatch(&collections, &data.join("flows"), command),
                 }
             }) {
                 Ok(value) => (0, success(value).to_string()),

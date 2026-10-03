@@ -6,8 +6,27 @@ use std::{fs, path::Path};
 
 use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedRequest};
 
-pub fn load(root: &Path) -> Result<CollectionRegistry> {
+/// The collections in `root`, after moving the flows that 0.1.22 saved in
+/// them, which they cannot load, to the flows directory, like the app.
+pub fn read(root: &Path, flows: &Path) -> CollectionRegistry {
     let registry = CollectionRegistry::from_path(root);
+    let moved = flow::move_flows_out_of_collections(
+        registry
+            .skipped()
+            .iter()
+            .map(|skipped| skipped.path.as_path()),
+        flows,
+    );
+
+    if moved.is_empty() {
+        registry
+    } else {
+        CollectionRegistry::from_path(root)
+    }
+}
+
+pub fn load(root: &Path, flows: &Path) -> Result<CollectionRegistry> {
+    let registry = read(root, flows);
     // The app leaves unreadable files out and only counts them, so the CLI
     // is where agents learn which files to fix and why. Commands must not act
     // on an incomplete view of the collections.
@@ -40,7 +59,7 @@ pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
     Ok(lock)
 }
 
-pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
+pub fn dispatch(root: &Path, flows: &Path, command: Command) -> Result<Value> {
     let _lock = match &command {
         Command::CollectionsList {}
         | Command::CollectionsGet { .. }
@@ -48,7 +67,7 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
         | Command::RequestsGet { .. } => None,
         _ => Some(lock_for_edit(root)?),
     };
-    let mut registry = load(root)?;
+    let mut registry = load(root, flows)?;
 
     let path = match command {
         Command::CollectionsList {} => return Ok(json!(registry.collections().iter().map(|collection| {

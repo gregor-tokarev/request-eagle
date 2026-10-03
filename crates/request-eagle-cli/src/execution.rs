@@ -15,8 +15,10 @@ use crate::commands::{
 };
 
 /// `cookies` is the app's cookie jar file.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     root: &Path,
+    flows: &Path,
     preferences: &preferences::PreferencesFile,
     cookies: &Path,
     path: &Path,
@@ -24,7 +26,7 @@ pub async fn run(
     variables: HashMap<String, String>,
     timeout_ms: Option<u64>,
 ) -> Result<Value> {
-    let registry = crate::collections::load(root)?;
+    let registry = crate::collections::load(root, flows)?;
     let file = registry.file(path).context("Unknown saved request path")?;
     let collection = registry
         .collections()

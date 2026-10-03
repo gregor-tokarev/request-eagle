@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use crate::collections::{load, lock_for_edit};
+use crate::collections::{load, lock_for_edit, read};
 use crate::commands::Command;
 
 /// The most Log values a run returns. Later ones are counted, not returned.
@@ -33,6 +33,8 @@ pub async fn dispatch(
             bindings,
         } => evaluate(&expression, input, bindings),
         Command::FlowsList { query } => {
+            // Flows that 0.1.22 saved in collections are listed too.
+            read(collections, directory);
             let library = load_library(directory)?;
             let query = query.to_lowercase();
 
@@ -51,12 +53,12 @@ pub async fn dispatch(
         }
         Command::FlowsGet { path } => {
             let library = load_library(directory)?;
-            flow_json(&library, &load(collections)?, &path)
+            flow_json(&library, &load(collections, directory)?, &path)
         }
         Command::FlowsCreate { name, flow } => {
             let _lock = lock_for_edit(directory)?;
             let mut library = load_library(directory)?;
-            let registry = load(collections)?;
+            let registry = load(collections, directory)?;
 
             let flow = flow.unwrap_or_else(Flow::starter);
             flow.check().map_err(|error| anyhow!(error))?;
@@ -70,7 +72,7 @@ pub async fn dispatch(
         } => {
             let _lock = lock_for_edit(directory)?;
             let mut library = load_library(directory)?;
-            let registry = load(collections)?;
+            let registry = load(collections, directory)?;
 
             flow.check().map_err(|error| anyhow!(error))?;
             library.update(&path, &expected_id, flow)?;
@@ -289,7 +291,7 @@ async fn run(
     timeout_ms: Option<u64>,
 ) -> Result<Value> {
     let library = load_library(directory)?;
-    let registry = load(collections)?;
+    let registry = load(collections, directory)?;
     let entry = library.get(path).context("Unknown saved flow path")?;
     entry.flow.check().map_err(|error| anyhow!(error))?;
 
