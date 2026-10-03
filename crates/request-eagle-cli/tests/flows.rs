@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
     net::TcpListener,
+    path::Path,
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -117,7 +118,7 @@ fn serve() -> String {
 }
 
 #[test]
-fn flows_are_created_listed_updated_moved_and_deleted() {
+fn flows_are_created_listed_updated_renamed_and_deleted() {
     let cli = Cli::new();
     let blocks = cli.call(json!({"command":"flows.blocks"}));
     assert_eq!(blocks["blocks"].as_array().unwrap().len(), 27);
@@ -126,25 +127,26 @@ fn flows_are_created_listed_updated_moved_and_deleted() {
     }));
 
     let collection = cli.collection();
-    let folder = cli.call(json!({"command":"folders.create","parent":collection}))["path"].clone();
-    let created = cli.call(json!({"command":"flows.create","parent":collection,"name":"Checkout"}));
+    let created = cli.call(json!({"command":"flows.create","name":"Checkout"}));
     assert_eq!(created["name"], "Checkout");
     assert_eq!(created["flow"]["blocks"][0]["type"], "start");
     let path = created["path"].clone();
+    let file = Path::new(path.as_str().unwrap());
+    assert_eq!(file.parent().unwrap(), cli.0.path().join("flows"));
 
-    // Flows are listed apart from requests.
+    // Flows are saved apart from collections and their requests.
     let listed = cli.call(json!({"command":"flows.list","query":"check"}));
-    assert_eq!(listed[0]["id"], created["id"]);
-    assert_eq!(listed[0]["blocks"], 1);
+    assert_eq!(
+        listed,
+        json!([{"path": path, "id": created["id"], "name": "Checkout", "blocks": 1}])
+    );
+    assert_eq!(
+        cli.call(json!({"command":"flows.list","query":"nightly"})),
+        json!([])
+    );
     assert_eq!(cli.call(json!({"command":"requests.list"})), json!([]));
     let tree = cli.call(json!({"command":"collections.get","path":collection}));
-    assert!(
-        tree["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry["kind"] == "flow" && entry["id"] == created["id"])
-    );
+    assert_eq!(tree["entries"], json!([]));
 
     let mut flow = created["flow"].clone();
     flow["blocks"].as_array_mut().unwrap().push(json!({
@@ -177,17 +179,49 @@ fn flows_are_created_listed_updated_moved_and_deleted() {
     );
     assert_eq!(code, 1);
 
-    let renamed =
-        cli.call(json!({"command":"entries.rename","path":path,"name":"Nightly checkout"}));
-    let moved = cli.call(
-        json!({"command":"entries.move","path":renamed["path"],"target":folder,"placement":"inside"}),
-    );
-    let read = cli.call(json!({"command":"flows.get","path":moved["path"]}));
+    // Renaming keeps the flow's file.
+    let renamed = cli.call(json!({"command":"flows.rename","path":path,
+        "expected_id":created["id"],"name":"Nightly checkout"}));
+    assert_eq!(renamed["path"], path);
+    let read = cli.call(json!({"command":"flows.get","path":path}));
     assert_eq!(read["name"], "Nightly checkout");
     assert_eq!(read["flow"], updated["flow"]);
+    let (code, _) = cli.raw(
+        &json!({"command":"flows.rename","path":path,"expected_id":"another","name":"Other"})
+            .to_string(),
+    );
+    assert_eq!(code, 1);
 
-    cli.call(json!({"command":"entries.delete","path":moved["path"],"confirm":true}));
+    let (code, error) =
+        cli.raw(&json!({"command":"flows.delete","path":path,"confirm":false}).to_string());
+    assert_eq!(code, 1);
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("confirm=true")
+    );
+    assert!(file.exists());
+
+    cli.call(json!({"command":"flows.delete","path":path,"confirm":true}));
     assert_eq!(cli.call(json!({"command":"flows.list"})), json!([]));
+    assert!(!file.exists());
+}
+
+#[test]
+fn unreadable_flows_are_reported_and_stop_flow_commands() {
+    let cli = Cli::new();
+    let directory = cli.0.path().join("flows");
+    std::fs::create_dir_all(&directory).unwrap();
+    let broken = directory.join("Broken.toml");
+    std::fs::write(&broken, "<<<<<<< HEAD\n").unwrap();
+
+    let (code, error) = cli.raw(&json!({"command":"flows.create","name":"Checkout"}).to_string());
+
+    assert_eq!(code, 1, "{error}");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(message.contains(broken.to_str().unwrap()), "{message}");
+    assert!(!directory.join("Checkout.toml").exists());
 }
 
 #[test]
@@ -239,9 +273,7 @@ fn runs_flows_that_send_requests_loop_and_return_outputs() {
             {"from":"b3","output":"item","to":"b11","input":"data"}
         ]
     });
-    let created = cli.call(
-        json!({"command":"flows.create","parent":collection,"name":"Send items","flow":flow}),
-    );
+    let created = cli.call(json!({"command":"flows.create","name":"Send items","flow":flow}));
     let got = cli.call(json!({"command":"flows.get","path":created["path"]}));
     assert_eq!(
         got["requests"][request["id"].as_str().unwrap()]["variables"],
@@ -301,11 +333,9 @@ fn flow_runs_need_trust_for_scripts_and_stop_at_their_timeout() {
             "method":"GET","url":"http://127.0.0.1:9","pre_request":"pm.variables.set('a', 1)"
         }}),
     );
-    let flow = cli.call(
-        json!({"command":"flows.create","parent":collection,"name":"Scripted","flow":{
-            "blocks":[{"id":"b1","type":"http_request","x":0,"y":0,"request":scripted["id"]}]
-        }}),
-    );
+    let flow = cli.call(json!({"command":"flows.create","name":"Scripted","flow":{
+        "blocks":[{"id":"b1","type":"http_request","x":0,"y":0,"request":scripted["id"]}]
+    }}));
     let (code, error) = cli.raw(&json!({"command":"flows.run","path":flow["path"]}).to_string());
     assert_eq!(code, 1);
     assert!(
@@ -315,15 +345,13 @@ fn flow_runs_need_trust_for_scripts_and_stop_at_their_timeout() {
             .contains("trust_scripts")
     );
 
-    let slow = cli.call(
-        json!({"command":"flows.create","parent":collection,"name":"Slow","flow":{
-            "blocks":[
-                {"id":"b1","type":"start","x":0,"y":0},
-                {"id":"b2","type":"delay","x":0,"y":0,"milliseconds":20000}
-            ],
-            "connections":[{"from":"b1","output":"data","to":"b2","input":"data"}]
-        }}),
-    );
+    let slow = cli.call(json!({"command":"flows.create","name":"Slow","flow":{
+        "blocks":[
+            {"id":"b1","type":"start","x":0,"y":0},
+            {"id":"b2","type":"delay","x":0,"y":0,"milliseconds":20000}
+        ],
+        "connections":[{"from":"b1","output":"data","to":"b2","input":"data"}]
+    }}));
     let started = Instant::now();
     let run = cli.call(json!({"command":"flows.run","path":slow["path"],"timeout_ms":300}));
     assert!(started.elapsed() < Duration::from_secs(10));

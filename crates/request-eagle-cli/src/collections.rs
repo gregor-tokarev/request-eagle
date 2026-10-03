@@ -25,8 +25,9 @@ pub fn load(root: &Path) -> Result<CollectionRegistry> {
 }
 
 pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
-    // Serialize CLI edits before loading the registry, so parallel invocations
-    // cannot save stale ordering or act on a moved/deleted snapshot.
+    // Serialize CLI edits before loading the collections or flows in `root`,
+    // so parallel invocations cannot save stale ordering or act on a
+    // moved/deleted snapshot.
     fs::create_dir_all(root)?;
     let lock = fs::OpenOptions::new()
         // Windows only locks files opened for writing; appending is not enough.
@@ -35,7 +36,7 @@ pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
         .truncate(false)
         .open(root.join(".cli.lock"))?;
     lock.try_lock()
-        .context("Collections are being used by another CLI command; retry")?;
+        .context("Saved data is being changed by another CLI command; retry")?;
     Ok(lock)
 }
 
@@ -138,7 +139,6 @@ fn entries(items: &[Entry]) -> Vec<Value> {
             value["kind"] = json!("request");
             value
         }
-        Entry::Flow(flow) => json!({"kind": "flow", "path": flow.path, "id": flow.id, "name": flow.name}),
         Entry::Directory(folder) => json!({"kind": "folder", "path": folder.path, "name": folder.name, "entries": entries(&folder.entries)}),
     }).collect()
 }
@@ -147,7 +147,6 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
     for entry in items {
         match entry {
             Entry::Directory(folder) => list_requests(&folder.entries, collection, query, output),
-            Entry::Flow(_) => {}
             Entry::File(file) => {
                 let value = match &file.request {
                     Request::Http(request) => {

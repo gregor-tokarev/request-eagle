@@ -89,10 +89,13 @@ fn main() {
                     | Command::FlowsGet { .. }
                     | Command::FlowsCreate { .. }
                     | Command::FlowsUpdate { .. }
+                    | Command::FlowsRename { .. }
+                    | Command::FlowsDelete { .. }
                     | Command::FlowsBlocks {}
                     | Command::FlowsRun { .. }
                     | Command::FqlEvaluate { .. }) => {
                         flows::dispatch(
+                            &data.join("flows"),
                             &collections,
                             &preferences,
                             &data.join("cookies.json"),

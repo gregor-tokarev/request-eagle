@@ -79,6 +79,7 @@ fn saved_session_loads_back_the_same() {
             visible: false,
             collections: true,
             environments: false,
+            flows: false,
             history: true,
         },
         tabs: vec![
@@ -107,6 +108,11 @@ fn saved_session_loads_back_the_same() {
             SavedTab::Collection {
                 path: PathBuf::from("/collections/api"),
             },
+            SavedTab::Flow {
+                path: PathBuf::from("/flows/Checkout.toml"),
+                id: "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f".into(),
+                draft: Some(Box::new(flow::Flow::starter())),
+            },
             SavedTab::Environment {
                 name: "Staging".into(),
             },
@@ -123,5 +129,5 @@ fn saved_session_loads_back_the_same() {
         serde_json::to_value(&session).unwrap(),
     );
     assert!(loaded.window.is_some());
-    assert_eq!(loaded.tabs.len(), 5);
+    assert_eq!(loaded.tabs.len(), 6);
 }

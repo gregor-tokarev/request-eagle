@@ -5,6 +5,7 @@ use crate::{
     bottom_panel::BottomPanel,
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
+    flow_panel::{FlowPanel, FlowPanelEvent},
     history_panel::{HistoryPanel, HistoryPanelEvent},
     main_view::{MainView, Page},
     session::{SavedSidebar, SavedWindow, Session},
@@ -13,6 +14,7 @@ use crate::{
 use collection::CollectionRegistry;
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
+use flow::{FlowLibrary, SavedFlow};
 use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
@@ -30,6 +32,7 @@ use updater::Updater;
 pub(crate) enum SidebarSection {
     Collections,
     Environments,
+    Flows,
     History,
 }
 
@@ -37,12 +40,15 @@ pub(crate) struct Workspace {
     top_panel: Entity<TopPanel>,
     pub(crate) sidebar: Entity<CollectionPanel>,
     pub(crate) environment_panel: Entity<EnvironmentPanel>,
+    flow_panel: Entity<FlowPanel>,
     history: Entity<HistoryPanel>,
     collections_open: bool,
     environments_open: bool,
+    flows_open: bool,
     history_open: bool,
     pub(crate) collections_header: FocusHandle,
     environments_header: FocusHandle,
+    flows_header: FocusHandle,
     history_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
@@ -63,14 +69,18 @@ pub(crate) struct Workspace {
 
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
+    _flow_panel_subscription: Subscription,
     _history_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
 impl Workspace {
+    // Each store is loaded once at startup and handed over here.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         collections: CollectionRegistry,
         environments: GlobalEnvironments,
+        flows: FlowLibrary,
         history: History,
         updater: Entity<Updater>,
         session: Session,
@@ -173,27 +183,6 @@ impl Workspace {
                         view.prepare_active_tab(window, cx);
                     });
                 }
-                CollectionPanelEvent::OpenFlow {
-                    id,
-                    path,
-                    name,
-                    collection,
-                    folders,
-                    flow,
-                } => {
-                    let location = RequestLocation {
-                        path: path.clone(),
-                        id: id.clone(),
-                        name: name.clone(),
-                        collection: collection.clone(),
-                        folders: folders.clone(),
-                    };
-
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_flow(location, flow.clone(), cx);
-                        view.prepare_active_tab(window, cx);
-                    });
-                }
                 CollectionPanelEvent::RunRequests {
                     path,
                     name,
@@ -245,6 +234,23 @@ impl Workspace {
             },
         );
 
+        let flow_panel = cx.new(|cx| FlowPanel::new(flows, cx));
+        let flow_panel_subscription = cx.subscribe_in(
+            &flow_panel,
+            window,
+            |this, _, event: &FlowPanelEvent, window, cx| match event {
+                FlowPanelEvent::Open(saved) => this.open_flow(saved, window, cx),
+                FlowPanelEvent::Renamed { path, name } => {
+                    this.main_view
+                        .update(cx, |view, cx| view.rename_flow(path, name.clone(), cx));
+                }
+                FlowPanelEvent::Deleted { path } => {
+                    this.main_view
+                        .update(cx, |view, cx| view.close_flow(path, cx));
+                }
+            },
+        );
+
         let history = cx.new(|cx| HistoryPanel::new(history, window, cx));
         let history_subscription = cx.subscribe_in(
             &history,
@@ -263,6 +269,7 @@ impl Workspace {
             MainView::new(
                 environments,
                 sidebar.clone(),
+                flow_panel.clone(),
                 history.clone(),
                 tabs,
                 selected_tab,
@@ -284,12 +291,15 @@ impl Workspace {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
+            flow_panel,
             history,
             collections_open: sidebar_state.collections,
             environments_open: sidebar_state.environments,
+            flows_open: sidebar_state.flows,
             history_open: sidebar_state.history,
             collections_header: cx.focus_handle(),
             environments_header: cx.focus_handle(),
+            flows_header: cx.focus_handle(),
             history_header: cx.focus_handle(),
             main_view,
             bottom_panel,
@@ -303,6 +313,7 @@ impl Workspace {
             session_path,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
+            _flow_panel_subscription: flow_panel_subscription,
             _history_subscription: history_subscription,
             _settings_subscription: None,
         }
@@ -317,6 +328,7 @@ impl Workspace {
                 visible: *self.sidebar_visible.read(cx),
                 collections: self.collections_open,
                 environments: self.environments_open,
+                flows: self.flows_open,
                 history: self.history_open,
             },
             tabs: self.main_view.read(cx).saved_tabs(cx),
@@ -446,6 +458,7 @@ impl Workspace {
         [
             &self.collections_header,
             &self.environments_header,
+            &self.flows_header,
             &self.history_header,
         ]
         .iter()
@@ -455,6 +468,7 @@ impl Workspace {
                 .environment_panel
                 .focus_handle(cx)
                 .contains_focused(window, cx)
+            || self.flow_panel.read(cx).contains_focus(window, cx)
             || self.history.read(cx).contains_focus(window, cx)
     }
 
@@ -467,6 +481,7 @@ impl Workspace {
         match section {
             SidebarSection::Collections => self.collections_open = !self.collections_open,
             SidebarSection::Environments => self.environments_open = !self.environments_open,
+            SidebarSection::Flows => self.flows_open = !self.flows_open,
             SidebarSection::History => self.history_open = !self.history_open,
         }
 
@@ -490,6 +505,11 @@ impl Workspace {
                     .focus_handle(cx)
                     .contains_focused(window, cx),
                 &self.environments_header,
+            ),
+            SidebarSection::Flows => (
+                self.flows_open,
+                self.flow_panel.read(cx).contains_focus(window, cx),
+                &self.flows_header,
             ),
             SidebarSection::History => (
                 self.history_open,
@@ -546,6 +566,34 @@ impl Workspace {
             .update(cx, |view, cx| view.create_environment(window, cx));
     }
 
+    /// Create a flow, open it, and name it in the sidebar.
+    fn create_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_visible.update(cx, |visible, cx| {
+            *visible = true;
+            cx.notify();
+        });
+        self.flows_open = true;
+        cx.notify();
+
+        let Some(path) = self.flow_panel.update(cx, |flows, cx| flows.create(cx)) else {
+            return;
+        };
+        if let Some(saved) = self.flow_panel.read(cx).get(&path).cloned() {
+            self.open_flow(&saved, window, cx);
+        }
+
+        // Opening the tab focuses its canvas, so the name is edited after.
+        self.flow_panel
+            .update(cx, |flows, cx| flows.begin_rename(path, window, cx));
+    }
+
+    fn open_flow(&mut self, saved: &SavedFlow, window: &mut Window, cx: &mut Context<Self>) {
+        self.main_view.update(cx, |view, cx| {
+            view.open_flow(saved.clone(), cx);
+            view.prepare_active_tab(window, cx);
+        });
+    }
+
     fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The confirmation shows in the section, so it must be visible.
         self.history_open = true;
@@ -560,6 +608,7 @@ impl Workspace {
         let (id, open) = match section {
             SidebarSection::Collections => ("collections-section", self.collections_open),
             SidebarSection::Environments => ("environments-section", self.environments_open),
+            SidebarSection::Flows => ("flows-section", self.flows_open),
             SidebarSection::History => ("history-section", self.history_open),
         };
 
@@ -594,6 +643,12 @@ impl Workspace {
                 "Environments",
                 self.environments_open,
                 &self.environments_header,
+            ),
+            SidebarSection::Flows => (
+                "flows-section",
+                "Flows",
+                self.flows_open,
+                &self.flows_header,
             ),
             SidebarSection::History => (
                 "history-section",
@@ -656,15 +711,18 @@ impl Workspace {
     fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
+        let flow_count = self.flow_panel.read(cx).count();
         let history_count = self.history.read(cx).count();
         let collections_progress = self.section_progress(SidebarSection::Collections, window, cx);
         let environments_progress = self.section_progress(SidebarSection::Environments, window, cx);
+        let flows_progress = self.section_progress(SidebarSection::Flows, window, cx);
         let history_progress = self.section_progress(SidebarSection::History, window, cx);
 
         // A folding section's rows stay on screen, where a click can still
         // focus them.
         self.release_section_focus(SidebarSection::Collections, window, cx);
         self.release_section_focus(SidebarSection::Environments, window, cx);
+        self.release_section_focus(SidebarSection::Flows, window, cx);
         self.release_section_focus(SidebarSection::History, window, cx);
 
         let new_collection = Button::new("new-collection")
@@ -682,6 +740,11 @@ impl Workspace {
             .icon(IconName::Plus)
             .tooltip("New Environment")
             .on_click(cx.listener(|this, _, window, cx| this.create_environment(window, cx)));
+        let new_flow = Button::new("new-flow")
+            .debug_selector(|| "new-flow".into())
+            .icon(IconName::Plus)
+            .tooltip_with_action("New Flow", &NewFlow, Some("Workspace"))
+            .on_click(cx.listener(|this, _, window, cx| this.create_flow(window, cx)));
         let clear_history = Button::new("clear-history")
             .debug_selector(|| "clear-history".into())
             .icon(Icon::default().path("icons/trash.svg"))
@@ -692,14 +755,15 @@ impl Workspace {
         let border = cx.theme().sidebar_border;
         let divider = move || div().flex_none().mx_2().h(px(1.)).bg(border);
 
-        // Open sections share the height, like the sections of an editor sidebar.
+        // Open sections share the height, like the sections of an editor sidebar,
+        // and collections, the main one, get twice the share of the others.
         // A folding section gives its share away and clips its rows. An open
         // one does not clip, so focus rings at its edges stay whole.
-        let section_body = |progress: f32, view: AnyView| {
+        let section_body = |progress: f32, share: f32, view: AnyView| {
             div()
                 .w_full()
                 .flex_basis(relative(0.))
-                .flex_grow(progress)
+                .flex_grow(progress * share)
                 .min_h_0()
                 .when(progress < 1.0, |this| this.overflow_hidden())
                 .child(view.cached(StyleRefinement::default().size_full()))
@@ -723,6 +787,7 @@ impl Workspace {
             .when(collections_progress > 0.0, |this| {
                 this.child(section_body(
                     collections_progress,
+                    2.,
                     self.sidebar.clone().into(),
                 ))
             })
@@ -738,7 +803,24 @@ impl Workspace {
             .when(environments_progress > 0.0, |this| {
                 this.child(section_body(
                     environments_progress,
+                    1.,
                     self.environment_panel.clone().into(),
+                ))
+            })
+            .child(divider())
+            .child(self.section_header(
+                SidebarSection::Flows,
+                flows_progress,
+                flow_count,
+                vec![new_flow],
+                window,
+                cx,
+            ))
+            .when(flows_progress > 0.0, |this| {
+                this.child(section_body(
+                    flows_progress,
+                    1.,
+                    self.flow_panel.clone().into(),
                 ))
             })
             .child(divider())
@@ -751,7 +833,11 @@ impl Workspace {
                 cx,
             ))
             .when(history_progress > 0.0, |this| {
-                this.child(section_body(history_progress, self.history.clone().into()))
+                this.child(section_body(
+                    history_progress,
+                    1.,
+                    self.history.clone().into(),
+                ))
             })
     }
 
@@ -916,6 +1002,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ImportCollection, window, cx| {
                 this.import_collection(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &NewFlow, window, cx| {
+                this.create_flow(window, cx);
+            }))
             .on_action(
                 cx.listener(|this, _: &OpenEnvironmentSelector, window, cx| {
                     this.main_view
@@ -1062,6 +1151,7 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
 pub fn init(
     collections: CollectionRegistry,
     environments: GlobalEnvironments,
+    flows: FlowLibrary,
     cookies: Result<request::CookieJar, String>,
     history: History,
     updater: Entity<Updater>,
@@ -1076,6 +1166,7 @@ pub fn init(
         Workspace::new(
             collections,
             environments,
+            flows,
             history,
             updater,
             session,

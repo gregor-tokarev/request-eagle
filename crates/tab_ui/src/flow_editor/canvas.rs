@@ -18,6 +18,23 @@ use crate::SendRequest;
 /// Canvas pixels between the dots of the background grid.
 const GRID: f32 = 24.;
 
+/// A connection being drawn, from its port to where it ends.
+struct PendingWire {
+    curve: [Point<f32>; 4],
+    end: Point<f32>,
+    kind: WireEnd,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WireEnd {
+    /// Following the pointer over empty canvas.
+    Pointer,
+    /// Over a port, or a block, that it would join.
+    Port,
+    /// At the block picker it opened, which adds the block it joins.
+    Picker,
+}
+
 impl FlowEditor {
     /// The canvas position under a point of the window.
     pub(super) fn canvas_position(&self, position: Point<Pixels>) -> Point<f32> {
@@ -178,13 +195,7 @@ impl FlowEditor {
 
         match drag {
             Drag::Connect { from, detached, .. } => {
-                let target = self.port_at(pointer, !from.output).or_else(|| {
-                    // Dropped on a block: join its first free port.
-                    self.block_at(pointer)
-                        .and_then(|block| self.free_port(&block, !from.output))
-                });
-
-                match (target, detached) {
+                match (self.drop_port(&from, pointer), detached) {
                     (Some(to), Some(connection)) => {
                         if let Some(moved) = connection_between(from, to)
                             && moved != connection
@@ -215,6 +226,61 @@ impl FlowEditor {
         }
 
         cx.notify();
+    }
+
+    /// The port a connection drawn from `from` joins when dropped at a
+    /// position: a port near it, or the first free port of the block there.
+    pub(super) fn drop_port(&self, from: &PortRef, position: Point<f32>) -> Option<PortRef> {
+        self.port_at(position, !from.output).or_else(|| {
+            self.block_at(position)
+                .and_then(|block| self.free_port(&block, !from.output))
+        })
+    }
+
+    /// Where a port is on the canvas.
+    fn port_position(&self, port: &PortRef) -> Option<Point<f32>> {
+        let layout = self.layouts.get(&port.block)?;
+        let ports = if port.output {
+            &layout.outputs
+        } else {
+            &layout.inputs
+        };
+        let index = ports.iter().position(|name| *name == port.port)?;
+
+        Some(if port.output {
+            layout.output_position(index)
+        } else {
+            layout.input_position(index)
+        })
+    }
+
+    /// The connection being drawn, from its port to where it ends: the
+    /// pointer, the port it would join, or the block picker it opened.
+    fn pending_wire(&self) -> Option<PendingWire> {
+        let (from, end, kind) = match (&self.drag, &self.picker) {
+            (Some(Drag::Connect { from, pointer, .. }), _) => {
+                match self
+                    .drop_port(from, *pointer)
+                    .and_then(|port| self.port_position(&port))
+                {
+                    Some(port) => (from, port, WireEnd::Port),
+                    None => (from, *pointer, WireEnd::Pointer),
+                }
+            }
+            (None, Some(picker)) => {
+                let from = picker.from.as_ref()?;
+                (from, self.picker_anchor(picker)?, WireEnd::Picker)
+            }
+            _ => return None,
+        };
+        let start = self.port_position(from)?;
+        let curve = if from.output {
+            geometry::wire(start, end)
+        } else {
+            geometry::wire(end, start)
+        };
+
+        Some(PendingWire { curve, end, kind })
     }
 
     /// The first port of a block on the given side that has no connection,
@@ -295,30 +361,7 @@ impl FlowEditor {
 
         let wires = self.wire_paths(cx);
         let theme = cx.theme();
-        let pending = match &self.drag {
-            Some(Drag::Connect { from, pointer, .. }) => {
-                let layout = self.layouts.get(&from.block);
-                layout.and_then(|layout| {
-                    let ports = if from.output {
-                        &layout.outputs
-                    } else {
-                        &layout.inputs
-                    };
-                    let index = ports.iter().position(|port| *port == from.port)?;
-                    let start = if from.output {
-                        layout.output_position(index)
-                    } else {
-                        layout.input_position(index)
-                    };
-                    Some(if from.output {
-                        geometry::wire(start, *pointer)
-                    } else {
-                        geometry::wire(*pointer, start)
-                    })
-                })
-            }
-            _ => None,
-        };
+        let pending = self.pending_wire();
         let marquee = match &self.drag {
             Some(Drag::Select { start, end, .. }) => Some(geometry::rectangle(*start, *end)),
             _ => None,
@@ -475,17 +518,33 @@ impl FlowEditor {
                                 rem,
                                 *color,
                                 *width,
+                                false,
                                 window,
                             );
                         }
-                        if let Some(curve) = &pending {
+                        if let Some(pending) = &pending {
+                            // Like Postman, a connection that is not joined
+                            // to anything yet is dashed and ends in a ring
+                            // at the pointer.
                             paint_curve(
                                 bounds.origin,
-                                curve,
+                                &pending.curve,
                                 viewport,
                                 rem,
                                 pending_color,
                                 2.,
+                                pending.kind == WireEnd::Pointer,
+                                window,
+                            );
+                            paint_wire_end(
+                                bounds.origin + viewport.to_view(pending.end, rem),
+                                scale,
+                                pending_color,
+                                if pending.kind == WireEnd::Pointer {
+                                    transparent_black()
+                                } else {
+                                    pending_color
+                                },
                                 window,
                             );
                         }
@@ -824,6 +883,7 @@ fn paint_grid(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_curve(
     origin: Point<Pixels>,
     curve: &[Point<f32>; 4],
@@ -831,14 +891,33 @@ fn paint_curve(
     rem: Pixels,
     color: Hsla,
     width: f32,
+    dashed: bool,
     window: &mut Window,
 ) {
     let [start, first, second, end] = curve.map(|point| origin + viewport.to_view(point, rem));
     let mut path = PathBuilder::stroke(px(width));
+    if dashed {
+        path = path.dash_array(&[px(6.), px(4.)]);
+    }
     path.move_to(start);
     path.cubic_bezier_to(end, first, second);
 
     if let Ok(path) = path.build() {
         window.paint_path(path, color);
     }
+}
+
+/// The end of a connection being drawn, the size of a port's dot: a ring at
+/// the pointer, or a dot where it joins a port or the block picker.
+fn paint_wire_end(center: Point<Pixels>, scale: f32, color: Hsla, fill: Hsla, window: &mut Window) {
+    let diameter = px((geometry::PORT * scale).max(6.));
+
+    window.paint_quad(quad(
+        Bounds::centered_at(center, size(diameter, diameter)),
+        diameter / 2.,
+        fill,
+        px(2.),
+        color,
+        BorderStyle::Solid,
+    ));
 }

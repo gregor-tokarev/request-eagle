@@ -87,6 +87,10 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     }
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
+    let flows = flow::FlowLibrary::load(home.join(".request-eagle/flows"));
+    for skipped in flows.skipped() {
+        eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
+    }
     let cookies_path = home.join(".request-eagle/cookies.json");
     let cookies = request::CookieJar::open(&cookies_path).map_err(|error| {
         // The unreadable file stays as it is.
@@ -109,6 +113,7 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
         let workspace = workspace::init(
             collections,
             environments,
+            flows,
             cookies,
             history,
             updater,

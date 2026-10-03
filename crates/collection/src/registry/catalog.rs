@@ -6,7 +6,7 @@ use std::{
 
 use environment::Environment;
 
-use crate::{Collection, Entry, FileEntry, FlowEntry};
+use crate::{Collection, Entry, FileEntry};
 
 pub(super) const ENVIRONMENT_FILE_NAME: &str = "environment.toml";
 
@@ -117,13 +117,6 @@ impl CollectionRegistry {
     pub fn file(&self, path: &Path) -> Option<&FileEntry> {
         match self.entry(path)? {
             Entry::File(file) => Some(file),
-            _ => None,
-        }
-    }
-
-    pub fn flow(&self, path: &Path) -> Option<&FlowEntry> {
-        match self.entry(path)? {
-            Entry::Flow(flow) => Some(flow),
             _ => None,
         }
     }

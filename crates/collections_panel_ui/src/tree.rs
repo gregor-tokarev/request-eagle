@@ -14,7 +14,9 @@ pub(super) enum ItemKind {
     Collection,
     Folder,
     Request(&'static str),
-    Flow,
+    /// Stands in for the contents of an empty collection or folder. It has
+    /// its branch's path, so looking up the path finds the branch.
+    Empty,
 }
 
 #[derive(Clone)]
@@ -199,19 +201,6 @@ fn add_entries(
                 add_entries(items, &folder.entries, index, search_texts);
                 items[parent].request_count += items[index].request_count;
             }
-            Entry::Flow(flow) => {
-                search_texts.push(format!("flow {}", flow.name));
-                items.push(TreeItem {
-                    label: flow.name.clone().into(),
-                    path: flow.path.clone(),
-                    kind: ItemKind::Flow,
-                    depth,
-                    parent: Some(parent),
-                    end: index + 1,
-                    request_count: 1,
-                });
-                items[parent].request_count += 1;
-            }
             Entry::File(file) => {
                 let (method, search_text) = request_row(file);
                 search_texts.push(search_text);
@@ -228,6 +217,19 @@ fn add_entries(
                 items[parent].request_count += 1;
             }
         }
+    }
+
+    if items.len() == parent + 1 {
+        search_texts.push(String::new());
+        items.push(TreeItem {
+            label: SharedString::default(),
+            path: items[parent].path.clone(),
+            kind: ItemKind::Empty,
+            depth: items[parent].depth + 1,
+            parent: Some(parent),
+            end: parent + 2,
+            request_count: 0,
+        });
     }
 
     items[parent].end = items.len();
