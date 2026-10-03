@@ -92,11 +92,12 @@ outside them is drawn at the nearest weight or width the file has.
 
 ## Screenshots
 
-`src/assets/shots/` holds captures of the real app (v0.1.15) running a demo
-"Flight API" collection against a local mock server. They come from the Linux
-build, so the page draws the macOS window controls over the title bar in CSS
-(`.window__lights`). Replace them with macOS captures when available. Shortcuts
-in the copy use the macOS modifier (⌘).
+`src/assets/shots/` holds captures of the real app running a demo
+"Flight API" collection against a local mock server. The hero and the theme
+picker show v0.1.22; the feature crops show v0.1.15. They come from the Linux
+build with the macOS title bar layout, so the page draws the macOS window
+controls over the title bar in CSS (`.window__lights`). Replace them with macOS
+captures when available. Shortcuts in the copy use the macOS modifier (⌘).
 
 The build resizes each capture to several widths, as AVIF with a WebP
 fallback, and the page picks one by the `sizes` set in `index.astro`. Keep
