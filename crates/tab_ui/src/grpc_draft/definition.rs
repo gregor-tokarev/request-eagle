@@ -11,17 +11,46 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Field, GrpcDefinition, GrpcError, ServiceDefinition};
 
 use super::draft::GrpcDraft;
+use super::invocation::Call;
 use super::methods::method_list;
 
 /// Typing a server URL loads its methods once typing pauses.
 const REFLECTION_DELAY: Duration = Duration::from_millis(700);
 
+/// The service definition, and the request settings it was loaded or is
+/// loading from. Replacing a load drops its task, which stops it.
 pub(crate) enum DefinitionState {
-    /// Nothing is loaded for the current settings yet.
+    /// Nothing is loaded or loading for the current settings.
     Idle,
-    Loading,
-    Loaded(ServiceDefinition),
-    Failed(GrpcError),
+    /// Waiting for typing to pause before reflection loads.
+    Debouncing { _task: Task<()> },
+    Loading {
+        source: DefinitionSource,
+        /// What the URL and metadata resolved to for reflection.
+        target: Option<Vec<String>>,
+        _task: Task<()>,
+    },
+    Loaded {
+        definition: ServiceDefinition,
+        source: DefinitionSource,
+        target: Option<Vec<String>>,
+    },
+    Failed {
+        error: GrpcError,
+        source: DefinitionSource,
+    },
+}
+
+impl DefinitionState {
+    /// The settings the definition was loaded or is loading from.
+    fn source(&self) -> Option<&DefinitionSource> {
+        match self {
+            Self::Loading { source, .. }
+            | Self::Loaded { source, .. }
+            | Self::Failed { source, .. } => Some(source),
+            Self::Idle | Self::Debouncing { .. } => None,
+        }
+    }
 }
 
 /// The request settings a definition was loaded from. Changing them makes
@@ -65,37 +94,41 @@ impl GrpcDraft {
 
     /// Whether the loaded definition matches the current settings.
     pub(super) fn definition_is_current(&self) -> bool {
-        matches!(self.definition, DefinitionState::Loaded(_))
-            && self.definition_source.is_some()
-            && self.definition_source == self.current_source()
+        matches!(
+            &self.definition,
+            DefinitionState::Loaded { source, .. } if self.current_source().as_ref() == Some(source)
+        )
     }
 
     /// Reload server reflection after the URL, TLS, metadata or certificate
     /// settings change.
     pub(super) fn schedule_reflection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.request.definition.is_reflection()
-            || (self.definition_source.is_some() && self.definition_source == self.current_source())
+            || self
+                .definition
+                .source()
+                .is_some_and(|source| self.current_source().as_ref() == Some(source))
         {
             return;
         }
-
-        self.definition = DefinitionState::Idle;
-        self.definition_source = None;
 
         if self.current_source().is_none() {
             self.drop_pending_invoke(cx);
         }
 
-        self.definition_task = self.current_source().map(|_| {
-            cx.spawn_in(window, async move |this, cx| {
-                cx.background_executor().timer(REFLECTION_DELAY).await;
-                let _ = this.update_in(cx, |this, window, cx| {
-                    this.definition_task = None;
-                    this.load_definition(false, window, cx);
-                    this.redraw(cx);
-                });
-            })
-        });
+        self.definition = match self.current_source() {
+            Some(_) => DefinitionState::Debouncing {
+                _task: cx.spawn_in(window, async move |this, cx| {
+                    cx.background_executor().timer(REFLECTION_DELAY).await;
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.definition = DefinitionState::Idle;
+                        this.load_definition(false, window, cx);
+                        this.redraw(cx);
+                    });
+                }),
+            },
+            None => DefinitionState::Idle,
+        };
         self.refresh_methods(window, cx);
         self.redraw(cx);
     }
@@ -111,20 +144,15 @@ impl GrpcDraft {
         let Some(source) = self.current_source() else {
             self.drop_pending_invoke(cx);
 
-            if !matches!(self.definition, DefinitionState::Idle) || self.definition_task.is_some() {
+            if !matches!(self.definition, DefinitionState::Idle) {
                 self.definition = DefinitionState::Idle;
-                self.definition_source = None;
-                self.definition_task = None;
                 self.refresh_methods(window, cx);
                 self.redraw(cx);
             }
             return;
         };
 
-        if !force
-            && self.definition_source.as_ref() == Some(&source)
-            && !matches!(self.definition, DefinitionState::Idle)
-        {
+        if !force && self.definition.source() == Some(&source) {
             return;
         }
 
@@ -132,25 +160,30 @@ impl GrpcDraft {
         let variables = self.variables.read(cx).request_variables(cx);
         let collection = self.collection_path();
         let load = client.load_definition(&self.request, &variables, collection.as_deref());
-        self.reflected_target = reflected_target(&self.request, &variables);
-        let task = cx.background_executor().spawn(load);
+        let target = reflected_target(&self.request, &variables);
+        let load = cx.background_executor().spawn(load);
+        let loading = (source.clone(), target.clone());
 
-        self.definition = DefinitionState::Loading;
-        self.definition_source = Some(source);
-        self.definition_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = task.await;
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let result = load.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.definition_task = None;
+                let (source, target) = loading;
                 this.definition = match result {
-                    Ok(definition) => DefinitionState::Loaded(definition),
-                    Err(error) => DefinitionState::Failed(error),
+                    Ok(definition) => DefinitionState::Loaded {
+                        definition,
+                        source,
+                        target,
+                    },
+                    Err(error) => DefinitionState::Failed { error, source },
                 };
                 this.refresh_methods(window, cx);
 
-                if std::mem::take(&mut this.invoke_when_loaded) {
+                if matches!(this.call, Call::AwaitingDefinition) {
+                    this.call = Call::Idle;
+
                     match &this.definition {
-                        DefinitionState::Loaded(_) => this.invoke(window, cx),
-                        DefinitionState::Failed(error) => {
+                        DefinitionState::Loaded { .. } => this.invoke(window, cx),
+                        DefinitionState::Failed { error, .. } => {
                             let message = format!("Could not load the service definition: {error}");
                             this.response
                                 .update(cx, |response, cx| response.fail(message.into(), cx));
@@ -161,7 +194,13 @@ impl GrpcDraft {
 
                 this.redraw(cx);
             });
-        }));
+        });
+
+        self.definition = DefinitionState::Loading {
+            source,
+            target,
+            _task: task,
+        };
         self.refresh_methods(window, cx);
         self.redraw(cx);
     }
@@ -177,15 +216,17 @@ impl GrpcDraft {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if source != self.current_source() {
+        let Some(source) = source.filter(|source| self.current_source().as_ref() == Some(source))
+        else {
             return;
-        }
+        };
 
-        self.definition = DefinitionState::Loaded(definition);
-        self.definition_source = source;
         // It replaces a load for the draft's settings that is still running.
-        self.definition_task = None;
-        self.reflected_target = target;
+        self.definition = DefinitionState::Loaded {
+            definition,
+            source,
+            target,
+        };
         self.refresh_methods(window, cx);
         self.redraw(cx);
     }
@@ -193,9 +234,9 @@ impl GrpcDraft {
     /// Forget an Invoke waiting for a definition that will no longer load,
     /// such as after the URL was cleared.
     fn drop_pending_invoke(&mut self, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.invoke_when_loaded) {
-            self.response
-                .update(cx, |response, cx| response.cancel(false, cx));
+        if matches!(self.call, Call::AwaitingDefinition) {
+            self.call = Call::Idle;
+            self.response.update(cx, |response, cx| response.cancel(cx));
         }
     }
 
@@ -205,7 +246,7 @@ impl GrpcDraft {
             return;
         };
         let services = match &self.definition {
-            DefinitionState::Loaded(definition) => definition.services(),
+            DefinitionState::Loaded { definition, .. } => definition.services(),
             _ => Vec::new(),
         };
         let selected = self.request.method.trim().to_owned();
@@ -219,7 +260,7 @@ impl GrpcDraft {
 
     /// Replace the message with an example of the method's input.
     pub(super) fn use_example_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let DefinitionState::Loaded(definition) = &self.definition else {
+        let DefinitionState::Loaded { definition, .. } = &self.definition else {
             return;
         };
         let Some(example) = definition.example_message(self.request.method.trim()) else {
@@ -312,8 +353,11 @@ impl GrpcDraft {
         self.import_paths.clear();
         self.definition_inputs(window, cx);
 
-        if current {
-            self.definition_source = self.current_source();
+        if current
+            && let Some(current_source) = self.current_source()
+            && let DefinitionState::Loaded { source, .. } = &mut self.definition
+        {
+            *source = current_source;
         }
 
         self.redraw(cx);
@@ -618,14 +662,13 @@ impl GrpcDraft {
                 GrpcDefinition::Reflection => String::new(),
             }
         };
-        let stale =
-            !self.definition_is_current() && matches!(self.definition, DefinitionState::Loaded(_));
+        let stale = !self.definition_is_current()
+            && matches!(self.definition, DefinitionState::Loaded { .. });
         // Reflection waits for typing to pause before it loads.
-        let loading = match self.definition {
-            DefinitionState::Loading => true,
-            DefinitionState::Idle => self.definition_task.is_some(),
-            _ => false,
-        };
+        let loading = matches!(
+            self.definition,
+            DefinitionState::Debouncing { .. } | DefinitionState::Loading { .. }
+        );
         let retry = Button::new("grpc-reload-definition")
             .debug_selector(|| "grpc-reload-definition".into())
             .ghost()
@@ -637,7 +680,7 @@ impl GrpcDraft {
 
         let (icon, title, detail): (AnyElement, SharedString, Option<SharedString>) =
             match &self.definition {
-                _ if loading => (
+                DefinitionState::Debouncing { .. } | DefinitionState::Loading { .. } => (
                     Spinner::new()
                         .color(cx.theme().muted_foreground)
                         .into_any_element(),
@@ -652,7 +695,7 @@ impl GrpcDraft {
                     "Using server reflection".into(),
                     Some("Enter the server URL to load its services.".into()),
                 ),
-                DefinitionState::Idle | DefinitionState::Loading => (
+                DefinitionState::Idle => (
                     Icon::new(IconName::Info)
                         .size_4()
                         .text_color(cx.theme().muted_foreground)
@@ -660,7 +703,7 @@ impl GrpcDraft {
                     format!("{source} is not imported yet").into(),
                     None,
                 ),
-                DefinitionState::Loaded(definition) => {
+                DefinitionState::Loaded { definition, .. } => {
                     let services = definition.services();
                     let methods: usize = services.iter().map(|service| service.methods.len()).sum();
 
@@ -691,7 +734,7 @@ impl GrpcDraft {
                     ),
                 )
                 }
-                DefinitionState::Failed(error) => (
+                DefinitionState::Failed { error, .. } => (
                     Icon::default()
                         .path("icons/circle-alert.svg")
                         .size_4()
@@ -705,10 +748,16 @@ impl GrpcDraft {
                     Some(error.to_string().into()),
                 ),
             };
-        let failed = matches!(self.definition, DefinitionState::Failed(_));
+        let failed = matches!(self.definition, DefinitionState::Failed { .. });
         let needed_tls = match &self.definition {
-            DefinitionState::Failed(GrpcError::TlsRequired) => Some(true),
-            DefinitionState::Failed(GrpcError::TlsUnsupported) => Some(false),
+            DefinitionState::Failed {
+                error: GrpcError::TlsRequired,
+                ..
+            } => Some(true),
+            DefinitionState::Failed {
+                error: GrpcError::TlsUnsupported,
+                ..
+            } => Some(false),
             _ => None,
         }
         .filter(|_| lock_decides_tls(&self.request.url));

@@ -16,7 +16,7 @@ use request::{
     WebSocketClose, WebSocketEvent, WebSocketEventKind, WebSocketHandshake, WebSocketMessage,
 };
 
-use super::draft::ConnectionState;
+use super::draft::{ConnectionState, WebSocketDraft};
 use crate::actions::SendRequest;
 use crate::response_view::{ResponseBodyEditor, VirtualBody, exceeds_editor_limit, hex_dump};
 
@@ -85,6 +85,8 @@ struct Detail {
 
 /// A connection's messages and events, newest first.
 pub(crate) struct MessageLog {
+    /// The draft whose connection the log shows.
+    draft: WeakEntity<WebSocketDraft>,
     /// Oldest first; the entry at `first` is the front.
     pub(super) entries: VecDeque<Entry>,
     /// Entries have stable ids, so removing old ones keeps the selection.
@@ -97,9 +99,7 @@ pub(crate) struct MessageLog {
     pub(super) filter: Filter,
     matcher: Option<AhoCorasick>,
     pub(super) search: Option<Entity<InputState>>,
-    pub(super) selected: Option<u64>,
     detail: Option<Detail>,
-    pub(super) state: ConnectionState,
     /// The resolved URL of the current or last connection.
     url: SharedString,
     pub(super) scroll: UniformListScrollHandle,
@@ -112,8 +112,9 @@ pub(crate) struct MessageLog {
 }
 
 impl MessageLog {
-    pub(super) fn new(cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(draft: WeakEntity<WebSocketDraft>, cx: &mut Context<Self>) -> Self {
         Self {
+            draft,
             entries: VecDeque::new(),
             first: 0,
             bytes: 0,
@@ -122,9 +123,7 @@ impl MessageLog {
             filter: Filter::All,
             matcher: None,
             search: None,
-            selected: None,
             detail: None,
-            state: ConnectionState::Disconnected,
             url: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
             row_height: ROW_HEIGHT.to_pixels(cx.theme().font_size),
@@ -153,9 +152,18 @@ impl MessageLog {
         self.search = Some(search);
     }
 
-    pub(super) fn set_state(&mut self, state: ConnectionState, cx: &mut Context<Self>) {
-        self.state = state;
-        cx.notify();
+    /// What the draft's connection is doing.
+    fn connection(&self, cx: &App) -> ConnectionState {
+        self.draft
+            .upgrade()
+            .map_or(ConnectionState::Disconnected, |draft| {
+                draft.read(cx).connection.state()
+            })
+    }
+
+    /// The entry shown below the list.
+    fn selected(&self) -> Option<u64> {
+        self.detail.as_ref().map(|detail| detail.id)
     }
 
     /// Append events in the order they happened.
@@ -183,8 +191,7 @@ impl MessageLog {
             if self.visible.front() == Some(&self.first) {
                 self.visible.pop_front();
             }
-            if self.selected == Some(self.first) {
-                self.selected = None;
+            if self.selected() == Some(self.first) {
                 self.detail = None;
             }
 
@@ -202,7 +209,6 @@ impl MessageLog {
         self.visible.clear();
         self.bytes = 0;
         self.dropped = 0;
-        self.selected = None;
         self.detail = None;
         cx.notify();
     }
@@ -277,8 +283,7 @@ impl MessageLog {
 
     /// Show an entry below the list, or hide it when it is already shown.
     pub(super) fn select(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected == Some(id) {
-            self.selected = None;
+        if self.selected() == Some(id) {
             self.detail = None;
             cx.notify();
             return;
@@ -308,14 +313,13 @@ impl MessageLog {
                 .into(),
         };
 
-        self.selected = Some(id);
         self.detail = Some(Detail { id, view });
         cx.notify();
     }
 
     /// The selected message's row, when the filter shows it.
     fn selected_row(&self) -> Option<usize> {
-        self.selected
+        self.selected()
             .and_then(|id| self.visible.iter().rposition(|&visible| visible == id))
             .map(|index| self.visible.len() - 1 - index)
     }
@@ -350,8 +354,7 @@ impl MessageLog {
             ("down" | "up", Some(row)) if !from_selection => Some(row),
             ("down", Some(row)) => (row + 1 < self.visible.len()).then_some(row + 1),
             ("up", Some(row)) => row.checked_sub(1),
-            ("escape", _) if self.selected.is_some() => {
-                self.selected = None;
+            ("escape", _) if self.detail.is_some() => {
                 self.detail = None;
                 cx.notify();
                 cx.stop_propagation();
@@ -428,7 +431,7 @@ impl MessageLog {
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let (label, color) = match self.state {
+        let (label, color) = match self.connection(cx) {
             ConnectionState::Disconnected => ("Disconnected", cx.theme().muted_foreground),
             ConnectionState::Connecting => ("Connecting…", cx.theme().info),
             ConnectionState::Connected => ("Connected", cx.theme().success),
@@ -517,7 +520,7 @@ impl MessageLog {
 
     fn row(&self, row: usize, keyboard_row: Option<usize>, cx: &mut Context<Self>) -> AnyElement {
         let (id, entry) = self.row_entry(row);
-        let selected = self.selected == Some(id);
+        let selected = self.selected() == Some(id);
         // Where the arrow keys start: the selection, or else the newest row.
         let keyboard = keyboard_row == Some(row);
         let (icon, color) = kind_icon(entry.kind, cx);
@@ -669,7 +672,6 @@ impl MessageLog {
                             .icon(IconName::Close)
                             .accessibility_label("Close message")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.selected = None;
                                 this.detail = None;
                                 cx.notify();
                             })),
@@ -690,9 +692,10 @@ impl MessageLog {
             )
     }
 
-    fn empty_state(&self, window: &Window) -> AnyElement {
+    fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
-        let header = if self.state == ConnectionState::Connecting {
+        let connection = self.connection(cx);
+        let header = if connection == ConnectionState::Connecting {
             EmptyHeader::new()
                 .media(media.child(Icon::new(IconName::Loader).with_animation(
                     "websocket-connecting",
@@ -708,7 +711,7 @@ impl MessageLog {
             EmptyHeader::new()
                 .media(media.child(Icon::default().path("icons/arrow-up-down.svg")))
                 .title(
-                    EmptyTitle::new().child(if self.state == ConnectionState::Connected {
+                    EmptyTitle::new().child(if connection == ConnectionState::Connected {
                         "Waiting for messages"
                     } else {
                         "Connect to send and receive messages"
@@ -716,7 +719,7 @@ impl MessageLog {
                 )
                 .when_some(
                     Kbd::binding_for_action(&SendRequest, Some("Workspace"), window)
-                        .filter(|_| self.state == ConnectionState::Disconnected),
+                        .filter(|_| connection == ConnectionState::Disconnected),
                     |header, kbd| {
                         header.description(
                             EmptyDescription::new().child(
@@ -744,7 +747,7 @@ impl MessageLog {
 impl Render for MessageLog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = if self.visible.is_empty() {
-            self.empty_state(window)
+            self.empty_state(window, cx)
         } else if let Some(detail) = &self.detail {
             v_resizable("websocket-message-split")
                 .with_state(&self.split)

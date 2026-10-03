@@ -10,6 +10,7 @@ use request::{Field, Method};
 use request_eagle_theme::{method_color, protocol_icon};
 
 use super::draft::{RequestDraft, RequestSection};
+use super::execution::{Exchange, Stream};
 use crate::actions::SendRequest;
 use crate::storage::Storage;
 use crate::variable_input::with_variables;
@@ -109,10 +110,27 @@ impl RequestDraft {
         let method = self.request.method;
         let draft = cx.entity().downgrade();
         let paste_target = draft.clone();
-        let sending = self.task.is_some();
-        let streaming = self.streaming;
-        // Stopping lasts while the response completes and its scripts run.
-        let stopping = streaming && self.stop.is_none();
+        let sending = matches!(self.exchange, Exchange::Sending { .. });
+        let (label, accessibility_label) = match &self.exchange {
+            Exchange::Idle => ("Send", "Send request"),
+            Exchange::Sending {
+                stream: Stream::Open(_),
+                ..
+            } => ("Stop", "Stop event stream"),
+            // Stopping lasts until the stream ends.
+            Exchange::Sending {
+                stream: Stream::Stopping,
+                ..
+            } => ("Stopping…", "Stop event stream"),
+            Exchange::Sending { .. } => ("Cancel", "Cancel request"),
+        };
+        let stopping = matches!(
+            self.exchange,
+            Exchange::Sending {
+                stream: Stream::Stopping,
+                ..
+            }
+        );
         let method_button = Button::new("request-method")
             .debug_selector(|| "request-method".into())
             .ghost()
@@ -224,34 +242,19 @@ impl RequestDraft {
                     .primary()
                     .min_w_20()
                     .flex_none()
-                    .label(if stopping {
-                        "Stopping…"
-                    } else if streaming {
-                        "Stop"
-                    } else if sending {
-                        "Cancel"
-                    } else {
-                        "Send"
-                    })
-                    .accessibility_label(if streaming {
-                        "Stop event stream"
-                    } else if sending {
-                        "Cancel request"
-                    } else {
-                        "Send request"
-                    })
+                    .label(label)
+                    .accessibility_label(accessibility_label)
                     .disabled(stopping)
                     .when(!sending, |button| {
                         button.tooltip_with_action("Send request", &SendRequest, Some("Workspace"))
                     })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.streaming {
-                            this.stop(cx);
-                        } else if this.task.is_some() {
-                            this.cancel(cx);
-                        } else {
-                            this.send(window, cx);
-                        }
+                    .on_click(cx.listener(|this, _, window, cx| match &this.exchange {
+                        Exchange::Idle => this.send(window, cx),
+                        Exchange::Sending {
+                            stream: Stream::Open(_) | Stream::Stopping,
+                            ..
+                        } => this.stop(cx),
+                        Exchange::Sending { .. } => this.cancel(cx),
                     })),
             )
     }

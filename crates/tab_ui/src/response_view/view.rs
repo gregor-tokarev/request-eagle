@@ -26,17 +26,27 @@ enum Section {
     Console,
 }
 
+/// What the view shows: the response, or why there is none.
+// Each view has one, so boxing the response would not save memory.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum ResponseState {
+    /// No response, with a title that says why: nothing was sent yet, the
+    /// request was cancelled, or a script skipped it.
+    Empty(SharedString),
+    Waiting,
+    Received {
+        content: ResponseContent,
+        body: Body,
+        /// The events of an event-stream response, while it is open and after it ends.
+        events: Option<Entity<EventLog>>,
+    },
+    Failed(SharedString),
+}
+
 pub struct ResponseView {
     pub(super) focus: FocusHandle,
-    pub(super) content: Option<ResponseContent>,
-    /// Present exactly when `content` is.
-    pub(super) body: Option<Body>,
+    pub(super) state: ResponseState,
     pub(super) mode: BodyMode,
-    /// The events of an event-stream response, while it is open and after it ends.
-    pub(super) events: Option<Entity<EventLog>>,
-    pub(super) message: SharedString,
-    loading: bool,
-    error: bool,
     pub(super) scripts: Vec<request::ScriptReport>,
     section: Section,
     pub(super) wrap: bool,
@@ -58,13 +68,8 @@ impl ResponseView {
     pub(crate) fn new(cx: &mut App) -> Self {
         Self {
             focus: cx.focus_handle(),
-            content: None,
-            body: None,
+            state: ResponseState::Empty("Send a request to see the response".into()),
             mode: BodyMode::Raw,
-            events: None,
-            message: "Send a request to see the response".into(),
-            loading: false,
-            error: false,
             scripts: Vec::new(),
             section: Section::Body,
             wrap: true,
@@ -87,15 +92,10 @@ impl ResponseView {
     }
 
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
-        self.content = None;
-        self.body = None;
+        self.state = ResponseState::Waiting;
         self.saved = None;
         self.responses += 1;
-        self.events = None;
         self.scripts.clear();
-        self.loading = true;
-        self.error = false;
-        self.message = "Sending request…".into();
         cx.notify();
     }
 
@@ -121,25 +121,26 @@ impl ResponseView {
             scripts: Vec::new(),
             sent: None,
         });
+        let events = cx.new(|cx| EventLog::new(window, cx));
 
-        self.headers_list.reset(content.headers.len());
-        self.cookies_list.reset(content.cookies.len());
-        let mode = content.default_mode();
-        self.content = Some(content);
-        self.show(mode, window, cx);
-        self.events = Some(cx.new(|cx| EventLog::new(window, cx)));
-        self.loading = false;
+        self.show_content(content, Some(events), window, cx);
         cx.notify();
     }
 
     pub(crate) fn receive_events(&mut self, events: Vec<ServerSentEvent>, cx: &mut Context<Self>) {
-        if let Some(log) = &self.events {
+        if let ResponseState::Received {
+            events: Some(log), ..
+        } = &self.state
+        {
             log.update(cx, |log, cx| log.push(events, cx));
         }
     }
 
     pub(crate) fn stop_stream(&mut self, cx: &mut Context<Self>) {
-        if let Some(log) = &self.events {
+        if let ResponseState::Received {
+            events: Some(log), ..
+        } = &self.state
+        {
             log.update(cx, |log, cx| log.stop(cx));
         }
 
@@ -147,12 +148,16 @@ impl ResponseView {
     }
 
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
-        self.loading = false;
-        self.message = "Request cancelled".into();
+        let message: SharedString = "Request cancelled".into();
 
-        if let Some(log) = self.events.as_ref().filter(|log| log.read(cx).is_open()) {
-            let message = self.message.clone();
-            log.update(cx, |log, cx| log.finish(Some(message), cx));
+        match &self.state {
+            // An open stream keeps its head and events, ending with the cancellation.
+            ResponseState::Received { events, .. } => {
+                if let Some(log) = events.as_ref().filter(|log| log.read(cx).is_open()) {
+                    log.update(cx, |log, cx| log.finish(Some(message), cx));
+                }
+            }
+            _ => self.state = ResponseState::Empty(message),
         }
 
         cx.notify();
@@ -160,13 +165,8 @@ impl ResponseView {
 
     /// Show why a request from history failed after it was sent.
     pub(crate) fn fail(&mut self, message: SharedString, cx: &mut Context<Self>) {
-        self.content = None;
-        self.body = None;
-        self.events = None;
+        self.state = ResponseState::Failed(message);
         self.scripts.clear();
-        self.loading = false;
-        self.error = true;
-        self.message = message;
         cx.notify();
     }
 
@@ -176,7 +176,6 @@ impl ResponseView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.loading = false;
         self.scripts.clear();
 
         match result {
@@ -187,28 +186,29 @@ impl ResponseView {
                 }) {
                     self.section = Section::Tests;
                 }
-                self.headers_list.reset(content.headers.len());
-                self.cookies_list.reset(content.cookies.len());
-                let mode = content.default_mode();
-                self.content = Some(content);
-                self.show(mode, window, cx);
-                self.saved = None;
-                self.responses += 1;
-                self.error = false;
 
-                if let Some(log) = &self.events {
+                // An event stream keeps showing its events.
+                let events = match &self.state {
+                    ResponseState::Received { events, .. } => events.clone(),
+                    _ => None,
+                };
+                if let Some(log) = &events {
                     log.update(cx, |log, cx| log.finish(None, cx));
                 }
+
+                self.show_content(content, events, window, cx);
+                self.saved = None;
+                self.responses += 1;
             }
             Err(error) => {
-                self.message = error.to_string().into();
+                let message: SharedString = error.to_string().into();
 
                 // Earlier scripts' reports wrap a failure or skip in a later script.
                 let (source, reports) = match error {
                     ExecutionError::ScriptedRequest { source, reports } => (*source, Some(reports)),
                     error => (error, None),
                 };
-                self.error = !matches!(source, ExecutionError::Skipped { .. });
+                let skipped = matches!(source, ExecutionError::Skipped { .. });
                 match source {
                     ExecutionError::Skipped { report, .. } => {
                         self.scripts = vec![*report];
@@ -224,14 +224,13 @@ impl ResponseView {
                     self.scripts = reports;
                 }
 
-                if let Some(log) = &self.events {
+                match &self.state {
                     // A broken stream keeps its head and events, ending with the error.
-                    let message = self.message.clone();
-                    log.update(cx, |log, cx| log.finish(Some(message), cx));
-                    self.error = false;
-                } else {
-                    self.content = None;
-                    self.body = None;
+                    ResponseState::Received {
+                        events: Some(log), ..
+                    } => log.update(cx, |log, cx| log.finish(Some(message), cx)),
+                    _ if skipped => self.state = ResponseState::Empty(message),
+                    _ => self.state = ResponseState::Failed(message),
                 }
             }
         }
@@ -239,15 +238,33 @@ impl ResponseView {
         cx.notify();
     }
 
+    /// Show `content`, with the events that arrived when it is an event stream.
+    fn show_content(
+        &mut self,
+        content: ResponseContent,
+        events: Option<Entity<EventLog>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.headers_list.reset(content.headers.len());
+        self.cookies_list.reset(content.cookies.len());
+        self.mode = content.default_mode();
+
+        let body = Body::new(&content, self.mode, self.wrap, window, cx);
+        self.state = ResponseState::Received {
+            content,
+            body,
+            events,
+        };
+    }
+
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let headers = self
-            .content
-            .as_ref()
-            .map_or(0, |content| content.headers.len());
-        let cookies = self
-            .content
-            .as_ref()
-            .map_or(0, |content| content.cookies.len());
+        let (headers, cookies) = match &self.state {
+            ResponseState::Received { content, .. } => {
+                (content.headers.len(), content.cookies.len())
+            }
+            _ => (0, 0),
+        };
 
         // In a narrow pane the tabs wrap rather than clip, and the metadata
         // goes to its own line, starting where the tabs do.
@@ -270,7 +287,13 @@ impl ResponseView {
                         [
                             (
                                 Section::Body,
-                                if self.events.is_some() {
+                                if matches!(
+                                    self.state,
+                                    ResponseState::Received {
+                                        events: Some(_),
+                                        ..
+                                    }
+                                ) {
                                     "Events"
                                 } else {
                                     "Body"
@@ -323,37 +346,46 @@ impl ResponseView {
                         }),
                     ),
             )
-            .when(self.content.is_some(), |row| {
-                match self.events.as_ref().map(|events| events.read(cx)) {
-                    Some(events) if events.is_open() => row.child(self.stream_status(true, cx)),
+            .map(|row| {
+                let ResponseState::Received {
+                    content, events, ..
+                } = &self.state
+                else {
+                    return row;
+                };
+
+                match events.as_ref().map(|events| events.read(cx)) {
+                    Some(events) if events.is_open() => {
+                        row.child(self.stream_status(content, true, cx))
+                    }
                     // A broken stream has its head, but no complete measurements.
-                    Some(events) if events.failed() => row.child(self.stream_status(false, cx)),
-                    _ => row.child(self.metadata(cx)),
+                    Some(events) if events.failed() => {
+                        row.child(self.stream_status(content, false, cx))
+                    }
+                    _ => row.child(self.metadata(content, cx)),
                 }
             })
     }
 
     fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
-        let header = if self.loading {
-            EmptyHeader::new()
+        let header = match &self.state {
+            ResponseState::Waiting => EmptyHeader::new()
                 .media(media.child(Icon::new(IconName::Loader).with_animation(
                     "response-loading",
                     Animation::new(std::time::Duration::from_secs(1)).repeat(),
                     |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                 )))
-                .title(EmptyTitle::new().child(self.message.clone()))
-        } else if self.error {
-            EmptyHeader::new()
+                .title(EmptyTitle::new().child("Sending request…")),
+            ResponseState::Failed(message) => EmptyHeader::new()
                 .media(
                     media.child(Icon::new(IconName::TriangleAlert).text_color(cx.theme().danger)),
                 )
                 .title(EmptyTitle::new().child("Request failed"))
-                .description(EmptyDescription::new().child(self.message.clone()))
-        } else {
-            EmptyHeader::new()
+                .description(EmptyDescription::new().child(message.clone())),
+            ResponseState::Empty(title) => EmptyHeader::new()
                 .media(media.child(Icon::default().path("icons/send-horizontal.svg")))
-                .title(EmptyTitle::new().child(self.message.clone()))
+                .title(EmptyTitle::new().child(title.clone()))
                 .when_some(
                     Kbd::binding_for_action(&SendRequest, Some("Workspace"), window),
                     |header, kbd| {
@@ -368,7 +400,9 @@ impl ResponseView {
                             ),
                         )
                     },
-                )
+                ),
+            // Its sections show a response, so it has no empty state.
+            ResponseState::Received { .. } => EmptyHeader::new(),
         };
 
         div()
@@ -385,30 +419,47 @@ impl Render for ResponseView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Starting a request clears the response and scripts, so a loading
         // view always falls through to the empty state.
-        let has_results = self.content.is_some() || !self.scripts.is_empty();
-        let has_response = self.content.is_some();
+        let has_results =
+            matches!(self.state, ResponseState::Received { .. }) || !self.scripts.is_empty();
+        let failure = match &self.state {
+            ResponseState::Failed(message)
+                if !self.scripts.is_empty()
+                    && self.scripts.iter().all(|report| report.error.is_none()) =>
+            {
+                Some(message.clone())
+            }
+            _ => None,
+        };
 
-        let content = match self.section {
-            Section::Tests if has_results => {
+        let content = match (self.section, &self.state) {
+            (Section::Tests, _) if has_results => {
                 script_results(&self.scripts, false, "send the request", cx)
             }
-            Section::Console if has_results => {
+            (Section::Console, _) if has_results => {
                 script_results(&self.scripts, true, "send the request", cx)
             }
-            Section::Body if has_response => match &self.events {
-                Some(events) => events.clone().into_any_element(),
-                None => match self
-                    .content
-                    .as_ref()
-                    .and_then(|content| content.omitted_body)
-                {
-                    Some(size) => omitted_body(size),
-                    None => self.body(cx),
+            (
+                Section::Body,
+                ResponseState::Received {
+                    events: Some(events),
+                    ..
                 },
-            },
-            Section::Headers if has_response => self.headers(false, cx),
-            Section::Cookies if has_response => self.headers(true, cx),
-            Section::Request if has_response => self.sent_request(cx),
+            ) => events.clone().into_any_element(),
+            (Section::Body, ResponseState::Received { content, body, .. }) => {
+                match content.omitted_body {
+                    Some(size) => omitted_body(size),
+                    None => self.body(content, body, cx),
+                }
+            }
+            (Section::Headers, ResponseState::Received { content, .. }) => {
+                self.headers(content, false, cx)
+            }
+            (Section::Cookies, ResponseState::Received { content, .. }) => {
+                self.headers(content, true, cx)
+            }
+            (Section::Request, ResponseState::Received { content, .. }) => {
+                self.sent_request(content, cx)
+            }
             _ => self.empty_state(window, cx),
         };
 
@@ -437,19 +488,9 @@ impl Render for ResponseView {
             .border_t_1()
             .border_color(cx.theme().border)
             .when(has_results, |view| view.child(self.toolbar(cx)))
-            .when(
-                self.error
-                    && !self.scripts.is_empty()
-                    && self.scripts.iter().all(|report| report.error.is_none()),
-                |view| {
-                    view.child(
-                        div()
-                            .px_2()
-                            .text_color(cx.theme().danger)
-                            .child(self.message.clone()),
-                    )
-                },
-            )
+            .when_some(failure, |view, message| {
+                view.child(div().px_2().text_color(cx.theme().danger).child(message))
+            })
             .child(content)
             // Root owns the active scope. While a hover card is open, exclude
             // the response behind it from that scope; the card opts back in.

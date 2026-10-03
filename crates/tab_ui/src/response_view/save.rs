@@ -3,12 +3,12 @@ use std::path::Path;
 use gpui_kit::*;
 
 use super::content::{Preview, ResponseContent};
-use super::view::ResponseView;
+use super::view::{ResponseState, ResponseView};
 
 impl ResponseView {
     /// Ask where to save the body's bytes, as received after decompression.
     pub(super) fn save_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(content) = &self.content else {
+        let ResponseState::Received { content, .. } = &self.state else {
             return;
         };
 

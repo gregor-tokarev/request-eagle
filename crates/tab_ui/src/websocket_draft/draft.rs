@@ -34,12 +34,46 @@ const EVENT_BATCH: usize = 512;
 /// while a stream keeps the queue full.
 const BATCH_PAUSE: Duration = Duration::from_millis(1);
 
+/// The draft's connection, and what it is doing. Replacing it drops the
+/// connection, which closes it, and the task that shows its events.
+// Each draft has one, so boxing the connection would not save memory.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum Connection {
+    Disconnected,
+    Connecting {
+        socket: WebSocketConnection,
+        /// The request as it was when it started connecting. History keeps
+        /// it once it connects.
+        sent: RequestSent,
+        task: Task<()>,
+    },
+    Connected {
+        socket: WebSocketConnection,
+        task: Task<()>,
+    },
+    /// Closing was requested; waiting for the server to acknowledge.
+    Closing {
+        _task: Task<()>,
+    },
+}
+
+impl Connection {
+    pub(super) fn state(&self) -> ConnectionState {
+        match self {
+            Connection::Disconnected => ConnectionState::Disconnected,
+            Connection::Connecting { .. } => ConnectionState::Connecting,
+            Connection::Connected { .. } => ConnectionState::Connected,
+            Connection::Closing { .. } => ConnectionState::Closing,
+        }
+    }
+}
+
+/// What the connection is doing, as the URL bar and message log show it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConnectionState {
     Disconnected,
     Connecting,
     Connected,
-    /// Closing was requested; waiting for the server to acknowledge.
     Closing,
 }
 
@@ -58,7 +92,7 @@ pub struct WebSocketDraft {
     pub request: WebSocketRequest,
     saved_request: WebSocketRequest,
     pub(crate) section: WebSocketSection,
-    pub(crate) state: ConnectionState,
+    pub(super) connection: Connection,
     pub(crate) url: Option<Entity<InputState>>,
     url_completion: Option<Entity<VariableInput>>,
     params: Option<Entity<RequestFields>>,
@@ -78,11 +112,6 @@ pub struct WebSocketDraft {
     variable_sessions: EnvironmentSessions,
     pub(crate) log: Entity<MessageLog>,
     split: Entity<ResizableState>,
-    connection: Option<WebSocketConnection>,
-    /// The request as it was when it started connecting. History keeps it
-    /// once it connects.
-    connecting: Option<RequestSent>,
-    events: Option<Task<()>>,
     address: Entity<WebSocketAddress>,
     configuration: Entity<WebSocketConfiguration>,
     pub(super) _subscriptions: Vec<Subscription>,
@@ -119,7 +148,7 @@ impl WebSocketDraft {
 
         // Editors install window listeners, so they wait until the tab is shown.
         let owner = cx.weak_entity();
-        let log = cx.new(MessageLog::new);
+        let log = cx.new(|cx| MessageLog::new(owner.clone(), cx));
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| WebSocketAddress(owner.clone()));
         let configuration = cx.new(|_| WebSocketConfiguration(owner));
@@ -136,7 +165,7 @@ impl WebSocketDraft {
             saved_request: request.clone(),
             request,
             section: WebSocketSection::Message,
-            state: ConnectionState::Disconnected,
+            connection: Connection::Disconnected,
             url: None,
             url_completion: None,
             params: None,
@@ -151,9 +180,6 @@ impl WebSocketDraft {
             variable_sessions: sessions,
             log,
             split,
-            connection: None,
-            connecting: None,
-            events: None,
             address,
             configuration,
             _subscriptions: subscriptions,
@@ -277,15 +303,15 @@ impl WebSocketDraft {
 
     /// Connect, or send the composed message once connected.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.state {
-            ConnectionState::Disconnected => self.connect(window, cx),
-            ConnectionState::Connected => self.send_message(cx),
-            ConnectionState::Connecting | ConnectionState::Closing => {}
+        match self.connection {
+            Connection::Disconnected => self.connect(window, cx),
+            Connection::Connected { .. } => self.send_message(cx),
+            Connection::Connecting { .. } | Connection::Closing { .. } => {}
         }
     }
 
     pub fn connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state != ConnectionState::Disconnected {
+        if !matches!(self.connection, Connection::Disconnected) {
             return;
         }
 
@@ -301,17 +327,14 @@ impl WebSocketDraft {
             auth: variables.effective_auth(&self.request.auth),
             ..self.request.clone()
         };
-        let (connection, mut events) =
+        let (socket, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
-        self.connecting = Some(RequestSent {
+        let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
-        });
+        };
 
-        self.connection = Some(connection);
-        self.set_state(ConnectionState::Connecting, cx);
-
-        self.events = Some(cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
                 let mut batch = vec![event];
                 while batch.len() < EVENT_BATCH
@@ -326,56 +349,49 @@ impl WebSocketDraft {
 
                 cx.background_executor().timer(BATCH_PAUSE).await;
             }
-        }));
+        });
+
+        self.connection = Connection::Connecting { socket, sent, task };
+        self.notify_controls(cx);
     }
 
     /// Close the connection, or stop connecting.
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
-        match self.state {
-            ConnectionState::Connecting => {
-                self.connection = None;
-                self.connecting = None;
-                self.events = None;
-                self.set_state(ConnectionState::Disconnected, cx);
-            }
-            ConnectionState::Connected => {
-                if let Some(connection) = &mut self.connection {
-                    connection.close();
-                }
-                self.set_state(ConnectionState::Closing, cx);
-            }
-            ConnectionState::Disconnected | ConnectionState::Closing => {}
-        }
+        self.connection = match std::mem::replace(&mut self.connection, Connection::Disconnected) {
+            Connection::Connecting { .. } => Connection::Disconnected,
+            // Dropping the connection starts a normal closure.
+            Connection::Connected { task, .. } => Connection::Closing { _task: task },
+            connection @ (Connection::Disconnected | Connection::Closing { .. }) => connection,
+        };
+        self.notify_controls(cx);
     }
 
     pub fn send_message(&mut self, cx: &mut Context<Self>) {
-        let Some(connection) = self
-            .connection
-            .as_ref()
-            .filter(|_| self.state == ConnectionState::Connected)
-        else {
+        let Connection::Connected { socket, .. } = &self.connection else {
             return;
         };
 
         let variables = self.variables.read(cx).request_variables(cx);
-        connection.send(self.request.message.clone(), variables);
+        socket.send(self.request.message.clone(), variables);
     }
 
     pub(super) fn receive(&mut self, events: Vec<WebSocketEvent>, cx: &mut Context<Self>) {
-        let mut state = self.state;
+        let state = self.connection.state();
 
         for event in &events {
             match event.kind {
-                WebSocketEventKind::Connected(_) if state == ConnectionState::Connecting => {
-                    state = ConnectionState::Connected;
-
-                    if let Some(sent) = self.connecting.take() {
+                WebSocketEventKind::Connected(_)
+                    if matches!(self.connection, Connection::Connecting { .. }) =>
+                {
+                    if let Connection::Connecting { socket, sent, task } =
+                        std::mem::replace(&mut self.connection, Connection::Disconnected)
+                    {
+                        self.connection = Connection::Connected { socket, task };
                         cx.emit(sent);
                     }
                 }
                 WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
-                    state = ConnectionState::Disconnected;
-                    self.connecting = None;
+                    self.connection = Connection::Disconnected;
                 }
                 _ => {}
             }
@@ -383,18 +399,9 @@ impl WebSocketDraft {
 
         self.log.update(cx, |log, cx| log.push(events, cx));
 
-        if state == ConnectionState::Disconnected {
-            self.connection = None;
+        if self.connection.state() != state {
+            self.notify_controls(cx);
         }
-        if state != self.state {
-            self.set_state(state, cx);
-        }
-    }
-
-    fn set_state(&mut self, state: ConnectionState, cx: &mut Context<Self>) {
-        self.state = state;
-        self.log.update(cx, |log, cx| log.set_state(state, cx));
-        self.notify_controls(cx);
     }
 
     /// Redraw the cached URL bar and sections. Notifying the draft alone
@@ -593,7 +600,7 @@ impl WebSocketDraft {
 
     fn url_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let url = self.url_state(window, cx);
-        let state = self.state;
+        let state = self.connection.state();
 
         h_flex()
             .flex_none()
@@ -627,7 +634,7 @@ impl WebSocketDraft {
                         button.tooltip_with_action("Connect", &SendRequest, Some("Workspace"))
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if this.state == ConnectionState::Disconnected {
+                        if matches!(this.connection, Connection::Disconnected) {
                             this.connect(window, cx);
                         } else {
                             this.disconnect(cx);
@@ -690,7 +697,7 @@ impl WebSocketDraft {
         let message = self.message_state(window, cx);
         let vim = self.message_vim.clone().unwrap();
         let mouse_vim = vim.clone();
-        let connected = self.state == ConnectionState::Connected;
+        let connected = matches!(self.connection, Connection::Connected { .. });
 
         v_flex()
             .size_full()

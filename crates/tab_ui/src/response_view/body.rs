@@ -17,7 +17,7 @@ use super::{
     metadata::size_label,
     pdf::PdfPreview,
     search::BodySearch,
-    view::ResponseView,
+    view::{ResponseState, ResponseView},
     virtual_body::VirtualBody,
 };
 
@@ -83,6 +83,60 @@ pub(super) enum Body {
     Pdf(Entity<PdfPreview>),
 }
 
+impl Body {
+    /// Show the body of `content` in `mode`, which must be one of its modes.
+    pub(super) fn new(
+        content: &ResponseContent,
+        mode: BodyMode,
+        wrap: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        match (mode, &content.preview) {
+            (BodyMode::Preview, Some(Preview::Html)) => {
+                let html = content.raw.clone();
+                Body::Html(cx.new(|cx| HtmlPreview::new(html, cx)))
+            }
+            (BodyMode::Preview, Some(Preview::Image(image))) => {
+                let image = image.clone();
+                Body::Image(cx.new(|cx| ImagePreview::new(image, cx)))
+            }
+            (BodyMode::Preview, Some(Preview::Pdf)) => {
+                let bytes = content.http().body.clone();
+                Body::Pdf(cx.new(|cx| PdfPreview::new(bytes, cx)))
+            }
+            (BodyMode::Pretty, _) => {
+                if content.language == "xml" {
+                    register_xml();
+                }
+                let text = content.pretty.clone().unwrap_or_default();
+                let editor = cx.new(|cx| {
+                    EditorState::new(window, cx)
+                        .language(content.language)
+                        .line_number(true)
+                        .soft_wrap(wrap)
+                        .searchable(true)
+                        .replaceable(false)
+                        .default_value(text)
+                });
+                Body::Pretty(cx.new(|_| ResponseBodyEditor(editor)))
+            }
+            (BodyMode::Hex, _) => {
+                let body = &content.http().body;
+                let dump = hex_dump(&body[..body.len().min(HEX_LIMIT)]);
+                Body::Raw {
+                    view: cx.new(|cx| VirtualBody::new(dump.into(), false, cx)),
+                    search: None,
+                }
+            }
+            _ => Body::Raw {
+                view: cx.new(|cx| VirtualBody::new(content.raw.clone(), wrap, cx)),
+                search: None,
+            },
+        }
+    }
+}
+
 /// Cache the editor independently so selecting response details does not lay
 /// out and paint an unchanged (potentially large) response body again.
 pub(crate) struct ResponseBodyEditor(pub(crate) Entity<EditorState>);
@@ -106,9 +160,12 @@ impl Render for ResponseBodyEditor {
 }
 
 impl ResponseView {
-    pub(super) fn body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let content = self.content.as_ref().unwrap();
-        let body = self.body.as_ref().unwrap();
+    pub(super) fn body(
+        &self,
+        content: &ResponseContent,
+        body: &Body,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mode = self.mode;
         let modes = content.modes();
         let text = matches!(mode, BodyMode::Pretty | BodyMode::Raw);
@@ -237,13 +294,19 @@ impl ResponseView {
                                 .accessibility_label("Toggle response line wrapping")
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.wrap = !this.wrap;
-                                    match &this.body {
-                                        Some(Body::Raw { view, .. }) => {
+                                    match &this.state {
+                                        ResponseState::Received {
+                                            body: Body::Raw { view, .. },
+                                            ..
+                                        } => {
                                             view.update(cx, |view, cx| {
                                                 view.set_wrap(this.wrap, cx)
                                             });
                                         }
-                                        Some(Body::Pretty(editor)) => {
+                                        ResponseState::Received {
+                                            body: Body::Pretty(editor),
+                                            ..
+                                        } => {
                                             let editor = editor.read(cx).0.clone();
                                             editor.update(cx, |editor, cx| {
                                                 editor.set_soft_wrap(this.wrap, window, cx)
@@ -282,7 +345,9 @@ impl ResponseView {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(image) = &image {
                                         cx.write_to_clipboard(ClipboardItem::new_image(image));
-                                    } else if let Some(content) = &this.content {
+                                    } else if let ResponseState::Received { content, .. } =
+                                        &this.state
+                                    {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
                                             content.raw.to_string(),
                                         ));
@@ -339,7 +404,7 @@ impl ResponseView {
     /// Show the body in a mode. A mode the body does not have falls back to
     /// raw text, or to hex for a binary body.
     pub(super) fn show(&mut self, mode: BodyMode, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(content) = &self.content else {
+        let ResponseState::Received { content, body, .. } = &mut self.state else {
             return;
         };
         let mode = if content.modes().contains(&mode) {
@@ -349,50 +414,8 @@ impl ResponseView {
         } else {
             BodyMode::Hex
         };
-        let wrap = self.wrap;
 
-        self.body = Some(match (mode, &content.preview) {
-            (BodyMode::Preview, Some(Preview::Html)) => {
-                let html = content.raw.clone();
-                Body::Html(cx.new(|cx| HtmlPreview::new(html, cx)))
-            }
-            (BodyMode::Preview, Some(Preview::Image(image))) => {
-                let image = image.clone();
-                Body::Image(cx.new(|cx| ImagePreview::new(image, cx)))
-            }
-            (BodyMode::Preview, Some(Preview::Pdf)) => {
-                let bytes = content.http().body.clone();
-                Body::Pdf(cx.new(|cx| PdfPreview::new(bytes, cx)))
-            }
-            (BodyMode::Pretty, _) => {
-                if content.language == "xml" {
-                    register_xml();
-                }
-                let text = content.pretty.clone().unwrap_or_default();
-                let editor = cx.new(|cx| {
-                    EditorState::new(window, cx)
-                        .language(content.language)
-                        .line_number(true)
-                        .soft_wrap(wrap)
-                        .searchable(true)
-                        .replaceable(false)
-                        .default_value(text)
-                });
-                Body::Pretty(cx.new(|_| ResponseBodyEditor(editor)))
-            }
-            (BodyMode::Hex, _) => {
-                let body = &content.http().body;
-                let dump = hex_dump(&body[..body.len().min(HEX_LIMIT)]);
-                Body::Raw {
-                    view: cx.new(|cx| VirtualBody::new(dump.into(), false, cx)),
-                    search: None,
-                }
-            }
-            _ => Body::Raw {
-                view: cx.new(|cx| VirtualBody::new(content.raw.clone(), wrap, cx)),
-                search: None,
-            },
-        });
+        *body = Body::new(content, mode, self.wrap, window, cx);
         self.mode = mode;
         cx.notify();
     }

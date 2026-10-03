@@ -26,7 +26,7 @@ impl GrpcDraft {
         let tls = self.request.uses_tls();
         let running = self.is_running();
         let placeholder: SharedString = match &self.definition {
-            DefinitionState::Loading => "Loading methods…".into(),
+            DefinitionState::Loading { .. } => "Loading methods…".into(),
             _ if self.request.method.is_empty() => "Select a method".into(),
             // A saved method stays visible before its definition loads.
             _ => {
@@ -44,10 +44,12 @@ impl GrpcDraft {
             }
         };
         let empty: SharedString = match &self.definition {
-            DefinitionState::Loading => "Loading methods…".into(),
-            DefinitionState::Failed(error) => error.to_string().into(),
-            DefinitionState::Loaded(_) => "No methods found".into(),
-            DefinitionState::Idle => "Enter a URL to load methods with server reflection".into(),
+            DefinitionState::Loading { .. } => "Loading methods…".into(),
+            DefinitionState::Failed { error, .. } => error.to_string().into(),
+            DefinitionState::Loaded { .. } => "No methods found".into(),
+            DefinitionState::Idle | DefinitionState::Debouncing { .. } => {
+                "Enter a URL to load methods with server reflection".into()
+            }
         };
 
         h_flex()
@@ -170,7 +172,7 @@ impl GrpcDraft {
     }
 
     pub(super) fn section_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let definition_failed = matches!(self.definition, DefinitionState::Failed(_));
+        let definition_failed = matches!(self.definition, DefinitionState::Failed { .. });
         let sections = [
             ("Message", GrpcSection::Message, 0),
             ("Auth", GrpcSection::Auth, 0),

@@ -6,13 +6,17 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::StatusCode;
 
 use super::{
+    content::ResponseContent,
     timing::{duration_label, timing_details},
     view::ResponseView,
 };
 
 impl ResponseView {
-    pub(super) fn metadata(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let content = self.content.as_ref().unwrap();
+    pub(super) fn metadata(
+        &self,
+        content: &ResponseContent,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
         let response = content.http();
         let status = response.status;
         let metrics = response.metrics;
@@ -124,10 +128,11 @@ impl ResponseView {
     /// still growing, or that broke before they were measured.
     pub(super) fn stream_status(
         &self,
+        content: &ResponseContent,
         streaming: bool,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
-        let status = self.content.as_ref().unwrap().http().status;
+        let status = content.http().status;
         let color = status_color(status, cx);
 
         h_flex()

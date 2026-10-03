@@ -3,15 +3,13 @@ use gpui_kit::component::{scroll::ScrollableElement as _, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Body, Field, HttpRequest};
 
+use super::content::ResponseContent;
 use super::view::ResponseView;
 
 impl ResponseView {
     /// The request as it went out: its address, headers and body.
-    pub(super) fn sent_request(&self, cx: &App) -> AnyElement {
-        let Some((sent, metrics)) = self.content.as_ref().and_then(|content| {
-            let sent = content.execution.sent.as_ref()?;
-            Some((sent, content.http().metrics))
-        }) else {
+    pub(super) fn sent_request(&self, content: &ResponseContent, cx: &App) -> AnyElement {
+        let Some(sent) = content.execution.sent.as_ref() else {
             return div()
                 .flex_1()
                 .flex()
@@ -22,6 +20,7 @@ impl ResponseView {
                 .into_any_element();
         };
 
+        let metrics = content.http().metrics;
         let url = sent_url(sent);
 
         v_flex()
