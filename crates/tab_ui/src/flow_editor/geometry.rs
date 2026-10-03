@@ -19,6 +19,8 @@ pub(super) const MAX_ZOOM: f32 = 2.;
 /// How much a notch of a mouse wheel zooms, as a natural logarithm: about
 /// 16%.
 const WHEEL_ZOOM: f32 = 0.15;
+/// The lines a mouse wheel scrolls for each notch by default.
+pub(super) const NOTCH_LINES: f32 = if cfg!(target_os = "macos") { 1. } else { 3. };
 
 pub(super) fn width(kind: &BlockKind) -> f32 {
     match kind.block_type() {
@@ -121,12 +123,12 @@ impl Viewport {
     }
 
     /// Follow a scroll over the view. A mouse wheel zooms around `anchor`
-    /// and a trackpad pans; the wheel scrolls by lines and the trackpad by
-    /// pixels. Shift makes the wheel pan, and Ctrl/Cmd makes the trackpad
-    /// zoom.
+    /// and a trackpad pans; see [`from_wheel`]. Shift makes the wheel pan,
+    /// and Ctrl/Cmd makes the trackpad zoom.
     pub fn scroll(
         &mut self,
         delta: ScrollDelta,
+        wheel: bool,
         modifiers: Modifiers,
         anchor: Point<Pixels>,
         line_height: Pixels,
@@ -134,16 +136,14 @@ impl Viewport {
     ) {
         let pixels = delta.pixel_delta(line_height);
         // A wheel that only scrolls sideways, such as a tilt wheel, pans.
-        let wheel = !delta.precise() && !modifiers.shift && pixels.y != px(0.);
+        let wheel = wheel && !modifiers.shift && pixels.y != px(0.);
         if !wheel && !modifiers.secondary() && !modifiers.control {
             self.pan(pixels, rem);
             return;
         }
 
-        // Each wheel notch zooms by the same step, however many lines the
-        // system scrolls for it.
         let factor = match delta {
-            ScrollDelta::Lines(lines) => (lines.y.clamp(-1., 1.) * WHEEL_ZOOM).exp(),
+            ScrollDelta::Lines(lines) => (lines.y / NOTCH_LINES * WHEEL_ZOOM).exp(),
             ScrollDelta::Pixels(pixels) => (f32::from(pixels.y) * 0.004).exp(),
         };
         self.zoom_around(self.zoom * factor, anchor, rem);
@@ -180,6 +180,21 @@ impl Viewport {
                 f32::from(view.height) / scale,
             ),
         }
+    }
+}
+
+/// Whether a scroll comes from a mouse wheel rather than a trackpad. Wheels
+/// scroll by lines and trackpads by pixels, except on X11, where trackpads
+/// scroll by lines too. There, only whole notches are a wheel; fractions of
+/// a notch, from a trackpad or a high-resolution wheel, are not.
+pub(super) fn from_wheel(delta: ScrollDelta, x11: bool) -> bool {
+    match delta {
+        ScrollDelta::Pixels(_) => false,
+        ScrollDelta::Lines(lines) if x11 => {
+            let notches = lines.y / NOTCH_LINES;
+            notches.round() != 0. && (notches - notches.round()).abs() < 0.01
+        }
+        ScrollDelta::Lines(_) => true,
     }
 }
 

@@ -239,8 +239,10 @@ impl FlowEditor {
     }
 
     fn scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let wheel = geometry::from_wheel(event.delta, cx.compositor_name() == "X11");
         self.viewport.scroll(
             event.delta,
+            wheel,
             event.modifiers,
             event.position - self.view.origin,
             window.line_height(),
