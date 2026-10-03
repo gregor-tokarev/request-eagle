@@ -331,7 +331,15 @@ impl Workspace {
                 environments: self.environments_open,
                 flows: self.flows_open,
                 history: self.history_open,
-                collapsed: self.sidebar.read(cx).collapsed_paths(),
+                // JSON holds only UTF-8 paths. Folders with other names
+                // expand again, rather than failing the whole save.
+                collapsed: self
+                    .sidebar
+                    .read(cx)
+                    .collapsed_paths()
+                    .into_iter()
+                    .filter(|path| path.to_str().is_some())
+                    .collect(),
             },
             tabs: self.main_view.read(cx).saved_tabs(cx),
             selected_tab: self.main_view.read(cx).selected,
