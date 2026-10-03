@@ -273,6 +273,9 @@ jobs:
           choco install innosetup --no-progress -y
           ./scripts/package-windows.ps1
 
+      - name: Build the tests
+        run: cargo test --locked --no-run -p preferences -p settings_ui -p updater -p request -p collection -p environment -p history
+
       # Later failures still keep the build, so the next run does not start over.
       - name: Save Cargo cache
         if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
