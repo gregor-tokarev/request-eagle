@@ -15,13 +15,15 @@ const REDIRECT_LIMIT: u32 = 100;
 
 /// Send the request, following redirects when `follow` is set. Each hop is
 /// sent with the client for its URL. Returns the final response and the URL
-/// it came from.
+/// it came from. Responses store their cookies in `cookies`, whose cookies
+/// each hop sends only with `send_cookies`.
 pub(crate) async fn send(
     client: impl Fn(&Url) -> Result<Arc<reqwest_client::ReqwestClient>, ExecutionError>,
     request: Request<Option<Bytes>>,
     mut url: Url,
     follow: bool,
     cookies: Option<&CookieJar>,
+    send_cookies: bool,
 ) -> Result<(Response<AsyncBody>, Url), ExecutionError> {
     let (mut parts, mut body) = request.into_parts();
     let mut redirects = 0;
@@ -35,7 +37,10 @@ pub(crate) async fn send(
 
         // Each destination receives the jar's cookies for its own URL,
         // including those that earlier redirects set.
-        if let Some(cookie) = cookies.and_then(|jar| jar.request_header(&url, hop.headers())) {
+        if let Some(cookie) = cookies
+            .filter(|_| send_cookies)
+            .and_then(|jar| jar.request_header(&url, hop.headers()))
+        {
             hop.headers_mut().insert(COOKIE, cookie);
         }
 

@@ -1515,11 +1515,20 @@ fn preserves_serialized_request_and_preference_formats() {
             timeout_ms: Some(0),
             follow_redirects: None,
             verify_certificates: Some(false),
+            send_cookies: true,
         }
     );
     assert_eq!(
         serde_json::to_value(&request).unwrap()["settings"],
         serde_json::json!({"timeout_ms": 0, "verify_certificates": false})
+    );
+
+    // Requests send the jar's cookies unless they are saved without them.
+    let settings: HttpSettings = serde_json::from_str(r#"{"send_cookies":false}"#).unwrap();
+    assert!(!settings.send_cookies);
+    assert_eq!(
+        serde_json::to_value(&settings).unwrap(),
+        serde_json::json!({"send_cookies": false})
     );
 
     let preferences: RequestPreferences =

@@ -335,6 +335,7 @@ impl From<RequestInput> for HttpRequest {
                 timeout_ms: input.timeout_ms,
                 follow_redirects: input.follow_redirects,
                 verify_certificates: input.verify_certificates,
+                send_cookies: input.send_cookies,
             },
         }
     }
@@ -386,6 +387,7 @@ impl From<&HttpRequest> for RequestInput {
             timeout_ms: request.settings.timeout_ms,
             follow_redirects: request.settings.follow_redirects,
             verify_certificates: request.settings.verify_certificates,
+            send_cookies: request.settings.send_cookies,
         }
     }
 }

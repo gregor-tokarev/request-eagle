@@ -95,7 +95,9 @@ script results.
   jar, `cookies.json` in the data directory, and sends them with later runs to
   the same sites, as the app does. `cookies.list` shows them and
   `cookies.delete` removes a domain's cookies, or one by name. Turn the jar off
-  with `settings.request` and `"cookie_jar": false`.
+  with `settings.request` and `"cookie_jar": false`. An HTTP request with
+  `"send_cookies": false` sends none of the jar's cookies, while its responses
+  still store theirs.
 - Flows have their own commands. `flows.blocks` describes every block type
   with its inputs, outputs and settings; `flows.get` also lists the variables
   of each request a flow's HTTP Request blocks send, which are their inputs.

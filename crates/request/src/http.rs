@@ -120,6 +120,7 @@ impl HttpExecutor {
             .settings
             .follow_redirects
             .unwrap_or(self.follow_all_redirects);
+        let send_cookies = request.settings.send_cookies;
         let mut url = Url::parse(&request.path).map_err(ExecutionError::InvalidUrl)?;
 
         if !matches!(url.scheme(), "http" | "https") {
@@ -190,10 +191,12 @@ impl HttpExecutor {
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
             .sum::<usize>();
 
-        // The jar's cookies join the request's own Cookie header when it is sent.
+        // The jar's cookies join the request's own Cookie header when it is
+        // sent, unless the request leaves them out.
         if let Some(cookie) = self
             .cookies
             .as_ref()
+            .filter(|_| send_cookies)
             .and_then(|jar| jar.request_header(&url, request.headers()))
         {
             let own = request
@@ -218,8 +221,15 @@ impl HttpExecutor {
         }
         // Each hop connects with the client certificate for its host.
         let client = |url: &Url| self.clients.get(url, verify, version);
-        let (response, url) =
-            crate::redirects::send(client, request, url, follow, self.cookies.as_ref()).await?;
+        let (response, url) = crate::redirects::send(
+            client,
+            request,
+            url,
+            follow,
+            self.cookies.as_ref(),
+            send_cookies,
+        )
+        .await?;
         let received = Instant::now();
         let (parts, mut stream) = response.into_parts();
         // HEAD and statuses without a body may describe an encoded representation

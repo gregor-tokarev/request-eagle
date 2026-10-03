@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::fields::{FieldsChanged, RequestFields};
+use super::fields::{FieldsChanged, RequestFields, SendCookiesChanged};
 use super::path_variables::{PathVariableChanged, PathVariables};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
@@ -77,6 +77,9 @@ pub struct RequestDraft {
     path_values: Vec<(String, String)>,
     pub(super) headers: Option<Entity<RequestFields>>,
     pub(super) generated_headers: Vec<(String, String)>,
+    /// The Cookie header that the cookie jar adds, while it has cookies for
+    /// the request.
+    pub(super) jar_cookies: Option<String>,
     pub(super) auth: Option<Entity<AuthEditor>>,
     /// The collection's authorization, which the request sends while it
     /// inherits it. Read again when the tab is shown.
@@ -193,6 +196,7 @@ impl RequestDraft {
             location,
             name: None,
             generated_headers: super::execution::generated_headers(&request, &request.auth),
+            jar_cookies: None,
             auth: None,
             inherited: None,
             path_values: request.path_variables.clone(),
@@ -648,6 +652,10 @@ impl RequestDraft {
                 window,
                 cx,
             )
+            .with_jar_cookies(
+                self.jar_cookies.as_deref(),
+                self.request.settings.send_cookies,
+            )
         });
         self._subscriptions.push(
             cx.subscribe(&headers, |this, _, event: &FieldsChanged, cx| {
@@ -656,6 +664,13 @@ impl RequestDraft {
                 cx.notify();
             }),
         );
+        self._subscriptions.push(cx.subscribe(
+            &headers,
+            |this, _, SendCookiesChanged(sent), cx| {
+                this.request.settings.send_cookies = *sent;
+                cx.notify();
+            },
+        ));
         self.headers = Some(headers.clone());
 
         headers

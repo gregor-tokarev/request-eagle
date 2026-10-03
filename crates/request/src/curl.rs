@@ -14,7 +14,8 @@ impl HttpRequest {
     /// request's settings. `{{variables}}` that `values` defines are filled
     /// in as sending fills them, including `:name` path variables; others,
     /// and generated ones such as `{{$guid}}`, stay as written. The cookies
-    /// that `cookies` would add join the request's Cookie header.
+    /// that `cookies` would add join the request's Cookie header, unless
+    /// the request's settings leave them out.
     pub fn curl_command(
         &self,
         values: &HashMap<String, String>,
@@ -96,7 +97,10 @@ impl HttpRequest {
 
         // The jar's cookies for the request's own URL, which cURL sends on
         // to redirects as well. A URL whose host is not known has none.
-        if let Some(jar_cookies) = cookies.and_then(|jar| jar.cookie_header(&url, &headers)) {
+        if let Some(jar_cookies) = cookies
+            .filter(|_| request.settings.send_cookies)
+            .and_then(|jar| jar.cookie_header(&url, &headers))
+        {
             let own = headers
                 .iter_mut()
                 .rfind(|(name, _)| name.eq_ignore_ascii_case("cookie"));
