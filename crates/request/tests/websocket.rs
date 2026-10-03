@@ -525,7 +525,9 @@ fn closing_abandons_a_send_the_peer_never_reads() {
                     ..
                 })
             ),
-            "{event:?}"
+            // The event may carry the whole message, which is too long to print.
+            "{:.300}",
+            format!("{event:?}")
         );
         assert!(started.elapsed() < Duration::from_secs(2));
     });
