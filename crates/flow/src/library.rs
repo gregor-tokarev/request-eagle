@@ -269,8 +269,17 @@ pub fn move_flows_out_of_collections(
     }
     fs::create_dir_all(directory)?;
 
+    // Like the collections, every folder of the collections directory is a
+    // collection, also through a link; links inside collections are not.
+    let mut folders: Vec<PathBuf> = fs::read_dir(collections)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()))
+        .collect();
     let mut moved = Vec::new();
-    let mut folders = vec![collections.to_path_buf()];
+
     while let Some(folder) = folders.pop() {
         let Ok(entries) = fs::read_dir(&folder) else {
             continue;
@@ -290,15 +299,11 @@ pub fn move_flows_out_of_collections(
                 continue;
             }
 
-            // A flow's file has a `flow` table where a request's has a
-            // `request` table.
-            let Some(table) = fs::read_to_string(&path)
-                .ok()
-                .and_then(|source| source.parse::<toml::Table>().ok())
-            else {
-                continue;
-            };
-            if !table.contains_key("flow") || table.contains_key("request") {
+            // Only whole flows move, never a request or a collection's
+            // environment that happens to name a variable `flow`.
+            let is_flow = fs::read_to_string(&path)
+                .is_ok_and(|source| toml::from_str::<SavedFlow>(&source).is_ok());
+            if !is_flow {
                 continue;
             }
 
@@ -313,13 +318,31 @@ pub fn move_flows_out_of_collections(
                 }
                 destination = directory.join(format!("{stem} {number}.{EXTENSION}"));
             }
-            if fs::rename(&path, &destination).is_ok() {
+            if move_file(&path, &destination).is_ok() {
                 moved.push(destination);
             }
         }
     }
 
     Ok(moved)
+}
+
+/// Renames a file, or copies it and removes the original when the two
+/// folders are on different filesystems, such as a collections folder on
+/// another drive.
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+
+    fs::copy(from, to)?;
+    if let Err(error) = fs::remove_file(from) {
+        // Keep one copy, where the collections report it.
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+
+    Ok(())
 }
 
 fn read(path: &Path) -> Result<SavedFlow, FlowLibraryError> {
