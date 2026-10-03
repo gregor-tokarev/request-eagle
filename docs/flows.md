@@ -20,8 +20,8 @@ its row in the sidebar opens, renames, duplicates or deletes it.
 | Move a connection | Drag it off the input it ends at. |
 | Select | Click a block or a connection. Shift-click or Ctrl/Cmd-click adds blocks; Shift-drag selects an area. |
 | Move | Drag a block. Every selected block moves with it. Arrow keys nudge the selection; with Shift, further. |
-| Pan | Drag empty canvas, drag with the middle button, or scroll. |
-| Zoom | Ctrl/Cmd-scroll, the toolbar, `Ctrl/Cmd =` and `Ctrl/Cmd -`. `Ctrl/Cmd 0` shows the whole flow. |
+| Pan | Drag empty canvas, drag with the middle button, scroll a trackpad, or Shift-scroll a mouse wheel. |
+| Zoom | Scroll a mouse wheel, pinch a trackpad, Ctrl/Cmd-scroll, the toolbar, `Ctrl/Cmd =` and `Ctrl/Cmd -`. `Ctrl/Cmd 0` shows the whole flow. |
 | Delete | Backspace or Delete removes the selection. |
 | Copy, paste, duplicate | `Ctrl/Cmd C`, `Ctrl/Cmd V`, `Ctrl/Cmd D`. Copies keep the connections between the copied blocks. |
 | Undo, redo | `Ctrl/Cmd Z`, `Ctrl/Cmd Shift Z`. |

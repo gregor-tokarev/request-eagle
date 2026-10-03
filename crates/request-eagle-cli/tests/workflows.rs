@@ -411,17 +411,16 @@ fn request_settings_are_saved_with_the_request() {
     let collection = cli.collection();
     let created = cli.create(
         &collection,
-        json!({"method":"GET","url":"https://example.invalid","timeout_ms":0,"follow_redirects":false,"verify_certificates":false}),
+        json!({"method":"GET","url":"https://example.invalid","timeout_ms":0,"follow_redirects":false,"verify_certificates":false,"send_cookies":false}),
     );
     let path = created["path"].as_str().unwrap();
     assert_eq!(created["request"]["timeout_ms"], 0);
     assert_eq!(created["request"]["follow_redirects"], false);
     assert_eq!(created["request"]["verify_certificates"], false);
-    assert!(
-        fs::read_to_string(path)
-            .unwrap()
-            .contains("[request.settings]")
-    );
+    assert_eq!(created["request"]["send_cookies"], false);
+    let source = fs::read_to_string(path).unwrap();
+    assert!(source.contains("[request.settings]"), "{source}");
+    assert!(source.contains("send_cookies = false"), "{source}");
 
     // Settings left unset follow the preferences and leave the file.
     let mut request = created["request"].clone();
@@ -430,12 +429,15 @@ fn request_settings_are_saved_with_the_request() {
         .as_object_mut()
         .unwrap()
         .remove("verify_certificates");
+    request.as_object_mut().unwrap().remove("send_cookies");
     let updated = cli.call(json!({"command":"requests.update","path":path,"expected_id":created["id"],"request":request}));
     assert_eq!(updated["request"], request);
     let source = fs::read_to_string(path).unwrap();
     assert!(source.contains("follow_redirects = false"), "{source}");
     assert!(
-        !source.contains("timeout_ms") && !source.contains("verify_certificates"),
+        !source.contains("timeout_ms")
+            && !source.contains("verify_certificates")
+            && !source.contains("send_cookies"),
         "{source}"
     );
 }

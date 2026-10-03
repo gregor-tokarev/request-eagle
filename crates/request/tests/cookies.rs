@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use request::{
-    CookieJar, Field, HttpRequest, HttpVersion, RequestExecutor, RequestPreferences,
+    CookieJar, Field, HttpRequest, HttpSettings, HttpVersion, RequestExecutor, RequestPreferences,
     RequestScripts, RequestVariables,
 };
 use smol::{
@@ -231,6 +231,44 @@ fn turning_the_cookie_jar_off_neither_stores_nor_sends_cookies() {
 
         assert_eq!(cookie_header(&heads[1]), None);
         assert_eq!(jar.cookies().len(), 1);
+    });
+}
+
+#[test]
+fn a_request_that_leaves_out_jar_cookies_still_stores_those_responses_set() {
+    smol::block_on(async {
+        let (url, server) = serve(vec![
+            "HTTP/1.1 200 OK\r\nSet-Cookie: session=abc\r\n",
+            "HTTP/1.1 302 Found\r\nSet-Cookie: step=1\r\nLocation: /done\r\n",
+            "HTTP/1.1 200 OK\r\n",
+        ])
+        .await;
+        let jar = CookieJar::new();
+        let executor = executor(true, &jar);
+
+        get(&executor, url.clone(), Vec::new()).await;
+        executor
+            .execute(
+                HttpRequest {
+                    path: format!("{url}/login"),
+                    headers: vec![Field::new("Cookie", "own=typed")],
+                    settings: HttpSettings {
+                        send_cookies: false,
+                        ..HttpSettings::default()
+                    },
+                    ..HttpRequest::default()
+                },
+                RequestVariables::new(HashMap::new(), None),
+            )
+            .await
+            .unwrap();
+        let heads = server.await;
+
+        // Neither the request nor its redirect sends the jar's cookies.
+        assert_eq!(cookie_header(&heads[1]), Some("own=typed"));
+        assert_eq!(cookie_header(&heads[2]), Some("own=typed"));
+        let names = jar.cookies().into_iter().map(|cookie| cookie.name);
+        assert_eq!(names.collect::<Vec<_>>(), ["session", "step"]);
     });
 }
 

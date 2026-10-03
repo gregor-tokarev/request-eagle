@@ -313,6 +313,18 @@ pub struct RequestInput {
     /// Unset follows the ssl_certificate_verification setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_certificates: Option<bool>,
+    /// Whether the cookie jar's cookies are sent with the request, while the
+    /// jar is on. Responses store their cookies either way.
+    #[serde(default = "sends_cookies", skip_serializing_if = "is_true")]
+    pub send_cookies: bool,
+}
+
+fn sends_cookies() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// A header, query parameter or metadata row as `[key, value]`, or as an

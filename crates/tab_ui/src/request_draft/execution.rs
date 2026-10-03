@@ -131,8 +131,8 @@ pub(crate) fn active_jar(cx: &App) -> Option<request::CookieJar> {
         .then(|| Cookies::jar(cx))
 }
 
-/// The Cookie header that the jar adds to the request, while it is on.
-fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
+/// The Cookie header value that the jar adds to the request, while it is on.
+fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<String> {
     let jar = active_jar(cx)?;
     let url = request_url(&request.path);
     let templated = url.contains("{{")
@@ -144,7 +144,7 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
             name.contains("{{") || (name.eq_ignore_ascii_case("cookie") && value.contains("{{"))
         });
 
-    let cookies = if templated {
+    if templated {
         // Which cookies apply depends on the resolved URL and headers.
         (!jar.is_empty()).then(|| "Resolved on Send".to_owned())
     } else {
@@ -153,25 +153,25 @@ fn jar_cookies(request: &HttpRequest, cx: &App) -> Option<(String, String)> {
             Ok::<_, Infallible>(value.to_owned())
         });
         jar.cookie_header(&url, &Field::pairs(&request.headers))
-    };
-
-    cookies.map(|cookies| ("Cookie".to_owned(), cookies))
+    }
 }
 
 impl RequestDraft {
     pub(super) fn refresh_generated_headers(&mut self, cx: &mut Context<Self>) {
-        let mut headers = generated_headers(&self.request, &self.effective_auth());
-        headers.extend(jar_cookies(&self.request, cx));
+        let headers = generated_headers(&self.request, &self.effective_auth());
+        let cookies = jar_cookies(&self.request, cx);
 
-        if headers == self.generated_headers {
+        if headers == self.generated_headers && cookies == self.jar_cookies {
             return;
         }
 
         self.generated_headers = headers;
+        self.jar_cookies = cookies;
 
         if let Some(headers) = &self.headers {
             headers.update(cx, |headers, cx| {
                 headers.set_generated_headers(&self.generated_headers, cx);
+                headers.set_jar_cookies(self.jar_cookies.as_deref(), cx);
             });
         }
 

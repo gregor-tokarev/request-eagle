@@ -184,6 +184,7 @@ pub(crate) fn request(item: &Value, inherited: &Inherited) -> Option<HttpRequest
             timeout_ms: None,
             follow_redirects: behavior.follow_redirects,
             verify_certificates: behavior.verify_certificates,
+            ..HttpSettings::default()
         },
     })
 }

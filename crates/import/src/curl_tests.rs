@@ -402,6 +402,7 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
             timeout_ms: Some(2500),
             follow_redirects: None,
             verify_certificates: Some(false),
+            ..HttpSettings::default()
         }
     );
 
@@ -417,6 +418,7 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
             timeout_ms: Some(1500),
             follow_redirects: None,
             verify_certificates: Some(false),
+            ..HttpSettings::default()
         },
         ..HttpRequest::default()
     };

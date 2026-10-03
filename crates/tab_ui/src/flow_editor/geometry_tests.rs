@@ -1,5 +1,5 @@
 use flow::BlockType;
-use gpui_kit::{Bounds, point, px, size};
+use gpui_kit::{Bounds, Modifiers, ScrollDelta, point, px, size};
 
 use super::geometry::*;
 
@@ -53,6 +53,112 @@ fn panning_moves_by_screen_pixels() {
 
     // 2× zoom at a 24 px font is 3 screen pixels per canvas pixel.
     assert!(close(viewport.origin.x, -10.) && close(viewport.origin.y, 20.));
+}
+
+#[test]
+fn a_mouse_wheel_zooms_around_the_pointer() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+    let notch = |viewport: &mut Viewport, notches: f32| {
+        viewport.scroll(
+            ScrollDelta::Lines(point(0., notches * NOTCH_LINES)),
+            true,
+            Modifiers::none(),
+            anchor,
+            line,
+            rem,
+        )
+    };
+    let mut viewport = Viewport::default();
+    let under = viewport.to_canvas(anchor, rem);
+
+    notch(&mut viewport, 1.);
+    let step = viewport.zoom;
+    assert!(step > 1.1 && step < 1.25);
+    let after = viewport.to_canvas(anchor, rem);
+    assert!(close(under.x, after.x) && close(under.y, after.y));
+
+    // The same rotation zooms as far however the system splits it.
+    let mut halves = Viewport::default();
+    notch(&mut halves, 0.5);
+    notch(&mut halves, 0.5);
+    assert!(close(halves.zoom, step));
+    let mut double = Viewport::default();
+    notch(&mut double, 2.);
+    assert!(close(double.zoom, step * step));
+
+    notch(&mut viewport, -1.);
+    assert!(close(viewport.zoom, 1.));
+}
+
+#[test]
+fn a_mouse_wheel_pans_with_shift_or_sideways() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+
+    for (delta, modifiers) in [
+        (point(1., 0.), Modifiers::shift()),
+        (point(0., 1.), Modifiers::shift()),
+        (point(1., 0.), Modifiers::none()),
+    ] {
+        let mut viewport = Viewport::default();
+        viewport.scroll(
+            ScrollDelta::Lines(delta),
+            true,
+            modifiers,
+            anchor,
+            line,
+            rem,
+        );
+
+        assert_eq!(viewport.zoom, 1.);
+        assert_ne!(viewport.origin, Viewport::default().origin);
+    }
+}
+
+#[test]
+fn a_trackpad_pans_and_zooms_with_ctrl_or_cmd() {
+    let rem = px(16.);
+    let line = px(20.);
+    let anchor = point(px(300.), px(200.));
+    let swipe = ScrollDelta::Pixels(point(px(30.), px(-60.)));
+
+    let mut viewport = Viewport::default();
+    viewport.scroll(swipe, false, Modifiers::none(), anchor, line, rem);
+    assert_eq!(viewport.zoom, 1.);
+    let origin = Viewport::default().origin;
+    assert!(close(viewport.origin.x, origin.x - 30.) && close(viewport.origin.y, origin.y + 60.));
+
+    // X11 trackpads scroll by lines.
+    let lines = ScrollDelta::Lines(point(0., -0.4));
+    let mut viewport = Viewport::default();
+    viewport.scroll(lines, false, Modifiers::none(), anchor, line, rem);
+    assert_eq!(viewport.zoom, 1.);
+    assert!(close(viewport.origin.y, origin.y + 0.4 * 20.));
+
+    for delta in [swipe, lines] {
+        for modifiers in [Modifiers::control(), Modifiers::secondary_key()] {
+            let mut viewport = Viewport::default();
+            viewport.scroll(delta, false, modifiers, anchor, line, rem);
+            assert!(viewport.zoom < 1.);
+        }
+    }
+}
+
+#[test]
+fn wheels_scroll_by_lines_and_trackpads_by_pixels_or_fractions_on_x11() {
+    let lines = |y: f32| ScrollDelta::Lines(point(0., y));
+    let pixels = ScrollDelta::Pixels(point(px(0.), px(12.)));
+
+    assert!(!from_wheel(pixels, false));
+    assert!(!from_wheel(pixels, true));
+    assert!(from_wheel(lines(0.4), false));
+    assert!(from_wheel(lines(NOTCH_LINES), true));
+    assert!(from_wheel(lines(-2. * NOTCH_LINES), true));
+    assert!(!from_wheel(lines(0.4 * NOTCH_LINES), true));
+    assert!(!from_wheel(lines(0.), true));
 }
 
 #[test]
