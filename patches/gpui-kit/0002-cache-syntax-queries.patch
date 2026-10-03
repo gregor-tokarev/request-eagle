@@ -1,8 +1,8 @@
 diff --git a/crates/component/src/highlighter/highlighter.rs b/crates/component/src/highlighter/highlighter.rs
-index 3128cd5..c0e9d4d 100644
+index 279385d9..27354814 100644
 --- a/crates/component/src/highlighter/highlighter.rs
 +++ b/crates/component/src/highlighter/highlighter.rs
-@@ -31,7 +31,7 @@ const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
+@@ -30,7 +30,7 @@ const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
  #[allow(unused)]
  pub struct SyntaxHighlighter {
      language: SharedString,
@@ -11,7 +11,7 @@ index 3128cd5..c0e9d4d 100644
      /// The full injections query. This is used to build injection layers during parsing.
      injections_query: Option<Arc<Query>>,
  
-@@ -390,43 +390,11 @@ impl SyntaxHighlighter {
+@@ -426,43 +426,11 @@ impl SyntaxHighlighter {
              .set_language(&grammar)
              .context("parse set_language")?;
  
@@ -60,7 +60,7 @@ index 3128cd5..c0e9d4d 100644
  
          // Find all of the highlighting patterns that are disabled for nodes that
          // have been identified as local variables.
-@@ -1241,6 +1209,43 @@ mod tests {
+@@ -1333,6 +1301,43 @@ mod tests {
      use super::*;
      use crate::Colorize as _;
  
@@ -105,7 +105,7 @@ index 3128cd5..c0e9d4d 100644
          let mut style = HighlightStyle::default();
          style.color = Some(color);
 diff --git a/crates/component/src/highlighter/mod.rs b/crates/component/src/highlighter/mod.rs
-index f1fc2aa..7f7ca34 100644
+index f35fcb8b..15d987d0 100644
 --- a/crates/component/src/highlighter/mod.rs
 +++ b/crates/component/src/highlighter/mod.rs
 @@ -22,6 +22,8 @@ pub(crate) fn input_highlighter_factory() -> gpui_base::input::InputHighlighterF
@@ -119,7 +119,7 @@ index f1fc2aa..7f7ca34 100644
  mod registry;
 diff --git a/crates/component/src/highlighter/queries.rs b/crates/component/src/highlighter/queries.rs
 new file mode 100644
-index 0000000..b6faa38
+index 00000000..b6faa381
 --- /dev/null
 +++ b/crates/component/src/highlighter/queries.rs
 @@ -0,0 +1,170 @@

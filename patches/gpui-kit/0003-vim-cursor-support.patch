@@ -1,8 +1,8 @@
 diff --git a/crates/base/src/input/base/state.rs b/crates/base/src/input/base/state.rs
-index c7bc92e0..667106b8 100644
+index b7085414..e616b4a8 100644
 --- a/crates/base/src/input/base/state.rs
 +++ b/crates/base/src/input/base/state.rs
-@@ -381,6 +381,8 @@ pub struct InputBaseState<M: InputModeKind> {
+@@ -401,6 +401,8 @@ pub struct InputBaseState<M: InputModeKind> {
      pub(super) clean_on_escape: bool,
      pub(super) submit_on_enter: bool,
      pub(super) show_whitespaces: bool,
@@ -11,7 +11,7 @@ index c7bc92e0..667106b8 100644
      /// This flag tells the renderer to prefer the end of the current visual line.
      pub(crate) cursor_line_end_affinity: bool,
      pub(super) pattern: Option<regex::Regex>,
-@@ -705,6 +707,7 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -735,6 +737,7 @@ impl<M: InputModeKind> InputBaseState<M> {
              clean_on_escape: false,
              submit_on_enter: false,
              show_whitespaces: false,
@@ -19,7 +19,7 @@ index c7bc92e0..667106b8 100644
              loading: false,
              pattern: None,
              validate: None,
-@@ -1120,6 +1123,16 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -1165,6 +1168,16 @@ impl<M: InputModeKind> InputBaseState<M> {
          cx.notify();
      }
  
@@ -36,7 +36,7 @@ index c7bc92e0..667106b8 100644
      /// Empty rows reserved below the last line of content ("scroll
      /// beyond last line"), code-editor mode only. Mirrors VSCode's
      /// `editor.scrollBeyondLastLine` / Zed's `scroll_beyond_last_line`.
-@@ -2858,6 +2871,15 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -3020,6 +3033,15 @@ impl<M: InputModeKind> InputBaseState<M> {
          self.select_to(end, cx);
      }
  
@@ -52,7 +52,7 @@ index c7bc92e0..667106b8 100644
      /// Resolve a mouse position to a byte offset in the text.
      ///
      /// Also reports the caret's line-end affinity for that offset: `true` when the position
-@@ -3162,6 +3184,7 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -3354,6 +3376,7 @@ impl<M: InputModeKind> InputBaseState<M> {
      pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
          (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
              && !self.disabled
@@ -60,7 +60,7 @@ index c7bc92e0..667106b8 100644
              && self.blink_cursor.read(cx).visible()
              && window.is_window_active()
      }
-@@ -3419,6 +3442,12 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -3612,6 +3635,12 @@ impl<M: InputModeKind> InputBaseState<M> {
              return None;
          };
  
@@ -73,7 +73,7 @@ index c7bc92e0..667106b8 100644
          let (_, _, start_pos) = self.line_and_position_for_offset(range.start);
          let (_, _, end_pos) = self.line_and_position_for_offset(range.end);
  
-@@ -6162,6 +6191,103 @@ mod tests {
+@@ -6852,6 +6881,103 @@ mod tests {
          });
      }
  

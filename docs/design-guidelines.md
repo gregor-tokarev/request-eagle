@@ -1,7 +1,7 @@
 # Request Eagle interface geometry
 
 Follow the [GPUI Kit design guide](https://gpui-kit.com/versions/main/docs/design-guides/#radius-spacing-and-density).
-The app uses the GPUI Kit 0.6.2 APIs already pinned in the workspace.
+The app uses the GPUI Kit 0.7.0 APIs already pinned in the workspace.
 
 - Use theme radius tiers: `sm` for inset and compact controls, `md` for rows,
   tabs and control frames, and `lg` for surfaces. Full rounding belongs to

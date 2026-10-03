@@ -1,5 +1,5 @@
 diff --git a/crates/base/src/input/base/blink_cursor.rs b/crates/base/src/input/base/blink_cursor.rs
-index cece9663..cd80fa4b 100644
+index dc367009..cefedde1 100644
 --- a/crates/base/src/input/base/blink_cursor.rs
 +++ b/crates/base/src/input/base/blink_cursor.rs
 @@ -3,6 +3,10 @@ use instant::Duration;
@@ -43,7 +43,7 @@ index cece9663..cd80fa4b 100644
          self.blink(self.epoch, cx);
      }
  
-@@ -55,6 +63,16 @@ impl BlinkCursor {
+@@ -65,6 +73,16 @@ impl BlinkCursor {
              return;
          }
  
@@ -60,25 +60,17 @@ index cece9663..cd80fa4b 100644
          self.visible = !self.visible;
          cx.notify();
  
-@@ -87,6 +105,7 @@ impl BlinkCursor {
-             if let Some(this) = this.upgrade() {
-                 this.update(cx, |this, cx| {
+@@ -111,6 +129,7 @@ impl BlinkCursor {
+                     }
+ 
                      this.paused = false;
 +                    this.blinks_left = BLINKS_BEFORE_SETTLING;
                      this.blink(epoch, cx);
                  });
              }
-@@ -98,6 +117,7 @@ impl BlinkCursor {
- mod tests {
-     use super::*;
-     use gpui::{AppContext as _, TestAppContext};
-+    use std::{cell::Cell, rc::Rc};
- 
-     #[gpui::test]
-     fn repeated_pauses_keep_cursor_visible_until_idle(cx: &mut TestAppContext) {
-@@ -117,4 +137,40 @@ mod tests {
-         cx.run_until_parked();
-         assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+@@ -243,4 +262,40 @@ mod tests {
+         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+         assert_eq!(notifications.get(), 0, "a stopped cursor kept blinking");
      }
 +
 +    #[gpui::test]

@@ -1,11 +1,12 @@
 diff --git a/crates/base/src/input/base/element.rs b/crates/base/src/input/base/element.rs
-index 6d2be4a..0d7d934 100644
+index 5c79ba96..46ecc392 100644
 --- a/crates/base/src/input/base/element.rs
 +++ b/crates/base/src/input/base/element.rs
-@@ -2176,6 +2176,32 @@ impl<M: InputModeKind> Element for TextElement<M> {
-             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
+@@ -2852,6 +2852,33 @@ impl<M: InputModeKind> Element for TextElement<M> {
          let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
  
+         let token_elements = self.prepaint_tokens(&last_layout, bounds, token_elements, window, cx);
++
 +        // Deferred overlays prepaint after the input and need this frame's
 +        // caret and scroll geometry before positioning their hitboxes.
 +        self.state.update(cx, |state, cx| {
@@ -33,9 +34,9 @@ index 6d2be4a..0d7d934 100644
 +        });
 +
          PrepaintState {
+             token_elements,
              hitbox,
-             bounds,
-@@ -2208,13 +2234,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
+@@ -2887,13 +2914,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
          window: &mut Window,
          cx: &mut App,
      ) {
@@ -50,7 +51,7 @@ index 6d2be4a..0d7d934 100644
                  state.editor_style.clone(),
                  state.editor_paddings,
              )
-@@ -2485,30 +2510,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
+@@ -3176,30 +3202,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
              cx,
          );
  
@@ -81,9 +82,9 @@ index 6d2be4a..0d7d934 100644
          if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref()
              && !window.modifiers().alt
          {
-@@ -2779,6 +2780,56 @@ fn split_runs_by_bg_segments(
- mod tests {
-     use super::*;
+@@ -3927,6 +3929,56 @@ mod tests {
+         );
+     }
  
 +    #[gpui::test]
 +    fn caret_geometry_is_current_when_deferred_overlays_prepaint(cx: &mut gpui::TestAppContext) {
@@ -139,7 +140,7 @@ index 6d2be4a..0d7d934 100644
      fn test_plain_text_decorations_include_unstyled_gaps() {
          let decoration = HighlightStyle {
 diff --git a/crates/base/src/input/editor/lsp/completions.rs b/crates/base/src/input/editor/lsp/completions.rs
-index 5e31131..0da5f81 100644
+index 5416997e..2072a9e6 100644
 --- a/crates/base/src/input/editor/lsp/completions.rs
 +++ b/crates/base/src/input/editor/lsp/completions.rs
 @@ -181,6 +181,7 @@ impl InputBaseState<EditorMode> {
@@ -196,18 +197,8 @@ index 5e31131..0da5f81 100644
          let closes_overlay =
              crate::input::Enter::is_primary(&*action) || action.partial_eq(&crate::input::Escape);
          let kind = if self.extras.context_menu_content.completion.open {
-@@ -257,7 +276,8 @@ impl InputBaseState<EditorMode> {
-         if handled && closes_overlay {
-             match kind {
-                 super::InputOverlayKind::Completion => {
--                    self.extras.context_menu_content.completion.open = false
-+                    self.extras.context_menu_content.completion.open = false;
-+                    self.extras.context_menu_content.completion.snapshot = None;
-                 }
-                 super::InputOverlayKind::CodeAction => {
-                     self.extras.context_menu_content.code_action.open = false
 diff --git a/crates/base/src/input/editor/lsp/overlay.rs b/crates/base/src/input/editor/lsp/overlay.rs
-index bae1c9a..d9db70d 100644
+index bae1c9a9..d9db70df 100644
 --- a/crates/base/src/input/editor/lsp/overlay.rs
 +++ b/crates/base/src/input/editor/lsp/overlay.rs
 @@ -10,6 +10,7 @@ pub struct CompletionMenuState {
@@ -241,7 +232,7 @@ index bae1c9a..d9db70d 100644
          }
      }
 diff --git a/crates/component/src/input/popovers/completion_menu.rs b/crates/component/src/input/popovers/completion_menu.rs
-index dbf2701..28e2d51 100644
+index dbf2701f..28e2d511 100644
 --- a/crates/component/src/input/popovers/completion_menu.rs
 +++ b/crates/component/src/input/popovers/completion_menu.rs
 @@ -3,10 +3,11 @@ use std::rc::Rc;

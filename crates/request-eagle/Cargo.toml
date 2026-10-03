@@ -14,7 +14,7 @@ environment = { path = "../environment" }
 flow = { path = "../flow" }
 request_history = { package = "history", path = "../history" }
 preferences = { path = "../preferences" }
-gpui-fps = { version = "=0.6.2", optional = true }
+gpui-fps = { version = "=0.7.0", optional = true }
 gpui-kit = { workspace = true, features = ["component", "assets"] }
 keybindings_service = { path = "../keybindings_service" }
 log = "0.4"

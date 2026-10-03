@@ -1121,8 +1121,6 @@ impl Render for Workspace {
             .size_full()
             .text_base()
             .child(workspace)
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
             .into_any_element()
     }
 }

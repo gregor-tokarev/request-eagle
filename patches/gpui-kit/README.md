@@ -1,9 +1,9 @@
 # GPUI Kit editor fixes
 
-The workspace pins nine changed files on top of GPUI Kit **0.6.2**:
+The workspace pins nine changed files on top of GPUI Kit **0.7.0**:
 
-- Upstream tag: `v0.6.2`, commit `122c36f7be19ea0e179107c067b679efccb7d66a`.
-- Patched commit: [`c38733a06868b10813788ca3ebbace790eeb65b1`](https://github.com/gregor-tokarev/gpui-kit/commit/c38733a06868b10813788ca3ebbace790eeb65b1).
+- Upstream tag: `v0.7.0`, commit `0c830f4d257e69fdd17200650533ab4ca9a40cc0`.
+- Patched commit: [`e44d39248944fa18ae9636cc8987a8ccfada8c9b`](https://github.com/gregor-tokarev/gpui-kit/commit/e44d39248944fa18ae9636cc8987a8ccfada8c9b).
 - Completion changes: [0001-current-frame-completion-position.patch](0001-current-frame-completion-position.patch).
 - Query reuse: [0002-cache-syntax-queries.patch](0002-cache-syntax-queries.patch), applied after the first patch.
 - Vim cursor support: [0003-vim-cursor-support.patch](0003-vim-cursor-support.patch), applied after the second patch.
