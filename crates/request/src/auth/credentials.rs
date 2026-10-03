@@ -109,6 +109,37 @@ impl Auth {
         }
     }
 
+    /// Whether a request sends the credential this authorization would add
+    /// itself, as an enabled header or a parameter of its URL or query. The
+    /// request's own then takes precedence, and the authorization adds
+    /// nothing.
+    ///
+    /// Sending asks twice: before the authorization's variables are filled
+    /// in, so they need no values when it gives way, and again when it adds
+    /// the credentials, since a variable can name the credential, such as an
+    /// API key header `{{name}}`.
+    pub(crate) fn overridden_by(&self, url: &str, query: &[Field], headers: &[Field]) -> bool {
+        match self.credential_name() {
+            Some((AuthLocation::Header, name)) => {
+                Field::enabled(headers).any(|(header, _)| header.trim().eq_ignore_ascii_case(name))
+            }
+            Some((AuthLocation::Query, name)) => {
+                Field::enabled(query).any(|(key, _)| key == name)
+                    || Url::parse(url)
+                        .is_ok_and(|url| url.query_pairs().any(|(key, _)| key == name))
+            }
+            None => false,
+        }
+    }
+
+    /// `overridden_by` for a gRPC call, which sends every credential as
+    /// metadata.
+    pub(crate) fn overridden_by_metadata(&self, metadata: &[Field]) -> bool {
+        self.credential_name().is_some_and(|(_, name)| {
+            Field::enabled(metadata).any(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+        })
+    }
+
     /// The headers that sending adds for this authorization, for showing
     /// before it is sent, the one a request can set itself first. A value is
     /// `None` when it is only known then: it has `{{variables}}`, or it is
@@ -176,7 +207,7 @@ pub(crate) fn authorize(
     body: &[u8],
     form: &[(String, String)],
 ) -> Result<(), String> {
-    if auth.credential_name().is_none() || sends_own_credential(auth, url, query, headers) {
+    if auth.credential_name().is_none() || auth.overridden_by(url, query, headers) {
         return Ok(());
     }
     let Ok(mut url) = Url::parse(url) else {
@@ -205,27 +236,6 @@ pub(crate) fn authorize(
     }
 
     Ok(())
-}
-
-/// Whether a request sends the credential its authorization would add, as
-/// an enabled header or a parameter of its URL or query. Its own then takes
-/// precedence, and the authorization adds nothing.
-pub(crate) fn sends_own_credential(
-    auth: &Auth,
-    url: &str,
-    query: &[Field],
-    headers: &[Field],
-) -> bool {
-    match auth.credential_name() {
-        Some((AuthLocation::Header, name)) => {
-            Field::enabled(headers).any(|(header, _)| header.trim().eq_ignore_ascii_case(name))
-        }
-        Some((AuthLocation::Query, name)) => {
-            Field::enabled(query).any(|(key, _)| key == name)
-                || Url::parse(url).is_ok_and(|url| url.query_pairs().any(|(key, _)| key == name))
-        }
-        None => false,
-    }
 }
 
 fn authorization(value: String) -> Credential {

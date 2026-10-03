@@ -488,10 +488,7 @@ pub(crate) fn auth_metadata(
     metadata: &[Field],
     auth: &Auth,
 ) -> Result<Vec<(String, String)>, String> {
-    let overridden = auth.credential_name().is_some_and(|(_, credential)| {
-        Field::enabled(metadata).any(|(name, _)| name.trim().eq_ignore_ascii_case(credential))
-    });
-    if overridden {
+    if auth.overridden_by_metadata(metadata) {
         return Ok(Vec::new());
     }
 

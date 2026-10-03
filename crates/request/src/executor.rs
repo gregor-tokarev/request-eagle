@@ -247,9 +247,10 @@ fn authorize(request: &mut HttpRequest, body: Option<&[u8]>) -> Result<(), Execu
 }
 
 /// The Authorization header that answers a Digest challenge in the
-/// response, unless the request set its own. Only the address the request
-/// was sent to is answered: a redirect may lead to another server, which
-/// must not learn the credentials, or change the method and body.
+/// response. A request that sets its own has no Digest authorization by
+/// then. Only the address the request was sent to is answered: a redirect
+/// may lead to another server, which must not learn the credentials, or
+/// change the method and body.
 fn answer_digest(
     request: &HttpRequest,
     response: &HttpResponse,
@@ -259,10 +260,7 @@ fn answer_digest(
     let Auth::Digest(credentials) = &request.auth else {
         return None;
     };
-    if response.status != StatusCode::UNAUTHORIZED
-        || Field::enabled(&request.headers)
-            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
-    {
+    if response.status != StatusCode::UNAUTHORIZED {
         return None;
     }
 

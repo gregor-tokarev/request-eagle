@@ -18,7 +18,7 @@ mod oauth2;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use credentials::{Credential, authorize, sends_own_credential};
+pub(crate) use credentials::{Credential, authorize};
 pub use model::{
     ApiKeyAuth, Auth, AuthKind, AuthLocation, AwsSignatureAuth, BearerAuth, JwtAlgorithm, JwtAuth,
     OAuth1Auth, OAuth1Signature, OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant, PasswordAuth,
