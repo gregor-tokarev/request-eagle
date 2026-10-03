@@ -156,7 +156,18 @@ impl FlowEditor {
         let block = entry.block.clone();
         let (run, released) = match &entry.run {
             RunData::Kept(run, _) => (Some(run.clone()), false),
-            RunData::Released => (None, true),
+            // A block's last run stays with its status after its entry lets
+            // go of it.
+            RunData::Released => match self
+                .run
+                .blocks
+                .get(&entry.block)
+                .filter(|status| status.runs == entry.index)
+                .and_then(|status| status.last.clone())
+            {
+                Some(last) => (Some(last), false),
+                None => (None, true),
+            },
             RunData::None => (None, false),
         };
         let at = entry.at;
