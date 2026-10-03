@@ -8,7 +8,7 @@ use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMenuItem},
-    scroll::ScrollableElement as _,
+    scroll::Scrollbar,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -38,6 +38,7 @@ pub(crate) struct FlowPanel {
     /// The row whose "…" menu is open, which keeps its button shown.
     menu_row: Option<PathBuf>,
     error: Option<String>,
+    scroll: UniformListScrollHandle,
     focus: FocusHandle,
 }
 
@@ -52,6 +53,7 @@ impl FlowPanel {
             pending_delete: None,
             menu_row: None,
             error: None,
+            scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle().tab_stop(true),
         }
     }
@@ -80,8 +82,7 @@ impl FlowPanel {
         match self.library.create("New Flow", Flow::starter()) {
             Ok(path) => {
                 self.error = None;
-                self.selected = Some(path.clone());
-                cx.notify();
+                self.select(path.clone(), cx);
                 Some(path)
             }
             Err(error) => {
@@ -124,11 +125,20 @@ impl FlowPanel {
         Ok(())
     }
 
+    /// Select a flow and scroll its row into view.
     fn select(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if self.selected.as_ref() != Some(&path) {
             self.pending_delete = None;
         }
 
+        if let Some(row) = self
+            .library
+            .flows()
+            .iter()
+            .position(|saved| saved.path == path)
+        {
+            self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        }
         self.selected = Some(path);
         cx.notify();
     }
@@ -152,9 +162,9 @@ impl FlowPanel {
             return;
         };
         let name = saved.name.clone();
-        self.pending_delete = None;
         self.error = None;
-        self.selected = Some(path.clone());
+        self.select(path.clone(), cx);
+        self.pending_delete = None;
 
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx).default_value(name);
@@ -196,8 +206,9 @@ impl FlowPanel {
             self.error = Some(format!("Could not rename flow: {error}"));
         }
 
+        // The new name can sort the flow elsewhere in the list.
+        self.select(rename.path, cx);
         window.focus(&self.focus, cx);
-        cx.notify();
     }
 
     fn duplicate(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -354,13 +365,11 @@ impl FlowPanel {
             .into_any_element()
     }
 
-    fn row(
-        &self,
-        index: usize,
-        path: PathBuf,
-        name: SharedString,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let saved = &self.library.flows()[index];
+        let path = saved.path.clone();
+        let name: SharedString = saved.name.clone().into();
+
         if self.pending_delete.as_ref() == Some(&path) {
             return self.delete_prompt(index, cx);
         }
@@ -496,12 +505,7 @@ impl Focusable for FlowPanel {
 
 impl Render for FlowPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let flows: Vec<(PathBuf, SharedString)> = self
-            .library
-            .flows()
-            .iter()
-            .map(|saved| (saved.path.clone(), saved.name.clone().into()))
-            .collect();
+        let count = self.library.flows().len();
         let skipped = self.library.skipped().len();
 
         v_flex()
@@ -535,33 +539,42 @@ impl Render for FlowPanel {
                 )
             })
             .child(
-                v_flex()
+                div()
                     .id("flows-list")
+                    .relative()
                     .flex_1()
                     .min_h_0()
+                    .overflow_hidden()
                     .track_focus(&self.focus)
                     .on_key_down(cx.listener(Self::on_key_down))
-                    .overflow_y_scrollbar()
-                    .when(flows.is_empty(), |this| {
-                        this.child(
-                            v_flex()
-                                .p_4()
-                                .gap_1()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("No flows yet")
-                                .child(
-                                    "Create one to chain requests on a canvas, without \
-                                     writing a script.",
-                                ),
+                    .child(if count == 0 {
+                        v_flex()
+                            .p_4()
+                            .gap_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No flows yet")
+                            .child(
+                                "Create one to chain requests on a canvas, without writing a \
+                                 script.",
+                            )
+                            .into_any_element()
+                    } else {
+                        // Only the rows in view are built, however many flows there are.
+                        uniform_list(
+                            "flows-scroll",
+                            count,
+                            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                                range.map(|index| this.row(index, cx)).collect()
+                            }),
                         )
+                        .size_full()
+                        .track_scroll(&self.scroll)
+                        .into_any_element()
                     })
-                    .children(
-                        flows
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, (path, name))| self.row(index, path, name, cx)),
-                    ),
+                    .when(count > 0, |this| {
+                        this.child(Scrollbar::vertical(&self.scroll))
+                    }),
             )
     }
 }

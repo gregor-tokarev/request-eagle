@@ -217,8 +217,12 @@ impl FlowEditor {
                         |flow| flow.connections.retain(|existing| *existing != connection),
                         cx,
                     ),
-                    // Dropped on the canvas: choose a block to connect to.
-                    (None, None) => self.open_picker(pointer, Some(from), window, cx),
+                    // Dropped on empty canvas: choose a block to connect to.
+                    (None, None) if self.block_at(pointer).is_none() => {
+                        self.open_picker(pointer, Some(from), window, cx)
+                    }
+                    // Dropped on a block it cannot join, such as its own.
+                    (None, None) => {}
                 }
             }
             Drag::Move { moved: true, .. } => self.history.seal(),
@@ -230,11 +234,14 @@ impl FlowEditor {
 
     /// The port a connection drawn from `from` joins when dropped at a
     /// position: a port near it, or the first free port of the block there.
+    /// A block cannot connect to itself.
     pub(super) fn drop_port(&self, from: &PortRef, position: Point<f32>) -> Option<PortRef> {
-        self.port_at(position, !from.output).or_else(|| {
-            self.block_at(position)
-                .and_then(|block| self.free_port(&block, !from.output))
-        })
+        self.port_at(position, !from.output)
+            .or_else(|| {
+                self.block_at(position)
+                    .and_then(|block| self.free_port(&block, !from.output))
+            })
+            .filter(|port| port.block != from.block)
     }
 
     /// Where a port is on the canvas.

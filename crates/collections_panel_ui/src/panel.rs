@@ -366,14 +366,26 @@ impl CollectionPanel {
         }
 
         match event.keystroke.key.as_str() {
-            "down" => self.select_row(
-                self.selected_row()
-                    .map_or(0, |row| (row + 1).min(self.visible.len() - 1)),
-                cx,
-            ),
-            "up" => self.select_row(row.saturating_sub(1), cx),
+            "down" => {
+                let next = match self.selected_row() {
+                    Some(row) => self.item_row(row + 1, true),
+                    None => Some(0),
+                };
+                if let Some(row) = next {
+                    self.select_row(row, cx);
+                }
+            }
+            "up" => {
+                if let Some(row) = row.checked_sub(1).and_then(|row| self.item_row(row, false)) {
+                    self.select_row(row, cx);
+                }
+            }
             "home" => self.select_row(0, cx),
-            "end" => self.select_row(self.visible.len() - 1, cx),
+            "end" => {
+                if let Some(row) = self.item_row(self.visible.len() - 1, false) {
+                    self.select_row(row, cx);
+                }
+            }
             "enter" => self.open(index, cx),
             "space" => self.toggle(index, cx),
             "right" => {
@@ -382,6 +394,7 @@ impl CollectionPanel {
                 } else if self.tree.items[index].is_branch()
                     && row + 1 < self.visible.len()
                     && self.visible[row + 1] < self.tree.items[index].end
+                    && self.tree.items[self.visible[row + 1]].kind != ItemKind::Empty
                 {
                     self.select_row(row + 1, cx);
                 }
@@ -402,6 +415,19 @@ impl CollectionPanel {
         }
 
         cx.stop_propagation();
+    }
+
+    /// The nearest row from `row` on, forward or back, that holds an item.
+    /// The placeholders of empty branches only show a message, so keys
+    /// skip them.
+    fn item_row(&self, row: usize, forward: bool) -> Option<usize> {
+        let holds_item = |row: &usize| self.tree.items[self.visible[*row]].kind != ItemKind::Empty;
+
+        if forward {
+            (row..self.visible.len()).find(holds_item)
+        } else {
+            (0..=row.min(self.visible.len() - 1)).rev().find(holds_item)
+        }
     }
 
     fn rename_selected(&mut self, _: &RenameItem, window: &mut Window, cx: &mut Context<Self>) {
@@ -445,7 +471,10 @@ impl CollectionPanel {
 
         let row = match event.keystroke.key.as_str() {
             "down" | "enter" => 0,
-            "up" => self.visible.len() - 1,
+            "up" => match self.item_row(self.visible.len() - 1, false) {
+                Some(row) => row,
+                None => return,
+            },
             _ => return,
         };
 

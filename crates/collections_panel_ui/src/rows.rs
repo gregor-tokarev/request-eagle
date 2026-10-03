@@ -375,20 +375,24 @@ impl CollectionPanel {
                     .text_color(theme.muted_foreground)
                     .when(dropping, |this| this.bg(theme.info.opacity(0.25)))
                     .children(indent_guides(item.depth, cx))
-                    .child(div().flex_none().ml_1().child(if collection {
+                    // In a narrow sidebar the message gives way, so the
+                    // shortcut stays in reach.
+                    .child(div().min_w_0().ml_1().truncate().child(if collection {
                         "This collection is empty."
                     } else {
                         "This folder is empty."
                     }))
                     .child(
-                        Button::new(("collection-empty-add", index))
-                            .debug_selector(move || format!("collection-empty-add-{index}"))
-                            .link()
-                            .xsmall()
-                            .label("Add a request")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.create_request(&parent_path, window, cx)
-                            })),
+                        div().flex_none().child(
+                            Button::new(("collection-empty-add", index))
+                                .debug_selector(move || format!("collection-empty-add-{index}"))
+                                .link()
+                                .xsmall()
+                                .label("Add a request")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.create_request(&parent_path, window, cx)
+                                })),
+                        ),
                     ),
             )
             .on_drag_move(
