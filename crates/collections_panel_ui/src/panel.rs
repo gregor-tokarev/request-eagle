@@ -117,13 +117,17 @@ pub struct CollectionPanel {
 impl EventEmitter<CollectionPanelEvent> for CollectionPanel {}
 
 impl CollectionPanel {
+    /// `collapsed` holds the paths of the collections and folders that start
+    /// collapsed, as `collapsed_paths` gave them in the last session.
     pub fn new(
         collections: CollectionRegistry,
+        collapsed: Vec<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let tree = Arc::new(CollectionTree::new(&collections));
-        let visible: Arc<Vec<usize>> = Arc::new((0..tree.items.len()).collect());
+        let collapsed = tree.branches_at(&collapsed.into_iter().collect());
+        let visible = Arc::new(tree.visible_rows(&collapsed, ""));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter collections"));
         let search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Focus | InputEvent::Change) {
@@ -152,7 +156,7 @@ impl CollectionPanel {
             tree,
             unfiltered_rows: Some(visible.clone()),
             visible,
-            collapsed: HashSet::new(),
+            collapsed,
             selected: None,
             clicked_branch: None,
             search,
@@ -168,6 +172,18 @@ impl CollectionPanel {
 
     pub fn collection_count(&self) -> usize {
         self.tree.roots.len()
+    }
+
+    /// The collapsed collections and folders in tree order, to restore them
+    /// in the next session.
+    pub fn collapsed_paths(&self) -> Vec<PathBuf> {
+        let mut collapsed: Vec<_> = self.collapsed.iter().copied().collect();
+        collapsed.sort_unstable();
+
+        collapsed
+            .into_iter()
+            .map(|index| self.tree.items[index].path.clone())
+            .collect()
     }
 
     /// Whether focus is in the search field or the tree.

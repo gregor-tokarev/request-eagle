@@ -104,6 +104,10 @@ fn saved_session_loads_back_the_same() {
             environments: false,
             flows: false,
             history: true,
+            collapsed: vec![
+                PathBuf::from("/collections/api"),
+                PathBuf::from("/collections/billing/Invoices"),
+            ],
         },
         tabs: vec![
             SavedTab::Request {
@@ -152,5 +156,6 @@ fn saved_session_loads_back_the_same() {
         serde_json::to_value(&session).unwrap(),
     );
     assert!(loaded.window.is_some());
+    assert_eq!(loaded.sidebar.collapsed.len(), 2);
     assert_eq!(loaded.tabs.len(), 6);
 }

@@ -165,3 +165,22 @@ fn empty_collections_and_folders_hold_a_placeholder_row() {
             .is_empty()
     );
 }
+
+#[test]
+fn collapsed_paths_find_their_collections_and_folders() {
+    let directory = tempfile::tempdir().unwrap();
+    let collection = directory.path().join("Empty API");
+    fs::create_dir_all(collection.join("Drafts")).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
+    let tree = CollectionTree::new(&collections);
+
+    // The folder's placeholder shares its path but is not a branch, and a
+    // deleted folder is left out.
+    let paths = HashSet::from([
+        collection.clone(),
+        collection.join("Drafts"),
+        collection.join("Deleted"),
+    ]);
+    assert_eq!(tree.branches_at(&paths), HashSet::from([0, 1]));
+    assert!(tree.branches_at(&HashSet::new()).is_empty());
+}
