@@ -130,3 +130,38 @@ fn tree_preserves_hierarchy_and_filters_collapsed_collections() {
     collapsed.clear();
     assert_eq!(tree.visible_rows(&collapsed, "").len(), tree.items.len());
 }
+
+#[test]
+fn empty_collections_and_folders_hold_a_placeholder_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let collection = directory.path().join("Empty API");
+    fs::create_dir_all(collection.join("Drafts")).unwrap();
+    let collections = CollectionRegistry::from_path(directory.path());
+    let tree = CollectionTree::new(&collections);
+
+    let kinds: Vec<_> = tree.items.iter().map(|item| item.kind).collect();
+    assert_eq!(
+        kinds,
+        [ItemKind::Collection, ItemKind::Folder, ItemKind::Empty]
+    );
+
+    // The collection holds its folder, so only the folder is empty.
+    let placeholder = &tree.items[2];
+    assert_eq!(placeholder.parent, Some(1));
+    assert_eq!(placeholder.depth, 2);
+    assert_eq!(placeholder.path, collection.join("Drafts"));
+    assert_eq!(tree.items[1].end, 3);
+
+    // The placeholder shares its folder's path; looking it up finds the folder.
+    assert_eq!(tree.index_of(&collection.join("Drafts")), Some(1));
+
+    // Collapsing the folder hides it. It has no text to match, but shows
+    // with a folder that matches, like the folder's requests would.
+    let collapsed = HashSet::from([1]);
+    assert_eq!(tree.visible_rows(&collapsed, ""), [0, 1]);
+    assert_eq!(tree.visible_rows(&HashSet::new(), "drafts"), [0, 1, 2]);
+    assert!(
+        tree.visible_rows(&HashSet::new(), "empty api drafts")
+            .is_empty()
+    );
+}

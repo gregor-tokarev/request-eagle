@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::Input,
-    menu::{ContextMenuExt, PopupMenuItem},
+    menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMenuItem},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -17,16 +17,36 @@ use super::{
 use collection::MovePlacement;
 use request_eagle_theme::{method_label, protocol_icon};
 
+/// How far each level of the tree is indented, in rems.
+const INDENT: f32 = 1.;
+/// The space before the first level, in rems.
+const INSET: f32 = 0.25;
+/// The column where branches show their chevron and requests leave a gap,
+/// so a request's method starts where a folder's icon does, in rems.
+const CHEVRON: f32 = 1.;
+
+type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+
 impl CollectionPanel {
     pub(super) fn row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let index = self.visible[row];
         let item = &self.tree.items[index];
+
+        if item.kind == ItemKind::Empty {
+            return self.empty_row(row, cx);
+        }
+
+        let delete_label = match item.kind {
+            ItemKind::Collection => "Delete collection",
+            ItemKind::Folder => "Delete folder",
+            ItemKind::Request(_) | ItemKind::Empty => "Delete request",
+        };
+        let menu = self.row_menu(index, delete_label, cx);
         let branch = item.is_branch();
         let expanded = !self.query.is_empty() || !self.collapsed.contains(&index);
         let selected = self.selected == Some(index);
         let theme = cx.theme();
-        let view = cx.entity().downgrade();
-        let drag_view = view.clone();
+        let drag_view = cx.entity().downgrade();
         let bounds = Rc::new(Cell::new(Bounds::default()));
         let row_bounds = bounds.clone();
         let drop_position = self
@@ -38,23 +58,11 @@ impl CollectionPanel {
             label: item.label.clone(),
             owner: cx.entity_id(),
         };
-        let path = item.path.clone();
-        let focus = self.focus.clone();
         let rename = self
             .rename
             .as_ref()
             .filter(|rename| rename.path == item.path);
-        let run_label = if item.kind == ItemKind::Collection {
-            "Run collection"
-        } else {
-            "Run folder"
-        };
-        let delete_label = match item.kind {
-            ItemKind::Collection => "Delete collection",
-            ItemKind::Folder => "Delete folder",
-            ItemKind::Request(_) => "Delete request",
-            ItemKind::Flow => "Delete flow",
-        };
+        let menu_open = self.menu_row.as_ref() == Some(&item.path);
 
         if self.pending_delete.as_ref() == Some(&item.path) {
             return div()
@@ -105,19 +113,24 @@ impl CollectionPanel {
                 .into_any_element();
         }
 
+        let menu_view = cx.entity().downgrade();
+        let menu_path = item.path.clone();
+
         div()
             .relative()
             .id(ElementId::Path(item.path.clone().into()))
             .debug_selector(move || format!("collection-row-{index}"))
+            .group("collection-row")
             .h_8()
             .w_full()
             .px_2()
             .child(
                 h_flex()
+                    .relative()
                     .size_full()
                     .rounded(cx.theme().radius_tokens().md)
-                    .pl(rems(0.5 + item.depth as f32))
-                    .pr_2()
+                    .pl(rems(INSET + INDENT * item.depth as f32))
+                    .pr_1()
                     .gap_1()
                     .text_sm()
                     .when(selected, |this| {
@@ -130,32 +143,16 @@ impl CollectionPanel {
                     .when(drop_position == Some(MovePlacement::Inside), |this| {
                         this.bg(theme.info.opacity(0.25))
                     })
-                    .child(match item.kind {
-                        ItemKind::Request(method) => {
-                            div().flex_none().child(method_label(method, cx))
-                        }
-                        ItemKind::Flow => div().flex_none().child(
-                            Icon::default()
-                                .path("icons/workflow.svg")
-                                .size(rems(0.875))
-                                .text_color(theme.chart_4),
-                        ),
-                        // Collections are the roots of the tree; folders only
-                        // group requests inside them.
-                        kind => {
-                            let icon = match (kind, expanded) {
-                                (ItemKind::Collection, _) => {
-                                    Icon::default().path("icons/package.svg")
-                                }
-                                (_, true) => Icon::new(IconName::FolderOpen),
-                                (_, false) => Icon::new(IconName::FolderClosed),
-                            };
-
-                            h_flex()
-                                .gap_1()
-                                .flex_none()
-                                .text_color(theme.muted_foreground)
-                                .child(
+                    .children(indent_guides(item.depth, cx))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(rems(CHEVRON))
+                            .flex()
+                            .justify_center()
+                            .text_color(theme.muted_foreground)
+                            .when(branch, |this| {
+                                this.child(
                                     Icon::new(if expanded {
                                         IconName::ChevronDown
                                     } else {
@@ -163,8 +160,26 @@ impl CollectionPanel {
                                     })
                                     .size_3(),
                                 )
-                                .child(icon.size(rems(0.875)))
+                            }),
+                    )
+                    .map(|this| match item.kind {
+                        ItemKind::Request(method) => {
+                            this.child(div().flex_none().mr_1().child(method_label(method, cx)))
                         }
+                        ItemKind::Folder => this.child(
+                            Icon::new(if expanded {
+                                IconName::FolderOpen
+                            } else {
+                                IconName::FolderClosed
+                            })
+                            .size(rems(0.875))
+                            .flex_none()
+                            .mr_1()
+                            .text_color(theme.muted_foreground),
+                        ),
+                        // Collections are the roots of the tree, so their
+                        // name is enough.
+                        ItemKind::Collection | ItemKind::Empty => this,
                     })
                     .child(if let Some(rename) = rename {
                         div()
@@ -188,13 +203,48 @@ impl CollectionPanel {
                             .child(item.label.clone())
                             .into_any_element()
                     })
-                    .when(branch, |this| {
+                    .when(rename.is_none(), |this| {
+                        // Shown while the row is hovered, selected or its
+                        // menu is open, as the context menu's twin.
                         this.child(
                             div()
+                                .id(("collection-row-menu-slot", index))
                                 .flex_none()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(item.request_count.to_string()),
+                                .when(!selected && !menu_open, |this| {
+                                    this.invisible()
+                                        .group_hover("collection-row", |this| this.visible())
+                                })
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(|_, _, cx| cx.stop_propagation())
+                                .child(
+                                    Button::new(("collection-row-menu", index))
+                                        .debug_selector(move || {
+                                            format!("collection-row-menu-{index}")
+                                        })
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Ellipsis)
+                                        .accessibility_label(format!(
+                                            "More actions for {}",
+                                            item.label
+                                        ))
+                                        .dropdown_menu_with_anchor(Anchor::TopRight, {
+                                            let menu = menu.clone();
+                                            move |popup, window, cx| menu(popup, window, cx)
+                                        })
+                                        .on_open_change(move |open, _, cx| {
+                                            let open = *open;
+                                            let path = menu_path.clone();
+                                            let _ = menu_view.update(cx, |this, cx| {
+                                                if open {
+                                                    this.menu_row = Some(path);
+                                                } else if this.menu_row.as_ref() == Some(&path) {
+                                                    this.menu_row = None;
+                                                }
+                                                cx.notify();
+                                            });
+                                        }),
+                                ),
                         )
                     }),
             )
@@ -289,173 +339,261 @@ impl CollectionPanel {
                     }
                 }),
             )
-            .context_menu(move |menu, _, cx| {
-                // Resolve shortcuts in the tree's key context. Clicks still run
-                // the item handlers, which target the clicked row's path.
-                let menu = menu.action_context(focus.clone());
-                let rename_view = view.clone();
-                let delete_view = view.clone();
-                let path = path.clone();
-                let rename_path = path.clone();
-                let delete_path = path.clone();
-                let copied_path = path.to_string_lossy().into_owned();
-
-                let menu = if branch {
-                    let run_view = view.clone();
-                    let run_path = path.clone();
-                    let request_view = view.clone();
-                    let request_parent = path.clone();
-                    let grpc_view = view.clone();
-                    let grpc_parent = path.clone();
-                    let websocket_view = view.clone();
-                    let websocket_parent = path.clone();
-                    let flow_view = view.clone();
-                    let flow_parent = path.clone();
-                    let folder_view = view.clone();
-                    let folder_parent = path.clone();
-
-                    // New requests show their protocol icons, as in the tab
-                    // bar's new tab menu, and folders their tree icon.
-                    menu.item(
-                        PopupMenuItem::new(run_label)
-                            .icon(
-                                Icon::default()
-                                    .path("icons/square-play.svg")
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                            .on_click(move |_, window, cx| {
-                                let view = run_view.clone();
-                                let path = run_path.clone();
-                                window.defer(cx, move |_, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        if let Some(event) = this
-                                            .tree
-                                            .index_of(&path)
-                                            .and_then(|index| this.run_event(index))
-                                        {
-                                            cx.emit(event);
-                                        }
-                                    });
-                                });
-                            }),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("New Request")
-                            .icon(protocol_icon("HTTP", cx))
-                            .on_click(move |_, window, cx| {
-                                let view = request_view.clone();
-                                let parent = request_parent.clone();
-                                window.defer(cx, move |window, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.create_request(&parent, window, cx)
-                                    });
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("New gRPC Request")
-                            .icon(protocol_icon("gRPC", cx))
-                            .on_click(move |_, window, cx| {
-                                let view = grpc_view.clone();
-                                let parent = grpc_parent.clone();
-                                window.defer(cx, move |window, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.create_grpc_request(&parent, window, cx)
-                                    });
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("New WebSocket")
-                            .icon(protocol_icon("WS", cx))
-                            .on_click(move |_, window, cx| {
-                                let view = websocket_view.clone();
-                                let parent = websocket_parent.clone();
-                                window.defer(cx, move |window, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.create_websocket(&parent, window, cx)
-                                    });
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("New Flow")
-                            .icon(
-                                Icon::default()
-                                    .path("icons/workflow.svg")
-                                    .text_color(cx.theme().chart_4),
-                            )
-                            .on_click(move |_, window, cx| {
-                                let view = flow_view.clone();
-                                let parent = flow_parent.clone();
-                                window.defer(cx, move |window, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.create_flow(&parent, window, cx)
-                                    });
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("New Folder")
-                            .icon(
-                                Icon::new(IconName::FolderClosed)
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                            .on_click(move |_, window, cx| {
-                                let view = folder_view.clone();
-                                let parent = folder_parent.clone();
-                                window.defer(cx, move |window, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.create_folder(&parent, window, cx)
-                                    });
-                                });
-                            }),
-                    )
-                    .separator()
-                } else {
-                    menu
-                };
-
-                menu.item(
-                    PopupMenuItem::new("Rename")
-                        .action(Box::new(RenameItem))
-                        .on_click(move |_, window, cx| {
-                            let view = rename_view.clone();
-                            let path = rename_path.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    if let Some(index) = this.tree.index_of(&path) {
-                                        this.begin_rename(index, window, cx);
-                                    }
-                                });
-                            });
-                        }),
-                )
-                .item(
-                    PopupMenuItem::new("Open in Finder")
-                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
-                )
-                .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copied_path.clone()));
-                }))
-                .separator()
-                .item(
-                    PopupMenuItem::new(delete_label)
-                        .action(Box::new(DeleteItem))
-                        .on_click(move |_, window, cx| {
-                            let view = delete_view.clone();
-                            let path = delete_path.clone();
-                            window.defer(cx, move |window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    if let Some(index) = this.tree.index_of(&path) {
-                                        this.request_delete(index, window, cx);
-                                    }
-                                });
-                            });
-                        }),
-                )
-            })
+            .context_menu(move |popup, window, cx| menu(popup, window, cx))
             .into_any_element()
     }
+
+    /// Stands in for the contents of an empty collection or folder, with a
+    /// shortcut to its first request. Dropping an item on it moves the item
+    /// into the branch.
+    fn empty_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+        let index = self.visible[row];
+        let item = &self.tree.items[index];
+        let parent = item.parent.map(|parent| &self.tree.items[parent]);
+        let collection = parent.is_some_and(|parent| parent.kind == ItemKind::Collection);
+        let parent_path = item.path.clone();
+        let theme = cx.theme();
+        let dropping = self
+            .drop_target
+            .is_some_and(|(target, _)| target == index && cx.has_active_drag());
+
+        div()
+            .id(("collection-empty", index))
+            .debug_selector(move || format!("collection-row-{index}"))
+            .h_8()
+            .w_full()
+            .px_2()
+            .child(
+                h_flex()
+                    .relative()
+                    .size_full()
+                    .rounded(theme.radius_tokens().md)
+                    .pl(rems(INSET + INDENT * item.depth as f32 + CHEVRON))
+                    .pr_1()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .when(dropping, |this| this.bg(theme.info.opacity(0.25)))
+                    .children(indent_guides(item.depth, cx))
+                    // In a narrow sidebar the message gives way, so the
+                    // shortcut stays in reach.
+                    .child(div().min_w_0().ml_1().truncate().child(if collection {
+                        "This collection is empty."
+                    } else {
+                        "This folder is empty."
+                    }))
+                    .child(
+                        div().flex_none().child(
+                            Button::new(("collection-empty-add", index))
+                                .debug_selector(move || format!("collection-empty-add-{index}"))
+                                .link()
+                                .xsmall()
+                                .label("Add a request")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.create_request(&parent_path, window, cx)
+                                })),
+                        ),
+                    ),
+            )
+            .on_drag_move(
+                cx.listener(move |this, event: &DragMoveEvent<DraggedItem>, _, cx| {
+                    this.drag_over_row(index, event, cx);
+                }),
+            )
+            .on_drop(cx.listener(move |this, drag: &DraggedItem, window, cx| {
+                if drag.owner != cx.entity_id() {
+                    return;
+                }
+                if let Some(placement) =
+                    this.drop_placement(index, drag, Bounds::default(), window.mouse_position())
+                {
+                    this.move_item(&drag.path, index, placement, window, cx);
+                }
+            }))
+            .into_any_element()
+    }
+
+    /// What right-clicking a row or its "…" button offers.
+    fn row_menu(
+        &self,
+        index: usize,
+        delete_label: &'static str,
+        cx: &mut Context<Self>,
+    ) -> MenuBuilder {
+        let item = &self.tree.items[index];
+        let branch = item.is_branch();
+        let view = cx.entity().downgrade();
+        let focus = self.focus.clone();
+        let path = item.path.clone();
+        let run_label = if item.kind == ItemKind::Collection {
+            "Run collection"
+        } else {
+            "Run folder"
+        };
+
+        Rc::new(move |menu, _, cx| {
+            // Resolve shortcuts in the tree's key context. Clicks still run
+            // the item handlers, which target the clicked row's path.
+            let menu = menu.action_context(focus.clone());
+            let rename_view = view.clone();
+            let delete_view = view.clone();
+            let path = path.clone();
+            let rename_path = path.clone();
+            let delete_path = path.clone();
+            let copied_path = path.to_string_lossy().into_owned();
+
+            let menu = if branch {
+                let run_view = view.clone();
+                let run_path = path.clone();
+                let request_view = view.clone();
+                let request_parent = path.clone();
+                let grpc_view = view.clone();
+                let grpc_parent = path.clone();
+                let websocket_view = view.clone();
+                let websocket_parent = path.clone();
+                let folder_view = view.clone();
+                let folder_parent = path.clone();
+
+                // New requests show their protocol icons, as in the tab
+                // bar's new tab menu, and folders their tree icon.
+                menu.item(
+                    PopupMenuItem::new(run_label)
+                        .icon(
+                            Icon::default()
+                                .path("icons/square-play.svg")
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .on_click(move |_, window, cx| {
+                            let view = run_view.clone();
+                            let path = run_path.clone();
+                            window.defer(cx, move |_, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    if let Some(event) = this
+                                        .tree
+                                        .index_of(&path)
+                                        .and_then(|index| this.run_event(index))
+                                    {
+                                        cx.emit(event);
+                                    }
+                                });
+                            });
+                        }),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("New Request")
+                        .icon(protocol_icon("HTTP", cx))
+                        .on_click(move |_, window, cx| {
+                            let view = request_view.clone();
+                            let parent = request_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_request(&parent, window, cx)
+                                });
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("New gRPC Request")
+                        .icon(protocol_icon("gRPC", cx))
+                        .on_click(move |_, window, cx| {
+                            let view = grpc_view.clone();
+                            let parent = grpc_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_grpc_request(&parent, window, cx)
+                                });
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("New WebSocket")
+                        .icon(protocol_icon("WS", cx))
+                        .on_click(move |_, window, cx| {
+                            let view = websocket_view.clone();
+                            let parent = websocket_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.create_websocket(&parent, window, cx)
+                                });
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("New Folder")
+                        .icon(
+                            Icon::new(IconName::FolderClosed)
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .on_click(move |_, window, cx| {
+                            let view = folder_view.clone();
+                            let parent = folder_parent.clone();
+                            window.defer(cx, move |window, cx| {
+                                let _ = view
+                                    .update(cx, |this, cx| this.create_folder(&parent, window, cx));
+                            });
+                        }),
+                )
+                .separator()
+            } else {
+                menu
+            };
+
+            menu.item(
+                PopupMenuItem::new("Rename")
+                    .action(Box::new(RenameItem))
+                    .on_click(move |_, window, cx| {
+                        let view = rename_view.clone();
+                        let path = rename_path.clone();
+                        window.defer(cx, move |window, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                if let Some(index) = this.tree.index_of(&path) {
+                                    this.begin_rename(index, window, cx);
+                                }
+                            });
+                        });
+                    }),
+            )
+            .item(
+                PopupMenuItem::new("Open in Finder")
+                    .on_click(move |_, _, cx| cx.reveal_path(&path)),
+            )
+            .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copied_path.clone()));
+            }))
+            .separator()
+            .item(
+                PopupMenuItem::new(delete_label)
+                    .action(Box::new(DeleteItem))
+                    .on_click(move |_, window, cx| {
+                        let view = delete_view.clone();
+                        let path = delete_path.clone();
+                        window.defer(cx, move |window, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                if let Some(index) = this.tree.index_of(&path) {
+                                    this.request_delete(index, window, cx);
+                                }
+                            });
+                        });
+                    }),
+            )
+        })
+    }
+}
+
+/// A line under the chevron of each branch that holds the row, so nesting
+/// reads at a glance.
+fn indent_guides(depth: usize, cx: &App) -> impl Iterator<Item = AnyElement> + use<> {
+    let color = cx.theme().sidebar_border;
+
+    (0..depth).map(move |level| {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(rems(INSET + INDENT * level as f32 + CHEVRON / 2.))
+            .w(px(1.))
+            .bg(color)
+            .into_any_element()
+    })
 }

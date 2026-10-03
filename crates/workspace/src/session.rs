@@ -141,6 +141,7 @@ pub(crate) struct SavedSidebar {
     pub(crate) visible: bool,
     pub(crate) collections: bool,
     pub(crate) environments: bool,
+    pub(crate) flows: bool,
     pub(crate) history: bool,
 }
 
@@ -150,6 +151,7 @@ impl Default for SavedSidebar {
             visible: true,
             collections: true,
             environments: true,
+            flows: true,
             history: true,
         }
     }
@@ -174,9 +176,15 @@ pub(crate) enum SavedTab {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         draft: Option<request::Request>,
     },
-    /// A saved flow, with its changes while they are not saved.
+    /// A saved flow, with its changes while they are not saved. Flow tabs of
+    /// 0.1.22, whose flows were in collections, read with no path and stay
+    /// closed, rather than losing the other tabs.
     Flow {
-        file: SavedFile,
+        #[serde(default)]
+        path: PathBuf,
+        /// Tells the flow apart from another one saved at the same path later.
+        #[serde(default)]
+        id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         draft: Option<Box<flow::Flow>>,
     },

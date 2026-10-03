@@ -62,7 +62,8 @@ impl CollectionPanel {
     ) -> Option<MovePlacement> {
         let item = &self.tree.items[index];
         let y = position.y - bounds.top();
-        let placement = if item.kind == ItemKind::Collection {
+        // Dropping on an empty branch's placeholder moves into the branch.
+        let placement = if matches!(item.kind, ItemKind::Collection | ItemKind::Empty) {
             MovePlacement::Inside
         } else if item.is_branch() {
             if y < bounds.size.height / 4. {

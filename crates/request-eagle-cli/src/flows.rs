@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result, anyhow, bail};
-use collection::{CollectionRegistry, Entry};
-use flow::{BlockKind, BlockType, Flow, RunEvent, RunOptions, SavedRequest};
+use collection::CollectionRegistry;
+use flow::{BlockKind, BlockType, Flow, FlowLibrary, RunEvent, RunOptions, SavedRequest};
 use request::{Request, RequestExecutor};
 use serde_json::{Map, Value, json};
 use std::{
@@ -10,14 +10,17 @@ use std::{
     time::Duration,
 };
 
-use crate::collections::{load, lock_for_edit};
+use crate::collections::{load, lock_for_edit, read};
 use crate::commands::Command;
 
 /// The most Log values a run returns. Later ones are counted, not returned.
 const MAX_LOGS: usize = 1000;
 
+/// Flows are saved in `directory`; their HTTP Request blocks send the saved
+/// requests of the collections in `collections`.
 pub async fn dispatch(
-    root: &Path,
+    directory: &Path,
+    collections: &Path,
     preferences: &preferences::PreferencesFile,
     cookies: &Path,
     command: Command,
@@ -29,50 +32,79 @@ pub async fn dispatch(
             input,
             bindings,
         } => evaluate(&expression, input, bindings),
-        Command::FlowsList { collection, query } => {
-            let registry = load(root)?;
-            if let Some(path) = &collection
-                && !registry
-                    .collections()
-                    .iter()
-                    .any(|entry| entry.path == *path)
-            {
-                bail!("Unknown collection path");
-            }
-
+        Command::FlowsList { query } => {
+            // Flows that 0.1.22 saved in collections are listed too.
+            read(collections, directory);
+            let library = load_library(directory)?;
             let query = query.to_lowercase();
-            let mut output = Vec::new();
-            for entry in registry
-                .collections()
+
+            let flows: Vec<Value> = library
+                .flows()
                 .iter()
-                .filter(|entry| collection.as_ref().is_none_or(|path| *path == entry.path))
-            {
-                list_flows(&entry.entries, &entry.path, &query, &mut output);
-            }
-            Ok(json!(output))
+                .filter(|saved| saved.name.to_lowercase().contains(&query))
+                .map(|saved| {
+                    json!({
+                        "path": saved.path, "id": saved.id, "name": saved.name,
+                        "blocks": saved.flow.blocks.len(),
+                    })
+                })
+                .collect();
+            Ok(json!(flows))
         }
+        // Loading the collections first moves the flows that 0.1.22 saved
+        // in them, so the flows read next include them.
         Command::FlowsGet { path } => {
-            let registry = load(root)?;
-            flow_json(&registry, &path)
+            let registry = load(collections, directory)?;
+            let library = load_library(directory)?;
+            flow_json(&library, &registry, &path)
         }
-        Command::FlowsCreate { parent, name, flow } => {
-            let _lock = lock_for_edit(root)?;
-            let mut registry = load(root)?;
+        Command::FlowsCreate { name, flow } => {
+            let _lock = lock_for_edit(directory)?;
+            let registry = load(collections, directory)?;
+            let mut library = load_library(directory)?;
+
             let flow = flow.unwrap_or_else(Flow::starter);
             flow.check().map_err(|error| anyhow!(error))?;
-            let path = registry.create_flow(&parent, &name, flow)?;
-            flow_json(&registry, &path)
+            let path = library.create(&name, flow)?;
+            flow_json(&library, &registry, &path)
         }
         Command::FlowsUpdate {
             path,
             expected_id,
             flow,
         } => {
-            let _lock = lock_for_edit(root)?;
-            let mut registry = load(root)?;
+            let _lock = lock_for_edit(directory)?;
+            let registry = load(collections, directory)?;
+            let mut library = load_library(directory)?;
+
             flow.check().map_err(|error| anyhow!(error))?;
-            registry.update_flow(&path, &expected_id, flow)?;
-            flow_json(&registry, &path)
+            library.update(&path, &expected_id, flow)?;
+            flow_json(&library, &registry, &path)
+        }
+        Command::FlowsRename {
+            path,
+            expected_id,
+            name,
+        } => {
+            let _lock = lock_for_edit(directory)?;
+            read(collections, directory);
+            let mut library = load_library(directory)?;
+
+            library.rename(&path, &expected_id, &name)?;
+            let saved = library.get(&path).context("Renamed flow was not found")?;
+            Ok(json!({"path": saved.path, "id": saved.id, "name": saved.name}))
+        }
+        Command::FlowsDelete { path, confirm } => {
+            if !confirm {
+                bail!("Set confirm=true to permanently delete this flow");
+            }
+
+            let _lock = lock_for_edit(directory)?;
+            read(collections, directory);
+            let mut library = load_library(directory)?;
+
+            library.delete(&path)?;
+            Ok(json!({"path": path}))
         }
         Command::FlowsRun {
             path,
@@ -82,7 +114,8 @@ pub async fn dispatch(
             timeout_ms,
         } => {
             run(
-                root,
+                directory,
+                collections,
                 preferences,
                 cookies,
                 &path,
@@ -97,30 +130,37 @@ pub async fn dispatch(
     }
 }
 
-fn list_flows(items: &[Entry], collection: &Path, query: &str, output: &mut Vec<Value>) {
-    for entry in items {
-        match entry {
-            Entry::Directory(folder) => list_flows(&folder.entries, collection, query, output),
-            Entry::Flow(flow) => {
-                if query.is_empty() || flow.name.to_lowercase().contains(query) {
-                    output.push(json!({
-                        "path": flow.path, "id": flow.id, "name": flow.name,
-                        "blocks": flow.flow.blocks.len(), "collection": collection,
-                    }));
-                }
-            }
-            Entry::File(_) => {}
-        }
+fn load_library(directory: &Path) -> Result<FlowLibrary> {
+    let library = FlowLibrary::load(directory);
+    // Like collections, the app leaves unreadable flows out, so the CLI is
+    // where agents learn which files to fix. Commands must not act on an
+    // incomplete view of the flows.
+    if !library.skipped().is_empty() {
+        let files = library
+            .skipped()
+            .iter()
+            .map(|skipped| format!("{}\n{}", skipped.path.display(), skipped.error))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        bail!("Could not load these flows. Fix or remove them first.\n\n{files}");
     }
+
+    for saved in library.flows() {
+        saved
+            .path
+            .to_str()
+            .context("Flow paths must be valid UTF-8")?;
+    }
+    Ok(library)
 }
 
 /// The flow with what an agent needs to connect its HTTP Request blocks:
 /// each request's name, URL and the variables that are its inputs.
-fn flow_json(registry: &CollectionRegistry, path: &Path) -> Result<Value> {
-    let entry = registry.flow(path).context("Unknown saved flow path")?;
+fn flow_json(library: &FlowLibrary, registry: &CollectionRegistry, path: &Path) -> Result<Value> {
+    let saved = library.get(path).context("Unknown saved flow path")?;
     let mut requests = Map::new();
 
-    for block in &entry.flow.blocks {
+    for block in &saved.flow.blocks {
         if let BlockKind::HttpRequest { request: id } = &block.kind
             && let Some((collection, file)) = registry.request_by_id(id)
         {
@@ -138,8 +178,8 @@ fn flow_json(registry: &CollectionRegistry, path: &Path) -> Result<Value> {
     }
 
     Ok(json!({
-        "path": entry.path, "id": entry.id, "name": entry.name,
-        "flow": entry.flow, "requests": requests,
+        "path": saved.path, "id": saved.id, "name": saved.name,
+        "flow": saved.flow, "requests": requests,
     }))
 }
 
@@ -245,7 +285,8 @@ impl Report {
 
 #[allow(clippy::too_many_arguments)]
 async fn run(
-    root: &Path,
+    directory: &Path,
+    collections: &Path,
     preferences: &preferences::PreferencesFile,
     cookies: &Path,
     path: &Path,
@@ -254,8 +295,9 @@ async fn run(
     variables: HashMap<String, String>,
     timeout_ms: Option<u64>,
 ) -> Result<Value> {
-    let registry = load(root)?;
-    let entry = registry.flow(path).context("Unknown saved flow path")?;
+    let registry = load(collections, directory)?;
+    let library = load_library(directory)?;
+    let entry = library.get(path).context("Unknown saved flow path")?;
     entry.flow.check().map_err(|error| anyhow!(error))?;
 
     let mut requests = HashMap::new();

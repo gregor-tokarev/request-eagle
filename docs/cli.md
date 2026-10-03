@@ -53,9 +53,9 @@ script results.
   changes. There is no live synchronization.
 - `requests.update` replaces the complete request. Read it first and preserve
   the fields you do not intend to change.
-- When a collection file can't be read, such as one with a merge conflict,
-  every command fails and lists each such file with the reason. The app only
-  shows how many files it left out, so fix them from here.
+- When a collection or flow file can't be read, such as one with a merge
+  conflict, the commands that use them fail and list each such file with the
+  reason. The app only shows how many files it left out, so fix them from here.
 - Headers, query parameters and gRPC metadata are `[key, value]` pairs. A row
   written as `{"key": …, "value": …, "disabled": true, "description": …}` is
   kept with the request but not sent.
@@ -98,10 +98,12 @@ script results.
   with `settings.request` and `"cookie_jar": false`. An HTTP request with
   `"send_cookies": false` sends none of the jar's cookies, while its responses
   still store theirs.
-- Flows have their own commands. `flows.blocks` describes every block type
-  with its inputs, outputs and settings; `flows.get` also lists the variables
-  of each request a flow's HTTP Request blocks send, which are their inputs.
-  `flows.update` replaces the complete flow and checks its connections.
+- Flows have their own commands and are saved apart from collections.
+  `flows.blocks` describes every block type with its inputs, outputs and
+  settings; `flows.get` also lists the variables of each request a flow's HTTP
+  Request blocks send, which are their inputs. `flows.update` replaces the
+  complete flow and checks its connections. `flows.rename` keeps the flow's
+  path, and `flows.delete` needs `confirm: true`.
   `flows.run` takes `input` for its Start blocks and returns what its Output
   blocks received, each block's last run and the Log blocks' values. A flow
   whose requests have scripts runs only with `trust_scripts: true`. A run that
@@ -110,5 +112,7 @@ script results.
   [flows guide](flows.md).
 - `fql.evaluate` evaluates FQL, the JSONata-based language of Evaluate
   blocks, against JSON `input`, to try an expression before saving it.
-- Data lives in `~/.request-eagle`. `--data-dir`, `--collections-dir`, and
-  `REQUEST_EAGLE_COLLECTIONS_DIR` select another location.
+- Data lives in `~/.request-eagle`, with collections in `collections` and
+  flows in `flows`. `--data-dir` selects another location for all of it;
+  `--collections-dir` and `REQUEST_EAGLE_COLLECTIONS_DIR` move only the
+  collections.

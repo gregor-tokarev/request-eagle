@@ -71,7 +71,6 @@ fn collect(
                 let location = format!("{location} › {}", folder.name);
                 collect(collection, &folder.entries, &location, requests);
             }
-            Entry::Flow(_) => {}
         }
     }
 }

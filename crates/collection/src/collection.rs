@@ -12,8 +12,8 @@ use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
 use crate::toml_merge::merge_table;
-use crate::{CollectionEditError, DirEntry, Entry, FileEntry, FlowEntry, SkippedPath};
-use request::{Auth, Request, RequestScripts};
+use crate::{CollectionEditError, DirEntry, Entry, FileEntry, SkippedPath};
+use request::{Auth, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
 const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
@@ -251,7 +251,7 @@ fn load_directory(
                 .and_then(|extension| extension.to_str())
                 == Some("toml")
         {
-            load_item(&child_path)
+            load_file(&child_path).map(Entry::File)
         } else {
             continue;
         };
@@ -275,49 +275,6 @@ fn load_directory(
         name: file_name(path),
         entries,
     })
-}
-
-/// A request or a flow, told apart by the `request` or `flow` table of its file.
-pub(crate) fn load_item(path: &Path) -> Result<Entry, CollectionLoadError> {
-    #[derive(Deserialize)]
-    struct Item {
-        id: String,
-        name: String,
-        schema_version: u8,
-        request: Option<Request>,
-        flow: Option<flow::Flow>,
-    }
-
-    let raw_content = fs::read_to_string(path).map_err(|source| CollectionLoadError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let item: Item = toml::from_str(&raw_content).map_err(|source| CollectionLoadError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    match (item.request, item.flow) {
-        (Some(request), _) => Ok(Entry::File(FileEntry {
-            raw_content,
-            path: path.to_path_buf(),
-            id: item.id,
-            name: item.name,
-            schema_version: item.schema_version,
-            request,
-        })),
-        (None, Some(flow)) => Ok(Entry::Flow(FlowEntry {
-            path: path.to_path_buf(),
-            id: item.id,
-            name: item.name,
-            schema_version: item.schema_version,
-            flow,
-        })),
-        (None, None) => Err(CollectionLoadError::Parse {
-            path: path.to_path_buf(),
-            source: <toml::de::Error as serde::de::Error>::missing_field("request"),
-        }),
-    }
 }
 
 pub(crate) fn load_file(path: &Path) -> Result<FileEntry, CollectionLoadError> {
@@ -436,22 +393,6 @@ pub(crate) fn save_file(entry: &mut FileEntry) -> Result<(), CollectionSaveError
     entry.raw_content = raw_content;
 
     Ok(())
-}
-
-/// Flows are written by the app and the CLI, so their file is written whole.
-pub(crate) fn save_flow(entry: &FlowEntry) -> Result<(), CollectionSaveError> {
-    let content =
-        toml::to_string_pretty(entry).map_err(|source| CollectionSaveError::Serialize {
-            path: entry.path.clone(),
-            source,
-        })?;
-
-    write_file_atomically(&entry.path, content.as_bytes()).map_err(|source| {
-        CollectionSaveError::Write {
-            path: entry.path.clone(),
-            source,
-        }
-    })
 }
 
 /// Serializes a request file. Header, parameter and metadata rows stay one

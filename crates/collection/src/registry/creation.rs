@@ -11,10 +11,7 @@ use uuid::Uuid;
 use super::catalog::ENVIRONMENT_FILE_NAME;
 use super::mutations::find_entry;
 use crate::collection::{is_reserved, render};
-use crate::{
-    Collection, CollectionEditError, CollectionRegistry, CollectionSaveError, DirEntry, Entry,
-    FileEntry, FlowEntry,
-};
+use crate::{Collection, CollectionEditError, CollectionRegistry, DirEntry, Entry, FileEntry};
 use request::{HttpRequest, Method, Request};
 
 impl CollectionRegistry {
@@ -79,59 +76,6 @@ impl CollectionRegistry {
         name: &str,
         request: Request,
     ) -> Result<PathBuf, CollectionEditError> {
-        let id = Uuid::new_v4().to_string();
-
-        self.create_item(parent, name, |path, name| {
-            let mut entry = FileEntry {
-                path,
-                raw_content: String::new(),
-                id: id.clone(),
-                name,
-                schema_version: 1,
-                request: request.clone(),
-            };
-            entry.raw_content = render(&entry)?.to_string();
-
-            Ok((entry.raw_content.clone(), Entry::File(entry)))
-        })
-    }
-
-    pub fn create_flow(
-        &mut self,
-        parent: &Path,
-        name: &str,
-        flow: flow::Flow,
-    ) -> Result<PathBuf, CollectionEditError> {
-        let id = Uuid::new_v4().to_string();
-
-        self.create_item(parent, name, |path, name| {
-            let entry = FlowEntry {
-                path,
-                id: id.clone(),
-                name,
-                schema_version: 1,
-                flow: flow.clone(),
-            };
-            let content = toml::to_string_pretty(&entry).map_err(|source| {
-                CollectionSaveError::Serialize {
-                    path: entry.path.clone(),
-                    source,
-                }
-            })?;
-
-            Ok((content, Entry::Flow(entry)))
-        })
-    }
-
-    /// Write a new request or flow file named after `name`, numbering the
-    /// name when it is taken. `item` gives the file's content and entry for
-    /// the path and name chosen.
-    fn create_item(
-        &mut self,
-        parent: &Path,
-        name: &str,
-        item: impl Fn(PathBuf, String) -> Result<(String, Entry), CollectionSaveError>,
-    ) -> Result<PathBuf, CollectionEditError> {
         let name = name.trim();
         if name.is_empty() || name.chars().any(char::is_control) {
             return Err(CollectionEditError::InvalidName);
@@ -141,6 +85,7 @@ impl CollectionRegistry {
         let entries = self
             .entries_mut(parent)
             .ok_or(CollectionEditError::NotFound)?;
+        let id = Uuid::new_v4().to_string();
 
         for number in 1.. {
             let name = if number == 1 {
@@ -153,14 +98,22 @@ impl CollectionRegistry {
             if is_reserved(&reserved, &path) {
                 continue;
             }
-            let (content, entry) = item(path.clone(), name)?;
+            let mut entry = FileEntry {
+                path: path.clone(),
+                raw_content: String::new(),
+                id: id.clone(),
+                name,
+                schema_version: 1,
+                request: request.clone(),
+            };
+            entry.raw_content = render(&entry)?.to_string();
             let mut file = match fs::File::create_new(&path) {
                 Ok(file) => file,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error.into()),
             };
 
-            if let Err(error) = file.write_all(content.as_bytes()) {
+            if let Err(error) = file.write_all(entry.raw_content.as_bytes()) {
                 drop(file);
                 let _ = fs::remove_file(&path);
                 return Err(error.into());
@@ -168,7 +121,7 @@ impl CollectionRegistry {
 
             drop(file);
             persist_created_order(parent, entries, &path, false)?;
-            entries.push(entry);
+            entries.push(Entry::File(entry));
             return Ok(path);
         }
 

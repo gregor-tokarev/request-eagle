@@ -14,6 +14,7 @@ actions!(
         OpenEnvironmentSelector,
         NewCollection,
         ImportCollection,
+        NewFlow,
         SaveRequest,
         FocusUrl,
         // Keep the existing action name so saved keyboard shortcuts continue
@@ -301,6 +302,17 @@ pub(crate) fn init(cx: &mut App) {
         cx,
     )
     .expect("default import collection keybinding should be valid");
+
+    keybindings_service::register(
+        NewFlow,
+        "New flow",
+        "Create a flow, open it and name it in the sidebar.",
+        "Flows",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("new flow action should register");
 
     keybindings_service::register(
         OpenSettings,

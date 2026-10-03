@@ -6,8 +6,27 @@ use std::{fs, path::Path};
 
 use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedRequest};
 
-pub fn load(root: &Path) -> Result<CollectionRegistry> {
+/// The collections in `root`, after moving the flows that 0.1.22 saved in
+/// them, which they cannot load, to the flows directory, like the app.
+pub fn read(root: &Path, flows: &Path) -> CollectionRegistry {
     let registry = CollectionRegistry::from_path(root);
+    let moved = flow::move_flows_out_of_collections(
+        registry
+            .skipped()
+            .iter()
+            .map(|skipped| skipped.path.as_path()),
+        flows,
+    );
+
+    if moved.is_empty() {
+        registry
+    } else {
+        CollectionRegistry::from_path(root)
+    }
+}
+
+pub fn load(root: &Path, flows: &Path) -> Result<CollectionRegistry> {
+    let registry = read(root, flows);
     // The app leaves unreadable files out and only counts them, so the CLI
     // is where agents learn which files to fix and why. Commands must not act
     // on an incomplete view of the collections.
@@ -25,8 +44,9 @@ pub fn load(root: &Path) -> Result<CollectionRegistry> {
 }
 
 pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
-    // Serialize CLI edits before loading the registry, so parallel invocations
-    // cannot save stale ordering or act on a moved/deleted snapshot.
+    // Serialize CLI edits before loading the collections or flows in `root`,
+    // so parallel invocations cannot save stale ordering or act on a
+    // moved/deleted snapshot.
     fs::create_dir_all(root)?;
     let lock = fs::OpenOptions::new()
         // Windows only locks files opened for writing; appending is not enough.
@@ -35,11 +55,11 @@ pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
         .truncate(false)
         .open(root.join(".cli.lock"))?;
     lock.try_lock()
-        .context("Collections are being used by another CLI command; retry")?;
+        .context("Saved data is being changed by another CLI command; retry")?;
     Ok(lock)
 }
 
-pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
+pub fn dispatch(root: &Path, flows: &Path, command: Command) -> Result<Value> {
     let _lock = match &command {
         Command::CollectionsList {}
         | Command::CollectionsGet { .. }
@@ -47,7 +67,7 @@ pub fn dispatch(root: &Path, command: Command) -> Result<Value> {
         | Command::RequestsGet { .. } => None,
         _ => Some(lock_for_edit(root)?),
     };
-    let mut registry = load(root)?;
+    let mut registry = load(root, flows)?;
 
     let path = match command {
         Command::CollectionsList {} => return Ok(json!(registry.collections().iter().map(|collection| {
@@ -138,7 +158,6 @@ fn entries(items: &[Entry]) -> Vec<Value> {
             value["kind"] = json!("request");
             value
         }
-        Entry::Flow(flow) => json!({"kind": "flow", "path": flow.path, "id": flow.id, "name": flow.name}),
         Entry::Directory(folder) => json!({"kind": "folder", "path": folder.path, "name": folder.name, "entries": entries(&folder.entries)}),
     }).collect()
 }
@@ -147,7 +166,6 @@ fn list_requests(items: &[Entry], collection: &Path, query: &str, output: &mut V
     for entry in items {
         match entry {
             Entry::Directory(folder) => list_requests(&folder.entries, collection, query, output),
-            Entry::Flow(_) => {}
             Entry::File(file) => {
                 let value = match &file.request {
                     Request::Http(request) => {

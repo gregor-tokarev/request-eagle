@@ -59,6 +59,29 @@ fn sidebar_parts_left_out_of_the_file_are_shown() {
 }
 
 #[test]
+fn flow_tabs_of_flows_in_collections_keep_the_other_tabs() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session.json");
+    std::fs::write(
+        &path,
+        r#"{ "tabs": [
+            { "kind": "flow", "file": { "path": "/collections/api/Checkout.toml", "id": "f1", "collection": "/collections/api" } },
+            { "kind": "cookies" }
+        ], "selected_tab": 1 }"#,
+    )
+    .unwrap();
+
+    let session = Session::load(path);
+
+    assert!(matches!(
+        &session.tabs[..],
+        [SavedTab::Flow { path, id, draft: None }, SavedTab::Cookies]
+            if path.as_os_str().is_empty() && id.is_empty()
+    ));
+    assert_eq!(session.selected_tab, Some(1));
+}
+
+#[test]
 fn saved_session_loads_back_the_same() {
     let directory = tempfile::tempdir().unwrap();
     // The directory is created on the first save.
@@ -79,6 +102,7 @@ fn saved_session_loads_back_the_same() {
             visible: false,
             collections: true,
             environments: false,
+            flows: false,
             history: true,
         },
         tabs: vec![
@@ -107,6 +131,11 @@ fn saved_session_loads_back_the_same() {
             SavedTab::Collection {
                 path: PathBuf::from("/collections/api"),
             },
+            SavedTab::Flow {
+                path: PathBuf::from("/flows/Checkout.toml"),
+                id: "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f".into(),
+                draft: Some(Box::new(flow::Flow::starter())),
+            },
             SavedTab::Environment {
                 name: "Staging".into(),
             },
@@ -123,5 +152,5 @@ fn saved_session_loads_back_the_same() {
         serde_json::to_value(&session).unwrap(),
     );
     assert!(loaded.window.is_some());
-    assert_eq!(loaded.tabs.len(), 5);
+    assert_eq!(loaded.tabs.len(), 6);
 }

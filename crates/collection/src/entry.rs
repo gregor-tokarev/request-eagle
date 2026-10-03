@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug)]
 pub enum Entry {
     File(FileEntry),
-    Flow(FlowEntry),
     Directory(DirEntry),
 }
 
@@ -24,20 +23,6 @@ pub struct FileEntry {
     pub schema_version: u8,
 
     pub request: Request,
-}
-
-/// A flow saved next to the requests it sends. Its file holds a `flow`
-/// table where a request's holds a `request` table.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FlowEntry {
-    #[serde(skip)]
-    pub path: PathBuf,
-
-    pub id: String,
-    pub name: String,
-    pub schema_version: u8,
-
-    pub flow: flow::Flow,
 }
 
 #[derive(Debug)]
@@ -57,7 +42,6 @@ impl Entry {
     pub fn path(&self) -> &Path {
         match self {
             Self::File(file) => &file.path,
-            Self::Flow(flow) => &flow.path,
             Self::Directory(folder) => &folder.path,
         }
     }

@@ -11,10 +11,15 @@ use super::{
     FlowEditor,
     blocks::{color, icon},
     editor::{FlowRequest, PortRef},
+    geometry,
 };
 
 /// The most saved requests the picker lists.
 const REQUEST_LIMIT: usize = 8;
+
+/// How far down the picker its search field's middle is: its padding and
+/// half the field.
+const SEARCH_MIDDLE: Rems = rems(1.25);
 
 /// Chooses a block to add, or a saved request to send from a new HTTP
 /// Request block. Opened at the canvas position the block goes to.
@@ -129,7 +134,20 @@ impl FlowEditor {
                 request: request.id,
             },
         };
-        self.add_block(kind, picker.position, picker.from, window, cx);
+        // A connection drawn to the picker reaches the new block's first
+        // port where the connection was dropped.
+        let position = match &picker.from {
+            Some(from) if from.output => point(
+                picker.position.x,
+                picker.position.y - geometry::port_offset(0),
+            ),
+            Some(_) => point(
+                picker.position.x - geometry::width(&kind),
+                picker.position.y - geometry::port_offset(0),
+            ),
+            None => picker.position,
+        };
+        self.add_block(kind, position, picker.from, window, cx);
         window.focus(&self.focus, cx);
     }
 
@@ -178,15 +196,11 @@ impl FlowEditor {
         cx.notify();
     }
 
-    pub(super) fn render_picker(
-        &self,
-        picker: &Picker,
-        _: &mut Window,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let theme = cx.theme();
-        let items = self.picker_items(picker, cx);
-        // Keep the picker inside the canvas, however small it is.
+    /// Where the picker is drawn, relative to the canvas. It opens beside
+    /// the spot it adds a block at: to the right, or to the left when a
+    /// connection was drawn from an input. It stays inside the canvas,
+    /// however small that is.
+    fn picker_bounds(&self, picker: &Picker) -> Bounds<Pixels> {
         let margin = px(8.);
         let width = rems(18.)
             .to_pixels(self.rem)
@@ -195,10 +209,40 @@ impl FlowEditor {
             .to_pixels(self.rem)
             .min(self.view.size.height - margin * 2.);
         let at = self.viewport.to_view(picker.position, self.rem);
-        let left = at.x.min(self.view.size.width - width - margin).max(margin);
-        let top =
-            at.y.min(self.view.size.height - height - margin)
-                .max(margin);
+        let from_input = picker.from.as_ref().is_some_and(|from| !from.output);
+        let left = if from_input { at.x - width } else { at.x };
+        let left = left.min(self.view.size.width - width - margin).max(margin);
+        let top = (at.y - SEARCH_MIDDLE.to_pixels(self.rem))
+            .min(self.view.size.height - height - margin)
+            .max(margin);
+
+        Bounds::new(point(left, top), size(width, height))
+    }
+
+    /// Where a connection drawn to the picker ends: the middle of its
+    /// search field's edge that faces the connection's port.
+    pub(super) fn picker_anchor(&self, picker: &Picker) -> Option<Point<f32>> {
+        let from = picker.from.as_ref()?;
+        let bounds = self.picker_bounds(picker);
+        let x = if from.output {
+            bounds.left()
+        } else {
+            bounds.right()
+        };
+        let y = bounds.top() + SEARCH_MIDDLE.to_pixels(self.rem);
+
+        Some(self.viewport.to_canvas(point(x, y), self.rem))
+    }
+
+    pub(super) fn render_picker(
+        &self,
+        picker: &Picker,
+        _: &mut Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let items = self.picker_items(picker, cx);
+        let bounds = self.picker_bounds(picker);
         let first_request = items
             .iter()
             .position(|item| matches!(item, PickerItem::Request(_)));
@@ -207,10 +251,10 @@ impl FlowEditor {
             .id("flow-block-picker")
             .debug_selector(|| "flow-block-picker".into())
             .absolute()
-            .left(left)
-            .top(top)
-            .w(width)
-            .max_h(height)
+            .left(bounds.left())
+            .top(bounds.top())
+            .w(bounds.size.width)
+            .max_h(bounds.size.height)
             .p_1()
             .gap_1()
             .rounded(theme.radius_tokens().lg)
