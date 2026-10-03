@@ -184,3 +184,52 @@ fn unreadable_files_are_skipped() {
     assert_eq!(reloaded.skipped().len(), 1);
     assert_eq!(reloaded.skipped()[0].path, fixture.0.join("Broken.toml"));
 }
+
+#[test]
+fn flows_saved_in_collections_move_to_the_flows_directory_once() {
+    let fixture = Fixture::new();
+    let collections = fixture.0.join("collections");
+    let flows = fixture.0.join("flows");
+    let folder = collections.join("API").join("Orders");
+    fs::create_dir_all(&folder).unwrap();
+    let request = "id = \"r1\"\nname = \"List\"\nschema_version = 1\n\n[request]\ntype = \"http\"\nmethod = \"GET\"\npath = \"/\"\n";
+    let flow = |name: &str| {
+        format!("id = \"{name}\"\nname = \"{name}\"\nschema_version = 1\n\n[flow]\nblocks = []\n")
+    };
+    fs::write(collections.join("API").join("List.toml"), request).unwrap();
+    fs::write(
+        collections.join("API").join("Checkout.toml"),
+        flow("Checkout"),
+    )
+    .unwrap();
+    fs::write(folder.join("Checkout.toml"), flow("Nested")).unwrap();
+    fs::write(folder.join("Broken.toml"), "flow = ").unwrap();
+
+    let mut moved = crate::move_flows_out_of_collections(&collections, &flows).unwrap();
+    moved.sort();
+    assert_eq!(
+        moved,
+        [flows.join("Checkout 2.toml"), flows.join("Checkout.toml")]
+    );
+    assert!(collections.join("API").join("List.toml").exists());
+    assert!(folder.join("Broken.toml").exists());
+    assert!(!folder.join("Checkout.toml").exists());
+
+    let library = FlowLibrary::load(&flows);
+    let mut names: Vec<_> = library
+        .flows()
+        .iter()
+        .map(|saved| saved.name.clone())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Checkout", "Nested"]);
+
+    // Once the flows directory exists, collections are not read again.
+    fs::write(collections.join("API").join("Later.toml"), flow("Later")).unwrap();
+    assert!(
+        crate::move_flows_out_of_collections(&collections, &flows)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(collections.join("API").join("Later.toml").exists());
+}

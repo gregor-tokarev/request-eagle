@@ -255,6 +255,73 @@ impl FlowLibrary {
     }
 }
 
+/// Moves flows that Request Eagle 0.1.22 saved inside collections into the
+/// flows directory, where they are found now. It runs while the flows
+/// directory does not exist yet, so later launches do not read every
+/// request again. A file that cannot be read or moved stays where it is,
+/// for the collections to report. Returns where the flows were moved.
+pub fn move_flows_out_of_collections(
+    collections: &Path,
+    directory: &Path,
+) -> io::Result<Vec<PathBuf>> {
+    if directory.exists() {
+        return Ok(Vec::new());
+    }
+    fs::create_dir_all(directory)?;
+
+    let mut moved = Vec::new();
+    let mut folders = vec![collections.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = fs::read_dir(&folder) else {
+            continue;
+        };
+
+        for path in entries.flatten().map(|entry| entry.path()) {
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.is_dir() {
+                folders.push(path);
+                continue;
+            }
+            if !metadata.is_file()
+                || path.extension().and_then(|extension| extension.to_str()) != Some(EXTENSION)
+            {
+                continue;
+            }
+
+            // A flow's file has a `flow` table where a request's has a
+            // `request` table.
+            let Some(table) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|source| source.parse::<toml::Table>().ok())
+            else {
+                continue;
+            };
+            if !table.contains_key("flow") || table.contains_key("request") {
+                continue;
+            }
+
+            let stem = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut destination = directory.join(format!("{stem}.{EXTENSION}"));
+            for number in 2.. {
+                if !destination.exists() {
+                    break;
+                }
+                destination = directory.join(format!("{stem} {number}.{EXTENSION}"));
+            }
+            if fs::rename(&path, &destination).is_ok() {
+                moved.push(destination);
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
 fn read(path: &Path) -> Result<SavedFlow, FlowLibraryError> {
     let source = fs::read_to_string(path)?;
     let mut saved: SavedFlow =

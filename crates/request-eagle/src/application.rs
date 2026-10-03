@@ -81,13 +81,22 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".request-eagle/collections"));
+    let flows_directory = home.join(".request-eagle/flows");
+    match flow::move_flows_out_of_collections(&collections_directory, &flows_directory) {
+        Ok(moved) => {
+            for path in moved {
+                eprintln!("Moved a flow out of its collection to {}", path.display());
+            }
+        }
+        Err(error) => eprintln!("Could not move flows out of collections: {error}"),
+    }
     let collections = collection::CollectionRegistry::from_path(collections_directory);
     for skipped in collections.skipped() {
         eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
     }
     let environments =
         environment::GlobalEnvironments::new(home.join(".request-eagle/environments"));
-    let flows = flow::FlowLibrary::load(home.join(".request-eagle/flows"));
+    let flows = flow::FlowLibrary::load(flows_directory);
     for skipped in flows.skipped() {
         eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);
     }

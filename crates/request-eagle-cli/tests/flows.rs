@@ -225,6 +225,30 @@ fn unreadable_flows_are_reported_and_stop_flow_commands() {
 }
 
 #[test]
+fn flows_saved_in_collections_move_to_the_flows_folder() {
+    // Before any other command, which would create the flows folder.
+    let cli = Cli(tempdir().unwrap());
+    let collection = cli.0.path().join("collections").join("API");
+    std::fs::create_dir_all(&collection).unwrap();
+    std::fs::write(
+        collection.join("Checkout.toml"),
+        "id = \"f1\"\nname = \"Checkout\"\nschema_version = 1\n\n[flow]\nblocks = []\n",
+    )
+    .unwrap();
+
+    let listed = cli.call(json!({"command":"flows.list"}));
+
+    let moved = cli.0.path().join("flows").join("Checkout.toml");
+    assert_eq!(
+        listed,
+        json!([{"path": moved, "id": "f1", "name": "Checkout", "blocks": 0}])
+    );
+    assert!(!collection.join("Checkout.toml").exists());
+    let tree = cli.call(json!({"command":"collections.get","path":collection}));
+    assert_eq!(tree["entries"], json!([]), "{tree}");
+}
+
+#[test]
 fn runs_flows_that_send_requests_loop_and_return_outputs() {
     let cli = Cli::new();
     let url = serve();

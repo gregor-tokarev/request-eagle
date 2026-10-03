@@ -20,7 +20,9 @@ mod runtime_tests;
 mod template_tests;
 
 pub use http::{SavedRequest, request_variables};
-pub use library::{FlowLibrary, FlowLibraryError, SavedFlow, SkippedFlow};
+pub use library::{
+    FlowLibrary, FlowLibraryError, SavedFlow, SkippedFlow, move_flows_out_of_collections,
+};
 pub use model::{
     Block, BlockKind, BlockType, Connection, DisplayFormat, Field, Flow, TemplateFormat,
     is_identifier,
