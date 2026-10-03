@@ -285,132 +285,48 @@ impl CollectionRunner {
             RunStatus::Complete => None,
         };
         let active = run.is_active();
-        let paused = run.status == RunStatus::Paused;
         let sending = run
             .in_flight()
             .filter(|_| run.status == RunStatus::Running)
             .map(|request| request.name.clone());
-        let saved = self
-            .exported
-            .clone()
-            .and_then(|exported| exported.ok())
-            .filter(|_| !active);
         let export_error = self.exported.clone().and_then(|exported| exported.err());
 
         v_flex()
             .flex_none()
             .gap_1()
             .child(
+                // The buttons move under the title rather than squeeze it
+                // out of a narrow pane.
                 h_flex()
-                    .h_10()
-                    .gap_2()
+                    .min_h_10()
+                    .flex_wrap()
+                    .gap_x_2()
+                    .gap_y_1()
                     .child(
-                        div()
-                            .debug_selector(|| "run-results-title".into())
+                        h_flex()
+                            .flex_grow(1.)
+                            .flex_basis(rems(12.))
                             .min_w_0()
-                            .truncate()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("{} — Run results", self.title())),
+                            .gap_2()
+                            .child(
+                                div()
+                                    .debug_selector(|| "run-results-title".into())
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_base()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(format!("{} — Run results", self.title())),
+                            )
+                            .when_some(status, |title, status| {
+                                title.child(
+                                    div()
+                                        .debug_selector(|| "run-status".into())
+                                        .flex_none()
+                                        .child(status.small()),
+                                )
+                            }),
                     )
-                    .when_some(status, |row, status| {
-                        row.child(
-                            div()
-                                .debug_selector(|| "run-status".into())
-                                .flex_none()
-                                .child(status.small()),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .when(active, |row| {
-                        row.child(
-                            Button::new("pause-run")
-                                .debug_selector(|| "pause-run".into())
-                                .ghost()
-                                .small()
-                                .flex_none()
-                                .icon(if paused {
-                                    IconName::Play
-                                } else {
-                                    IconName::Pause
-                                })
-                                .label(if paused { "Resume" } else { "Pause" })
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    if paused {
-                                        this.resume(window, cx);
-                                    } else {
-                                        this.pause(cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            Button::new("stop-run")
-                                .debug_selector(|| "stop-run".into())
-                                .ghost()
-                                .small()
-                                .flex_none()
-                                .icon(Icon::default().path("icons/square.svg"))
-                                .label("Stop")
-                                .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
-                        )
-                    })
-                    .when_some(saved, |row, path| {
-                        row.child(
-                            Button::new("run-exported")
-                                .debug_selector(|| "run-exported".into())
-                                .ghost()
-                                .small()
-                                .min_w_0()
-                                .max_w(rems(18.))
-                                .icon(IconName::Check)
-                                .label(format!(
-                                    "Saved {}",
-                                    path.file_name().unwrap_or_default().to_string_lossy()
-                                ))
-                                .tooltip("Show in folder")
-                                .on_click(move |_, _, cx| cx.reveal_path(&path)),
-                        )
-                    })
-                    .when(!active, |row| {
-                        row.child(
-                            Button::new("run-again")
-                                .debug_selector(|| "run-again".into())
-                                .primary()
-                                .small()
-                                .flex_none()
-                                .icon(Icon::default().path("icons/square-play.svg"))
-                                .label("Run Again")
-                                .loading(self.preparing.is_some())
-                                .disabled(self.preparing.is_some())
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.run_again(window, cx)),
-                                ),
-                        )
-                        .child(
-                            Button::new("new-run")
-                                .debug_selector(|| "new-run".into())
-                                .ghost()
-                                .small()
-                                .flex_none()
-                                .icon(IconName::Plus)
-                                .label("New Run")
-                                .tooltip("Change the run configuration")
-                                .on_click(cx.listener(|this, _, _, cx| this.new_run(cx))),
-                        )
-                        .child(
-                            Button::new("export-results")
-                                .debug_selector(|| "export-results".into())
-                                .ghost()
-                                .small()
-                                .flex_none()
-                                .icon(Icon::default().path("icons/download.svg"))
-                                .label("Export Results")
-                                .tooltip("Save the results as JSON")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.export_results(window, cx)
-                                })),
-                        )
-                    }),
+                    .child(self.header_actions(run, cx)),
             )
             .child(
                 h_flex()
@@ -476,6 +392,109 @@ impl CollectionRunner {
                         )
                         .small(),
                     ),
+                )
+            })
+    }
+
+    /// Pause and Stop while the run goes on. Once it ends, the saved
+    /// results, and running, changing or exporting the run.
+    fn header_actions(&self, run: &Run, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let active = run.is_active();
+        let paused = run.status == RunStatus::Paused;
+        let saved = self
+            .exported
+            .clone()
+            .and_then(|exported| exported.ok())
+            .filter(|_| !active);
+
+        h_flex()
+            .flex_none()
+            .gap_2()
+            .when(active, |row| {
+                row.child(
+                    Button::new("pause-run")
+                        .debug_selector(|| "pause-run".into())
+                        .ghost()
+                        .small()
+                        .flex_none()
+                        .icon(if paused {
+                            IconName::Play
+                        } else {
+                            IconName::Pause
+                        })
+                        .label(if paused { "Resume" } else { "Pause" })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if paused {
+                                this.resume(window, cx);
+                            } else {
+                                this.pause(cx);
+                            }
+                        })),
+                )
+                .child(
+                    Button::new("stop-run")
+                        .debug_selector(|| "stop-run".into())
+                        .ghost()
+                        .small()
+                        .flex_none()
+                        .icon(Icon::default().path("icons/square.svg"))
+                        .label("Stop")
+                        .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
+                )
+            })
+            .when_some(saved, |row, path| {
+                row.child(
+                    Button::new("run-exported")
+                        .debug_selector(|| "run-exported".into())
+                        .ghost()
+                        .small()
+                        .min_w_0()
+                        .max_w(rems(18.))
+                        .icon(IconName::Check)
+                        .label(format!(
+                            "Saved {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ))
+                        .tooltip("Show in folder")
+                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                )
+            })
+            .when(!active, |row| {
+                row.child(
+                    Button::new("run-again")
+                        .debug_selector(|| "run-again".into())
+                        .primary()
+                        .small()
+                        .flex_none()
+                        .icon(Icon::default().path("icons/square-play.svg"))
+                        .label("Run Again")
+                        .loading(self.preparing.is_some())
+                        .disabled(self.preparing.is_some())
+                        .on_click(cx.listener(|this, _, window, cx| this.run_again(window, cx))),
+                )
+                .child(
+                    Button::new("new-run")
+                        .debug_selector(|| "new-run".into())
+                        .ghost()
+                        .small()
+                        .flex_none()
+                        .icon(IconName::Plus)
+                        .label("New Run")
+                        .tooltip("Change the run configuration")
+                        .on_click(cx.listener(|this, _, _, cx| this.new_run(cx))),
+                )
+                .child(
+                    Button::new("export-results")
+                        .debug_selector(|| "export-results".into())
+                        .ghost()
+                        .small()
+                        .flex_none()
+                        .icon(Icon::default().path("icons/download.svg"))
+                        .label("Export Results")
+                        .tooltip("Save the results as JSON")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.export_results(window, cx)),
+                        ),
                 )
             })
     }

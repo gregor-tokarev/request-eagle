@@ -175,10 +175,13 @@ impl CollectionRunner {
                     .gap_x_3()
                     .gap_y_1()
                     .child(
+                        // Wide enough to keep the steps beside it, and
+                        // narrower when the pane is.
                         div()
-                            .flex_1()
-                            .min_w(rems(12.))
-                            .max_w_full()
+                            .flex_grow(1.)
+                            .flex_shrink(1.)
+                            .flex_basis(rems(12.))
+                            .min_w_0()
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(SelectableText::new("run-detail-url", url)),
