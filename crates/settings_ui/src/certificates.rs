@@ -314,6 +314,8 @@ impl CertificateSettings {
                         div().text_sm().text_color(cx.theme().muted_foreground).child(
                             if cfg!(target_os = "linux") {
                                 "Only for an encrypted key or PKCS #12 file. It is saved in your desktop keyring."
+                            } else if cfg!(windows) {
+                                "Only for an encrypted key or PKCS #12 file. It is saved in Windows Credential Manager."
                             } else {
                                 "Only for an encrypted key or PKCS #12 file. It is saved in macOS Keychain."
                             },

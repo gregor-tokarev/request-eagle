@@ -29,8 +29,10 @@ pub(crate) fn lock_for_edit(root: &Path) -> Result<fs::File> {
     // cannot save stale ordering or act on a moved/deleted snapshot.
     fs::create_dir_all(root)?;
     let lock = fs::OpenOptions::new()
+        // Windows only locks files opened for writing; appending is not enough.
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(false)
         .open(root.join(".cli.lock"))?;
     lock.try_lock()
         .context("Collections are being used by another CLI command; retry")?;

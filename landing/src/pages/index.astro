@@ -1,7 +1,6 @@
 ---
 import { Image, Picture, getImage } from "astro:assets";
 
-import AppleLogo from "../components/AppleLogo.astro";
 import Page from "../layouts/Page.astro";
 
 import "../styles/landing.css";
@@ -63,15 +62,12 @@ const themes = await Promise.all(
         <div class="hero__row">
           <p class="lede">
             Request Eagle is a Postman alternative written in Rust and rendered on the GPU.
-            It is a real Mac app with no web view inside, and it keeps your requests as files
-            on your disk.
+            It is a real desktop app for macOS, Windows and Linux with no web view inside, and
+            it keeps your requests as files on your disk.
           </p>
 
           <div class="actions">
-            <a class="button" data-magnetic href="/downloads/">
-              <AppleLogo />
-              <span>Download for macOS</span>
-            </a>
+            <a class="button" data-magnetic href="/downloads/"><span>Download</span></a>
 
             <a class="button button--outline" data-magnetic href="https://github.com/gregor-tokarev/request-eagle"><span>GitHub</span></a>
           </div>
@@ -296,12 +292,13 @@ const themes = await Promise.all(
         <h2 class="display" data-reveal>Ready<br>for takeoff.</h2>
 
         <p data-reveal>
-          Request Eagle runs on Apple Silicon Macs and builds from source on Linux. It is in
-          early development, and new builds ship most days.
+          Request Eagle runs on Apple Silicon Macs, Windows, and Debian or Ubuntu. It is in
+          early development: stable releases have run as nightly builds first, and nightly
+          builds ship most days.
         </p>
 
         <div class="actions" data-reveal data-boost>
-          <a class="button" data-magnetic href="/downloads/"><span>Download for macOS</span></a>
+          <a class="button" data-magnetic href="/downloads/"><span>Download</span></a>
           <a class="button button--outline" data-magnetic href="https://github.com/gregor-tokarev/request-eagle#build-from-source"><span>Build from source</span></a>
         </div>
       </div>

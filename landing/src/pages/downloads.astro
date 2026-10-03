@@ -1,14 +1,15 @@
 ---
-import AppleLogo from "../components/AppleLogo.astro";
 import Page from "../layouts/Page.astro";
 
-import "../styles/base.css";
+import "../styles/downloads.css";
+
+const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest";
 ---
 
 <Page
   title="Download — Request Eagle"
-  description="Download the latest build of Request Eagle for Apple Silicon Macs, as a disk image or a ZIP archive."
-  socialDescription="The latest build of Request Eagle, ready to download."
+  description="Download Request Eagle for Apple Silicon Macs, Windows and Debian or Ubuntu, as a stable release or a nightly build."
+  socialDescription="Request Eagle for macOS, Windows and Linux, ready to download."
   download={false}
 >
   <main>
@@ -22,19 +23,54 @@ import "../styles/base.css";
         </h1>
 
         <div class="hero__row">
-          <p class="lede">
-            The latest build of Request Eagle, for Apple Silicon Macs.
-          </p>
+          <div>
+            <p class="lede">
+              Request Eagle for macOS, Windows and Linux. Stable releases have run as nightly
+              builds first; nightly builds bring what is new most days.
+            </p>
 
-          <!-- Without the script both lead to the latest release on GitHub; the script points them at its files. -->
-          <div class="actions" data-boost>
-            <a class="button" href="https://github.com/gregor-tokarev/request-eagle/releases/latest" data-image>
-              <AppleLogo />
-              <span>Download for macOS</span>
-            </a>
+            <div class="tracks" role="group" aria-label="Update track" data-tracks>
+              <button type="button" aria-pressed="true" data-track="stable"><span>Stable</span></button>
+              <button type="button" aria-pressed="false" data-track="nightly"><span>Nightly</span></button>
+            </div>
 
-            <a class="button button--outline" href="https://github.com/gregor-tokarev/request-eagle/releases/latest" data-archive><span>Download ZIP</span></a>
+            <p class="tracks__note" data-track-note
+               data-stable="The app updates to each stable release."
+               data-nightly="After installing, set Update track to Nightly in the app's General settings to keep getting nightly builds.">
+              The app updates to each stable release.
+            </p>
           </div>
+        </div>
+
+        <!-- Without the script every button leads to the latest release on GitHub; the script points them at its files. -->
+        <div class="platforms" data-boost>
+          <section class="platform">
+            <h2 class="display">macOS</h2>
+            <p>For Apple Silicon Macs. The app installs its own updates.</p>
+
+            <div class="platform__actions">
+              <a class="button" href={latest} data-file="-arm64.dmg"><span>Disk image</span></a>
+              <a class="button button--outline" href={latest} data-file="-arm64.zip"><span>ZIP</span></a>
+            </div>
+          </section>
+
+          <section class="platform">
+            <h2 class="display">Windows</h2>
+            <p>For Windows 10 and 11 on x64. Installs for your account, without an administrator.</p>
+
+            <div class="platform__actions">
+              <a class="button" href={latest} data-file="-x64-setup.exe"><span>Installer</span></a>
+            </div>
+          </section>
+
+          <section class="platform">
+            <h2 class="display">Linux</h2>
+            <p>For Debian 12, Ubuntu 22.04 and newer on x64. Open the package to install it.</p>
+
+            <div class="platform__actions">
+              <a class="button" href={latest} data-file="_amd64.deb"><span>Debian package</span></a>
+            </div>
+          </section>
         </div>
       </div>
     </div>

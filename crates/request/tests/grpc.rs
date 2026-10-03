@@ -754,6 +754,10 @@ async fn tls_servers_reached_without_tls_ask_for_tls() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows resets the connection before the server's plaintext answer is read"
+)]
 async fn plaintext_servers_reached_with_tls_ask_to_turn_it_off() {
     let protos = protos();
     let address = serve(&protos, Some("v1")).await;

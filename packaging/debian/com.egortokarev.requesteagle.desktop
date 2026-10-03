@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Request Eagle
+GenericName=API Client
+Comment=Send and test HTTP, gRPC and WebSocket requests
+Exec=request-eagle
+Icon=com.egortokarev.requesteagle
+Terminal=false
+Categories=Development;WebDevelopment;
+Keywords=API;HTTP;REST;gRPC;WebSocket;Postman;
+StartupWMClass=com.egortokarev.requesteagle

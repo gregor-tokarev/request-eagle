@@ -10,9 +10,12 @@ mod linux_credentials;
 mod macos_credentials;
 #[cfg(feature = "ui")]
 mod store;
+mod update_track;
+#[cfg(windows)]
+mod windows_credentials;
 
 pub use appearance::{AppearanceMode, AppearancePreferences};
-pub use file::{Preferences, PreferencesFile, UpdateChannel};
+pub use file::{Preferences, PreferencesFile};
 pub use request::{
     CertificateFiles, ClientCertificate, HttpVersion, ProxyMode, ProxyPreferences, ProxyProtocol,
     RequestPreferences,
@@ -22,3 +25,4 @@ pub use store::{
     add_client_certificate, credential_error, init, load, remove_client_certificate, update,
     update_proxy,
 };
+pub use update_track::UpdateTrack;

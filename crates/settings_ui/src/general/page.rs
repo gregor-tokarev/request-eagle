@@ -1,20 +1,33 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, button::*, h_flex,
-    progress::Progress, switch::Switch, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _,
+    button::*,
+    h_flex,
+    progress::Progress,
+    select::{SearchableVec, Select, SelectEvent, SelectState},
+    switch::Switch,
+    v_flex,
 };
 use gpui_kit::{prelude::*, *};
 
-use preferences::{Preferences, UpdateChannel};
-use updater::{UpdateStatus, Updater};
+use preferences::{Preferences, UpdateTrack};
+use updater::{INSTALLS_IN_APP, UpdateStatus, Updater};
 
 use super::request::RequestSettings;
 use crate::layout::{self, row, section};
 
+const UPDATE_TRACKS: [(UpdateTrack, &str); 2] = [
+    (UpdateTrack::Stable, "Stable"),
+    (UpdateTrack::Nightly, "Nightly"),
+];
+
+type TrackList = SearchableVec<SharedString>;
+
 pub(crate) struct GeneralSettings {
     updater: Entity<Updater>,
+    update_track: Entity<SelectState<TrackList>>,
     request: Entity<RequestSettings>,
+    update_track_error: Option<String>,
     error: Option<String>,
-    channel_error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -27,12 +40,53 @@ impl GeneralSettings {
         let subscription = cx.observe(&updater, |_, _, cx| cx.notify());
         let preferences = cx.observe_global::<Preferences>(|_, cx| cx.notify());
 
+        let track = cx.global::<Preferences>().update_track;
+        let selected = UPDATE_TRACKS
+            .iter()
+            .position(|(candidate, _)| *candidate == track)
+            .unwrap_or(0);
+
+        let update_track = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(
+                    UPDATE_TRACKS
+                        .iter()
+                        .map(|(_, label)| SharedString::from(*label))
+                        .collect::<Vec<_>>(),
+                ),
+                Some(IndexPath::new(selected)),
+                window,
+                cx,
+            )
+        });
+
+        // The updater follows the saved preference and checks the new track.
+        let track_subscription = cx.subscribe(
+            &update_track,
+            |this, _, event: &SelectEvent<TrackList>, cx| {
+                if let SelectEvent::Confirm(Some(label)) = event
+                    && let Some(&(track, _)) = UPDATE_TRACKS
+                        .iter()
+                        .find(|(_, candidate)| *candidate == label.as_ref())
+                {
+                    this.update_track_error = preferences::update(cx, |preferences| {
+                        preferences.update_track = track;
+                    })
+                    .err()
+                    .map(|error| format!("Could not save the update track: {error}"));
+
+                    cx.notify();
+                }
+            },
+        );
+
         Self {
             updater,
+            update_track,
             request: cx.new(|cx| RequestSettings::new(window, cx)),
+            update_track_error: None,
             error: None,
-            channel_error: None,
-            _subscriptions: vec![subscription, preferences],
+            _subscriptions: vec![subscription, preferences, track_subscription],
         }
     }
 }
@@ -100,6 +154,7 @@ impl Render for GeneralSettings {
                 } else {
                     "Download update"
                 })
+                .when(!INSTALLS_IN_APP, |this| this.icon(IconName::ExternalLink))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.updater.update(cx, |updater, cx| updater.download(cx));
                 }))
@@ -160,40 +215,16 @@ impl Render for GeneralSettings {
                     None => format!("{:.1} MB downloaded", downloaded as f64 / 1_000_000.),
                 })
             })
-            .when(available || downloading || verifying, |this| {
-                this.child("You can keep working. Relaunch when you're ready.")
+            .when(available && !INSTALLS_IN_APP, |this| {
+                this.child("The update downloads in your browser. Open it to install.")
             })
+            .when(
+                INSTALLS_IN_APP && (available || downloading || verifying),
+                |this| this.child("You can keep working. Relaunch when you're ready."),
+            )
             .when(ready, |this| {
                 this.child("Download verified. Quit and relaunch to finish installing the update.")
             });
-
-        let daily_builds = div()
-            .debug_selector(|| "daily-builds".into())
-            .flex_shrink_0()
-            .child(
-                Switch::new("daily-builds")
-                    .accessibility_label("Daily builds")
-                    .checked(cx.global::<Preferences>().update_channel == UpdateChannel::Daily)
-                    .on_click(cx.listener(|this, checked, _, cx| {
-                        let channel = if *checked {
-                            UpdateChannel::Daily
-                        } else {
-                            UpdateChannel::Stable
-                        };
-
-                        this.channel_error = preferences::update(cx, |preferences| {
-                            preferences.update_channel = channel;
-                        })
-                        .err()
-                        .map(|error| format!("Could not save daily builds: {error}"));
-
-                        if this.channel_error.is_none() {
-                            this.updater.update(cx, |updater, cx| updater.check(cx));
-                        }
-
-                        cx.notify();
-                    })),
-            );
 
         let vim_mode = div()
             .debug_selector(|| "vim-mode".into())
@@ -231,16 +262,18 @@ impl Render for GeneralSettings {
                         div().flex_shrink_0().child(update_button),
                         cx,
                     ))
-                    .child(
-                        row(
-                            "Daily builds",
-                            "Get new versions every day instead of waiting for stable releases.",
-                            daily_builds,
-                            cx,
-                        )
-                        .debug_selector(|| "daily-builds-row".into()),
-                    )
-                    .when_some(self.channel_error.clone(), |this, error| {
+                    .child(row(
+                        "Update track",
+                        "Use stable releases or nightly builds. Switch back anytime.",
+                        div().w_40().flex_shrink_0().child(
+                            Select::new(&self.update_track)
+                                .accessibility_label("Update track")
+                                .disabled(downloading || verifying)
+                                .w_full(),
+                        ),
+                        cx,
+                    ))
+                    .when_some(self.update_track_error.clone(), |this, error| {
                         this.child(div().text_sm().text_color(cx.theme().danger).child(error))
                     }),
             )

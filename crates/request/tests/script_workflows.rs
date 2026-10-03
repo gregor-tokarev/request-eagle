@@ -41,10 +41,11 @@ impl Server {
                 };
                 let received = received.clone();
                 connections.push(thread::spawn(move || {
-                    // macOS accepts sockets in the listener's non-blocking mode,
-                    // which would cut large responses short.
+                    // Windows and macOS accept sockets in the listener's non-blocking
+                    // mode, which would drop requests and cut large responses short.
                     stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
                     let mut request = Vec::new();
                     let mut buffer = [0; 4096];
                     loop {

@@ -500,6 +500,10 @@ fn dropping_a_connection_stops_its_handshake() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows buffers the whole send on loopback, so it finishes"
+)]
 fn closing_abandons_a_send_the_peer_never_reads() {
     // The server completes the handshake and then stops reading.
     let url = serve(|socket, _| async move {
@@ -516,14 +520,20 @@ fn closing_abandons_a_send_the_peer_never_reads() {
 
         let started = std::time::Instant::now();
         connection.close();
-        assert!(matches!(
-            next(&mut events).await,
-            WebSocketEventKind::Closed(WebSocketClose {
-                code: None,
-                by_client: true,
-                ..
-            })
-        ));
+        let event = next(&mut events).await;
+        assert!(
+            matches!(
+                event,
+                WebSocketEventKind::Closed(WebSocketClose {
+                    code: None,
+                    by_client: true,
+                    ..
+                })
+            ),
+            // The event may carry the whole message, which is too long to print.
+            "{:.300}",
+            format!("{event:?}")
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
     });
 }

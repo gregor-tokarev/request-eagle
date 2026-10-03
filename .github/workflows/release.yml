@@ -1,0 +1,367 @@
+name: Release
+
+# Builds every platform's package for a vX.Y.Z tag and publishes them as one
+# GitHub pre-release, which nightly installs update to. The Promote release
+# workflow makes a tested one the stable release behind releases/latest.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to release
+        required: true
+        type: string
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to release
+        required: true
+        type: string
+      dry_run:
+        description: Build and verify the selected branch without publishing a release
+        required: true
+        default: false
+        type: boolean
+      skip_macos:
+        description: Skip macOS signing and packaging during a dry run
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag="$RELEASE_TAG"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a vX.Y.Z tag, got: $tag" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Tags are needed for the release notes.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify Cargo version
+        run: |
+          cargo_version="$(sed -n '/^name = "request-eagle"$/{n;s/version = "\([^"]*\)"/\1/p;q;}' crates/request-eagle/Cargo.toml)"
+          test "$cargo_version" = "${{ steps.release.outputs.version }}"
+
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          mkdir notes
+          python3 scripts/release-notes.py json "$TAG" > notes/release-notes.json
+          python3 scripts/release-notes.py markdown "$TAG" > notes/release-notes.md
+          cat notes/release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes/*
+
+  linux-cli:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || needs.prepare.outputs.tag }}
+      - name: Build separate CLI release
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CLI_TARGET: ${{ matrix.target }}
+        run: ./scripts/package-cli.sh
+      - name: Test Linux release binary
+        env:
+          REQUEST_EAGLE_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          CLI_TARGET: ${{ matrix.target }}
+        run: |
+          cargo test --locked --release -p request-eagle-cli --target "$CLI_TARGET"
+          binary="dist/cli/request-eagle-cli-$CLI_TARGET"
+          cmp "target/$CLI_TARGET/release/request-eagle-cli" "$binary"
+          test "$("$binary" --version)" = "request-eagle-cli $REQUEST_EAGLE_RELEASE_VERSION (format 1)"
+          "$binary" schema > "$RUNNER_TEMP/cli-schema.json"
+          python3 -c 'import json, sys; result = json.load(open(sys.argv[1])); assert result["ok"] and result["result"]["format_version"] == 1' "$RUNNER_TEMP/cli-schema.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/cli/*
+
+  macos:
+    needs: prepare
+    if: ${{ !(inputs.dry_run && inputs.skip_macos) }}
+    runs-on: macos-15
+    env:
+      CARGO_TERM_COLOR: always
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      REQUEST_EAGLE_RELEASE_NOTES: ${{ github.workspace }}/notes/release-notes.json
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || needs.prepare.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: macos-arm64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            macos-arm64-
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          test "$(uname -m)" = "arm64"
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/request-eagle-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+
+          identity="$(security find-identity -v -p codesigning "$keychain_path" |
+            sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' |
+            head -1)"
+          test -n "$identity"
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build signed Apple Silicon app
+        env:
+          BUILD_VERSION: ${{ github.run_number }}
+        run: ./scripts/build-macos.sh
+
+      - name: Build, sign, and notarize separate macOS CLI
+        env:
+          CLI_TARGET: aarch64-apple-darwin
+        run: ./scripts/package-cli.sh
+
+      - name: Notarize and package
+        run: ./scripts/package-macos.sh
+
+      - name: Verify release artifacts
+        shell: bash
+        run: |
+          codesign --verify --deep --strict --verbose=2 "dist/Request Eagle.app"
+          test "$(lipo -archs "dist/Request Eagle.app/Contents/MacOS/request-eagle")" = "arm64"
+          spctl --assess --type execute --verbose=2 "dist/Request Eagle.app"
+          spctl --assess --type open --context context:primary-signature --verbose=2 \
+            "dist/RequestEagle-$VERSION-arm64.dmg"
+          xcrun stapler validate "dist/Request Eagle.app"
+          xcrun stapler validate "dist/RequestEagle-$VERSION-arm64.dmg"
+
+      # macOS keeps the manifest name that installs before update tracks read.
+      - name: Create update manifest
+        run: ./scripts/write-update-manifest.sh "dist/RequestEagle-$VERSION-arm64.zip" dist/request-eagle-update.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: |
+            dist/RequestEagle-*-arm64.dmg
+            dist/RequestEagle-*-arm64.zip
+            dist/request-eagle-update.json
+            dist/cli/*
+
+  windows:
+    needs: prepare
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      REQUEST_EAGLE_RELEASE_NOTES: ${{ github.workspace }}\notes\release-notes.json
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || needs.prepare.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: windows-dist-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-dist-
+
+      - name: Build the installer
+        run: |
+          choco install innosetup --no-progress -y
+          ./scripts/package-windows.ps1
+
+      - name: Create update manifest
+        shell: bash
+        run: ./scripts/write-update-manifest.sh "dist/RequestEagle-$VERSION-x64-setup.exe" dist/request-eagle-update-windows.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: |
+            dist/RequestEagle-*-x64-setup.exe
+            dist/request-eagle-update-windows.json
+
+  debian:
+    needs: prepare
+    runs-on: ubuntu-latest
+    # The oldest supported release, so the package also installs on newer ones.
+    container: debian:bookworm
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Install Debian build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git \
+            build-essential cmake clang pkg-config dpkg-dev libfontconfig-dev libfreetype-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.dry_run && github.sha || needs.prepare.outputs.tag }}
+
+      # Container jobs see the runner's temporary directory at another path,
+      # so the notes stay in the workspace.
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: debian-dist-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            debian-dist-
+
+      - name: Build the Debian package
+        run: |
+          export REQUEST_EAGLE_RELEASE_NOTES="$PWD/notes/release-notes.json"
+          ./scripts/package-debian.sh
+          ./scripts/write-update-manifest.sh "dist/request-eagle_${VERSION}_amd64.deb" dist/request-eagle-update-debian.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-debian
+          path: |
+            dist/request-eagle_*_amd64.deb
+            dist/request-eagle-update-debian.json
+
+  publish:
+    needs: [prepare, linux-cli, macos, windows, debian]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          # The macOS CLI arrives in a cli directory beside the app packages.
+          mv dist/cli/* dist/
+          rmdir dist/cli
+          (cd dist && sha256sum -- * > SHA256SUMS)
+
+          gh release create "$TAG" \
+            --verify-tag \
+            --prerelease \
+            --title "Request Eagle $VERSION" \
+            --notes-file notes/release-notes.md \
+            dist/*

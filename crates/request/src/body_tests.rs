@@ -134,8 +134,14 @@ fn raw_bodies_are_sent_with_their_language_unless_a_header_names_a_type() {
 
 #[test]
 fn multipart_forms_send_text_and_files_between_boundaries() {
+    // Windows does not allow quotes in file names.
+    let (name, sent_name) = if cfg!(windows) {
+        ("eagle 1.png", "eagle 1.png")
+    } else {
+        ("eagle \"1\".png", "eagle %221%22.png")
+    };
     let directory = tempfile::tempdir().unwrap();
-    let image = directory.path().join("eagle \"1\".png");
+    let image = directory.path().join(name);
     std::fs::write(&image, [0x89, b'P', b'N', b'G']).unwrap();
 
     let mut request = post(Body::Multipart {
@@ -160,7 +166,7 @@ fn multipart_forms_send_text_and_files_between_boundaries() {
         .unwrap();
     let mut expected = format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nHello\r\nworld\r\n\
-         --{boundary}\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"eagle %221%22.png\"\r\nContent-Type: image/png\r\n\r\n"
+         --{boundary}\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"{sent_name}\"\r\nContent-Type: image/png\r\n\r\n"
     )
     .into_bytes();
     expected.extend_from_slice(&[0x89, b'P', b'N', b'G']);

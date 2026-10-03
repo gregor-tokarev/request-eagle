@@ -1,5 +1,7 @@
 use crate::credentials::Secret;
-use crate::{AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences};
+use crate::{
+    AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences, UpdateTrack,
+};
 use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,23 +11,13 @@ use std::{
 };
 use uuid::Uuid;
 
-/// Which releases the app updates to. Daily builds are published as GitHub
-/// pre-releases; stable releases are the ones promoted from them.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateChannel {
-    #[default]
-    Stable,
-    Daily,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Preferences {
     pub appearance: AppearancePreferences,
     pub request: RequestPreferences,
     pub vim_mode: bool,
-    pub update_channel: UpdateChannel,
+    pub update_track: UpdateTrack,
     /// The global environment selected in the workspace, by name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_environment: Option<String>,
@@ -270,8 +262,10 @@ impl PreferencesFile {
             .context("Preferences path has no parent")?;
         fs::create_dir_all(directory)?;
         let lock = fs::OpenOptions::new()
+            // Windows only locks files opened for writing; appending is not enough.
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(false)
             .open(directory.join("preferences.lock"))?;
         lock.try_lock()
             .context("Preferences are being edited by another process; retry")?;

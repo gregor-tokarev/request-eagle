@@ -18,11 +18,12 @@ fn search_accepts_names_symbols_and_modifier_aliases() {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, ToggleLeftSidebar::name_for_type());
 
-        for query in ["⌘B", "Command+B", "cmd-b", "collections"] {
+        for query in ["⌘B", "Command+B", "cmd-b", "Win+B", "win b", "collections"] {
             assert!(matches_search(found[0], query), "{query}");
         }
 
         assert!(!matches_search(found[0], "sidebar no-such-command"));
+        assert!(!matches_search(found[0], "window"));
     });
 }
 

@@ -58,7 +58,8 @@ async fn serve(response: Vec<u8>) -> (String, smol::Task<ReceivedRequest>) {
 
 fn executor() -> RequestExecutor {
     RequestExecutor::new(&RequestPreferences {
-        timeout_ms: 2_000,
+        // Windows takes about two seconds to refuse a connection to a closed port.
+        timeout_ms: 10_000,
         http_version: HttpVersion::Http1_1,
         ssl_certificate_verification: true,
         ..RequestPreferences::default()

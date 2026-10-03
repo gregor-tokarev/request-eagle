@@ -164,6 +164,11 @@ fn search_text(value: &str) -> String {
         .replace('⇧', " shift ")
         .replace('⎋', " escape ")
         .replace(['-', '+'], " ")
+        .split_whitespace()
+        // Windows calls the platform key Win, but "win" is also part of "window".
+        .map(|word| if word == "win" { "cmd" } else { word })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(super) fn matches_search(command: &Command, query: &str) -> bool {
