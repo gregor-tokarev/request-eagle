@@ -9,23 +9,24 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Field, Method};
 use request_eagle_theme::{method_color, protocol_icon};
 
-use super::draft::{RequestDraft, RequestLocation, RequestSection};
+use super::draft::{RequestDraft, RequestSection};
 use crate::actions::SendRequest;
 use crate::variable_input::with_variables;
+use collection::SavedLocation;
 
 /// The request's protocol, `HTTP`, `gRPC` or `WS`, and where it is saved. An
 /// unsaved request shows the name given in its tab.
 pub(crate) fn request_header(
     protocol: &'static str,
-    location: Option<&RequestLocation>,
+    location: Option<&SavedLocation>,
     name: Option<&SharedString>,
     cx: &App,
 ) -> impl IntoElement + use<> {
-    let name = location
-        .map(|location| &location.name)
-        .or(name)
-        .cloned()
-        .unwrap_or_else(|| "Untitled Request".into());
+    let name: SharedString = match (location, name) {
+        (Some(location), _) => location.name.clone().into(),
+        (None, Some(name)) => name.clone(),
+        (None, None) => "Untitled Request".into(),
+    };
 
     h_flex()
         .flex_none()
@@ -51,7 +52,7 @@ pub(crate) fn request_header(
                 .text_sm()
                 .overflow_hidden()
                 .when_some(
-                    location.map(|location| location.collection.clone()),
+                    location.map(SavedLocation::collection_name),
                     |row, collection| {
                         row.child(
                             div()
@@ -70,7 +71,7 @@ pub(crate) fn request_header(
                 .children(
                     location
                         .into_iter()
-                        .flat_map(|location| &location.folders)
+                        .flat_map(SavedLocation::folders)
                         .enumerate()
                         .map(|(index, folder)| {
                             h_flex()

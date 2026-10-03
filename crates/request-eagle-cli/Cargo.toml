@@ -8,7 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "string"] }
-collection = { path = "../collection" }
+collection = { path = "../collection", default-features = false }
 dirs = "6"
 environment = { path = "../environment" }
 flow = { path = "../flow", features = ["schema"] }

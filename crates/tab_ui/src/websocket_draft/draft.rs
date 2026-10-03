@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime};
 
+use collection::SavedLocation;
 use environment::EnvironmentSessions;
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::base::{Tab, Tabs};
@@ -19,7 +20,7 @@ use request::{
 use super::message_log::MessageLog;
 use crate::actions::SendRequest;
 use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited};
-use crate::request_draft::{FieldsChanged, RequestFields, RequestLocation, request_header};
+use crate::request_draft::{FieldsChanged, RequestFields, request_header};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
 use crate::{Environments, RequestSent};
@@ -53,7 +54,7 @@ pub(crate) enum WebSocketSection {
 /// An editable WebSocket request owned by one tab, and its connection.
 pub struct WebSocketDraft {
     /// Unsaved drafts have no location.
-    pub location: Option<RequestLocation>,
+    pub location: Option<SavedLocation>,
     /// The name given to the request in its tab before it is saved.
     pub name: Option<SharedString>,
     pub request: WebSocketRequest,
@@ -96,14 +97,12 @@ impl WebSocketDraft {
     /// session values and the active global environment.
     pub fn new(
         request: WebSocketRequest,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let environment_path = location
-            .as_ref()
-            .and_then(RequestLocation::environment_path);
+        let environment_path = location.as_ref().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
         let subscriptions = environments
             .iter()
@@ -177,7 +176,7 @@ impl WebSocketDraft {
     /// have changed.
     fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
         let inherited = self.location.as_ref().map(|location| Inherited {
-            name: location.collection.clone(),
+            name: location.collection_name().into(),
             auth: self.variables.read(cx).collection_auth(),
         });
         if inherited == self.inherited {
@@ -225,8 +224,8 @@ impl WebSocketDraft {
     }
 
     /// Follow the saved request to its current file and name.
-    pub fn set_location(&mut self, location: RequestLocation, cx: &mut Context<Self>) {
-        let path = location.environment_path();
+    pub fn set_location(&mut self, location: SavedLocation, cx: &mut Context<Self>) {
+        let path = Some(location.environment_path());
         let session = self.variable_sessions.for_path(path.as_deref());
 
         self.variables.update(cx, |scope, cx| {

@@ -96,7 +96,9 @@ impl CollectionPanel {
     ) {
         self.drop_target = None;
         let target = self.tree.items[target].path.clone();
-        match self.collections.move_entry(source, &target, placement) {
+        match self.collections.update(cx, |collections, cx| {
+            collections.move_entry(source, &target, placement, cx)
+        }) {
             Ok(destination) => {
                 self.rename = None;
                 self.pending_delete = None;

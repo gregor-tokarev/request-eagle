@@ -49,6 +49,25 @@ impl Request {
             Self::WebSocket(request) => Self::WebSocket(request.clone()),
         }
     }
+
+    /// Store file paths inside `collection` relative to it, as a request
+    /// saved there keeps them.
+    pub fn relative_to(&self, collection: &Path) -> Self {
+        match self {
+            Self::Http(request) => Self::Http(HttpRequest {
+                body: request
+                    .body
+                    .as_ref()
+                    .map(|body| body.relative_to(collection)),
+                ..request.clone()
+            }),
+            Self::Grpc(request) => Self::Grpc(crate::GrpcRequest {
+                definition: request.definition.relative_to(collection),
+                ..request.clone()
+            }),
+            Self::WebSocket(request) => Self::WebSocket(request.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

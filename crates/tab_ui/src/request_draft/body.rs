@@ -9,7 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Body, Field, Method, RawLanguage};
 
-use super::draft::{RequestDraft, RequestLocation};
+use super::draft::RequestDraft;
 use super::fields::{ChooseFile, FieldsChanged, RequestFields};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 
@@ -107,7 +107,7 @@ impl RequestDraft {
         let Some(collection) = self
             .location
             .as_ref()
-            .and_then(RequestLocation::collection_path)
+            .map(|location| location.collection.clone())
         else {
             return;
         };
@@ -363,8 +363,8 @@ impl RequestDraft {
     fn stored_path(&self, path: PathBuf) -> PathBuf {
         self.location
             .as_ref()
-            .and_then(RequestLocation::collection_path)
-            .and_then(|collection| path.strip_prefix(collection).ok().map(Path::to_path_buf))
+            .and_then(|location| path.strip_prefix(&location.collection).ok())
+            .map(Path::to_path_buf)
             .unwrap_or(path)
     }
 

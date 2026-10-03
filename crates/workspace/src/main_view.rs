@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    mem,
-    path::{Path, PathBuf},
-};
+use std::{mem, path::Path};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
@@ -19,12 +15,12 @@ use crate::flow_panel::FlowPanel;
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
-use collections_panel_ui::{CollectionPanel, CollectionPanelEvent, RunnableRequest};
+use collection::{Collections, CollectionsEvent, SavedLocation, directory_name};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
-    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestLocation, RequestSent,
-    RunCollection, SaveCollection, WebSocketDraft,
+    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
+    SaveCollection, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -75,7 +71,7 @@ impl Page {
     }
 
     /// Where a request tab's file is saved.
-    pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a RequestLocation> {
+    pub(crate) fn location<'a>(&self, cx: &'a App) -> Option<&'a SavedLocation> {
         match self {
             Page::Request(draft) => draft.read(cx).location.as_ref(),
             Page::Grpc(draft) => draft.read(cx).location.as_ref(),
@@ -120,14 +116,14 @@ impl Page {
 
     /// The tab as the next launch reopens it.
     fn saved(&self, title: &SharedString, cx: &App) -> SavedTab {
-        let request = |location: &Option<RequestLocation>,
+        let request = |location: &Option<SavedLocation>,
                        name: &Option<SharedString>,
                        request: request::Request| SavedTab::Request {
             title: title.to_string(),
             file: location.as_ref().map(|location| SavedFile {
                 path: location.path.clone(),
-                id: location.id.to_string(),
-                collection: location.collection_path().unwrap_or_default(),
+                id: location.id.clone(),
+                collection: location.collection.clone(),
             }),
             name: name.as_ref().map(ToString::to_string),
             draft: (location.is_none() || self.is_dirty(cx)).then_some(request),
@@ -308,13 +304,13 @@ pub(crate) struct MainView {
     variable_sessions: environment::EnvironmentSessions,
     pub(crate) environments: Entity<Environments>,
     environment_picker: Entity<EnvironmentPicker>,
-    /// Stores saved requests and collections.
-    sidebar: Entity<CollectionPanel>,
+    collections: Entity<Collections>,
     /// Stores saved flows.
     flows: Entity<FlowPanel>,
     /// Keeps the requests that tabs send.
     history: Entity<HistoryPanel>,
     _environment_subscriptions: [Subscription; 2],
+    _collections_subscription: Subscription,
 }
 
 impl MainView {
@@ -324,7 +320,7 @@ impl MainView {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         environments: Entity<Environments>,
-        sidebar: Entity<CollectionPanel>,
+        collections: Entity<Collections>,
         flows: Entity<FlowPanel>,
         history: Entity<HistoryPanel>,
         tabs: Vec<SavedTab>,
@@ -342,6 +338,8 @@ impl MainView {
             },
         );
         let environments_subscription = cx.subscribe(&environments, Self::on_environments_event);
+        let collections_subscription =
+            cx.subscribe_in(&collections, window, Self::on_collections_event);
 
         let mut view = Self {
             tabs: Vec::new(),
@@ -356,10 +354,11 @@ impl MainView {
             variable_sessions: environment::EnvironmentSessions::default(),
             environments,
             environment_picker,
-            sidebar,
+            collections,
             flows,
             history,
             _environment_subscriptions: [picker_subscription, environments_subscription],
+            _collections_subscription: collections_subscription,
         };
 
         let mut selected = None;
@@ -393,36 +392,18 @@ impl MainView {
                 // The file must still hold the same request, in the draft's
                 // protocol.
                 let saved = file.as_ref().and_then(|file| {
-                    match self.sidebar.read(cx).open_event_at(&file.path) {
-                        Some(CollectionPanelEvent::OpenRequest {
-                            id,
-                            path,
-                            name,
-                            collection,
-                            folders,
-                            request,
-                        }) if id.as_ref() == file.id
-                            && draft.as_ref().is_none_or(|draft| {
-                                mem::discriminant(draft) == mem::discriminant(&request)
-                            }) =>
-                        {
-                            let location = RequestLocation {
-                                path,
-                                id,
-                                name,
-                                collection,
-                                folders,
-                            };
+                    let (location, saved) = self.collections.read(cx).request(&file.path)?;
+                    let same_protocol = draft.as_ref().is_none_or(|draft| {
+                        mem::discriminant(draft) == mem::discriminant(&saved.request)
+                    });
 
-                            Some((location, request))
-                        }
-                        _ => None,
-                    }
+                    (location.id == file.id && same_protocol)
+                        .then(|| (location, saved.request.clone()))
                 });
 
                 match (saved, draft) {
                     (Some((location, request)), draft) => {
-                        let title = location.name.clone();
+                        let title = location.name.clone().into();
                         self.restore_request(title, draft, request, Some(location), cx);
                     }
                     // Changes to a request whose file is gone reopen unsaved,
@@ -450,32 +431,8 @@ impl MainView {
                     (None, None) => return false,
                 }
             }
-            SavedTab::Collection { path } => {
-                let Some(CollectionPanelEvent::OpenCollection {
-                    path,
-                    name,
-                    variables,
-                    shared,
-                }) = self.sidebar.read(cx).open_event_at(&path)
-                else {
-                    return false;
-                };
-
-                self.open_collection(&path, name, variables, shared, window, cx);
-            }
-            SavedTab::Runner { path } => {
-                let Some(CollectionPanelEvent::RunRequests {
-                    path,
-                    name,
-                    collection,
-                    requests,
-                }) = self.sidebar.read(cx).run_event_at(&path)
-                else {
-                    return false;
-                };
-
-                self.open_runner(path, name, collection, requests, cx);
-            }
+            SavedTab::Collection { path } => return self.open_collection(&path, window, cx),
+            SavedTab::Runner { path } => return self.open_runner(&path, cx),
             SavedTab::Environment { name } => {
                 let Some(name) = self
                     .environments
@@ -521,7 +478,7 @@ impl MainView {
         title: SharedString,
         draft: Option<request::Request>,
         saved: request::Request,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         cx: &mut Context<Self>,
     ) -> usize {
         let index = match draft.unwrap_or_else(|| saved.clone()) {
@@ -583,10 +540,27 @@ impl MainView {
         index
     }
 
+    /// Show the saved collection or request at `path`, reusing its tab when
+    /// it is open.
+    pub(crate) fn open_saved(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let request = self
+            .collections
+            .read(cx)
+            .request(path)
+            .map(|(location, file)| (location, file.request.clone()));
+
+        match request {
+            Some((location, request)) => self.open_request(location, &request, cx),
+            None => {
+                self.open_collection(path, window, cx);
+            }
+        }
+    }
+
     /// Show a saved request, reusing its tab when it is open.
-    pub(crate) fn open_request(
+    fn open_request(
         &mut self,
-        location: RequestLocation,
+        location: SavedLocation,
         request: &request::Request,
         cx: &mut Context<Self>,
     ) {
@@ -596,24 +570,52 @@ impl MainView {
             return;
         }
 
+        let title: SharedString = location.name.clone().into();
         match request {
             request::Request::Http(request) => {
-                self.open_draft(location.name.clone(), request.clone(), Some(location), cx);
+                self.open_draft(title, request.clone(), Some(location), cx);
             }
             request::Request::Grpc(request) => {
-                self.open_grpc_draft(location.name.clone(), request.clone(), Some(location), cx);
+                self.open_grpc_draft(title, request.clone(), Some(location), cx);
             }
             request::Request::WebSocket(request) => {
-                self.open_websocket(location.name.clone(), request.clone(), Some(location), cx);
+                self.open_websocket(title, request.clone(), Some(location), cx);
             }
         }
     }
 
-    /// Follow a request renamed or moved in the sidebar.
-    pub(crate) fn relocate_request(
+    /// Follow collections, folders and requests renamed, moved or deleted in
+    /// the sidebar or a tab.
+    fn on_collections_event(
+        &mut self,
+        _: &Entity<Collections>,
+        event: &CollectionsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            CollectionsEvent::CollectionRenamed {
+                previous_path,
+                path,
+            } => self.relocate_collection(previous_path, path, window, cx),
+            CollectionsEvent::FolderRelocated {
+                previous_path,
+                path,
+                collection,
+            } => self.relocate_runners(previous_path, path, collection, cx),
+            CollectionsEvent::RequestRelocated {
+                previous_path,
+                location,
+            } => self.relocate_request(previous_path, location.clone(), cx),
+            CollectionsEvent::Deleted(path) => self.close_deleted(path, cx),
+            CollectionsEvent::Created(_) | CollectionsEvent::RequestSaved(_) => {}
+        }
+    }
+
+    fn relocate_request(
         &mut self,
         previous_path: &Path,
-        location: RequestLocation,
+        location: SavedLocation,
         cx: &mut Context<Self>,
     ) {
         for tab in &self.tabs {
@@ -622,8 +624,8 @@ impl MainView {
                     runner.relocate_request(
                         &location.id,
                         &location.path,
-                        location.name.clone(),
-                        location.folders.clone(),
+                        location.name.clone().into(),
+                        location.folders().into_iter().map(Into::into).collect(),
                         cx,
                     )
                 });
@@ -647,11 +649,11 @@ impl MainView {
     fn set_request_location(
         &mut self,
         index: usize,
-        location: RequestLocation,
+        location: SavedLocation,
         cx: &mut Context<Self>,
     ) {
         let tab = &mut self.tabs[index];
-        tab.title = location.name.clone();
+        tab.title = location.name.clone().into();
 
         match &tab.page {
             Page::Request(draft) => draft.update(cx, |draft, cx| draft.set_location(location, cx)),
@@ -674,8 +676,7 @@ impl MainView {
             return index;
         }
 
-        let requests =
-            std::rc::Rc::new(crate::flow_requests::SidebarRequests(self.sidebar.clone()));
+        let collections = self.collections.clone();
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let id = saved.id.into();
@@ -684,7 +685,7 @@ impl MainView {
                 saved.path,
                 id,
                 saved.flow,
-                requests,
+                collections,
                 sessions,
                 Some(environments),
                 cx,
@@ -727,20 +728,28 @@ impl MainView {
         }
     }
 
-    pub(crate) fn open_collection(
+    /// Show a collection's page, reusing its tab when it is open. Tells
+    /// whether the collection exists.
+    fn open_collection(
         &mut self,
         path: &Path,
-        name: SharedString,
-        variables: HashMap<String, String>,
-        shared: collection::SharedSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if let Some(index) = self.collection_tab(path, cx) {
             self.select_tab(index, cx);
-            return;
+            return true;
         }
 
+        let Some(collection) = self.collections.read(cx).collection(path) else {
+            return false;
+        };
+        let name: SharedString = directory_name(path).into();
+        let variables = collection.local_env().entries.clone();
+        let shared = collection::SharedSettings {
+            scripts: collection.scripts().clone(),
+            auth: collection.auth().clone(),
+        };
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let page = cx.new(|cx| {
@@ -770,70 +779,61 @@ impl MainView {
             window,
             |this, page, _: &RunCollection, window, cx| {
                 let path = page.read(cx).path.clone();
-                this.run_collection(&path, cx);
+                this.open_runner(&path, cx);
                 this.prepare_active_tab(window, cx);
             },
         );
         self.tabs[index]
             ._subscriptions
             .extend([subscription, run_subscription]);
+
+        true
     }
 
     /// Show the Collection Runner for a collection's or folder's requests,
-    /// reusing its tab when it is open.
-    pub(crate) fn open_runner(
-        &mut self,
-        path: PathBuf,
-        name: SharedString,
-        collection: PathBuf,
-        requests: Vec<RunnableRequest>,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(index) = self.runner_tab(&path, cx) {
+    /// reusing its tab when it is open. Tells whether the collection or
+    /// folder exists.
+    pub(crate) fn open_runner(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        let collections = self.collections.read(cx);
+        let (Some(collection), Some(requests)) =
+            (collections.containing(path), collections.requests_in(path))
+        else {
+            return false;
+        };
+        let collection = collection.path.clone();
+        let requests: Vec<_> = requests
+            .into_iter()
+            .map(|(location, file)| {
+                let folders = location.folders().into_iter().map(Into::into).collect();
+                (file.clone(), folders)
+            })
+            .collect();
+
+        if let Some(index) = self.runner_tab(path, cx) {
             if let Page::Runner(runner) = &self.tabs[index].page {
-                runner.update(cx, |runner, cx| {
-                    runner.refresh(
-                        requests
-                            .into_iter()
-                            .map(|request| (request.file, request.folders)),
-                        cx,
-                    )
-                });
+                runner.update(cx, |runner, cx| runner.refresh(requests, cx));
             }
             self.select_tab(index, cx);
-            return;
+            return true;
         }
 
+        let name: SharedString = directory_name(path).into();
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let runner = cx.new(|cx| {
             CollectionRunner::new(
-                path,
+                path.to_path_buf(),
                 name.clone(),
                 collection,
-                requests
-                    .into_iter()
-                    .map(|request| (request.file, request.folders)),
+                requests,
                 sessions,
                 environments,
                 cx,
             )
         });
-
         self.open_tab(name, Page::Runner(runner), cx);
-    }
 
-    /// Run the collection whose page is in the tab, as the sidebar does.
-    fn run_collection(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(CollectionPanelEvent::RunRequests {
-            path,
-            name,
-            collection,
-            requests,
-        }) = self.sidebar.read(cx).run_event_at(path)
-        {
-            self.open_runner(path, name, collection, requests, cx);
-        }
+        true
     }
 
     fn runner_tab(&self, path: &Path, cx: &App) -> Option<usize> {
@@ -850,14 +850,14 @@ impl MainView {
         })
     }
 
-    /// Close a deleted collection's tab, so a later collection at the same
-    /// path cannot reuse its stale settings.
-    pub(crate) fn close_collection(&mut self, path: &Path, cx: &mut Context<Self>) {
+    /// Close the pages of a deleted collection or folder, so a later one at
+    /// the same path cannot reuse their stale settings.
+    fn close_deleted(&mut self, path: &Path, cx: &mut Context<Self>) {
         if let Some(index) = self.collection_tab(path, cx) {
             self.remove_tab(index, cx);
         }
 
-        // Its runners and those of its folders end with it.
+        // Its runners and those of what it holds end with it.
         while let Some(index) = self.tabs.iter().position(|tab| match &tab.page {
             Page::Runner(runner) => runner.read(cx).path.starts_with(path),
             _ => false,
@@ -866,16 +866,15 @@ impl MainView {
         }
     }
 
-    /// Follow a collection renamed in the sidebar.
-    pub(crate) fn relocate_collection(
+    fn relocate_collection(
         &mut self,
         previous_path: &Path,
         path: &Path,
-        name: SharedString,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.relocate_runners(previous_path, path, name.clone(), path, cx);
+        self.relocate_runners(previous_path, path, path, cx);
+        let name: SharedString = directory_name(path).into();
 
         let Some(index) = self.collection_tab(previous_path, cx) else {
             return;
@@ -891,17 +890,17 @@ impl MainView {
         cx.notify();
     }
 
-    /// Follow a collection or folder renamed or moved in the sidebar in the
-    /// runners of it and of what it contains. `collection` is the directory
-    /// of the collection it is in now.
-    pub(crate) fn relocate_runners(
+    /// Follow a collection or folder renamed or moved in the runners of it
+    /// and of what it holds. `collection` is the directory of the collection
+    /// it is in now.
+    fn relocate_runners(
         &mut self,
         previous_path: &Path,
         path: &Path,
-        name: SharedString,
         collection: &Path,
         cx: &mut Context<Self>,
     ) {
+        let name: SharedString = directory_name(path).into();
         for tab in &mut self.tabs {
             if let Page::Runner(runner) = &tab.page {
                 tab.title = runner.update(cx, |runner, cx| {
@@ -941,7 +940,7 @@ impl MainView {
         &mut self,
         title: SharedString,
         request: request::WebSocketRequest,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
@@ -956,7 +955,7 @@ impl MainView {
         &mut self,
         title: SharedString,
         request: request::HttpRequest,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
@@ -976,7 +975,7 @@ impl MainView {
         &mut self,
         title: SharedString,
         request: request::GrpcRequest,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         cx: &mut Context<Self>,
     ) -> usize {
         let sessions = self.variable_sessions.clone();
@@ -1226,9 +1225,9 @@ impl MainView {
             Page::Collection(page) => {
                 let path = page.read(cx).path.clone();
                 let result = page.read(cx).settings().and_then(|settings| {
-                    self.sidebar
-                        .update(cx, |sidebar, cx| {
-                            sidebar.save_collection(
+                    self.collections
+                        .update(cx, |collections, cx| {
+                            collections.save_collection(
                                 &path,
                                 &settings.name,
                                 settings.variables.iter().cloned().collect(),
@@ -1321,7 +1320,7 @@ impl MainView {
     fn save_request_at(
         &mut self,
         tab_id: u64,
-        location: Option<RequestLocation>,
+        location: Option<SavedLocation>,
         name: Option<SharedString>,
         request: request::Request,
         window: &mut Window,
@@ -1330,7 +1329,7 @@ impl MainView {
         let Some(location) = location else {
             save_request::open(
                 cx.entity(),
-                self.sidebar.clone(),
+                self.collections.clone(),
                 tab_id,
                 name,
                 request,
@@ -1340,8 +1339,8 @@ impl MainView {
             return false;
         };
 
-        let result = self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.save_request(&location.path, &location.id, request, cx)
+        let result = self.collections.update(cx, |collections, cx| {
+            collections.update_request(&location.path, &location.id, request, cx)
         });
 
         if let Err(error) = &result {
@@ -1355,24 +1354,17 @@ impl MainView {
     pub(crate) fn attach_saved_request(
         &mut self,
         tab_id: u64,
-        file: &collection::FileEntry,
-        destination: &collections_panel_ui::SaveDestination,
+        location: SavedLocation,
+        request: &request::Request,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        let location = RequestLocation {
-            path: file.path.clone(),
-            id: file.id.clone().into(),
-            name: file.name.clone().into(),
-            collection: destination.collection.clone(),
-            folders: destination.folders.clone(),
-        };
         self.set_request_location(index, location, cx);
 
-        match (&self.tabs[index].page, &file.request) {
+        match (&self.tabs[index].page, request) {
             (Page::Request(draft), request::Request::Http(request)) => {
                 draft.update(cx, |draft, cx| {
                     // Saving can store body files relative to the collection.
@@ -1486,7 +1478,7 @@ impl MainView {
         }
 
         if let Page::Flow(editor) = &tab.page {
-            // The tab follows the sidebar's rename event.
+            // The tab follows the flow panel's rename event.
             let (path, id) = {
                 let editor = editor.read(cx);
                 (editor.path.clone(), editor.id.clone())
@@ -1502,10 +1494,10 @@ impl MainView {
         }
 
         match tab.page.location(cx).cloned() {
-            // The tab follows the sidebar's relocation event.
+            // The tab follows the relocation event.
             Some(location) => {
-                let result = self.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.rename_request(&location.path, &location.id, &name, cx)
+                let result = self.collections.update(cx, |collections, cx| {
+                    collections.rename_request(&location.path, &location.id, &name, cx)
                 });
 
                 if let Err(error) = result {

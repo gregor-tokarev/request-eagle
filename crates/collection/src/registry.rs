@@ -4,6 +4,7 @@ mod importing;
 mod movement;
 mod mutations;
 
+pub(crate) use catalog::ENVIRONMENT_FILE_NAME;
 pub use catalog::{CollectionRegistry, SkippedPath};
 pub use importing::{ImportedCollection, ImportedItem};
 pub use movement::MovePlacement;

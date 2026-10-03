@@ -197,8 +197,8 @@ impl RequestDraft {
             .location
             .as_ref()
             .map(|location| request::ExecutionInfo {
-                request_name: location.name.to_string(),
-                request_id: location.id.to_string(),
+                request_name: location.name.clone(),
+                request_id: location.id.clone(),
                 ..Default::default()
             })
             .unwrap_or_default();

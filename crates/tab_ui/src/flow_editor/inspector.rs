@@ -13,7 +13,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_label;
 use serde_json::Value;
 
-use super::{FlowEditor, blocks, preview, run::format_duration};
+use super::{FlowEditor, blocks, editor::FlowRequest, preview, run::format_duration};
 
 /// How long the FQL preview waits for typing to pause before evaluating.
 const PREVIEW_DELAY: Duration = Duration::from_millis(150);
@@ -1107,16 +1107,14 @@ impl FlowEditor {
     ) -> AnyElement {
         let theme = cx.theme();
         let chosen = (!current.is_empty())
-            .then(|| self.requests.find(current, cx))
+            .then(|| FlowRequest::find(self.collections.read(cx), current))
             .flatten();
         let query = inspector
             .request_search
             .as_ref()
             .map(|search| search.read(cx).value().trim().to_lowercase())
             .unwrap_or_default();
-        let matches: Vec<_> = self
-            .requests
-            .all(cx)
+        let matches: Vec<_> = FlowRequest::all(self.collections.read(cx))
             .into_iter()
             .filter(|request| {
                 query.is_empty()

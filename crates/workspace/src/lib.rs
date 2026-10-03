@@ -6,7 +6,6 @@ mod command_palette;
 mod environment_panel;
 mod environment_picker;
 mod flow_panel;
-mod flow_requests;
 mod history_panel;
 mod main_view;
 mod save_request;

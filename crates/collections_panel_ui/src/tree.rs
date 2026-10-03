@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use collection::{CollectionRegistry, Entry, FileEntry};
+use collection::{CollectionRegistry, Entry, FileEntry, directory_name};
 
 use gpui_kit::SharedString;
 
@@ -51,7 +51,7 @@ impl CollectionTree {
 
         for collection in collections.collections() {
             let index = items.len();
-            let name = path_name(&collection.path);
+            let name = directory_name(&collection.path);
 
             roots.push(index);
             search_texts.push(name.clone());
@@ -178,13 +178,6 @@ impl CollectionTree {
 
         rows
     }
-}
-
-pub(super) fn path_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or(path.as_os_str())
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn add_entries(

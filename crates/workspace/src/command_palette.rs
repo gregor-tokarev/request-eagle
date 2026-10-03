@@ -389,9 +389,10 @@ impl ListDelegate for CommandPalette {
                 window.dispatch_action(self.commands[*index].action.boxed_clone(), cx)
             }
             Row::Request(RequestMatch { path, .. }) | Row::Collection { path, .. } => {
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open_at(path, cx));
-                self.main_view.update(cx, |view, cx| view.focus(window, cx));
+                self.main_view.update(cx, |view, cx| {
+                    view.open_saved(path, window, cx);
+                    view.focus(window, cx);
+                });
             }
             Row::Environment { name, .. } => {
                 self.main_view.update(cx, |view, cx| {

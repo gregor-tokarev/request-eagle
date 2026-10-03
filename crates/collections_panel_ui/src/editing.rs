@@ -11,7 +11,7 @@ use gpui_kit::{
 };
 
 use super::{
-    panel::{CollectionPanel, CollectionPanelEvent},
+    panel::CollectionPanel,
     tree::{CollectionTree, ItemKind},
 };
 
@@ -23,7 +23,9 @@ pub(super) struct RenameEditor {
 
 impl CollectionPanel {
     pub fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let result = self.collections.create_collection();
+        let result = self
+            .collections
+            .update(cx, |collections, cx| collections.create_collection(cx));
         self.finish_creation(result, window, cx);
     }
 
@@ -33,7 +35,9 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.collections.create_request(parent);
+        let result = self
+            .collections
+            .update(cx, |collections, cx| collections.create_request(parent, cx));
         self.finish_creation(result, window, cx);
     }
 
@@ -43,11 +47,14 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.collections.create_request_with(
-            parent,
-            "New gRPC Request",
-            request::GrpcRequest::default().into(),
-        );
+        let result = self.collections.update(cx, |collections, cx| {
+            collections.create_request_with(
+                parent,
+                "New gRPC Request",
+                request::GrpcRequest::default().into(),
+                cx,
+            )
+        });
         self.finish_creation(result, window, cx);
     }
 
@@ -57,11 +64,14 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.collections.create_request_with(
-            parent,
-            "New WebSocket",
-            request::WebSocketRequest::default().into(),
-        );
+        let result = self.collections.update(cx, |collections, cx| {
+            collections.create_request_with(
+                parent,
+                "New WebSocket",
+                request::WebSocketRequest::default().into(),
+                cx,
+            )
+        });
         self.finish_creation(result, window, cx);
     }
 
@@ -71,7 +81,9 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.collections.create_folder(parent);
+        let result = self
+            .collections
+            .update(cx, |collections, cx| collections.create_folder(parent, cx));
         self.finish_creation(result, window, cx);
     }
 
@@ -169,7 +181,10 @@ impl CollectionPanel {
         let path = rename.path.clone();
         let name = rename.input.read(cx).value();
 
-        match self.collections.rename(&path, &name) {
+        match self
+            .collections
+            .update(cx, |collections, cx| collections.rename(&path, &name, cx))
+        {
             Ok(destination) => {
                 self.rename = None;
                 self.error = None;
@@ -179,25 +194,6 @@ impl CollectionPanel {
             Err(error) => self.error = Some(format!("Could not rename: {error}")),
         }
         cx.notify();
-    }
-
-    /// Rename a saved request outside the tree, such as from its tab. Open
-    /// tabs follow it through the relocation event.
-    pub fn rename_request(
-        &mut self,
-        path: &Path,
-        expected_id: &str,
-        name: &str,
-        cx: &mut Context<Self>,
-    ) -> Result<(), CollectionEditError> {
-        self.collections.rename_request(path, expected_id, name)?;
-
-        let selected = self
-            .selected
-            .map(|index| self.tree.items[index].path.clone());
-        self.rebuild_tree(selected.as_deref(), Some((path, path)), cx);
-
-        Ok(())
     }
 
     pub(super) fn request_delete(
@@ -266,17 +262,12 @@ impl CollectionPanel {
             return;
         };
         let row = self.selected_row().unwrap_or(0);
-        let collection = self
-            .collections
-            .collections()
-            .iter()
-            .any(|collection| collection.path == path);
 
-        match self.collections.delete(&path) {
+        match self
+            .collections
+            .update(cx, |collections, cx| collections.delete(&path, cx))
+        {
             Ok(()) => {
-                if collection {
-                    cx.emit(CollectionPanelEvent::CollectionDeleted { path });
-                }
                 self.pending_delete = None;
                 self.rename = None;
                 self.error = None;
@@ -331,7 +322,9 @@ impl CollectionPanel {
             })
             .collect();
 
-        self.tree = Arc::new(CollectionTree::new(&self.collections));
+        let collections = self.collections.read(cx);
+        self.tree = Arc::new(CollectionTree::new(collections.registry()));
+        self.revision = collections.revision();
         self.collapsed = self.tree.branches_at(&collapsed);
         self.selected = selected.and_then(|path| self.tree.index_of(path));
         let browsing = Arc::new(self.tree.visible_rows(&self.collapsed, ""));
@@ -342,62 +335,5 @@ impl CollectionPanel {
             Arc::new(self.tree.visible_rows(&self.collapsed, &self.query))
         };
         self.apply_rows(rows, false, cx);
-
-        if let Some((previous, destination)) = renamed {
-            if let Some(collection) = self
-                .tree
-                .roots
-                .iter()
-                .map(|&index| &self.tree.items[index])
-                .find(|item| item.path == destination)
-            {
-                cx.emit(CollectionPanelEvent::CollectionRenamed {
-                    previous_path: previous.to_path_buf(),
-                    path: destination.to_path_buf(),
-                    name: collection.label.clone(),
-                });
-            } else if let Some(index) = self.tree.index_of(destination)
-                && self.tree.items[index].kind == ItemKind::Folder
-            {
-                let mut root = index;
-                while let Some(parent) = self.tree.items[root].parent {
-                    root = parent;
-                }
-
-                cx.emit(CollectionPanelEvent::FolderRelocated {
-                    previous_path: previous.to_path_buf(),
-                    path: destination.to_path_buf(),
-                    name: self.tree.items[index].label.clone(),
-                    collection: self.tree.items[root].path.clone(),
-                });
-            }
-
-            for (index, item) in self.tree.items.iter().enumerate() {
-                if item.is_branch() {
-                    continue;
-                }
-                let Ok(relative) = item.path.strip_prefix(destination) else {
-                    continue;
-                };
-                let Some(file) = self.collections.file(&item.path) else {
-                    continue;
-                };
-                let (collection, folders) = self.tree.location(index);
-
-                cx.emit(CollectionPanelEvent::RequestRelocated {
-                    id: file.id.clone().into(),
-                    // Joining an empty path would add a trailing separator.
-                    previous_path: if relative.as_os_str().is_empty() {
-                        previous.to_path_buf()
-                    } else {
-                        previous.join(relative)
-                    },
-                    path: item.path.clone(),
-                    name: item.label.clone(),
-                    collection,
-                    folders,
-                });
-            }
-        }
     }
 }
