@@ -52,19 +52,18 @@ cf pages projects deployments create requesteagle --branch main
 
 `src/pages/downloads.astro` is the page at `/downloads/`, and the landing's
 download buttons lead there. It offers the macOS disk image and ZIP archive,
-the Windows installer and the Debian package, from either
-[update track](releases.md): stable by default, or nightly after choosing it.
-`/downloads/#nightly` opens the page on the nightly track.
+the Windows installer and the Debian package from the latest stable release.
+Nightly builds are not offered on the site: the app switches to them from its
+[update track](releases.md) setting.
 
-Its script, `src/scripts/downloads.js`, reads the releases from the GitHub API
-in the visitor's browser, so the buttons follow each new or promoted release
-without an edit or a deploy. Each button takes the newest file for its
-platform on the chosen track. The page shows no version number. The CLI
+Its script, `src/scripts/downloads.js`, reads the latest release from the
+GitHub API in the visitor's browser, so the buttons follow each promoted
+release without an edit or a deploy. The page shows no version number. The CLI
 executables are not offered, because the CLI is installed from the app.
 
 Without scripts, or when GitHub cannot be reached, the buttons lead to the
-latest release on GitHub instead. A platform with no file on the chosen track
-leads to the list of releases.
+latest release on GitHub instead. So does a button whose file the latest
+release does not have.
 
 ## Motion
 

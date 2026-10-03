@@ -5,7 +5,7 @@
 ## Pages
 
 - [Landing](https://requesteagle.tokarev.work/): What Request Eagle is and what it can do
-- [Download](https://requesteagle.tokarev.work/downloads/): Stable and nightly builds for Apple Silicon Macs, Windows, and Debian or Ubuntu
+- [Download](https://requesteagle.tokarev.work/downloads/): The latest stable release for Apple Silicon Macs, Windows, and Debian or Ubuntu
 
 ## Guides
 
