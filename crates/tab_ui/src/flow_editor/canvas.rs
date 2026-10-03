@@ -239,16 +239,25 @@ impl FlowEditor {
     }
 
     fn scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let delta = event.delta.pixel_delta(window.line_height());
+        let wheel = geometry::from_wheel(event.delta, cx.compositor_name() == "X11");
+        self.viewport.scroll(
+            event.delta,
+            wheel,
+            event.modifiers,
+            event.position - self.view.origin,
+            window.line_height(),
+            self.rem,
+        );
 
-        if event.modifiers.secondary() || event.modifiers.control {
-            let factor = (f32::from(delta.y) * 0.004).exp();
-            let zoom = self.viewport.zoom * factor;
-            self.viewport
-                .zoom_around(zoom, event.position - self.view.origin, self.rem);
-        } else {
-            self.viewport.pan(delta, self.rem);
-        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    /// Pinching a trackpad zooms around the fingers.
+    fn pinch(&mut self, event: &PinchEvent, cx: &mut Context<Self>) {
+        let zoom = self.viewport.zoom * (1. + event.delta);
+        self.viewport
+            .zoom_around(zoom, event.position - self.view.origin, self.rem);
 
         cx.stop_propagation();
         cx.notify();
@@ -462,10 +471,23 @@ impl FlowEditor {
                                     window.request_animation_frame();
                                 }
                             });
+
+                            window.insert_hitbox(bounds, HitboxBehavior::Normal)
                         }
                     },
-                    move |bounds, _, window, _| {
+                    move |bounds, hitbox, window, _| {
                         paint_grid(bounds, viewport, rem, grid_color, window);
+
+                        // A pinch is handled where a scroll would be. Unlike
+                        // `on_pinch`, this also works right after typing,
+                        // before the pointer has moved.
+                        let pinched = entity.clone();
+                        window.on_mouse_event(move |event: &PinchEvent, phase, window, cx| {
+                            if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window)
+                            {
+                                let _ = pinched.update(cx, |this, cx| this.pinch(event, cx));
+                            }
+                        });
 
                         for (curve, color, width) in &wires {
                             paint_curve(
