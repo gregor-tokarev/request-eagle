@@ -260,3 +260,32 @@ fn flows_move_out_of_collections_linked_into_the_collections_directory() {
     assert!(!linked.join("Sync.toml").exists());
     assert_eq!(names(&FlowLibrary::load(&flows)), ["Sync"]);
 }
+
+#[test]
+fn a_flow_moved_by_another_start_meanwhile_keeps_its_one_copy() {
+    let fixture = Fixture::new();
+    let flows = fixture.0.join("flows");
+    fs::create_dir_all(&flows).unwrap();
+    let source = legacy_flow("Checkout");
+    // Another start already moved the flow: its copy is here and the file
+    // it came from is gone.
+    fs::write(flows.join("Checkout.toml"), &source).unwrap();
+    let gone = fixture
+        .0
+        .join("collections")
+        .join("API")
+        .join("Checkout.toml");
+
+    let result = crate::library::move_flow(&gone, &source, &flows, "Checkout");
+
+    assert!(result.is_err());
+    let files: Vec<_> = fs::read_dir(&flows)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(files, ["Checkout.toml"]);
+    assert_eq!(
+        fs::read_to_string(flows.join("Checkout.toml")).unwrap(),
+        source
+    );
+}

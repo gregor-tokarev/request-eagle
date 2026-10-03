@@ -302,12 +302,13 @@ pub fn move_flows_out_of_collections(
             // Only whole flows move, never a request, which 0.1.22 also read
             // as one when it had a `flow` table, or a collection's
             // environment that happens to name a variable `flow`.
-            let is_flow = fs::read_to_string(&path).is_ok_and(|source| {
-                source
-                    .parse::<toml::Table>()
-                    .is_ok_and(|table| !table.contains_key("request"))
-                    && toml::from_str::<SavedFlow>(&source).is_ok()
-            });
+            let Ok(source) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let is_flow = source
+                .parse::<toml::Table>()
+                .is_ok_and(|table| !table.contains_key("request"))
+                && toml::from_str::<SavedFlow>(&source).is_ok();
             if !is_flow {
                 continue;
             }
@@ -316,14 +317,7 @@ pub fn move_flows_out_of_collections(
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let mut destination = directory.join(format!("{stem}.{EXTENSION}"));
-            for number in 2.. {
-                if !destination.exists() {
-                    break;
-                }
-                destination = directory.join(format!("{stem} {number}.{EXTENSION}"));
-            }
-            if move_file(&path, &destination).is_ok() {
+            if let Ok(destination) = move_flow(&path, &source, directory, &stem) {
                 moved.push(destination);
             }
         }
@@ -332,27 +326,41 @@ pub fn move_flows_out_of_collections(
     Ok(moved)
 }
 
-/// Renames a file, or copies it and removes the original when the two
-/// folders are on different filesystems, such as a collections folder on
-/// another drive.
-fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    if fs::rename(from, to).is_ok() {
-        return Ok(());
+/// Writes a flow's `source` under a free name in `directory`, then removes
+/// the file at `from`. It works across filesystems, never replaces a file,
+/// and on failure removes only the file it wrote, so two starts moving the
+/// same flow at once leave exactly one copy of it.
+pub(crate) fn move_flow(
+    from: &Path,
+    source: &str,
+    directory: &Path,
+    stem: &str,
+) -> io::Result<PathBuf> {
+    for number in 1.. {
+        let to = match number {
+            1 => directory.join(format!("{stem}.{EXTENSION}")),
+            number => directory.join(format!("{stem} {number}.{EXTENSION}")),
+        };
+        let mut file = match fs::File::create_new(&to) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let result = file
+            .write_all(source.as_bytes())
+            .and_then(|()| file.sync_all())
+            .and_then(|()| fs::remove_file(from));
+        if let Err(error) = result {
+            drop(file);
+            let _ = fs::remove_file(&to);
+            return Err(error);
+        }
+
+        return Ok(to);
     }
 
-    // A copy that fails partway, such as on a full drive, is removed, so the
-    // flows folder never holds part of a flow.
-    if let Err(error) = fs::copy(from, to) {
-        let _ = fs::remove_file(to);
-        return Err(error);
-    }
-    if let Err(error) = fs::remove_file(from) {
-        // Keep one copy, where the collections report it.
-        let _ = fs::remove_file(to);
-        return Err(error);
-    }
-
-    Ok(())
+    unreachable!()
 }
 
 fn read(path: &Path) -> Result<SavedFlow, FlowLibraryError> {
