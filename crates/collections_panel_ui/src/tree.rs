@@ -78,6 +78,17 @@ impl CollectionTree {
         self.items.iter().position(|item| item.path == path)
     }
 
+    /// The collections and folders at these paths. Paths with no branch in
+    /// the tree, such as deleted folders, are left out.
+    pub fn branches_at(&self, paths: &HashSet<PathBuf>) -> HashSet<usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.is_branch() && paths.contains(&item.path))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
     /// The collection and folders that contain an item. A collection is its
     /// own location.
     pub fn location(&self, index: usize) -> (SharedString, Vec<SharedString>) {
