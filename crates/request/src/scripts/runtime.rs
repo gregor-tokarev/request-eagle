@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use bytes::Bytes;
-use environment::EnvironmentSession;
+use environment::{EnvironmentSession, VariableResolver};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -16,7 +16,7 @@ use super::{
 use crate::{
     Body, Execution, ExecutionError, ExecutionFailure, Field, FormPart, HttpRequest, Method,
     RequestExecutor, RequestVariables, Response,
-    variables::{resolve_request, sent_url},
+    variables::{SCRIPTED_OUTPUT_LIMIT, describe_error, sent_url},
 };
 
 /// A dropped request future also interrupts a script on the blocking pool.
@@ -63,12 +63,28 @@ pub(crate) struct ScriptState {
     pub locals: Option<LocalVariables>,
 }
 
+/// The request as its pre-request scripts left it, with what they leave for
+/// filling in its variables and for the post-response phase.
+#[derive(Debug)]
+pub(crate) struct ScriptedRequest {
+    request: HttpRequest,
+    state: ScriptState,
+    reports: Vec<ScriptReport>,
+    environment_error: Option<String>,
+    /// Whether a pre-request script ran.
+    scripted: bool,
+    /// Whether a script set the body's text.
+    body_changed: bool,
+}
+
+/// Run the collection's pre-request script, then the request's, which can
+/// change the request and set variables.
 pub(crate) async fn pre_request(
     mut request: HttpRequest,
     variables: RequestVariables,
     executor: RequestExecutor,
     cancelled: Arc<AtomicBool>,
-) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
+) -> Result<ScriptedRequest, ExecutionFailure> {
     let RequestVariables {
         scopes,
         session,
@@ -238,41 +254,77 @@ pub(crate) async fn pre_request(
             reports.push(report);
         }
 
-        if matches!(request.method, Method::Get | Method::Head) {
-            request.body = None;
-        }
-
-        let values = state.variables.visible();
-        let resolved = resolve_request(
-            &values,
-            environment_error.as_deref(),
+        Ok(ScriptedRequest {
             request,
+            state,
+            reports,
+            environment_error,
             scripted,
             body_changed,
-            &mut state.variables.generated,
-        );
+        })
+    })
+    .await
+}
+
+impl ScriptedRequest {
+    /// The request as it is sent, its variables filled in with the values
+    /// the scripts left, with the state for the post-response phase and the
+    /// scripts' reports. A variable that cannot be filled in fails the last
+    /// script that ran.
+    pub fn resolve(
+        mut self,
+    ) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
+        let variables = &mut self.state.variables;
+        let values = variables.visible();
+        let mut resolver = VariableResolver::new(&values);
+
+        // Scripts can set values of any size.
+        if self.scripted || !self.request.scripts.is_empty() {
+            resolver.limit_output(SCRIPTED_OUTPUT_LIMIT);
+        }
+        // `{{$name}}` sends the value a script generated or set. Only scripts
+        // can set these reserved names; collection values were filtered when
+        // this send snapshot was created.
+        let set = values
+            .iter()
+            .filter(|(name, _)| self.scripted && name.starts_with('$'));
+        for (name, value) in variables.generated.iter().chain(set) {
+            resolver.override_generated(name.clone(), value.clone());
+        }
+
+        let resolved = self
+            .request
+            .resolve_for_send(&mut resolver, self.body_changed);
+
+        // Keep generated values for the post-response phase, separate from
+        // local overrides so unsetting an override restores the cached value.
+        for (name, value) in resolver.generated_values() {
+            if !values.contains_key(name) {
+                variables.generated.insert(name.clone(), value.clone());
+            }
+        }
 
         match resolved {
             Ok(request) => {
-                if let Some(locals) = &state.locals {
-                    locals.set(state.variables.values.clone());
+                if let Some(locals) = &self.state.locals {
+                    locals.set(self.state.variables.values.clone());
                 }
-                Ok((request.prepare_for_send(), state, reports))
+                Ok((request, self.state, self.reports))
             }
-            Err(message) => {
+            Err(error) => {
+                let message = describe_error(error, self.environment_error.as_deref());
                 let message: String = message.chars().take(4096).collect();
-                let Some(report) = reports.last_mut() else {
+                let Some(report) = self.reports.last_mut() else {
                     return Err(ExecutionError::Variables(message).into());
                 };
                 report.error = Some(message.clone());
                 Err(ExecutionFailure {
                     error: ExecutionError::Script { message },
-                    scripts: reports,
+                    scripts: self.reports,
                 })
             }
         }
-    })
-    .await
+    }
 }
 
 /// A script that stopped the send, after the scripts that completed before it.

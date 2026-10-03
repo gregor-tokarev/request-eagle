@@ -26,7 +26,7 @@ use tokio_tungstenite::{
 
 use crate::{
     Auth, ExecutionError, Field, Method, RequestPreferences, RequestVariables, WebSocketRequest,
-    tls::Tls,
+    executor::with_timeout, tls::Tls,
 };
 
 /// Events wait in a queue until the tab reads them. When it holds this many
@@ -289,19 +289,8 @@ impl Connection {
             .settings
             .timeout_ms
             .unwrap_or(preferences.timeout_ms);
-        let connecting = pin!(async {
-            match (timeout != 0).then(|| Duration::from_millis(timeout)) {
-                Some(timeout) => {
-                    smol::future::or(connecting, async {
-                        smol::Timer::after(timeout).await;
-
-                        Err(ExecutionError::Timeout { timeout })
-                    })
-                    .await
-                }
-                None => connecting.await,
-            }
-        });
+        let timeout = (timeout != 0).then(|| Duration::from_millis(timeout));
+        let connecting = pin!(with_timeout(timeout, None, connecting));
 
         // Closing stops a handshake that would otherwise never end.
         let (socket, handshake) = match future::select(connecting, &mut closing).await {

@@ -9,6 +9,10 @@ use crate::{
     WebSocketRequest,
 };
 
+/// How much text filling in variables may produce for a request with
+/// scripts, which can set values of any size.
+pub(crate) const SCRIPTED_OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
+
 /// A collection-variable snapshot and any failure to read its source.
 pub struct RequestVariables {
     /// The values `{{name}}` resolves to.
@@ -230,16 +234,27 @@ impl RequestVariables {
         resolver
     }
 
+    /// Fill in the `{{variables}}` of every field of `request`.
     pub fn resolve(&self, request: &HttpRequest) -> Result<HttpRequest, String> {
-        let scripted = !request.scripts.pre_request.trim().is_empty();
-        resolve_request(
-            &self.values,
-            self.environment_error.as_deref(),
-            request.clone(),
-            scripted,
-            false,
-            &mut BTreeMap::new(),
-        )
+        let mut resolver = VariableResolver::new(&self.values);
+
+        if !request.scripts.is_empty() {
+            resolver.limit_output(SCRIPTED_OUTPUT_LIMIT);
+        }
+        // As in a send, a pre-request script's values for `{{$name}}`
+        // replace generated ones.
+        if !request.scripts.pre_request.trim().is_empty() {
+            for (name, value) in &self.values {
+                if name.starts_with('$') {
+                    resolver.override_generated(name.clone(), value.clone());
+                }
+            }
+        }
+
+        request
+            .clone()
+            .resolve_with(&mut resolver)
+            .map_err(|error| describe_error(error, self.environment_error.as_deref()))
     }
 
     /// Resolve the URL, parameters and headers a WebSocket connects with.
@@ -287,7 +302,7 @@ impl RequestVariables {
 
 /// An unknown variable is most likely missing because its environment could
 /// not be read, so report that instead.
-fn describe_error(error: VariableError, environment_error: Option<&str>) -> String {
+pub(crate) fn describe_error(error: VariableError, environment_error: Option<&str>) -> String {
     if let VariableError::Unknown(name) = &error
         && !name.starts_with('$')
         && let Some(message) = environment_error
@@ -310,7 +325,7 @@ pub(crate) fn sent_url(
     generated: &BTreeMap<String, String>,
 ) -> Option<String> {
     let mut resolver = VariableResolver::new(values);
-    resolver.limit_output(32 * 1024 * 1024);
+    resolver.limit_output(SCRIPTED_OUTPUT_LIMIT);
 
     let overrides = generated
         .iter()
@@ -358,42 +373,6 @@ fn query_start(url: &str) -> usize {
     url.len()
 }
 
-/// `scripted` reports whether a collection or request pre-request script ran.
-pub(crate) fn resolve_request(
-    values: &HashMap<String, String>,
-    environment_error: Option<&str>,
-    request: HttpRequest,
-    scripted: bool,
-    body_changed: bool,
-    generated: &mut BTreeMap<String, String>,
-) -> Result<HttpRequest, String> {
-    let mut resolver = VariableResolver::new(values);
-    for (name, value) in generated.iter() {
-        resolver.override_generated(name.clone(), value.clone());
-    }
-    if scripted || !request.scripts.is_empty() {
-        resolver.limit_output(32 * 1024 * 1024);
-    }
-    // Only scripts can introduce these reserved names; collection values
-    // were filtered when this send snapshot was created.
-    if scripted {
-        for (name, value) in values {
-            if name.starts_with('$') {
-                resolver.override_generated(name.clone(), value.clone());
-            }
-        }
-    }
-    let resolved = request.resolve_with(&mut resolver, body_changed);
-    // Keep generated values for the post-response phase, separate from
-    // local overrides so unsetting an override restores the cached value.
-    for (name, value) in resolver.generated_values() {
-        if !values.contains_key(name) {
-            generated.insert(name.clone(), value.clone());
-        }
-    }
-    resolved.map_err(|error| describe_error(error, environment_error))
-}
-
 impl HttpRequest {
     /// Resolve a send snapshot, preserving the saved request and editable draft.
     pub fn resolve_variables(
@@ -401,14 +380,34 @@ impl HttpRequest {
         values: &HashMap<String, String>,
     ) -> Result<Self, VariableError> {
         self.clone()
-            .resolve_with(&mut VariableResolver::new(values), false)
+            .resolve_with(&mut VariableResolver::new(values))
     }
 
-    fn resolve_with(
+    /// The request as it is sent, with its variables filled in. The body's
+    /// are filled in after `prepare_for_send`, so a GET or HEAD body, which
+    /// is not sent, needs no values. With `body_changed`, raw text that a
+    /// script set is filled in even without references, so its size counts
+    /// toward the output limit.
+    pub(crate) fn resolve_for_send(
         self,
         resolver: &mut VariableResolver<'_>,
         body_changed: bool,
     ) -> Result<Self, VariableError> {
+        let mut request = self.resolve_head(resolver)?.prepare_for_send();
+        request.resolve_body(resolver, body_changed)?;
+
+        Ok(request)
+    }
+
+    fn resolve_with(self, resolver: &mut VariableResolver<'_>) -> Result<Self, VariableError> {
+        let mut request = self.resolve_head(resolver)?;
+        request.resolve_body(resolver, false)?;
+
+        Ok(request)
+    }
+
+    /// Fill in the URL, headers, query and authorization.
+    fn resolve_head(self, resolver: &mut VariableResolver<'_>) -> Result<Self, VariableError> {
         let mut request = self;
         // Fill path variables only where the resolved URL is sent, so a value
         // after a fragment is not resolved either.
@@ -437,7 +436,15 @@ impl HttpRequest {
         }
         request.auth.resolve_with(|text| resolver.resolve(text))?;
 
-        match &mut request.body {
+        Ok(request)
+    }
+
+    fn resolve_body(
+        &mut self,
+        resolver: &mut VariableResolver<'_>,
+        body_changed: bool,
+    ) -> Result<(), VariableError> {
+        match &mut self.body {
             Some(Body::Raw { text, .. }) if body_changed || text.contains("{{") => {
                 *text = resolver.resolve(text)?;
             }
@@ -459,7 +466,7 @@ impl HttpRequest {
             Some(Body::Raw { .. } | Body::Binary { .. }) | None => {}
         }
 
-        Ok(request)
+        Ok(())
     }
 }
 

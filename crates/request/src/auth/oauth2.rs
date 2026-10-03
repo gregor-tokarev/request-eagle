@@ -22,7 +22,11 @@ use url::{Host, Url};
 use super::credentials::basic;
 use super::crypto::{random_token, sha256};
 use super::{OAuth2Auth, OAuth2ClientAuthentication, OAuth2Grant};
-use crate::{Body, Field, HttpRequest, Method, RequestExecutor, RequestVariables, StatusCode};
+use crate::{
+    Body, ExecutionError, Field, HttpRequest, Method, RequestExecutor, RequestVariables,
+    StatusCode,
+    executor::{send, with_timeout},
+};
 
 /// How long to wait for the browser to return after signing in.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -222,24 +226,17 @@ async fn request_token(
         .map_err(|error| error.to_string())?
         .map(Bytes::from);
 
-    let send = executor.http.execute(&request, body, None);
-    let sent = match executor.timeout {
-        Some(timeout) => {
-            smol::future::or(async { Some(send.await) }, async {
-                smol::Timer::after(timeout).await;
-                None
-            })
-            .await
-        }
-        None => Some(send.await),
-    };
-    let (response, _) = sent
-        .ok_or_else(|| "The token endpoint did not answer in time".to_owned())?
-        .map_err(|error| {
-            format!(
+    let sent = send(&executor.http, &mut request, body, None);
+    let (response, _, _) = with_timeout(executor.timeout, None, sent)
+        .await
+        .map_err(|error| match error {
+            ExecutionError::Timeout { .. } => {
+                "The token endpoint did not answer in time".to_owned()
+            }
+            error => format!(
                 "Could not reach the token endpoint: {}",
                 error.message_without_url()
-            )
+            ),
         })?;
 
     parse_token(response.status, &response.body)

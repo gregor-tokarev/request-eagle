@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use environment::VariableResolver;
 use url::{Url, form_urlencoded::byte_serialize};
 
 use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
@@ -23,10 +24,6 @@ impl HttpRequest {
     ) -> String {
         let mut request = self.clone();
         request.auth = request.auth.sending();
-        // Sending leaves these bodies out before it resolves anything.
-        if matches!(request.method, Method::Get | Method::Head) {
-            request.body = None;
-        }
 
         request.path = keep_unknown(&request.path, values);
         for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
@@ -69,9 +66,8 @@ impl HttpRequest {
         // A reference without its closing braces cannot be filled in, so the
         // request is written as it is.
         let mut request = request
-            .resolve_variables(values)
-            .unwrap_or_else(|_| self.clone())
-            .prepare_for_send();
+            .resolve_for_send(&mut VariableResolver::new(values), false)
+            .unwrap_or_else(|_| self.clone().prepare_for_send());
         for (index, reference) in references.iter().enumerate() {
             request.path = request
                 .path

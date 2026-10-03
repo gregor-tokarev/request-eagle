@@ -50,7 +50,9 @@ async fn pre_request(
     request: HttpRequest,
     variables: RequestVariables,
 ) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
-    runtime::pre_request(request, variables, executor(), cancelled()).await
+    runtime::pre_request(request, variables, executor(), cancelled())
+        .await?
+        .resolve()
 }
 
 async fn post_response(

@@ -12,7 +12,10 @@ use rquickjs::{Ctx, Exception, Function, Promise};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{Field, HttpRequest, Method, RequestExecutor};
+use crate::{
+    ExecutionError, Field, HttpRequest, Method, RequestExecutor,
+    executor::{send, with_timeout},
+};
 
 const REQUEST_LIMIT: usize = 32;
 const REQUEST_BYTES: usize = 1024 * 1024;
@@ -26,6 +29,7 @@ struct RequestInput {
     url: String,
     method: Method,
     headers: Vec<(String, String)>,
+    /// None for GET and HEAD, which `pm.sendRequest` sends without a body.
     body: Option<String>,
 }
 
@@ -76,28 +80,22 @@ impl<'js> Network<'js> {
             state.count.set(state.count.get() + 1);
 
             state.pending.borrow_mut().push(Box::pin(async move {
-                let request = HttpRequest {
+                let mut request = HttpRequest {
                     path: input.url,
                     method: input.method,
                     headers: input.headers.into_iter().map(Field::from).collect(),
                     ..Default::default()
                 };
-                let body = input
-                    .body
-                    .filter(|_| !matches!(request.method, Method::Get | Method::Head))
-                    .map(bytes::Bytes::from);
+                let body = input.body.map(bytes::Bytes::from);
                 let started = Instant::now();
-                let send = async {
-                    http.execute(&request, body, None).await.map(|(response, _)| response).map_err(|error| error.to_string())
-                };
-                let response = match timeout {
-                    Some(timeout) => smol::future::or(send, async {
-                        smol::Timer::after(timeout).await;
-                        Err(format!("Script HTTP request timed out after {timeout:?}"))
-                    }).await,
-                    None => send.await,
-                };
-                let result = response.and_then(|response| {
+                let sent = send(&http, &mut request, body, None);
+                let response = with_timeout(timeout, None, sent).await.map_err(|error| match error {
+                    ExecutionError::Timeout { timeout } => {
+                        format!("Script HTTP request timed out after {timeout:?}")
+                    }
+                    error => error.to_string(),
+                });
+                let result = response.and_then(|(response, _, _)| {
                     let total = response_bytes.get().saturating_add(response.body.len());
                     response_bytes.set(total);
                     if total > TOTAL_RESPONSE_BYTES {
