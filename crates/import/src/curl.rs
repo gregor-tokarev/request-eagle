@@ -534,6 +534,7 @@ impl Options {
                 timeout_ms: self.timeout_ms,
                 follow_redirects: None,
                 verify_certificates: self.insecure.then_some(false),
+                ..HttpSettings::default()
             },
             ..HttpRequest::default()
         })

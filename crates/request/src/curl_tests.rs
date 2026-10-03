@@ -207,6 +207,7 @@ fn writes_the_request_settings_that_curl_has_options_for() {
             timeout_ms: Some(1500),
             follow_redirects: Some(false),
             verify_certificates: Some(false),
+            ..HttpSettings::default()
         }),
         "curl --insecure --max-time 1.5 'https://pets.test/'"
     );
@@ -215,6 +216,7 @@ fn writes_the_request_settings_that_curl_has_options_for() {
             timeout_ms: Some(0),
             follow_redirects: Some(true),
             verify_certificates: Some(true),
+            ..HttpSettings::default()
         }),
         "curl --location 'https://pets.test/'"
     );
@@ -247,6 +249,19 @@ fn includes_the_jar_cookies_for_the_url() {
     );
     assert_eq!(
         request.curl_command(&HashMap::new(), None),
+        "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: own=typed'"
+    );
+
+    // A request that leaves out the jar's cookies sends only its own.
+    let request = HttpRequest {
+        settings: HttpSettings {
+            send_cookies: false,
+            ..HttpSettings::default()
+        },
+        ..request
+    };
+    assert_eq!(
+        request.curl_command(&HashMap::new(), Some(&jar)),
         "curl --location 'https://pets.test/pets' \\\n--header 'Cookie: own=typed'"
     );
 }

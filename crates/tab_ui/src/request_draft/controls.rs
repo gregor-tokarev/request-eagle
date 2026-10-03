@@ -282,6 +282,10 @@ impl RequestDraft {
                         Some(RequestSection::Headers) => {
                             Field::enabled(&self.request.headers).count()
                                 + self.generated_headers.len()
+                                + usize::from(
+                                    self.jar_cookies.is_some()
+                                        && self.request.settings.send_cookies,
+                                )
                         }
                         Some(RequestSection::Body) => match &self.request.body {
                             Some(request::Body::UrlEncoded { fields }) => fields.len(),

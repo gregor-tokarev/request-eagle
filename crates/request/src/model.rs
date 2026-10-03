@@ -83,7 +83,7 @@ pub struct HttpRequest {
 }
 
 /// Per-request options. Each unset option follows the request preferences.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct HttpSettings {
     /// Deadline through the complete response body. Zero disables it.
@@ -93,6 +93,25 @@ pub struct HttpSettings {
     pub follow_redirects: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verify_certificates: Option<bool>,
+    /// Whether the cookie jar's cookies join the request's Cookie header,
+    /// while the jar is on. Responses store their cookies either way.
+    #[serde(skip_serializing_if = "is_true")]
+    pub send_cookies: bool,
+}
+
+impl Default for HttpSettings {
+    fn default() -> Self {
+        Self {
+            timeout_ms: None,
+            follow_redirects: None,
+            verify_certificates: None,
+            send_cookies: true,
+        }
+    }
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl HttpSettings {
@@ -105,6 +124,7 @@ impl HttpSettings {
         usize::from(self.timeout_ms.is_some())
             + usize::from(self.follow_redirects.is_some())
             + usize::from(self.verify_certificates.is_some())
+            + usize::from(!self.send_cookies)
     }
 }
 

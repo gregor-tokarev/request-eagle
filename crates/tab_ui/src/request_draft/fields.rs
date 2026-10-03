@@ -32,11 +32,18 @@ pub(crate) struct FieldsChanged(pub Vec<Field>);
 /// Asks for a file to send from a row, whose value input takes its path.
 pub(crate) struct ChooseFile(pub Entity<InputState>);
 
+/// Whether the cookie jar's Cookie header is switched on.
+pub(crate) struct SendCookiesChanged(pub bool);
+
 /// A request's editable key/value rows, including one trailing empty row.
 pub(crate) struct RequestFields {
     id: &'static str,
     rows: Vec<FieldRow>,
     generated_headers: Vec<(SharedString, SharedString)>,
+    /// The Cookie header that the cookie jar adds, shown after the generated
+    /// headers, and whether it is sent.
+    jar_cookies: Option<SharedString>,
+    send_cookies: bool,
     focus: FocusHandle,
     scope: Entity<VariableScope>,
     /// Whether a row without a name is sent, as a query parameter `=value`
@@ -48,6 +55,7 @@ pub(crate) struct RequestFields {
 
 impl EventEmitter<FieldsChanged> for RequestFields {}
 impl EventEmitter<ChooseFile> for RequestFields {}
+impl EventEmitter<SendCookiesChanged> for RequestFields {}
 
 impl RequestFields {
     pub(crate) fn new(
@@ -65,6 +73,8 @@ impl RequestFields {
                 .iter()
                 .map(|(name, value)| (name.clone().into(), value.clone().into()))
                 .collect(),
+            jar_cookies: None,
+            send_cookies: true,
             focus: cx.focus_handle(),
             scope,
             keyless_rows: false,
@@ -81,6 +91,12 @@ impl RequestFields {
 
     pub(crate) fn with_keyless_rows(mut self) -> Self {
         self.keyless_rows = true;
+        self
+    }
+
+    pub(crate) fn with_jar_cookies(mut self, cookies: Option<&str>, sent: bool) -> Self {
+        self.jar_cookies = cookies.map(|cookies| cookies.to_owned().into());
+        self.send_cookies = sent;
         self
     }
 
@@ -210,6 +226,15 @@ impl RequestFields {
             .iter()
             .map(|(name, value)| (name.clone().into(), value.clone().into()))
             .collect();
+        cx.notify();
+    }
+
+    pub(crate) fn set_jar_cookies(&mut self, cookies: Option<&str>, cx: &mut Context<Self>) {
+        if self.jar_cookies.as_deref() == cookies {
+            return;
+        }
+
+        self.jar_cookies = cookies.map(|cookies| cookies.to_owned().into());
         cx.notify();
     }
 
@@ -365,12 +390,25 @@ impl Render for RequestFields {
             .children(
                 self.generated_headers
                     .iter()
+                    .map(|(name, value)| (name.clone(), value.clone(), false))
+                    .chain(
+                        self.jar_cookies
+                            .clone()
+                            .map(|cookies| ("Cookie".into(), cookies, true)),
+                    )
                     .enumerate()
-                    .map(|(index, (name, value))| {
+                    .map(|(index, (name, value, jar_cookies))| {
                         h_flex()
-                            .id(format!("generated-header-{name}"))
+                            .id(if jar_cookies {
+                                "jar-cookies".into()
+                            } else {
+                                format!("generated-header-{name}")
+                            })
                             .debug_selector(move || format!("headers-generated-row-{index}"))
                             .min_h_8()
+                            // Each cell spans the row, which a wrapped value can
+                            // make taller, so the column lines do too.
+                            .items_stretch()
                             .border_t_1()
                             .border_color(cx.theme().border)
                             .capture_any_mouse_down(cx.listener(
@@ -386,14 +424,39 @@ impl Render for RequestFields {
                                     cx.notify();
                                 }
                             }))
-                            .child(div().w_9().flex_none())
+                            .child(
+                                div()
+                                    .w_9()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    // The other generated headers are always sent.
+                                    .when(jar_cookies, |this| {
+                                        this.child(
+                                            Checkbox::new("send-cookies")
+                                                .debug_selector(|| "headers-send-cookies".into())
+                                                .accessibility_label(
+                                                    "Send cookies from the cookie jar",
+                                                )
+                                                .checked(self.send_cookies)
+                                                .on_click(cx.listener(
+                                                    |this, sent: &bool, _, cx| {
+                                                        this.send_cookies = *sent;
+                                                        cx.emit(SendCookiesChanged(*sent));
+                                                        cx.notify();
+                                                    },
+                                                )),
+                                        )
+                                    }),
+                            )
                             .children(
                                 [
-                                    ("key", name.clone()),
-                                    ("value", value.clone()),
+                                    ("key", name),
+                                    ("value", value),
                                     (
                                         "description",
-                                        SharedString::from(if name == "Cookie" {
+                                        SharedString::from(if jar_cookies {
                                             "From the cookie jar"
                                         } else {
                                             "Auto-generated"
@@ -404,12 +467,13 @@ impl Render for RequestFields {
                                 .enumerate()
                                 .map(
                                     |(column_index, (column, text))| {
-                                        div()
+                                        v_flex()
                                             .debug_selector(move || {
                                                 format!("headers-generated-{column}-{index}")
                                             })
                                             .flex_1()
                                             .min_w_0()
+                                            .justify_center()
                                             .px_2()
                                             .py_1()
                                             .when(column != "description", |cell| cell.border_r_1())
