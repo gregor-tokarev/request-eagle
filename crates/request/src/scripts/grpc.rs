@@ -18,7 +18,7 @@ use super::{
     variables::Variables,
 };
 use crate::{
-    Field, GrpcError, GrpcEvent, GrpcEvents, GrpcMessage, GrpcRequest, GrpcScripts,
+    Field, GrpcError, GrpcEvent, GrpcEvents, GrpcFailure, GrpcMessage, GrpcRequest, GrpcScripts,
     RequestExecutor, RequestVariables,
 };
 
@@ -81,7 +81,7 @@ impl CallScripts {
         &mut self,
         request: &mut GrpcRequest,
         variables: &mut RequestVariables,
-    ) -> Result<Option<ScriptReport>, GrpcError> {
+    ) -> Result<Option<ScriptReport>, GrpcFailure> {
         if self.scripts.before_invoke.trim().is_empty() {
             return Ok(None);
         }
@@ -93,9 +93,9 @@ impl CallScripts {
             .await;
 
         if let Some(message) = report.error.clone() {
-            return Err(GrpcError::Script {
-                message,
-                report: Box::new(report),
+            return Err(GrpcFailure {
+                error: GrpcError::Script { message },
+                scripts: vec![report],
             });
         }
 
@@ -111,16 +111,18 @@ impl CallScripts {
             && let Err(message) = session.apply(&changes)
         {
             report.error = Some(message.into());
-            return Err(GrpcError::Script {
-                message: message.into(),
-                report: Box::new(report),
+            return Err(GrpcFailure {
+                error: GrpcError::Script {
+                    message: message.into(),
+                },
+                scripts: vec![report],
             });
         }
 
         if let Some(reason) = skip_reason {
-            return Err(GrpcError::Skipped {
-                reason,
-                report: Box::new(report),
+            return Err(GrpcFailure {
+                error: GrpcError::Skipped { reason },
+                scripts: vec![report],
             });
         }
 

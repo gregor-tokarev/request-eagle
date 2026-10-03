@@ -1,8 +1,16 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use thiserror::Error;
 
 use crate::ScriptReport;
+
+/// A gRPC call that did not start, with the report of its Before invoke
+/// script when that ran.
+#[derive(Debug)]
+pub struct GrpcFailure {
+    pub error: GrpcError,
+    pub scripts: Vec<ScriptReport>,
+}
 
 /// A gRPC call that could not start or finish with a status.
 #[derive(Debug, Error)]
@@ -58,25 +66,34 @@ pub enum GrpcError {
     Timeout { timeout: Duration },
 
     #[error("Before invoke script failed: {message}")]
-    Script {
-        message: String,
-        report: Box<ScriptReport>,
-    },
+    Script { message: String },
 
     #[error("Call skipped: {reason}")]
-    Skipped {
-        reason: String,
-        report: Box<ScriptReport>,
-    },
+    Skipped { reason: String },
 
     #[error("scripts could not start: {0}")]
     ScriptSetup(String),
+}
 
-    /// The call did not start after its Before invoke script ran, whose
-    /// results it keeps.
-    #[error("{source}")]
-    ScriptedCall {
-        source: Box<GrpcError>,
-        report: Box<ScriptReport>,
-    },
+/// A failure before the Before invoke script ran.
+impl From<GrpcError> for GrpcFailure {
+    fn from(error: GrpcError) -> Self {
+        Self {
+            error,
+            scripts: Vec::new(),
+        }
+    }
+}
+
+/// The error's message, without the script's report.
+impl fmt::Display for GrpcFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for GrpcFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
 }

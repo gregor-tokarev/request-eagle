@@ -8,8 +8,8 @@ use futures::{StreamExt as _, channel::mpsc::unbounded};
 
 use super::{CallScripts, GrpcScripts, ScriptPhase, ScriptReport};
 use crate::{
-    Field, GrpcError, GrpcEvent, GrpcMessage, GrpcRequest, GrpcStatus, RequestExecutor,
-    RequestPreferences, RequestVariables,
+    Field, GrpcError, GrpcEvent, GrpcFailure, GrpcMessage, GrpcRequest, GrpcStatus,
+    RequestExecutor, RequestPreferences, RequestVariables,
 };
 
 fn variables() -> RequestVariables {
@@ -152,15 +152,21 @@ fn before_invoke_errors_and_skips_stop_the_call() {
     };
 
     match run("console.log('checking'); throw new Error('no token');") {
-        Err(GrpcError::Script { message, report }) => {
+        Err(GrpcFailure {
+            error: GrpcError::Script { message },
+            scripts,
+        }) => {
             assert!(message.contains("no token"), "{message}");
-            assert_eq!(report.logs[0].message, "checking");
+            assert_eq!(scripts[0].logs[0].message, "checking");
         }
         result => panic!("expected a script error, got {result:?}"),
     }
 
     match run("pm.execution.skipRequest('offline');") {
-        Err(GrpcError::Skipped { reason, .. }) => assert_eq!(reason, "offline"),
+        Err(GrpcFailure {
+            error: GrpcError::Skipped { reason },
+            ..
+        }) => assert_eq!(reason, "offline"),
         result => panic!("expected a skip, got {result:?}"),
     }
 

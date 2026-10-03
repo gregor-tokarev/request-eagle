@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use bytes::Bytes;
-use environment::EnvironmentSession;
+use environment::{EnvironmentSession, VariableResolver};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -14,9 +14,9 @@ use super::{
     variables::Variables,
 };
 use crate::{
-    Body, Execution, ExecutionError, Field, FormPart, HttpRequest, Method, RequestExecutor,
-    RequestVariables, Response,
-    variables::{resolve_request, sent_url},
+    Body, Execution, ExecutionError, ExecutionFailure, Field, FormPart, HttpRequest, Method,
+    RequestExecutor, RequestVariables, Response,
+    variables::{SCRIPTED_OUTPUT_LIMIT, describe_error, sent_url},
 };
 
 /// A dropped request future also interrupts a script on the blocking pool.
@@ -63,12 +63,28 @@ pub(crate) struct ScriptState {
     pub locals: Option<LocalVariables>,
 }
 
+/// The request as its pre-request scripts left it, with what they leave for
+/// filling in its variables and for the post-response phase.
+#[derive(Debug)]
+pub(crate) struct ScriptedRequest {
+    request: HttpRequest,
+    state: ScriptState,
+    reports: Vec<ScriptReport>,
+    environment_error: Option<String>,
+    /// Whether a pre-request script ran.
+    scripted: bool,
+    /// Whether a script set the body's text.
+    body_changed: bool,
+}
+
+/// Run the collection's pre-request script, then the request's, which can
+/// change the request and set variables.
 pub(crate) async fn pre_request(
     mut request: HttpRequest,
     variables: RequestVariables,
     executor: RequestExecutor,
     cancelled: Arc<AtomicBool>,
-) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionError> {
+) -> Result<ScriptedRequest, ExecutionFailure> {
     let RequestVariables {
         scopes,
         session,
@@ -92,9 +108,9 @@ pub(crate) async fn pre_request(
                 error: Some(message.clone()),
                 next_request: None,
             };
-            return Err(ExecutionError::Script {
-                message,
-                report: Box::new(report),
+            return Err(ExecutionFailure {
+                error: ExecutionError::Script { message },
+                scripts: vec![report],
             });
         }
     };
@@ -163,12 +179,10 @@ pub(crate) async fn pre_request(
             }
 
             if let Some(message) = report.error.clone() {
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
-                    ExecutionError::Script {
-                        message,
-                        report: Box::new(report),
-                    },
+                    report,
+                    ExecutionError::Script { message },
                 ));
             }
 
@@ -181,11 +195,11 @@ pub(crate) async fn pre_request(
                 && let Err(message) = session.apply(&output.changes)
             {
                 report.error = Some(message.into());
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
+                    report,
                     ExecutionError::Script {
                         message: message.into(),
-                        report: Box::new(report),
                     },
                 ));
             }
@@ -194,12 +208,10 @@ pub(crate) async fn pre_request(
                 if let Some(locals) = &state.locals {
                     locals.set(output.variables.values.clone());
                 }
-                return Err(after_earlier_scripts(
+                return Err(stopped(
                     reports,
-                    ExecutionError::Skipped {
-                        reason,
-                        report: Box::new(report),
-                    },
+                    report,
+                    ExecutionError::Skipped { reason },
                 ));
             }
             let changes = output.request;
@@ -226,12 +238,10 @@ pub(crate) async fn pre_request(
                         part.name
                     );
                     report.error = Some(message.clone());
-                    return Err(after_earlier_scripts(
+                    return Err(stopped(
                         reports,
-                        ExecutionError::Script {
-                            message,
-                            report: Box::new(report),
-                        },
+                        report,
+                        ExecutionError::Script { message },
                     ));
                 }
 
@@ -244,59 +254,90 @@ pub(crate) async fn pre_request(
             reports.push(report);
         }
 
-        if matches!(request.method, Method::Get | Method::Head) {
-            request.body = None;
-        }
-
-        let values = state.variables.visible();
-        let resolved = resolve_request(
-            &values,
-            environment_error.as_deref(),
+        Ok(ScriptedRequest {
             request,
+            state,
+            reports,
+            environment_error,
             scripted,
             body_changed,
-            &mut state.variables.generated,
-        );
-
-        match resolved {
-            Ok(request) => {
-                if let Some(locals) = &state.locals {
-                    locals.set(state.variables.values.clone());
-                }
-                Ok((request.prepare_for_send(), state, reports))
-            }
-            Err(message) => {
-                let message: String = message.chars().take(4096).collect();
-                let Some(mut report) = reports.pop() else {
-                    return Err(ExecutionError::Variables(message));
-                };
-                report.error = Some(message.clone());
-                Err(after_earlier_scripts(
-                    reports,
-                    ExecutionError::Script {
-                        message,
-                        report: Box::new(report),
-                    },
-                ))
-            }
-        }
+        })
     })
     .await
 }
 
-/// Keep the reports of scripts that completed before a later one stopped the send.
-fn after_earlier_scripts(mut reports: Vec<ScriptReport>, error: ExecutionError) -> ExecutionError {
-    if reports.is_empty() {
-        return error;
-    }
+impl ScriptedRequest {
+    /// The request as it is sent, its variables filled in with the values
+    /// the scripts left, with the state for the post-response phase and the
+    /// scripts' reports. A variable that cannot be filled in fails the last
+    /// script that ran.
+    pub fn resolve(
+        mut self,
+    ) -> Result<(HttpRequest, ScriptState, Vec<ScriptReport>), ExecutionFailure> {
+        let variables = &mut self.state.variables;
+        let values = variables.visible();
+        let mut resolver = VariableResolver::new(&values);
 
-    if let ExecutionError::Script { report, .. } | ExecutionError::Skipped { report, .. } = &error {
-        reports.push((**report).clone());
-    }
+        // Scripts can set values of any size.
+        if self.scripted || !self.request.scripts.is_empty() {
+            resolver.limit_output(SCRIPTED_OUTPUT_LIMIT);
+        }
+        // `{{$name}}` sends the value a script generated or set. Only scripts
+        // can set these reserved names; collection values were filtered when
+        // this send snapshot was created.
+        let set = values
+            .iter()
+            .filter(|(name, _)| self.scripted && name.starts_with('$'));
+        for (name, value) in variables.generated.iter().chain(set) {
+            resolver.override_generated(name.clone(), value.clone());
+        }
 
-    ExecutionError::ScriptedRequest {
-        source: Box::new(error),
-        reports,
+        let resolved = self
+            .request
+            .resolve_for_send(&mut resolver, self.body_changed);
+
+        // Keep generated values for the post-response phase, separate from
+        // local overrides so unsetting an override restores the cached value.
+        for (name, value) in resolver.generated_values() {
+            if !values.contains_key(name) {
+                variables.generated.insert(name.clone(), value.clone());
+            }
+        }
+
+        match resolved {
+            Ok(request) => {
+                if let Some(locals) = &self.state.locals {
+                    locals.set(self.state.variables.values.clone());
+                }
+                Ok((request, self.state, self.reports))
+            }
+            Err(error) => {
+                let message = describe_error(error, self.environment_error.as_deref());
+                let message: String = message.chars().take(4096).collect();
+                let Some(report) = self.reports.last_mut() else {
+                    return Err(ExecutionError::Variables(message).into());
+                };
+                report.error = Some(message.clone());
+                Err(ExecutionFailure {
+                    error: ExecutionError::Script { message },
+                    scripts: self.reports,
+                })
+            }
+        }
+    }
+}
+
+/// A script that stopped the send, after the scripts that completed before it.
+fn stopped(
+    mut reports: Vec<ScriptReport>,
+    report: ScriptReport,
+    error: ExecutionError,
+) -> ExecutionFailure {
+    reports.push(report);
+
+    ExecutionFailure {
+        error,
+        scripts: reports,
     }
 }
 

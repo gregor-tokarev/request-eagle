@@ -8,7 +8,7 @@ use environment::EnvironmentSessions;
 
 use super::{
     ExecutionInfo, LocalVariables, NextRequest, RequestScripts, ScriptReport,
-    runtime::{ScriptState, post_response, pre_request},
+    runtime::{ScriptState, ScriptedRequest, post_response, pre_request},
 };
 use crate::{
     Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
@@ -29,6 +29,7 @@ fn send(
         executor(),
         Arc::new(AtomicBool::new(false)),
     ))
+    .and_then(ScriptedRequest::resolve)
     .unwrap()
 }
 

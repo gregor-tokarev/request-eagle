@@ -1,23 +1,26 @@
 use std::{
     future::Future,
-    sync::atomic::Ordering,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
 
 use http_client::http::header::WWW_AUTHENTICATE;
+use url::Url;
 
 use crate::{
-    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, Field, HttpRequest,
-    RequestPreferences, RequestVariables, Response, StatusCode, http::HttpExecutor, scripts,
+    Auth, Body, CookieJar, EventStream, Execution, ExecutionError, ExecutionFailure, Field,
+    HttpRequest, HttpResponse, RequestPreferences, RequestVariables, Response, StatusCode,
+    http::HttpExecutor, scripts,
 };
 
 /// How much of a raw body `Execution::sent` keeps.
 const SENT_TEXT_LIMIT: usize = 64 * 1024;
 
-/// Reusable protocol dispatcher with a connection pool and a settings snapshot.
-/// Construct a new executor when request preferences change.
+/// Runs HTTP requests with their scripts, reusing connections, with a
+/// snapshot of the request preferences. Construct a new executor when they
+/// change.
 #[derive(Clone)]
 pub struct RequestExecutor {
     pub(crate) http: HttpExecutor,
@@ -50,7 +53,7 @@ impl RequestExecutor {
         &self,
         request: HttpRequest,
         variables: RequestVariables,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         self.run(request, variables, None)
     }
 
@@ -62,7 +65,7 @@ impl RequestExecutor {
         request: HttpRequest,
         variables: RequestVariables,
         events: EventStream,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         self.run(request, variables, Some(events))
     }
 
@@ -71,10 +74,8 @@ impl RequestExecutor {
         mut request: HttpRequest,
         variables: RequestVariables,
         mut events: Option<EventStream>,
-    ) -> impl Future<Output = Result<Execution, ExecutionError>> + Send + 'static + use<> {
+    ) -> impl Future<Output = Result<Execution, ExecutionFailure>> + Send + 'static + use<> {
         let executor = self.clone();
-        // Resolved with the request's other fields, after pre-request scripts.
-        request.auth = variables.effective_auth(&request.auth);
         let opened = events.as_ref().map(|events| events.opened.clone());
         let timeout = match request.settings.timeout_ms {
             Some(0) => None,
@@ -82,17 +83,26 @@ impl RequestExecutor {
             None => self.timeout,
         };
 
+        // The request's own authorization, or its collection's when it
+        // inherits it. Its variables resolve with the request's other fields.
+        request.auth = variables.effective_auth(&request.auth);
+
         async move {
             let cancellation = scripts::Cancellation::new();
+            // The pre-request scripts' reports, which a failure to send keeps.
             let mut reports = Vec::new();
+
             let run = async {
-                let (mut request, mut state, pre_reports) = scripts::pre_request(
+                let scripted = scripts::pre_request(
                     request,
                     variables,
                     executor.clone(),
                     cancellation.0.clone(),
                 )
                 .await?;
+                // Filling in large values takes a while.
+                let (mut request, mut state, pre_reports) =
+                    smol::unblock(move || scripted.resolve()).await?;
                 reports = pre_reports;
 
                 // Reading the body's files blocks.
@@ -102,9 +112,6 @@ impl RequestExecutor {
                 })
                 .await;
                 let body = body?.map(Bytes::from);
-                authorize(&mut request, body.as_deref())?;
-
-                let sent_at = Instant::now();
 
                 // Only a post-response script reads the sent body. Otherwise
                 // HTTP owns the upload and releases it before the download.
@@ -123,24 +130,8 @@ impl RequestExecutor {
                     _ => None,
                 };
 
-                // Digest may send the body again; otherwise HTTP owns it.
-                let digest_body = matches!(request.auth, Auth::Digest(_))
-                    .then(|| body.clone())
-                    .flatten();
-                let (mut response, mut url) = executor
-                    .http
-                    .execute(&request, body, events.as_mut())
-                    .await?;
-
-                if let Some(answer) =
-                    answer_digest(&request, &response, &url, digest_body.as_deref())
-                {
-                    request.headers.push(Field::new("Authorization", answer));
-                    (response, url) = executor
-                        .http
-                        .execute(&request, digest_body, events.as_mut())
-                        .await?;
-                }
+                let (response, url, elapsed) =
+                    send(&executor.http, &mut request, body, events.as_mut()).await?;
                 state.response_url = Some(url.into());
 
                 let mut sent = request.clone();
@@ -150,42 +141,24 @@ impl RequestExecutor {
                 }
                 let execution = Execution {
                     response: Response::Http(response),
-                    elapsed: sent_at.elapsed(),
+                    elapsed,
                     scripts: std::mem::take(&mut reports),
                     sent: Some(sent),
                 };
 
-                Ok((request, post_body, state, execution))
+                Ok::<_, ExecutionFailure>((request, post_body, state, execution))
             };
 
-            let (request, body, state, execution) = match timeout {
-                Some(timeout) => {
-                    smol::future::or(run, async {
-                        smol::Timer::after(timeout).await;
-
-                        if opened
-                            .as_ref()
-                            .is_some_and(|opened| opened.load(Ordering::SeqCst))
-                        {
-                            std::future::pending::<()>().await;
-                        }
-
-                        Err(ExecutionError::Timeout { timeout })
-                    })
-                    .await
-                }
-                None => run.await,
-            }
-            .map_err(|error| {
-                if reports.is_empty() {
-                    error
-                } else {
-                    ExecutionError::ScriptedRequest {
-                        source: Box::new(error),
-                        reports,
+            // The timeout covers the pre-request scripts too.
+            let (request, body, state, execution) = with_timeout(timeout, opened.as_deref(), run)
+                .await
+                .map_err(|mut failure| {
+                    // A failure after the pre-request scripts keeps their reports.
+                    if failure.scripts.is_empty() {
+                        failure.scripts = reports;
                     }
-                }
-            })?;
+                    failure
+                })?;
 
             // Once the response is complete, its script uses the separate script
             // deadline. A request timeout must not discard a received response.
@@ -200,6 +173,58 @@ impl RequestExecutor {
             .await)
         }
     }
+}
+
+/// Send a resolved request with its encoded body: add its authorization's
+/// credentials, send it with the cookie jar at every hop of its redirects,
+/// and send it again to answer a Digest challenge. Also returns where the
+/// response came from, and the time from sending the request until the
+/// complete response was read. `request` keeps the credentials it was sent
+/// with.
+pub(crate) async fn send(
+    http: &HttpExecutor,
+    request: &mut HttpRequest,
+    body: Option<Bytes>,
+    mut events: Option<&mut EventStream>,
+) -> Result<(HttpResponse, Url, Duration), ExecutionError> {
+    authorize(request, body.as_deref())?;
+    let sent_at = Instant::now();
+
+    // Digest may send the body again; otherwise HTTP owns it.
+    let digest_body = matches!(request.auth, Auth::Digest(_))
+        .then(|| body.clone())
+        .flatten();
+    let (mut response, mut url) = http.execute(request, body, events.as_deref_mut()).await?;
+
+    if let Some(answer) = answer_digest(request, &response, &url, digest_body.as_deref()) {
+        request.headers.push(Field::new("Authorization", answer));
+        (response, url) = http.execute(request, digest_body, events).await?;
+    }
+
+    Ok((response, url, sent_at.elapsed()))
+}
+
+/// `future`'s result, or a timeout error once `timeout` passes first. An
+/// event stream that has `opened` by then lasts until it ends instead.
+pub(crate) async fn with_timeout<T, E: From<ExecutionError>>(
+    timeout: Option<Duration>,
+    opened: Option<&AtomicBool>,
+    future: impl Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    let Some(timeout) = timeout else {
+        return future.await;
+    };
+
+    smol::future::or(future, async {
+        smol::Timer::after(timeout).await;
+
+        if opened.is_some_and(|opened| opened.load(Ordering::SeqCst)) {
+            std::future::pending::<()>().await;
+        }
+
+        Err(ExecutionError::Timeout { timeout }.into())
+    })
+    .await
 }
 
 /// Add the credentials of the request's resolved authorization.
@@ -222,26 +247,24 @@ fn authorize(request: &mut HttpRequest, body: Option<&[u8]>) -> Result<(), Execu
 }
 
 /// The Authorization header that answers a Digest challenge in the
-/// response, unless the request set its own. Only the address the request
-/// was sent to is answered: a redirect may lead to another server, which
-/// must not learn the credentials, or change the method and body.
+/// response. A request that sets its own has no Digest authorization by
+/// then. Only the address the request was sent to is answered: a redirect
+/// may lead to another server, which must not learn the credentials, or
+/// change the method and body.
 fn answer_digest(
     request: &HttpRequest,
-    response: &crate::HttpResponse,
-    url: &url::Url,
+    response: &HttpResponse,
+    url: &Url,
     body: Option<&[u8]>,
 ) -> Option<String> {
     let Auth::Digest(credentials) = &request.auth else {
         return None;
     };
-    if response.status != StatusCode::UNAUTHORIZED
-        || Field::enabled(&request.headers)
-            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
-    {
+    if response.status != StatusCode::UNAUTHORIZED {
         return None;
     }
 
-    let mut sent = url::Url::parse(&request.path).ok()?;
+    let mut sent = Url::parse(&request.path).ok()?;
     sent.set_fragment(None);
     let query = Field::pairs(&request.query);
     if !query.is_empty() {

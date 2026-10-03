@@ -1,4 +1,6 @@
-use request::{ExecutionError, NextRequest, ScriptLog, ScriptPhase, ScriptReport};
+use request::{
+    ExecutionError, ExecutionFailure, NextRequest, ScriptLog, ScriptPhase, ScriptReport,
+};
 
 use super::run::{
     Cursor, Kept, Outcome, Position, RunRequest, RunResult, Totals, chosen_request, count_label,
@@ -111,12 +113,11 @@ fn skipped_and_failed_requests_keep_their_scripts() {
     let skipped = RunResult::new(
         position,
         request::Method::Get,
-        Err(ExecutionError::ScriptedRequest {
-            source: Box::new(ExecutionError::Skipped {
+        Err(ExecutionFailure {
+            error: ExecutionError::Skipped {
                 reason: "No token".into(),
-                report: Box::new(report(None)),
-            }),
-            reports: vec![report(None), report(None)],
+            },
+            scripts: vec![report(None), report(None)],
         }),
         Some(&mut kept),
         false,
@@ -131,9 +132,7 @@ fn skipped_and_failed_requests_keep_their_scripts() {
     let failed = RunResult::new(
         position,
         request::Method::Get,
-        Err(ExecutionError::Variables(
-            "Unknown variable {{host}}".into(),
-        )),
+        Err(ExecutionError::Variables("Unknown variable {{host}}".into()).into()),
         Some(&mut kept),
         true,
     );
@@ -248,9 +247,11 @@ fn totals_count_tests_skips_errors_and_response_times() {
     totals.add(&RunResult::new(
         position,
         request::Method::Get,
-        Err(ExecutionError::Skipped {
-            reason: "No token".into(),
-            report: Box::new(report(None)),
+        Err(ExecutionFailure {
+            error: ExecutionError::Skipped {
+                reason: "No token".into(),
+            },
+            scripts: vec![report(None)],
         }),
         None,
         true,
@@ -258,7 +259,7 @@ fn totals_count_tests_skips_errors_and_response_times() {
     totals.add(&RunResult::new(
         position,
         request::Method::Get,
-        Err(ExecutionError::Variables("Unknown variable".into())),
+        Err(ExecutionError::Variables("Unknown variable".into()).into()),
         None,
         true,
     ));

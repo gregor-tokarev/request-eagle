@@ -77,7 +77,7 @@ fn certificate_verification_is_enabled_by_default_and_can_be_overridden() {
                 .await;
 
             if verification != Some(false) {
-                let error = result.unwrap_err();
+                let error = result.unwrap_err().error;
                 println!("\n  Verify TLS = {verification:?}, self-signed server -> {error}");
                 assert!(matches!(error, ExecutionError::Transport(_)));
             } else {
@@ -150,7 +150,10 @@ fn a_request_can_override_certificate_verification() {
                 .await;
 
             if setting {
-                assert!(matches!(result.unwrap_err(), ExecutionError::Transport(_)));
+                assert!(matches!(
+                    result.unwrap_err().error,
+                    ExecutionError::Transport(_)
+                ));
             } else {
                 let Response::Http(response) = result.unwrap().response;
                 assert_eq!(response.body, b"ok");
@@ -261,7 +264,8 @@ fn forced_http2_explains_unsupported_host_overrides_before_sending() {
                 no_variables(),
             )
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .error;
 
         assert!(matches!(error, ExecutionError::Http2HostOverride));
     });

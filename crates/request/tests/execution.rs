@@ -88,7 +88,8 @@ fn tells_whether_a_request_went_out_and_keeps_its_secrets_out_of_failures() {
         let error = executor()
             .execute_streaming(request, variables, events)
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .error;
 
         assert!(dispatch.started());
         assert!(error.to_string().contains("s3cret"), "{error}");
@@ -711,7 +712,7 @@ fn request_settings_override_the_redirect_and_timeout_preferences() {
                 server.await;
             } else {
                 assert!(matches!(
-                    result.unwrap_err(),
+                    result.unwrap_err().error,
                     ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150)
                 ));
             }
@@ -1031,7 +1032,8 @@ fn explicit_host_redirects_share_the_transport_redirect_limit() {
                     no_variables(),
                 )
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .error;
 
             assert!(matches!(&error, ExecutionError::Transport(_)));
             assert!(error.to_string().contains("too many redirects"), "{error}");
@@ -1053,7 +1055,8 @@ fn rejects_invalid_urls_schemes_and_headers_before_sending() {
                     no_variables(),
                 )
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .error;
             println!("\n  {path:?} -> {error}");
             assert!(matches!(
                 error,
@@ -1072,7 +1075,8 @@ fn rejects_invalid_urls_schemes_and_headers_before_sending() {
                     no_variables(),
                 )
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .error;
             println!("\n  Invalid header -> {error}");
             assert!(matches!(error, ExecutionError::InvalidRequest(_)));
         }
@@ -1110,7 +1114,8 @@ fn rejects_invalid_and_duplicate_host_headers_before_sending() {
                     no_variables(),
                 )
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .error;
 
             println!("\n  Host: {value:?} -> {error}");
             assert!(matches!(error, ExecutionError::InvalidHost));
@@ -1130,7 +1135,8 @@ fn rejects_invalid_and_duplicate_host_headers_before_sending() {
                 no_variables(),
             )
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .error;
 
         assert!(matches!(error, ExecutionError::MultipleHosts));
     });
@@ -1245,7 +1251,8 @@ fn reports_transport_and_truncated_body_errors() {
                     no_variables(),
                 )
                 .await
-                .unwrap_err();
+                .unwrap_err()
+                .error;
             server.await;
             println!("\n  Connection failure -> {error}");
 
@@ -1302,7 +1309,7 @@ fn enforces_size_limit_for_content_length_and_chunked_responses() {
                 let Response::Http(response) = result.response;
                 assert_eq!(response.body.len(), limit);
             } else {
-                let error = result.unwrap_err();
+                let error = result.unwrap_err().error;
                 println!("\n  {size} bytes, chunked={chunked} -> {error}");
                 assert!(matches!(
                     error,
@@ -1374,7 +1381,7 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                 ..RequestPreferences::default()
             })
             .unwrap();
-            let error = executor
+            let failure = executor
                 .execute(HttpRequest {
                     path: url,
                     scripts: request::RequestScripts {
@@ -1390,15 +1397,16 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                 .await
                 .unwrap_err();
             println!(
-                "\n  Stalled {} -> {error}",
+                "\n  Stalled {} -> {failure}",
                 if send_headers { "body" } else { "headers" }
             );
-            let error = if scripted {
-                let ExecutionError::ScriptedRequest { source, reports } = error else {
-                    panic!("timeout discarded pre-request diagnostics");
-                };
-
-                assert_eq!(reports.len(), 1);
+            let reports = &failure.scripts;
+            if scripted {
+                assert_eq!(
+                    reports.len(),
+                    1,
+                    "timeout discarded pre-request diagnostics"
+                );
                 assert_eq!(reports[0].phase, request::ScriptPhase::PreRequest);
                 assert_eq!(reports[0].logs.len(), 1);
                 assert_eq!(reports[0].logs[0].message, "prepared");
@@ -1408,13 +1416,12 @@ fn timeout_covers_waiting_for_headers_and_reading_the_body() {
                 assert_eq!(reports[0].tests[1].name, "fail");
                 assert!(reports[0].tests[1].error.is_some());
                 assert!(reports[0].error.is_none());
-                *source
             } else {
-                error
-            };
+                assert!(reports.is_empty());
+            }
 
             assert!(
-                matches!(error, ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150))
+                matches!(failure.error, ExecutionError::Timeout { timeout } if timeout == Duration::from_millis(150))
             );
 
             let closed = smol::future::or(async { Some(server.await) }, async {

@@ -9,7 +9,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{GrpcError, GrpcEvent, GrpcStatus, MethodKind, ScriptReport};
+use request::{GrpcError, GrpcEvent, GrpcFailure, GrpcStatus, MethodKind, ScriptReport};
 
 use crate::actions::SendRequest;
 use crate::response_view::script_results;
@@ -183,24 +183,15 @@ impl GrpcResponse {
 
     /// A call that did not start. Its Before invoke script may have failed or
     /// skipped it, and its results show.
-    pub(crate) fn fail_invoke(&mut self, error: GrpcError, cx: &mut Context<Self>) {
+    pub(crate) fn fail_invoke(&mut self, failure: GrpcFailure, cx: &mut Context<Self>) {
         self.reset();
 
-        match error {
-            GrpcError::Skipped { reason, report } => {
-                self.state = CallState::Skipped(reason.into());
-                self.scripts.push(*report);
-            }
-            GrpcError::Script { message, report } => {
-                self.state = CallState::Failed(message.into());
-                self.scripts.push(*report);
-            }
-            GrpcError::ScriptedCall { source, report } => {
-                self.state = CallState::Failed(source.to_string().into());
-                self.scripts.push(*report);
-            }
-            error => self.state = CallState::Failed(error.to_string().into()),
-        }
+        self.state = match failure.error {
+            GrpcError::Skipped { reason } => CallState::Skipped(reason.into()),
+            GrpcError::Script { message } => CallState::Failed(message.into()),
+            error => CallState::Failed(error.to_string().into()),
+        };
+        self.scripts = failure.scripts;
 
         self.show_failures();
         cx.notify();

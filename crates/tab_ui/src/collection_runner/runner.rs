@@ -11,7 +11,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{
-    Auth, CookieJar, Execution, ExecutionError, ExecutionInfo, LocalVariables, Request,
+    Auth, CookieJar, Execution, ExecutionFailure, ExecutionInfo, LocalVariables, Request,
     RequestExecutor, RequestScripts, RequestVariables,
 };
 
@@ -845,7 +845,7 @@ impl CollectionRunner {
     fn send(
         &mut self,
         cx: &mut Context<Self>,
-    ) -> Option<(Position, Task<Result<Execution, ExecutionError>>)> {
+    ) -> Option<(Position, Task<Result<Execution, ExecutionFailure>>)> {
         let run = self.run.as_mut()?;
         if run.status != RunStatus::Running {
             return None;
@@ -882,7 +882,7 @@ impl CollectionRunner {
     fn record(
         &mut self,
         position: Position,
-        result: Result<Execution, ExecutionError>,
+        result: Result<Execution, ExecutionFailure>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {

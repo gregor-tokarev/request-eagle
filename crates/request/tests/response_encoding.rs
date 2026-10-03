@@ -102,7 +102,8 @@ async fn execute_response(
         },
         no_variables(),
     )
-    .await;
+    .await
+    .map_err(|failure| failure.error);
 
     (result, server.await)
 }
@@ -385,7 +386,8 @@ fn gzip_decoding_respects_the_total_request_deadline() {
                 },
                 no_variables(),
             )
-            .await;
+            .await
+            .map_err(|failure| failure.error);
         server.await;
 
         match result {

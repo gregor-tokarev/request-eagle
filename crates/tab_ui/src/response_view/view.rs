@@ -6,8 +6,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{
-    Execution, ExecutionError, HeaderMap, HttpMetrics, HttpResponse, Response, ServerSentEvent,
-    StatusCode, Version,
+    Execution, ExecutionError, ExecutionFailure, HeaderMap, HttpMetrics, HttpResponse, Response,
+    ServerSentEvent, StatusCode, Version,
 };
 
 use super::body::{Body, BodyMode};
@@ -172,7 +172,7 @@ impl ResponseView {
 
     pub fn finish(
         &mut self,
-        result: Result<ResponseContent, ExecutionError>,
+        result: Result<ResponseContent, ExecutionFailure>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -200,29 +200,15 @@ impl ResponseView {
                 self.saved = None;
                 self.responses += 1;
             }
-            Err(error) => {
-                let message: SharedString = error.to_string().into();
-
-                // Earlier scripts' reports wrap a failure or skip in a later script.
-                let (source, reports) = match error {
-                    ExecutionError::ScriptedRequest { source, reports } => (*source, Some(reports)),
-                    error => (error, None),
-                };
-                let skipped = matches!(source, ExecutionError::Skipped { .. });
-                match source {
-                    ExecutionError::Skipped { report, .. } => {
-                        self.scripts = vec![*report];
-                        self.section = Section::Body;
-                    }
-                    ExecutionError::Script { report, .. } => {
-                        self.scripts = vec![*report];
-                        self.section = Section::Tests;
-                    }
+            Err(failure) => {
+                let message: SharedString = failure.error.to_string().into();
+                let skipped = matches!(failure.error, ExecutionError::Skipped { .. });
+                match failure.error {
+                    ExecutionError::Skipped { .. } => self.section = Section::Body,
+                    ExecutionError::Script { .. } => self.section = Section::Tests,
                     _ => {}
                 }
-                if let Some(reports) = reports {
-                    self.scripts = reports;
-                }
+                self.scripts = failure.scripts;
 
                 match &self.state {
                     // A broken stream keeps its head and events, ending with the error.

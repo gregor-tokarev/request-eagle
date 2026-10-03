@@ -62,16 +62,16 @@ pub use auth::{
 pub use body::{Body, FormPart, RawLanguage};
 pub use certificates::{CertificateFiles, ClientCertificate};
 pub use cookies::{Cookie, CookieJar};
-pub use error::ExecutionError;
+pub use error::{ExecutionError, ExecutionFailure};
 pub use event_stream::{
     Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
 };
 pub use executor::RequestExecutor;
 pub use generated_headers::generated_headers;
 pub use grpc::{
-    GrpcCall, GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcMessage,
-    GrpcMethod, GrpcRequest, GrpcService, GrpcSettings, GrpcStatus, MethodKind, PreparedCall,
-    ServiceDefinition,
+    GrpcCall, GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcFailure,
+    GrpcMessage, GrpcMethod, GrpcRequest, GrpcService, GrpcSettings, GrpcStatus, MethodKind,
+    PreparedCall, ServiceDefinition,
 };
 pub use http_client::http::{HeaderMap, HeaderName, StatusCode, Version};
 pub use model::{

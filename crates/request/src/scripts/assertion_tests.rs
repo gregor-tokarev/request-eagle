@@ -2,7 +2,10 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use std::collections::HashMap;
 
-use super::{RequestScripts, runtime::pre_request};
+use super::{
+    RequestScripts,
+    runtime::{ScriptedRequest, pre_request},
+};
 use crate::{HttpRequest, RequestExecutor, RequestPreferences, RequestVariables};
 
 fn check(cases: &[(&str, bool)]) {
@@ -24,6 +27,7 @@ fn check(cases: &[(&str, bool)]) {
         RequestExecutor::new(&RequestPreferences::default()).unwrap(),
         Arc::new(AtomicBool::new(false)),
     ))
+    .and_then(ScriptedRequest::resolve)
     .unwrap();
 
     assert_eq!(reports[0].tests.len(), cases.len());

@@ -12,8 +12,8 @@ use std::{
 
 use environment::{EnvironmentSession, EnvironmentSessions, VariableScopes};
 use request::{
-    ExecutionError, Field, HttpRequest, ProxyMode, RequestExecutor, RequestPreferences,
-    RequestVariables,
+    ExecutionError, ExecutionFailure, Field, HttpRequest, ProxyMode, RequestExecutor,
+    RequestPreferences, RequestVariables,
 };
 
 struct Server {
@@ -299,8 +299,9 @@ fn malformed_subrequest_templates_fail_before_sending() {
                 format!("pm.variables.set('token', 'resolved'); await pm.sendRequest({config});");
             let error =
                 smol::block_on(executor.execute(server.request(&source, ""), no_variables()))
-                    .unwrap_err();
-            let ExecutionError::Script { message, .. } = error else {
+                    .unwrap_err()
+                    .error;
+            let ExecutionError::Script { message } = error else {
                 panic!("Expected a script error for {field}: {template}, got {error}");
             };
             assert!(
@@ -461,7 +462,10 @@ fn promise_errors_and_unresolved_async_tests_fail_without_sending() {
         assert!(
             matches!(
                 smol::block_on(server.executor().execute(request, no_variables())),
-                Err(ExecutionError::Script { .. })
+                Err(ExecutionFailure {
+                    error: ExecutionError::Script { .. },
+                    ..
+                })
             ),
             "{source}"
         );
@@ -519,9 +523,12 @@ fn skip_preserves_reason_and_does_not_send_queued_or_main_requests() {
     "#,
         "throw Error('must not run post-response');",
     );
-    let error = smol::block_on(server.executor().execute(request, no_variables())).unwrap_err();
-    let ExecutionError::Skipped { reason, report } = error else {
-        panic!("{error:?}")
+    let failure = smol::block_on(server.executor().execute(request, no_variables())).unwrap_err();
+    let ExecutionError::Skipped { reason } = failure.error else {
+        panic!("{failure:?}")
+    };
+    let [report] = &failure.scripts[..] else {
+        panic!("{:?}", failure.scripts)
     };
     assert_eq!(reason, "No access token configured");
     assert!(report.error.is_none());
@@ -665,13 +672,11 @@ fn a_failing_request_script_keeps_the_collection_report_and_sends_nothing() {
     let variables = RequestVariables::new(HashMap::new(), None)
         .with_collection_scripts(collection_scripts("console.log('collection ran');", ""));
 
-    let error = smol::block_on(server.executor().execute(request, variables)).unwrap_err();
+    let failure = smol::block_on(server.executor().execute(request, variables)).unwrap_err();
 
-    let ExecutionError::ScriptedRequest { source, reports } = error else {
-        panic!("expected both script reports, got {error}");
-    };
-    assert!(matches!(*source, ExecutionError::Script { .. }));
-    assert_eq!(reports.len(), 2);
+    let reports = &failure.scripts;
+    assert!(matches!(failure.error, ExecutionError::Script { .. }));
+    assert_eq!(reports.len(), 2, "expected both script reports");
     assert!(reports[0].collection);
     assert_eq!(reports[0].logs[0].message, "collection ran");
     assert!(!reports[1].collection);
@@ -691,11 +696,14 @@ fn unreadable_collection_scripts_stop_the_send() {
     let variables = RequestVariables::new(HashMap::new(), None)
         .with_collection_scripts(Err("Could not read the collection scripts".into()));
 
-    let error =
+    let failure =
         smol::block_on(server.executor().execute(server.request("", ""), variables)).unwrap_err();
 
-    let ExecutionError::Script { message, report } = error else {
-        panic!("expected a script error, got {error}");
+    let ExecutionError::Script { message } = failure.error else {
+        panic!("expected a script error, got {failure}");
+    };
+    let [report] = &failure.scripts[..] else {
+        panic!("expected the collection script's report");
     };
     assert_eq!(message, "Could not read the collection scripts");
     assert_eq!(report.label(), "Collection pre-request");

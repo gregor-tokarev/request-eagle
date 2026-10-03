@@ -2,7 +2,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use gpui_kit::SharedString;
 use request::{
-    Execution, ExecutionError, HttpRequest, Method, NextRequest, Response, ScriptReport,
+    Execution, ExecutionError, ExecutionFailure, HttpRequest, Method, NextRequest, Response,
+    ScriptReport,
 };
 
 /// A saved HTTP request that a run can send.
@@ -155,7 +156,7 @@ impl RunResult {
     pub fn new(
         position: Position,
         method: Method,
-        result: Result<Execution, ExecutionError>,
+        result: Result<Execution, ExecutionFailure>,
         kept: Option<&mut usize>,
         logs: bool,
     ) -> Self {
@@ -189,28 +190,14 @@ impl RunResult {
                     scripts,
                 )
             }
-            Err(error) => {
-                // Earlier scripts' reports wrap a failure or skip in a later script.
-                let (source, earlier) = match error {
-                    ExecutionError::ScriptedRequest { source, reports } => (*source, reports),
-                    error => (error, Vec::new()),
-                };
-                let (outcome, report) = match source {
-                    ExecutionError::Skipped { reason, report } => {
-                        (Outcome::Skipped(reason), Some(*report))
-                    }
-                    ExecutionError::Script { message, report } => {
-                        (Outcome::Failed(message), Some(*report))
-                    }
-                    error => (Outcome::Failed(error.message_without_url()), None),
-                };
-                let scripts = if earlier.is_empty() {
-                    report.into_iter().collect()
-                } else {
-                    earlier
+            Err(failure) => {
+                let outcome = match failure.error {
+                    ExecutionError::Skipped { reason } => Outcome::Skipped(reason),
+                    ExecutionError::Script { message } => Outcome::Failed(message),
+                    error => Outcome::Failed(error.message_without_url()),
                 };
 
-                (outcome, scripts)
+                (outcome, failure.scripts)
             }
         };
 

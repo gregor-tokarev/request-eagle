@@ -487,7 +487,7 @@ async fn authorization_is_sent_as_metadata() {
             panic!("{} authorized a call", kind.label());
         };
         assert!(
-            matches!(&error, GrpcError::Auth(message) if message.contains("cannot authorize gRPC calls")),
+            matches!(&error.error, GrpcError::Auth(message) if message.contains("cannot authorize gRPC calls")),
             "{error}"
         );
     }
@@ -658,7 +658,8 @@ async fn invalid_messages_are_rejected_before_connecting() {
         .invoke(&request, variables(), &definition)
         .await
         .err()
-        .unwrap();
+        .unwrap()
+        .error;
     assert!(matches!(error, GrpcError::InvalidMessage(_)), "{error}");
 
     let error = client()
@@ -672,7 +673,8 @@ async fn invalid_messages_are_rejected_before_connecting() {
         )
         .await
         .err()
-        .unwrap();
+        .unwrap()
+        .error;
     assert!(matches!(error, GrpcError::UnknownMethod(_)), "{error}");
 }
 
@@ -1275,17 +1277,18 @@ async fn failing_before_invoke_scripts_stop_the_call() {
     request.scripts.before_invoke = "throw new Error('no token');".into();
     let definition = reflect(&request).await;
 
-    let error = client()
+    let failure = client()
         .invoke(&request, variables(), &definition)
         .await
         .err()
         .unwrap();
 
     assert!(
-        matches!(&error, GrpcError::Script { report, .. } if report.error.is_some()),
-        "{error}"
+        matches!(&failure.error, GrpcError::Script { .. })
+            && matches!(&failure.scripts[..], [report] if report.error.is_some()),
+        "{failure}"
     );
-    assert!(error.to_string().contains("no token"), "{error}");
+    assert!(failure.to_string().contains("no token"), "{failure}");
 }
 
 #[tokio::test]
@@ -1332,19 +1335,20 @@ async fn calls_that_fail_after_before_invoke_keep_its_results() {
     .into();
     let definition = reflect(&request).await;
 
-    let error = client()
+    let failure = client()
         .invoke(&request, variables(), &definition)
         .await
         .err()
         .unwrap();
 
-    match error {
-        GrpcError::ScriptedCall { source, report } => {
-            assert!(matches!(*source, GrpcError::InvalidMessage(_)), "{source}");
-            assert_eq!(report.logs[0].message, "prepared");
-        }
-        error => panic!("expected the script's results, got {error}"),
-    }
+    assert!(
+        matches!(failure.error, GrpcError::InvalidMessage(_)),
+        "{failure}"
+    );
+    let [report] = &failure.scripts[..] else {
+        panic!("expected the script's results, got {failure}");
+    };
+    assert_eq!(report.logs[0].message, "prepared");
 }
 
 #[tokio::test]

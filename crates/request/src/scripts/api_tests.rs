@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::{
     RequestScripts, ScriptPhase, ScriptReport,
-    runtime::{ScriptState, post_response, pre_request},
+    runtime::{ScriptState, ScriptedRequest, post_response, pre_request},
 };
 use crate::{
     Body, Execution, Field, HeaderMap, HttpMetrics, HttpRequest, HttpResponse, RequestExecutor,
@@ -25,6 +25,7 @@ fn send(request: HttpRequest) -> (HttpRequest, ScriptState, Vec<ScriptReport>) {
         executor(),
         Arc::new(AtomicBool::new(false)),
     ))
+    .and_then(ScriptedRequest::resolve)
     .unwrap()
 }
 
