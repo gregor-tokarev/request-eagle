@@ -8,6 +8,7 @@ use crate::{
     Environments, RequestSent,
     auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited},
     script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged},
+    storage::Storage,
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -35,10 +36,7 @@ pub(crate) enum RequestSection {
 
 /// An editable HTTP request snapshot owned by one tab, independent of collection storage.
 pub struct RequestDraft {
-    /// Unsaved drafts have no location.
-    pub location: Option<SavedLocation>,
-    /// The name given to the request in its tab before it is saved.
-    pub name: Option<SharedString>,
+    pub storage: Storage,
     pub request: HttpRequest,
     saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
@@ -128,12 +126,12 @@ impl RequestDraft {
     /// session values and the active global environment.
     pub fn new(
         mut request: HttpRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let environment_path = location.as_ref().map(SavedLocation::environment_path);
+        let environment_path = storage.location().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
         let mut subscriptions: Vec<_> = environments
             .iter()
@@ -165,8 +163,7 @@ impl RequestDraft {
         request.inline_query();
 
         Self {
-            location,
-            name: None,
+            storage,
             generated_headers: super::execution::generated_headers(&request, &request.auth),
             jar_cookies: None,
             auth: None,
@@ -210,7 +207,7 @@ impl RequestDraft {
     /// collection.
     pub(super) fn sent_request(&self) -> HttpRequest {
         let mut request = self.request.clone();
-        if let (Some(body), Some(location)) = (&mut request.body, &self.location) {
+        if let (Some(body), Some(location)) = (&mut request.body, self.storage.location()) {
             *body = body.resolved_from(&location.collection);
         }
 
@@ -229,7 +226,7 @@ impl RequestDraft {
     /// Read the collection's authorization again, which another tab may
     /// have changed.
     fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
-        let inherited = self.location.as_ref().map(|location| Inherited {
+        let inherited = self.storage.location().map(|location| Inherited {
             name: location.collection_name().into(),
             auth: self.variables.read(cx).collection_auth(),
         });
@@ -273,7 +270,7 @@ impl RequestDraft {
 
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
+        self.request != self.saved_request || self.storage.is_dirty()
     }
 
     /// The query parameters and path variables in the URL.
@@ -298,7 +295,7 @@ impl RequestDraft {
             scope.changed(cx);
         });
 
-        self.location = Some(location);
+        self.storage = Storage::Saved(location);
         self.refresh_inherited(cx);
         self.notify_address(cx);
         cx.notify();
@@ -306,7 +303,9 @@ impl RequestDraft {
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        self.name = Some(name);
+        if let Storage::Unsaved { name: unsaved } = &mut self.storage {
+            *unsaved = Some(name);
+        }
         self.notify_address(cx);
         cx.notify();
     }
@@ -805,8 +804,7 @@ impl Render for RequestAddress {
                                     .min_w_0()
                                     .child(super::controls::request_header(
                                         "HTTP",
-                                        draft.location.as_ref(),
-                                        draft.name.as_ref(),
+                                        &draft.storage,
                                         cx,
                                     )),
                             )

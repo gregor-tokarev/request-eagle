@@ -194,8 +194,8 @@ impl RequestDraft {
         let request = self.sent_request();
         let url = request.path.clone();
         let info = self
-            .location
-            .as_ref()
+            .storage
+            .location()
             .map(|location| request::ExecutionInfo {
                 request_name: location.name.clone(),
                 request_id: location.id.clone(),

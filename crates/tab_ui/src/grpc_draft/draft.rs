@@ -20,6 +20,7 @@ use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::grpc_response::GrpcResponse;
 use crate::request_draft::{FieldsChanged, RequestFields};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
+use crate::storage::Storage;
 use crate::{
     Environments, RequestSent,
     variable_input::{VariableInput, VariableTarget},
@@ -39,10 +40,7 @@ pub(crate) enum GrpcSection {
 /// An editable gRPC request owned by one tab: its address, method, message,
 /// metadata and service definition, and the call it is running.
 pub struct GrpcDraft {
-    /// Unsaved drafts have no location.
-    pub location: Option<SavedLocation>,
-    /// The name given to the request in its tab before it is saved.
-    pub name: Option<SharedString>,
+    pub storage: Storage,
     pub request: GrpcRequest,
     saved_request: GrpcRequest,
     pub(crate) section: GrpcSection,
@@ -125,12 +123,12 @@ impl GrpcDraft {
     /// session values and the active global environment.
     pub fn new(
         request: GrpcRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let environment_path = location.as_ref().map(SavedLocation::environment_path);
+        let environment_path = storage.location().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
         let subscriptions = environments
             .iter()
@@ -156,8 +154,7 @@ impl GrpcDraft {
         let configuration = cx.new(|_| GrpcConfiguration(owner));
 
         Self {
-            location,
-            name: None,
+            storage,
             saved_request: request.clone(),
             request,
             section: GrpcSection::Message,
@@ -230,7 +227,7 @@ impl GrpcDraft {
 
     /// Whether the collection's authorization changed since it was read.
     fn update_inherited(&mut self, cx: &mut Context<Self>) -> bool {
-        let inherited = self.location.as_ref().map(|location| Inherited {
+        let inherited = self.storage.location().map(|location| Inherited {
             name: location.collection_name().into(),
             auth: self.variables.read(cx).collection_auth(),
         });
@@ -283,7 +280,7 @@ impl GrpcDraft {
 
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
+        self.request != self.saved_request || self.storage.is_dirty()
     }
 
     /// Follow the saved request to its current file and name.
@@ -297,7 +294,7 @@ impl GrpcDraft {
             scope.changed(cx);
         });
 
-        self.location = Some(location);
+        self.storage = Storage::Saved(location);
         // Invoking reloads the services if the credentials changed.
         self.update_inherited(cx);
         self.redraw(cx);
@@ -305,7 +302,9 @@ impl GrpcDraft {
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        self.name = Some(name);
+        if let Storage::Unsaved { name: unsaved } = &mut self.storage {
+            *unsaved = Some(name);
+        }
         self.redraw(cx);
     }
 
@@ -322,8 +321,8 @@ impl GrpcDraft {
 
     /// The directory relative `.proto` paths resolve from.
     pub(crate) fn collection_path(&self) -> Option<PathBuf> {
-        self.location
-            .as_ref()
+        self.storage
+            .location()
             .map(|location| location.collection.clone())
     }
 
@@ -637,12 +636,7 @@ impl Render for GrpcAddress {
                         h_flex()
                             .gap_2()
                             .child(div().flex_1().min_w_0().child(
-                                crate::request_draft::request_header(
-                                    "gRPC",
-                                    draft.location.as_ref(),
-                                    draft.name.as_ref(),
-                                    cx,
-                                ),
+                                crate::request_draft::request_header("gRPC", &draft.storage, cx),
                             ))
                             .child(code_snippet::toggle_button(
                                 draft.code_snippet.snippet.is_some(),

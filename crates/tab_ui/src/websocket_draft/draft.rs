@@ -21,6 +21,7 @@ use super::message_log::MessageLog;
 use crate::actions::SendRequest;
 use crate::auth_editor::{AuthChanged, AuthEditor, AuthTarget, Inherited};
 use crate::request_draft::{FieldsChanged, RequestFields, request_header};
+use crate::storage::Storage;
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
 use crate::{Environments, RequestSent};
@@ -53,10 +54,7 @@ pub(crate) enum WebSocketSection {
 
 /// An editable WebSocket request owned by one tab, and its connection.
 pub struct WebSocketDraft {
-    /// Unsaved drafts have no location.
-    pub location: Option<SavedLocation>,
-    /// The name given to the request in its tab before it is saved.
-    pub name: Option<SharedString>,
+    pub storage: Storage,
     pub request: WebSocketRequest,
     saved_request: WebSocketRequest,
     pub(crate) section: WebSocketSection,
@@ -97,12 +95,12 @@ impl WebSocketDraft {
     /// session values and the active global environment.
     pub fn new(
         request: WebSocketRequest,
-        location: Option<SavedLocation>,
+        storage: Storage,
         sessions: EnvironmentSessions,
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let environment_path = location.as_ref().map(SavedLocation::environment_path);
+        let environment_path = storage.location().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
         let subscriptions = environments
             .iter()
@@ -127,8 +125,7 @@ impl WebSocketDraft {
         let configuration = cx.new(|_| WebSocketConfiguration(owner));
 
         Self {
-            location,
-            name: None,
+            storage,
             handshake_headers: request::websocket_handshake_headers(
                 &request.url,
                 &request.headers,
@@ -175,7 +172,7 @@ impl WebSocketDraft {
     /// Read the collection's authorization again, which another tab may
     /// have changed.
     fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
-        let inherited = self.location.as_ref().map(|location| Inherited {
+        let inherited = self.storage.location().map(|location| Inherited {
             name: location.collection_name().into(),
             auth: self.variables.read(cx).collection_auth(),
         });
@@ -220,7 +217,7 @@ impl WebSocketDraft {
 
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
-        self.request != self.saved_request || (self.location.is_none() && self.name.is_some())
+        self.request != self.saved_request || self.storage.is_dirty()
     }
 
     /// Follow the saved request to its current file and name.
@@ -234,14 +231,16 @@ impl WebSocketDraft {
             scope.changed(cx);
         });
 
-        self.location = Some(location);
+        self.storage = Storage::Saved(location);
         self.refresh_inherited(cx);
         self.notify_controls(cx);
     }
 
     /// Name the request before it is saved.
     pub fn set_name(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        self.name = Some(name);
+        if let Storage::Unsaved { name: unsaved } = &mut self.storage {
+            *unsaved = Some(name);
+        }
         self.notify_controls(cx);
     }
 
@@ -813,12 +812,7 @@ impl Render for WebSocketAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(request_header(
-                        "WS",
-                        draft.location.as_ref(),
-                        draft.name.as_ref(),
-                        cx,
-                    ))
+                    .child(request_header("WS", &draft.storage, cx))
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())
