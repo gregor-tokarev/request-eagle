@@ -18,6 +18,10 @@ use crate::{cookies::Cookies, variables::VariableScope};
 /// latest entries are the ones worth reading.
 const LOG_LIMIT: usize = 2000;
 
+/// About how many bytes of earlier runs' data the run log keeps for the
+/// inspector. Older entries keep only their line of text.
+const RUN_DATA_LIMIT: usize = 64 * 1024 * 1024;
+
 /// How often a running flow redraws, at most.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -29,6 +33,8 @@ pub(super) struct RunState {
     pub log: Vec<LogEntry>,
     /// Entries removed from the start of the log to keep it within its limit.
     pub dropped: usize,
+    /// About how many bytes of run data the log's entries hold.
+    pub retained: usize,
     pub summary: Option<RunSummary>,
     /// How many times an HTTP Request block's request failed, sending from
     /// its Fail output.
@@ -42,6 +48,9 @@ pub(super) struct BlockStatus {
     pub running: bool,
     pub runs: usize,
     pub last: Option<Arc<BlockRun>>,
+    /// What each output sent last in the run, whichever run of the block
+    /// sent it, such as a loop's Then in an earlier iteration.
+    pub outputs: HashMap<String, Arc<Value>>,
     /// A Display block's latest data, ready to draw, and the format it is
     /// drawn in.
     pub display: Option<(DisplayFormat, preview::Display)>,
@@ -55,7 +64,11 @@ impl BlockStatus {
     /// Whether the last run failed or sent from a Fail output: an HTTP
     /// Request's request or a Validate block's check failed.
     pub fn troubled(&self) -> bool {
-        self.failed() || self.sent("fail")
+        self.failed()
+            || self
+                .last
+                .as_ref()
+                .is_some_and(|run| run.outputs.iter().any(|(name, _)| name == "fail"))
     }
 
     /// The HTTP status of the response an HTTP Request block's last run
@@ -70,11 +83,9 @@ impl BlockStatus {
             .as_u64()
     }
 
-    /// Whether the last run sent data from this output.
+    /// Whether this output sent data in the run.
     pub fn sent(&self, output: &str) -> bool {
-        self.last
-            .as_ref()
-            .is_some_and(|run| run.outputs.iter().any(|(name, _)| name == output))
+        self.outputs.contains_key(output)
     }
 }
 
@@ -325,8 +336,22 @@ impl FlowEditor {
                         status.display = display;
                     }
                     status.last = Some(run.clone());
+                    for (output, value) in &run.outputs {
+                        status.outputs.insert(output.clone(), value.clone());
+                    }
 
-                    if !logged {
+                    if logged {
+                        // The entry the Log block wrote shows this run.
+                        if let Some(entry) = self.run.log.iter_mut().rev().find(|entry| {
+                            entry.block == run.block
+                                && entry.kind == LogKind::Logged
+                                && entry.index == index
+                        }) && entry.run.is_none()
+                        {
+                            entry.run = Some(run.clone());
+                            self.run.retained += run_size(&run);
+                        }
+                    } else {
                         self.log_run(run.at, run.block.clone(), kind, text, index, Some(run));
                     }
                 }
@@ -393,6 +418,7 @@ impl FlowEditor {
         index: usize,
         run: Option<Arc<BlockRun>>,
     ) {
+        self.run.retained += run.as_deref().map_or(0, run_size);
         self.run.log.push(LogEntry {
             at,
             block,
@@ -404,10 +430,44 @@ impl FlowEditor {
 
         if self.run.log.len() > LOG_LIMIT {
             let excess = self.run.log.len() - LOG_LIMIT;
-            self.run.log.drain(..excess);
+            for entry in self.run.log.drain(..excess) {
+                self.run.retained -= entry.run.as_deref().map_or(0, run_size);
+            }
             self.run.dropped += excess;
         }
+
+        // Earlier entries let go of their data first. Each block's last
+        // run stays with its status.
+        let mut entries = self.run.log.iter_mut();
+        while self.run.retained > RUN_DATA_LIMIT
+            && let Some(entry) = entries.next()
+        {
+            if let Some(run) = entry.run.take() {
+                self.run.retained -= run_size(&run);
+            }
+        }
     }
+}
+
+/// About how many bytes a run's inputs and outputs take.
+fn run_size(run: &BlockRun) -> usize {
+    fn size(value: &Value) -> usize {
+        match value {
+            Value::String(text) => text.len(),
+            Value::Array(items) => items.iter().map(size).sum::<usize>() + items.len(),
+            Value::Object(fields) => fields
+                .iter()
+                .map(|(name, value)| name.len() + size(value))
+                .sum(),
+            _ => 8,
+        }
+    }
+
+    run.inputs
+        .iter()
+        .chain(&run.outputs)
+        .map(|(name, value)| name.len() + size(value))
+        .sum()
 }
 
 /// The failures of a run, such as `, 1 failed, 2 requests failed`, to

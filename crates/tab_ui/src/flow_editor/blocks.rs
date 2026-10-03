@@ -14,9 +14,13 @@ use super::{
     run::BlockStatus,
 };
 
+/// How far above itself a zoomed-out Note shows its heading, in interface
+/// pixels.
+pub(super) const NOTE_LABEL: f32 = 20.;
+
 /// Zoomed-out blocks show their titles only when they are at least this
 /// wide on screen, in interface pixels.
-const OUTLINE_TITLE_WIDTH: f32 = 36.;
+const OUTLINE_TITLE_WIDTH: f32 = 40.;
 
 /// Canvas pixels as rems, which the zoomed canvas scales.
 fn units(value: f32) -> Rems {
@@ -209,9 +213,9 @@ impl FlowEditor {
     ) -> AnyElement {
         let theme = cx.theme();
         let filled = layout
-            .request
+            .filled
             .as_ref()
-            .is_some_and(|request| request.defined.contains(name.as_ref()))
+            .is_some_and(|filled| filled.contains(name.as_ref()))
             && self.flow.connection_into(&block.id, name).is_none();
 
         if !filled {
@@ -298,10 +302,11 @@ impl FlowEditor {
             .when(titled, |this| {
                 this.child(
                     div()
-                        .px(self.screen(3.))
+                        .px(self.screen(4.))
                         .pt(self.screen(1.))
-                        .text_size(self.screen(10.))
-                        .line_height(self.screen(12.))
+                        // The text_xs tier of the interface, not of the zoom.
+                        .text_size(self.screen(12.))
+                        .line_height(self.screen(16.))
                         .text_ellipsis()
                         .text_color(theme.foreground)
                         .child(self.block_title(block, cx)),
@@ -316,7 +321,6 @@ impl FlowEditor {
         let theme = cx.theme();
         let selected = self.selection.contains(&block.id);
         let origin = self.viewport.to_view(layout.bounds.origin, self.rem);
-        let id = block.id.clone();
         let resized = block.id.clone();
         let text = match &block.kind {
             BlockKind::Note { text, .. } => text.as_str(),
@@ -346,13 +350,8 @@ impl FlowEditor {
                 theme.warning.opacity(0.35)
             })
             .bg(theme.warning.opacity(0.07))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.press(event, Some(id.clone()), window, cx);
-                }),
-            )
+            // Presses go to the canvas, which takes a Note by its heading or
+            // border and lets the inside of the frame work like the canvas.
             .child(if detail {
                 v_flex()
                     .p(units(12.))
@@ -384,14 +383,15 @@ impl FlowEditor {
             } else {
                 // Zoomed out, a Note names its section above it at a
                 // readable size, where the blocks it frames leave it be.
+                // The text_sm tier of the interface, not of the zoom.
                 div()
                     .absolute()
                     .left_0()
-                    .top(-self.screen(18.))
+                    .top(-self.screen(NOTE_LABEL))
                     .w_full()
-                    .h(self.screen(16.))
-                    .text_size(self.screen(13.))
-                    .line_height(self.screen(16.))
+                    .h(self.screen(18.))
+                    .text_size(self.screen(14.))
+                    .line_height(self.screen(18.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.foreground)
                     .text_ellipsis()

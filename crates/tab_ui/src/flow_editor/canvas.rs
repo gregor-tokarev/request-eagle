@@ -154,7 +154,7 @@ impl FlowEditor {
 
     /// The selected blocks, and the blocks inside the selected Notes, which
     /// move with them.
-    fn moving_blocks(&self) -> Vec<String> {
+    pub(super) fn moving_blocks(&self) -> Vec<String> {
         let mut moving = self.selection.clone();
         for id in &self.selection {
             let Some(frame) = self
@@ -633,7 +633,8 @@ impl FlowEditor {
                             "up" => (0., -step),
                             _ => (0., step),
                         };
-                        let selection = this.selection.clone();
+                        // Nudging a Note takes the blocks it frames along.
+                        let selection = this.moving_blocks();
                         // Repeated presses are one edit to undo.
                         this.edit(
                             Some("nudge".to_owned()),

@@ -56,6 +56,9 @@ pub(super) fn width(kind: &BlockKind) -> f32 {
     }
 }
 
+/// How far down a Note its heading reaches, where it is taken to move it.
+pub(super) const NOTE_HEADING: f32 = 40.;
+
 /// The size of a Note that has not been resized.
 pub(super) const NOTE_SIZE: Size<f32> = Size {
     width: 288.,

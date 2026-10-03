@@ -75,7 +75,7 @@ const PLACEMENT_STEP: f32 = 24.;
 const PLACEMENT_TRIES: usize = 80;
 
 /// Where a block of `size` can go at or below `position` without covering
-/// any of `taken`, or `position` when no place near it is free.
+/// any of `taken`.
 pub(super) fn free_spot(
     taken: &[Bounds<f32>],
     size: Size<f32>,
@@ -90,7 +90,8 @@ pub(super) fn free_spot(
 }
 
 /// How far to move `group` from where it is, starting at `start` and going
-/// further down, for none of it to cover any of `taken`.
+/// further down, for none of it to cover any of `taken`. Past the places
+/// tried, it goes below every block.
 pub(super) fn free_offset(
     taken: &[Bounds<f32>],
     group: &[Bounds<f32>],
@@ -117,7 +118,17 @@ pub(super) fn free_offset(
     (0..PLACEMENT_TRIES)
         .map(|step| point(start.x, start.y + PLACEMENT_STEP * step as f32))
         .find(|offset| !covers(*offset))
-        .unwrap_or(start)
+        .unwrap_or_else(|| {
+            let bottom = taken
+                .iter()
+                .map(|bounds| bounds.origin.y + bounds.size.height)
+                .fold(f32::MIN, f32::max);
+            let top = group
+                .iter()
+                .map(|bounds| bounds.origin.y)
+                .fold(f32::MAX, f32::min);
+            point(start.x, start.y.max(bottom + PLACEMENT_GAP * 2. - top))
+        })
 }
 
 /// Place blocks in columns by how far they are from where data starts, so

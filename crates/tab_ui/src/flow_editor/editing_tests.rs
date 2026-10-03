@@ -165,6 +165,30 @@ fn new_blocks_go_to_the_nearest_free_place_below() {
 }
 
 #[test]
+fn copies_of_a_long_column_go_below_it() {
+    // Twenty blocks in a column, too tall for the places tried near it.
+    let column: Vec<Bounds<f32>> = (0..20)
+        .map(|row| Bounds {
+            origin: point(0., row as f32 * 160.),
+            size: size(288., 120.),
+        })
+        .collect();
+
+    let offset = free_offset(&column, &column, point(32., 32.));
+    let covers = column.iter().any(|copy| {
+        let moved = Bounds {
+            origin: point(copy.origin.x + offset.x, copy.origin.y + offset.y),
+            size: copy.size,
+        };
+        column
+            .iter()
+            .any(|original| geometry::intersects(&moved, original))
+    });
+    assert!(!covers);
+    assert_eq!(offset.x, 32.);
+}
+
+#[test]
 fn undo_and_redo_restore_snapshots_and_join_typing() {
     let mut history = History::default();
     let mut flow = sample();

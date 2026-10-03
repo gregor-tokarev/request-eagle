@@ -639,13 +639,8 @@ impl FlowEditor {
                 .run
                 .blocks
                 .get(&connection.from)
-                .and_then(|status| status.last.as_ref())
-                .and_then(|run| {
-                    run.outputs
-                        .iter()
-                        .find(|(name, _)| *name == connection.output)
-                        .map(|(_, value)| preview::pretty(value))
-                });
+                .and_then(|status| status.outputs.get(&connection.output))
+                .map(|value| preview::pretty(value));
             return Some(
                 panel
                     .child(

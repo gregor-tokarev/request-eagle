@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
+    time::SystemTime,
 };
 
 use environment::EnvironmentSessions;
@@ -14,7 +15,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{Auth, HttpRequest};
 
 use super::{
-    editing,
+    blocks, editing,
     geometry::{self, Viewport},
     history::History,
     inspector::Inspector,
@@ -62,9 +63,18 @@ pub(super) struct RequestInfo {
     /// Its URL as saved, variables and all.
     pub path: SharedString,
     pub variables: Vec<SharedString>,
-    /// Variables its collection or the active environment give a value,
-    /// which an unconnected input sends.
-    pub defined: Rc<HashSet<String>>,
+    /// The directory of its collection.
+    pub collection: PathBuf,
+}
+
+/// The variables a collection's requests find a value for, from the
+/// collection, the active environment and the session, and what they were
+/// read from, to tell when they change.
+struct FilledNames {
+    revision: u64,
+    active: Option<PathBuf>,
+    versions: Vec<Option<SystemTime>>,
+    names: Rc<HashSet<String>>,
 }
 
 /// What the canvas draws for a block this frame.
@@ -74,6 +84,9 @@ pub(super) struct Layout {
     pub bounds: Bounds<f32>,
     /// The request an HTTP Request block sends.
     pub request: Option<RequestInfo>,
+    /// The variables of that request its collection, the active environment
+    /// or the session fill, which an unconnected input sends.
+    pub filled: Option<Rc<HashSet<String>>>,
 }
 
 impl Layout {
@@ -151,6 +164,8 @@ pub struct FlowEditor {
     /// every frame. Cleared whenever the canvas is focused or clicked, so
     /// edits made elsewhere show up.
     pub(super) request_info: HashMap<String, Option<RequestInfo>>,
+    /// The variables each collection's requests find a value for.
+    filled_names: HashMap<PathBuf, FilledNames>,
     pub(super) history: History,
     pub(super) picker: Option<Picker>,
     pub(super) inspector: Option<Inspector>,
@@ -176,6 +191,9 @@ pub struct FlowEditor {
     pub(super) log_filtered: bool,
     pub(super) inspector_split: Entity<ResizableState>,
     pub(super) log_split: Entity<ResizableState>,
+    /// Redraws when another environment is chosen, which fills other
+    /// variables.
+    _environments: Option<Subscription>,
 }
 
 impl FlowEditor {
@@ -188,6 +206,10 @@ impl FlowEditor {
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let observed = environments
+            .as_ref()
+            .map(|environments| cx.observe(environments, |_, _, cx| cx.notify()));
+
         Self {
             path,
             id,
@@ -201,6 +223,7 @@ impl FlowEditor {
             rem: px(16.),
             layouts: HashMap::new(),
             request_info: HashMap::new(),
+            filled_names: HashMap::new(),
             history: History::default(),
             picker: None,
             inspector: None,
@@ -219,6 +242,7 @@ impl FlowEditor {
             log_filtered: false,
             inspector_split: cx.new(|_| ResizableState::default()),
             log_split: cx.new(|_| ResizableState::default()),
+            _environments: observed,
         }
     }
 
@@ -291,10 +315,24 @@ impl FlowEditor {
                 let info = self
                     .requests
                     .find(id, cx)
-                    .map(|saved| self.describe_request(saved, cx));
+                    .map(|saved| self.describe_request(saved));
                 self.request_info.insert(id.clone(), info);
             }
         }
+
+        let collections: Vec<PathBuf> = self
+            .request_info
+            .values()
+            .flatten()
+            .map(|info| info.collection.clone())
+            .collect();
+        let filled: HashMap<PathBuf, Rc<HashSet<String>>> = collections
+            .into_iter()
+            .map(|collection| {
+                let names = self.filled(&collection, cx);
+                (collection, names)
+            })
+            .collect();
 
         let mut connected: HashMap<&str, Vec<&str>> = HashMap::new();
         for connection in &self.flow.connections {
@@ -312,6 +350,7 @@ impl FlowEditor {
                 .map(|name| SharedString::from(name.into_owned()))
                 .collect();
             let mut request = None;
+            let mut names = None;
 
             if let BlockKind::HttpRequest { request: id } = &block.kind {
                 // Send also fills a `{{send}}` variable, so it is drawn once.
@@ -322,6 +361,7 @@ impl FlowEditor {
                         }
                     }
                     request = Some(info.clone());
+                    names = filled.get(&info.collection).cloned();
                 }
 
                 // A connected input stays while its variable is out of the
@@ -357,6 +397,7 @@ impl FlowEditor {
                     inputs,
                     outputs,
                     request,
+                    filled: names,
                 },
             );
         }
@@ -364,21 +405,8 @@ impl FlowEditor {
         self.layouts = layouts;
     }
 
-    /// What an HTTP Request block shows of a saved request, with the
-    /// variables its collection and the active environment fill.
-    fn describe_request(&self, saved: FlowRequest, cx: &App) -> RequestInfo {
-        let environment = saved.collection.join("environment.toml");
-        let scope = VariableScope {
-            path: Some(environment.clone()),
-            session: self.sessions.for_path(Some(&environment)),
-            environments: self.environments.clone(),
-            names: None,
-        };
-        let defined = scope
-            .values(cx)
-            .map(|values| values.into_keys().collect())
-            .unwrap_or_default();
-
+    /// What an HTTP Request block shows of a saved request.
+    fn describe_request(&self, saved: FlowRequest) -> RequestInfo {
         RequestInfo {
             method: saved.request.method.as_str(),
             path: SharedString::from(saved.request.path.clone()),
@@ -386,9 +414,52 @@ impl FlowEditor {
                 .into_iter()
                 .map(SharedString::from)
                 .collect(),
-            defined: Rc::new(defined),
+            collection: saved.collection,
             name: saved.name,
         }
+    }
+
+    /// The variables a collection's requests find a value for, read again
+    /// only when the session, the active environment or their files change.
+    fn filled(&mut self, collection: &Path, cx: &App) -> Rc<HashSet<String>> {
+        let environment = collection.join("environment.toml");
+        let scope = VariableScope {
+            path: Some(environment.clone()),
+            session: self.sessions.for_path(Some(&environment)),
+            environments: self.environments.clone(),
+            names: None,
+        };
+        let revision = scope.session.revision();
+        let active = self
+            .environments
+            .as_ref()
+            .and_then(|environments| environments.read(cx).active_path());
+        let versions = scope.file_versions(cx);
+
+        if let Some(known) = self.filled_names.get(collection)
+            && known.revision == revision
+            && known.active == active
+            && known.versions == versions
+        {
+            return known.names.clone();
+        }
+
+        let names: Rc<HashSet<String>> = Rc::new(
+            scope
+                .values(cx)
+                .map(|values| values.into_keys().collect())
+                .unwrap_or_default(),
+        );
+        self.filled_names.insert(
+            collection.to_owned(),
+            FilledNames {
+                revision,
+                active,
+                versions,
+                names: names.clone(),
+            },
+        );
+        names
     }
 
     /// The name a block goes by on the canvas and in the run log: its own
@@ -461,7 +532,9 @@ impl FlowEditor {
     }
 
     /// The topmost block at a canvas position. Notes lie behind the other
-    /// blocks.
+    /// blocks and are taken by their heading or border, so the inside of a
+    /// frame works like the canvas: its connections can be chosen and areas
+    /// selected there.
     pub(super) fn block_at(&self, position: Point<f32>) -> Option<String> {
         let at = |block: &&Block| {
             self.layouts.get(&block.id).is_some_and(|layout| {
@@ -473,14 +546,42 @@ impl FlowEditor {
             })
         };
         let note = |block: &&Block| matches!(block.kind, BlockKind::Note { .. });
+        let grip = |block: &&Block| {
+            self.layouts
+                .get(&block.id)
+                .is_some_and(|layout| self.note_grip(layout.bounds, position))
+        };
 
         let blocks = self.flow.blocks.iter().rev();
         blocks
             .clone()
             .filter(|block| !note(block))
             .find(at)
-            .or_else(|| blocks.filter(note).find(at))
+            .or_else(|| blocks.filter(note).find(grip))
             .map(|block| block.id.clone())
+    }
+
+    /// Whether a position is on a Note's heading or border, or on the label
+    /// it shows above itself when zoomed out.
+    fn note_grip(&self, bounds: Bounds<f32>, position: Point<f32>) -> bool {
+        let scale = self.viewport.scale(self.rem);
+        let border = geometry::GRAB / scale;
+        let label = if self.viewport.zoom < geometry::DETAIL_ZOOM {
+            blocks::NOTE_LABEL * f32::from(self.rem) / geometry::BASE_REM / scale
+        } else {
+            0.
+        };
+        let (left, top) = (bounds.origin.x, bounds.origin.y);
+        let (right, bottom) = (left + bounds.size.width, top + bounds.size.height);
+
+        let near = position.x >= left - border
+            && position.x <= right + border
+            && position.y >= top - label - border
+            && position.y <= bottom + border;
+        near && (position.y <= top + geometry::NOTE_HEADING
+            || position.x <= left + border
+            || position.x >= right - border
+            || position.y >= bottom - border)
     }
 
     /// The connection nearest to a canvas position, within reach of the pointer.
@@ -579,11 +680,12 @@ impl FlowEditor {
     ) -> String {
         let id = self.flow.next_block_id();
         let loops = matches!(kind, BlockKind::For | BlockKind::Repeat);
-        let position = self.free_spot(&kind, position);
+        let position = self.free_spot(&kind, position, cx);
         let collect_position = loops.then(|| {
             self.free_spot(
                 &BlockType::Collect.block_kind(),
                 point(position.x + 520., position.y),
+                cx,
             )
         });
         let block = Block {
@@ -648,13 +750,29 @@ impl FlowEditor {
 
     /// Where a new block can go at or just below `position` without covering
     /// another block. Notes may be covered; they frame blocks.
-    fn free_spot(&self, kind: &BlockKind, position: Point<f32>) -> Point<f32> {
-        let rows = kind.inputs().len().max(kind.outputs().len()).max(1);
-        editing::free_spot(
-            &self.taken(),
-            geometry::block_size(kind, rows, false),
-            position,
-        )
+    fn free_spot(&self, kind: &BlockKind, position: Point<f32>, cx: &App) -> Point<f32> {
+        editing::free_spot(&self.taken(), self.drawn_size(kind, cx), position)
+    }
+
+    /// The size a block is drawn at before it has run, with a row for each
+    /// variable of an HTTP Request block's request.
+    fn drawn_size(&self, kind: &BlockKind, cx: &App) -> Size<f32> {
+        let mut inputs: Vec<String> = kind
+            .inputs()
+            .into_iter()
+            .map(|name| name.into_owned())
+            .collect();
+        if let BlockKind::HttpRequest { request } = kind
+            && let Some(saved) = self.requests.find(request, cx)
+        {
+            for variable in flow::request_variables(&saved.request, &saved.collection_auth) {
+                if !inputs.contains(&variable) {
+                    inputs.push(variable);
+                }
+            }
+        }
+        let rows = inputs.len().max(kind.outputs().len());
+        geometry::block_size(kind, rows, false)
     }
 
     /// Where the blocks other than Notes are.
@@ -748,7 +866,7 @@ impl FlowEditor {
                     .get(&block.id)
                     .filter(|layout| layout.bounds.origin == point(block.x, block.y))
                     .map(|layout| layout.bounds.size)
-                    .unwrap_or_else(|| geometry::block_size(&block.kind, 1, false)),
+                    .unwrap_or_else(|| self.drawn_size(&block.kind, cx)),
             })
             .collect();
         let offset = editing::free_offset(&self.taken(), &group, point(32., 32.));
