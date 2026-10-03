@@ -2,11 +2,16 @@ use gpui_kit::base::SelectableText;
 use gpui_kit::component::*;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
+use super::content::ResponseContent;
 use super::view::ResponseView;
 
 impl ResponseView {
-    pub(super) fn headers(&self, cookies_only: bool, cx: &App) -> AnyElement {
-        let content = self.content.as_ref().unwrap();
+    pub(super) fn headers(
+        &self,
+        content: &ResponseContent,
+        cookies_only: bool,
+        cx: &App,
+    ) -> AnyElement {
         let (rows, state) = if cookies_only {
             (content.cookies.clone(), self.cookies_list.clone())
         } else {

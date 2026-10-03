@@ -7,11 +7,15 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{Auth, Body, Field, HttpRequest, Method};
-use request::{EventStream, EventStreamUpdate, RequestExecutor};
+use request::{
+    Dispatch, EventStream, EventStreamUpdate, ExecutionError, RequestExecutor, RequestPreferences,
+    StopEventStream,
+};
 
 use super::draft::RequestDraft;
 use crate::RequestSent;
 use crate::cookies::Cookies;
+use crate::response_view::ResponseContent;
 
 /// The most event-stream updates shown per redraw. A fast stream is drawn in
 /// batches instead of once for every event.
@@ -20,6 +24,45 @@ const UPDATE_BATCH: usize = 512;
 /// The pause after each batch, which lets the window draw and handle input
 /// while a stream keeps the queue full.
 const BATCH_PAUSE: Duration = Duration::from_millis(1);
+
+/// What the draft's request is doing.
+// Each draft has one, so boxing the request would not save memory.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum Exchange {
+    Idle,
+    /// Sending the request and receiving its response, until its
+    /// post-response scripts finish. Dropping the task cancels it.
+    Sending {
+        _task: Task<()>,
+        /// The request as it is sent, which history keeps once it went out.
+        sent: RequestSent,
+        dispatch: Dispatch,
+        stream: Stream,
+    },
+}
+
+/// The event stream that the response may turn out to be.
+pub(super) enum Stream {
+    /// No event stream has opened. The handle ends one that does.
+    Pending(StopEventStream),
+    /// The handle ends the open stream.
+    Open(StopEventStream),
+    /// Stop was requested. The response completes with the events that arrived.
+    Stopping,
+    /// The stream ended; only post-response scripts remain.
+    Ended,
+}
+
+/// What sending a request in the background ends with.
+struct Finished {
+    /// The executor that sent the request, which the next request reuses
+    /// while the preferences stay the same.
+    executor: Option<(RequestPreferences, RequestExecutor)>,
+    response: Result<ResponseContent, ExecutionError>,
+    /// What history keeps of the outcome. A request that failed before it
+    /// went out is left out.
+    history: Option<Result<request_history::Response, String>>,
+}
 
 fn request_url(path: &str) -> String {
     let path = path.trim();
@@ -180,7 +223,7 @@ impl RequestDraft {
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.task.is_some() {
+        if !matches!(self.exchange, Exchange::Idle) {
             return;
         }
 
@@ -222,40 +265,39 @@ impl RequestDraft {
         let cookies = Cookies::jar(cx);
         let (events, mut updates, stop) = EventStream::new();
         let dispatch = events.dispatch();
-        self.stop = Some(stop);
-        self.sending = Some((
-            RequestSent {
-                record: request_history::Record::sent(recorded),
-                sent_at: SystemTime::now(),
-            },
-            dispatch.clone(),
-        ));
+        let sent = RequestSent {
+            record: request_history::Record::sent(recorded),
+            sent_at: SystemTime::now(),
+        };
+        let went_out = dispatch.clone();
         let task = cx.background_executor().spawn(async move {
             let executor = match cached.map(Ok).unwrap_or_else(|| {
                 RequestExecutor::new(&preferences).map(|executor| executor.with_cookie_jar(cookies))
             }) {
                 Ok(executor) => executor,
-                Err(error) => return (None, Err(error), None),
+                Err(error) => {
+                    return Finished {
+                        executor: None,
+                        response: Err(error),
+                        history: None,
+                    };
+                }
             };
             let result = executor.execute_streaming(request, variables, events).await;
-            // What history keeps of the outcome. A request that failed
-            // before it went out is left out.
-            let outcome = match &result {
+            let history = match &result {
                 Ok(execution) => Some(Ok(request_history::Response::new(execution))),
-                Err(error) if dispatch.started() => Some(Err(error.message_without_url())),
+                Err(error) if went_out.started() => Some(Err(error.message_without_url())),
                 Err(_) => None,
             };
 
-            (
-                Some((preferences, executor)),
-                result.map(|execution| {
-                    crate::response_view::ResponseContent::new(execution).named_after(&url)
-                }),
-                outcome,
-            )
+            Finished {
+                executor: Some((preferences, executor)),
+                response: result.map(|execution| ResponseContent::new(execution).named_after(&url)),
+                history,
+            }
         });
 
-        self.task = Some(cx.spawn_in(window, async move |this, cx| {
+        let task = cx.spawn_in(window, async move |this, cx| {
             // An event stream shows its events while it is open. The updates
             // end with the response body, before post-response scripts run.
             while let Some(update) = updates.next().await {
@@ -278,17 +320,19 @@ impl RequestDraft {
 
             // The body is complete; only scripts remain.
             let _ = this.update(cx, |this, cx| {
-                if this.streaming {
-                    this.streaming = false;
-                    this.stop = None;
+                if let Exchange::Sending { stream, .. } = &mut this.exchange
+                    && matches!(stream, Stream::Open(_) | Stream::Stopping)
+                {
+                    *stream = Stream::Ended;
                     this.notify_address(cx);
                 }
             });
 
-            let (executor, result, outcome) = task.await;
+            let finished = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                if let Some((mut sent, _)) = this.sending.take()
-                    && let Some(outcome) = outcome
+                let exchange = std::mem::replace(&mut this.exchange, Exchange::Idle);
+                if let Exchange::Sending { mut sent, .. } = exchange
+                    && let Some(outcome) = finished.history
                 {
                     match outcome {
                         Ok(response) => sent.record.response = Some(response),
@@ -297,18 +341,25 @@ impl RequestDraft {
                     cx.emit(sent);
                 }
 
-                this.executor = executor;
-                this.task = None;
-                this.stop = None;
+                this.executor = finished.executor;
                 scope.update(cx, |scope, cx| scope.changed(cx));
                 Cookies::changed(cx);
                 // Scripts may have changed variables that other visible tabs of
                 // the collection share; redraw so their chips recolor.
                 window.refresh();
-                response.update(cx, |response, cx| response.finish(result, window, cx));
+                response.update(cx, |response, cx| {
+                    response.finish(finished.response, window, cx)
+                });
                 cx.notify();
             });
-        }));
+        });
+
+        self.exchange = Exchange::Sending {
+            _task: task,
+            sent,
+            dispatch,
+            stream: Stream::Pending(stop),
+        };
         cx.notify();
     }
 
@@ -329,7 +380,12 @@ impl RequestDraft {
                 } => {
                     // The jar stored the stream's cookies with its head.
                     Cookies::changed(cx);
-                    self.streaming = true;
+                    if let Exchange::Sending { stream, .. } = &mut self.exchange {
+                        *stream = match std::mem::replace(stream, Stream::Ended) {
+                            Stream::Pending(stop) => Stream::Open(stop),
+                            stream => stream,
+                        };
+                    }
                     self.response.update(cx, |response, cx| {
                         response.open_stream(status, version, headers, window, cx)
                     });
@@ -348,8 +404,9 @@ impl RequestDraft {
     /// End an open event stream. The response completes with the events that
     /// arrived, and post-response scripts run.
     pub fn stop(&mut self, cx: &mut Context<Self>) {
-        if self.streaming
-            && let Some(stop) = self.stop.take()
+        if let Exchange::Sending { stream, .. } = &mut self.exchange
+            && matches!(stream, Stream::Open(_))
+            && let Stream::Open(stop) = std::mem::replace(stream, Stream::Stopping)
         {
             stop.stop();
             self.response
@@ -360,14 +417,15 @@ impl RequestDraft {
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
-        self.task = None;
-        self.stop = None;
-        self.streaming = false;
+        // Dropping its task cancels the request.
+        let exchange = std::mem::replace(&mut self.exchange, Exchange::Idle);
         // Redirects before the cancellation may have set cookies.
         Cookies::changed(cx);
 
         // The server may already act on a request that went out.
-        if let Some((mut sent, dispatch)) = self.sending.take()
+        if let Exchange::Sending {
+            mut sent, dispatch, ..
+        } = exchange
             && dispatch.started()
         {
             sent.record.error = Some("Request cancelled".into());

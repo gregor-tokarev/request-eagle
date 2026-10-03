@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::execution::Exchange;
 use super::fields::{FieldsChanged, RequestFields, SendCookiesChanged};
 use super::path_variables::{PathVariableChanged, PathVariables};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
@@ -74,14 +75,9 @@ pub struct RequestDraft {
     split: Entity<ResizableState>,
     /// The request as a cURL command, beside it while open.
     pub(super) code_snippet: SnippetPanel<Self>,
-    pub(super) task: Option<Task<()>>,
-    /// The request being sent, which history keeps if it is cancelled after
-    /// it went out.
-    pub(super) sending: Option<(RequestSent, request::Dispatch)>,
-    /// Ends the response if it is an event stream. Taken when it is stopped.
-    pub(super) stop: Option<request::StopEventStream>,
-    /// Whether the response is an event stream that has not ended yet.
-    pub(super) streaming: bool,
+    pub(super) exchange: Exchange,
+    /// The executor of the last request, which the next one reuses while the
+    /// preferences stay the same.
     pub(super) executor: Option<(request::RequestPreferences, request::RequestExecutor)>,
     address: Entity<RequestAddress>,
     configuration: Entity<RequestConfiguration>,
@@ -192,10 +188,7 @@ impl RequestDraft {
             response,
             split,
             code_snippet: SnippetPanel::default(),
-            task: None,
-            sending: None,
-            stop: None,
-            streaming: false,
+            exchange: Exchange::Idle,
             executor: None,
             address,
             configuration,

@@ -8,7 +8,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
-use super::{body::Body, view::ResponseView};
+use super::body::Body;
+use super::view::{ResponseState, ResponseView};
 
 pub(super) struct BodySearch {
     pub(super) input: Entity<InputState>,
@@ -56,8 +57,11 @@ impl BodySearch {
 
 impl ResponseView {
     pub(super) fn open_response_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match &mut self.body {
-            Some(Body::Raw { search, .. }) => {
+        match &mut self.state {
+            ResponseState::Received {
+                body: Body::Raw { search, .. },
+                ..
+            } => {
                 let search = search.get_or_insert_with(|| {
                     let input =
                         cx.new(|cx| InputState::new(window, cx).placeholder("Search response"));
@@ -83,7 +87,10 @@ impl ResponseView {
                 });
                 cx.notify();
             }
-            Some(Body::Pretty(editor)) => {
+            ResponseState::Received {
+                body: Body::Pretty(editor),
+                ..
+            } => {
                 let editor = editor.read(cx).0.clone();
                 editor.update(cx, |editor, cx| editor.open_search(false, cx));
             }
@@ -92,10 +99,14 @@ impl ResponseView {
     }
 
     fn update_body_search(&mut self, cx: &mut Context<Self>) {
-        let Some(Body::Raw {
-            view,
-            search: Some(search),
-        }) = &mut self.body
+        let ResponseState::Received {
+            body:
+                Body::Raw {
+                    view,
+                    search: Some(search),
+                },
+            ..
+        } = &mut self.state
         else {
             return;
         };
@@ -107,10 +118,14 @@ impl ResponseView {
     }
 
     fn move_body_match(&mut self, previous: bool, cx: &mut Context<Self>) {
-        let Some(Body::Raw {
-            view,
-            search: Some(search),
-        }) = &mut self.body
+        let ResponseState::Received {
+            body:
+                Body::Raw {
+                    view,
+                    search: Some(search),
+                },
+            ..
+        } = &mut self.state
         else {
             return;
         };
@@ -133,7 +148,11 @@ impl ResponseView {
     }
 
     fn close_body_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(Body::Raw { view, search }) = &mut self.body {
+        if let ResponseState::Received {
+            body: Body::Raw { view, search },
+            ..
+        } = &mut self.state
+        {
             *search = None;
             view.update(cx, |view, cx| {
                 view.select_match(None, cx);
@@ -173,10 +192,14 @@ impl ResponseView {
                     .selected(search.case_sensitive)
                     .tooltip("Match case")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(Body::Raw {
-                            search: Some(search),
+                        if let ResponseState::Received {
+                            body:
+                                Body::Raw {
+                                    search: Some(search),
+                                    ..
+                                },
                             ..
-                        }) = &mut this.body
+                        } = &mut this.state
                         {
                             search.case_sensitive = !search.case_sensitive;
                         }
