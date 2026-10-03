@@ -213,6 +213,9 @@ fn flows_saved_in_collections_move_to_the_flows_directory_once() {
     fs::write(collection.join("Checkout.toml"), legacy_flow("Checkout")).unwrap();
     fs::write(folder.join("Checkout.toml"), legacy_flow("Nested")).unwrap();
     fs::write(folder.join("Broken.toml"), "flow = ").unwrap();
+    // A request stays a request, even with a `flow` table.
+    let annotated = format!("{request}\n[flow]\nblocks = []\n");
+    fs::write(folder.join("Annotated.toml"), annotated).unwrap();
     // A variable named like the table does not make an environment a flow.
     fs::write(collection.join("environment.toml"), "flow = \"checkout\"\n").unwrap();
 
@@ -225,6 +228,7 @@ fn flows_saved_in_collections_move_to_the_flows_directory_once() {
     assert!(collection.join("List.toml").exists());
     assert!(collection.join("environment.toml").exists());
     assert!(folder.join("Broken.toml").exists());
+    assert!(folder.join("Annotated.toml").exists());
     assert!(!folder.join("Checkout.toml").exists());
     assert_eq!(names(&FlowLibrary::load(&flows)), ["Checkout", "Nested"]);
 

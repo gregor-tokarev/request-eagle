@@ -299,10 +299,15 @@ pub fn move_flows_out_of_collections(
                 continue;
             }
 
-            // Only whole flows move, never a request or a collection's
+            // Only whole flows move, never a request, which 0.1.22 also read
+            // as one when it had a `flow` table, or a collection's
             // environment that happens to name a variable `flow`.
-            let is_flow = fs::read_to_string(&path)
-                .is_ok_and(|source| toml::from_str::<SavedFlow>(&source).is_ok());
+            let is_flow = fs::read_to_string(&path).is_ok_and(|source| {
+                source
+                    .parse::<toml::Table>()
+                    .is_ok_and(|table| !table.contains_key("request"))
+                    && toml::from_str::<SavedFlow>(&source).is_ok()
+            });
             if !is_flow {
                 continue;
             }
@@ -335,7 +340,12 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
         return Ok(());
     }
 
-    fs::copy(from, to)?;
+    // A copy that fails partway, such as on a full drive, is removed, so the
+    // flows folder never holds part of a flow.
+    if let Err(error) = fs::copy(from, to) {
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
     if let Err(error) = fs::remove_file(from) {
         // Keep one copy, where the collections report it.
         let _ = fs::remove_file(to);
