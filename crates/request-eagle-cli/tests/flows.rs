@@ -235,9 +235,13 @@ fn flows_saved_in_collections_move_to_the_flows_folder() {
     )
     .unwrap();
 
+    // The first command already finds the flow where it moves to.
+    let moved = cli.0.path().join("flows").join("Checkout.toml");
+    let got = cli.call(json!({"command":"flows.get","path":moved}));
+    assert_eq!(got["name"], "Checkout");
+
     let listed = cli.call(json!({"command":"flows.list"}));
 
-    let moved = cli.0.path().join("flows").join("Checkout.toml");
     assert_eq!(
         listed,
         json!([{"path": moved, "id": "f1", "name": "Checkout", "blocks": 0}])

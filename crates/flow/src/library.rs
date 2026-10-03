@@ -265,6 +265,7 @@ pub fn move_flows_out_of_collections<'a>(
     directory: &Path,
 ) -> Vec<PathBuf> {
     let mut moved = Vec::new();
+    let mut lock = None;
 
     for path in skipped {
         if path.extension().and_then(|extension| extension.to_str()) != Some(EXTENSION) {
@@ -281,8 +282,17 @@ pub fn move_flows_out_of_collections<'a>(
             .parse::<toml::Table>()
             .is_ok_and(|table| !table.contains_key("request"))
             && toml::from_str::<SavedFlow>(&source).is_ok();
-        if !is_flow || fs::create_dir_all(directory).is_err() {
+        if !is_flow {
             continue;
+        }
+
+        // The app and CLI commands starting together move flows one at a
+        // time. Without the lock, flows stay to move on the next start.
+        if lock.is_none() {
+            match lock_moves(directory) {
+                Ok(file) => lock = Some(file),
+                Err(_) => break,
+            }
         }
 
         let stem = path
@@ -295,6 +305,20 @@ pub fn move_flows_out_of_collections<'a>(
     }
 
     moved
+}
+
+/// Waits until no other start of the app or CLI moves flows into
+/// `directory`, until the returned file is dropped.
+fn lock_moves(directory: &Path) -> io::Result<fs::File> {
+    fs::create_dir_all(directory)?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(directory.join(".request-eagle-moves.lock"))?;
+    file.lock()?;
+
+    Ok(file)
 }
 
 /// Moves a flow's file to a free name in `directory`. The new name is a
@@ -349,8 +373,8 @@ fn link_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<Pa
 }
 
 /// Renames `from`, a file in `directory`, to the first name that no file
-/// has. Unlike a link, a rename replaces a file another start created after
-/// the check, so it is only for drives without links.
+/// has. Unlike a link, a rename would replace a file created after the
+/// check, so it is only for drives without links, while moves are locked.
 fn rename_to_free_name(from: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
     let to = free_names(directory, stem)
         .find(|to| !to.exists())

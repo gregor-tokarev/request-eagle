@@ -51,14 +51,17 @@ pub async fn dispatch(
                 .collect();
             Ok(json!(flows))
         }
+        // Loading the collections first moves the flows that 0.1.22 saved
+        // in them, so the flows read next include them.
         Command::FlowsGet { path } => {
+            let registry = load(collections, directory)?;
             let library = load_library(directory)?;
-            flow_json(&library, &load(collections, directory)?, &path)
+            flow_json(&library, &registry, &path)
         }
         Command::FlowsCreate { name, flow } => {
             let _lock = lock_for_edit(directory)?;
-            let mut library = load_library(directory)?;
             let registry = load(collections, directory)?;
+            let mut library = load_library(directory)?;
 
             let flow = flow.unwrap_or_else(Flow::starter);
             flow.check().map_err(|error| anyhow!(error))?;
@@ -71,8 +74,8 @@ pub async fn dispatch(
             flow,
         } => {
             let _lock = lock_for_edit(directory)?;
-            let mut library = load_library(directory)?;
             let registry = load(collections, directory)?;
+            let mut library = load_library(directory)?;
 
             flow.check().map_err(|error| anyhow!(error))?;
             library.update(&path, &expected_id, flow)?;
@@ -84,6 +87,7 @@ pub async fn dispatch(
             name,
         } => {
             let _lock = lock_for_edit(directory)?;
+            read(collections, directory);
             let mut library = load_library(directory)?;
 
             library.rename(&path, &expected_id, &name)?;
@@ -96,6 +100,7 @@ pub async fn dispatch(
             }
 
             let _lock = lock_for_edit(directory)?;
+            read(collections, directory);
             let mut library = load_library(directory)?;
 
             library.delete(&path)?;
@@ -290,8 +295,8 @@ async fn run(
     variables: HashMap<String, String>,
     timeout_ms: Option<u64>,
 ) -> Result<Value> {
-    let library = load_library(directory)?;
     let registry = load(collections, directory)?;
+    let library = load_library(directory)?;
     let entry = library.get(path).context("Unknown saved flow path")?;
     entry.flow.check().map_err(|error| anyhow!(error))?;
 
