@@ -499,6 +499,10 @@ fn dropping_a_connection_stops_its_handshake() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows buffers the whole send on loopback, so it finishes"
+)]
 fn closing_abandons_a_send_the_peer_never_reads() {
     // The server completes the handshake and then stops reading.
     let url = serve(|socket, _| async move {
