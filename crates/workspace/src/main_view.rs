@@ -205,12 +205,14 @@ impl Page {
     }
 
     /// Redraw the tab strip only when the tab's title, label or dirty marker
-    /// changes.
+    /// changes. Every change is reported, so the session can be saved.
     fn observe(&self, id: u64, cx: &mut Context<MainView>) -> Subscription {
         let on_change = move |this: &mut MainView, cx: &mut Context<MainView>| {
             let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) else {
                 return;
             };
+            cx.emit(TabEdited);
+
             let title = tab.page.title(cx).unwrap_or_else(|| tab.title.clone());
             let label = tab.page.label(cx);
             let dirty = tab.page.is_dirty(cx);
@@ -323,6 +325,11 @@ struct TabRename {
     input: Entity<InputState>,
     _subscription: Subscription,
 }
+
+/// The page of a tab changed, such as a request being edited in it.
+pub(crate) struct TabEdited;
+
+impl EventEmitter<TabEdited> for MainView {}
 
 pub(crate) struct MainView {
     pub(crate) tabs: Vec<PageTab>,

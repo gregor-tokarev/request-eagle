@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui_kit::{Bounds, point, px, size};
 
-use crate::session::{SavedFile, SavedSidebar, SavedTab, Session, fit_bounds};
+use crate::session::{SavedFile, SavedSidebar, SavedTab, Session, SessionWriter, fit_bounds};
 
 fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<gpui_kit::Pixels> {
     Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
@@ -148,7 +148,7 @@ fn saved_session_loads_back_the_same() {
         selected_tab: Some(1),
     };
 
-    session.save().unwrap();
+    SessionWriter::default().save(1, &session);
     let loaded = Session::load(path);
 
     assert_eq!(
@@ -158,4 +158,70 @@ fn saved_session_loads_back_the_same() {
     assert!(loaded.window.is_some());
     assert_eq!(loaded.sidebar.collapsed.len(), 2);
     assert_eq!(loaded.tabs.len(), 6);
+}
+
+#[test]
+fn session_captured_earlier_does_not_replace_a_later_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session.json");
+    let session = |tabs| Session {
+        path: path.clone(),
+        tabs,
+        ..Session::default()
+    };
+    let writer = SessionWriter::default();
+
+    // Saves in the background can finish after the one that followed them.
+    writer.save(2, &session(vec![SavedTab::Cookies]));
+    writer.save(1, &session(Vec::new()));
+
+    assert!(matches!(
+        &Session::load(path.clone()).tabs[..],
+        [SavedTab::Cookies]
+    ));
+
+    writer.save(3, &session(Vec::new()));
+
+    assert!(Session::load(path).tabs.is_empty());
+}
+
+#[test]
+fn unchanged_session_is_not_written_again() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session.json");
+    let session = |tabs| Session {
+        path: path.clone(),
+        tabs,
+        ..Session::default()
+    };
+    let writer = SessionWriter::default();
+    writer.save(1, &session(vec![SavedTab::Cookies]));
+    std::fs::remove_file(&path).unwrap();
+
+    writer.save(2, &session(vec![SavedTab::Cookies]));
+    assert!(!path.exists());
+
+    writer.save(3, &session(Vec::new()));
+    assert!(path.exists());
+}
+
+#[test]
+fn session_that_could_not_be_written_is_tried_again() {
+    let directory = tempfile::tempdir().unwrap();
+    // A file where the session's directory should be fails the save.
+    let blocked = directory.path().join("blocked");
+    std::fs::write(&blocked, "").unwrap();
+    let path = blocked.join("session.json");
+    let session = Session {
+        path: path.clone(),
+        tabs: vec![SavedTab::Cookies],
+        ..Session::default()
+    };
+    let writer = SessionWriter::default();
+    writer.save(1, &session);
+
+    std::fs::remove_file(&blocked).unwrap();
+    writer.save(2, &session);
+
+    assert!(matches!(&Session::load(path).tabs[..], [SavedTab::Cookies]));
 }
