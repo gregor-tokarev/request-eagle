@@ -223,10 +223,11 @@ impl Collections {
         request: Request,
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
+        // A file that holds another request by now is reported as replaced.
         if self
             .registry
             .file(path)
-            .is_some_and(|file| file.outside_changes() != outside_changes)
+            .is_some_and(|file| file.id == expected_id && file.outside_changes() != outside_changes)
         {
             return Err(CollectionEditError::ChangedOnDisk);
         }
