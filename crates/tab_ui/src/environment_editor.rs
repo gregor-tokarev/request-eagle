@@ -10,6 +10,10 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use crate::variable_table::{VariableTable, VariablesChanged};
 use crate::{Environments, EnvironmentsEvent};
 
+/// Emitted by the editor's Save button. The workspace saves the tab, as it
+/// does for its Save shortcut.
+pub struct SaveEnvironment;
+
 /// Edits one global environment's name and variables in a tab. Variables are
 /// written to the environment file only when saved.
 pub struct EnvironmentEditor {
@@ -23,6 +27,8 @@ pub struct EnvironmentEditor {
     table: Option<Entity<VariableTable>>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<SaveEnvironment> for EnvironmentEditor {}
 
 impl EnvironmentEditor {
     pub fn new(name: SharedString, environments: Entity<Environments>, cx: &App) -> Self {
@@ -46,6 +52,21 @@ impl EnvironmentEditor {
 
     pub fn is_dirty(&self) -> bool {
         sorted(self.variables.iter().cloned()) != self.saved
+    }
+
+    /// Whether the environment's file holds other variables than when it
+    /// was opened or last saved here, so saving would lose a change made
+    /// outside the app. A file that cannot be read anymore changed too.
+    pub fn changed_outside(&self, cx: &App) -> bool {
+        // Saving explains a file that could not be read when it was opened.
+        if self.load_error.is_some() {
+            return false;
+        }
+
+        let path = self.environments.read(cx).path(&self.name);
+        Environment::from_file(path).map_or(true, |environment| {
+            sorted(environment.entries) != self.saved
+        })
     }
 
     /// Select the name so a new or renamed environment can be typed over.
@@ -242,9 +263,7 @@ impl EnvironmentEditor {
                     .label("Save")
                     .disabled(!self.is_dirty())
                     .tooltip("Save variables")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let _ = this.save(cx);
-                    })),
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(SaveEnvironment))),
             )
     }
 }

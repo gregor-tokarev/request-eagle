@@ -4,12 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use environment::EnvironmentSaveError;
+use environment::{EnvironmentLoadError, EnvironmentSaveError};
 use thiserror::Error;
 
 use crate::collection::{is_reserved, load_file, save_file};
 use crate::{
-    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry, SharedSettings,
+    Collection, CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry,
+    SharedSettings,
 };
 use request::Request;
 
@@ -129,18 +130,42 @@ impl CollectionRegistry {
 
     /// Saves the collection's variables to `environment.toml` and its scripts
     /// and authorization to the settings file, leaving unchanged files as
-    /// they are.
+    /// they are. A file that changed since it was last read here is not
+    /// saved, so a change made outside the app is not lost.
     pub fn update_collection(
         &mut self,
         path: &Path,
         variables: HashMap<String, String>,
         shared: SharedSettings,
     ) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?
+            .save_settings(variables, shared, false)
+    }
+
+    /// Saves the collection's variables, scripts and authorization over the
+    /// ones their files hold now, once the user chose to keep their own
+    /// changes.
+    pub fn overwrite_collection(
+        &mut self,
+        path: &Path,
+        variables: HashMap<String, String>,
+        shared: SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?
+            .save_settings(variables, shared, true)
+    }
+
+    /// Reads a collection's variables, scripts and authorization again,
+    /// taking the changes made to their files outside the app.
+    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?.reload_settings()
+    }
+
+    fn collection_mut(&mut self, path: &Path) -> Result<&mut Collection, CollectionEditError> {
         self.collections
             .iter_mut()
             .find(|collection| collection.path == path)
-            .ok_or(CollectionEditError::NotFound)?
-            .save_settings(variables, shared)
+            .ok_or(CollectionEditError::NotFound)
     }
 
     /// Request names live in TOML; collection and folder names live on disk.
@@ -362,7 +387,7 @@ pub enum CollectionEditError {
     NotFound,
     #[error("This request was replaced by a different request. Your edits have not been saved.")]
     RequestReplaced,
-    #[error("This request was changed outside Request Eagle. Your edits have not been saved.")]
+    #[error("The file was changed outside Request Eagle. Your edits have not been saved.")]
     ChangedOnDisk,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
@@ -374,4 +399,6 @@ pub enum CollectionEditError {
     Save(#[from] CollectionSaveError),
     #[error("{0}")]
     Environment(#[from] EnvironmentSaveError),
+    #[error("{0}")]
+    EnvironmentLoad(#[from] EnvironmentLoadError),
 }

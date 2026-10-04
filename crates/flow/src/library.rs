@@ -17,6 +17,11 @@ const EXTENSION: &str = "toml";
 pub struct SavedFlow {
     #[serde(skip)]
     pub path: PathBuf,
+    /// How many times the flow was taken from its file after it changed
+    /// outside the app. A tab keeps the count it opened with, and a later
+    /// count tells it that it edits an older flow than this one.
+    #[serde(skip)]
+    pub outside_changes: u64,
 
     pub id: String,
     pub name: String,
@@ -137,6 +142,7 @@ impl FlowLibrary {
             };
             let saved = SavedFlow {
                 path: self.directory.join(format!("{file_name}.{EXTENSION}")),
+                outside_changes: 0,
                 id: id.clone(),
                 name,
                 schema_version: 1,
@@ -175,14 +181,36 @@ impl FlowLibrary {
     }
 
     /// Saves a flow's blocks and connections, unless its file now holds a
-    /// different flow.
+    /// different flow. A flow that changed in its file since it was last
+    /// read here is not saved, so a change made outside the app is not lost.
     pub fn update(
         &mut self,
         path: &Path,
         expected_id: &str,
         flow: Flow,
     ) -> Result<(), FlowLibraryError> {
-        self.change(path, expected_id, |saved| saved.flow = flow)
+        self.save(path, expected_id, flow, false)
+    }
+
+    /// Saves a flow over the one its file holds now, once the user chose to
+    /// keep their own changes.
+    pub fn overwrite(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        flow: Flow,
+    ) -> Result<(), FlowLibraryError> {
+        self.save(path, expected_id, flow, true)
+    }
+
+    /// Reads a flow's file again, taking the changes made to it outside the
+    /// app.
+    pub fn reload(&mut self, path: &Path, expected_id: &str) -> Result<(), FlowLibraryError> {
+        let (saved, latest) = self.latest(path, expected_id)?;
+        take_latest(saved, latest);
+        self.sort();
+
+        Ok(())
     }
 
     /// Renames a flow, unless its file now holds a different flow.
@@ -197,7 +225,10 @@ impl FlowLibrary {
             return Err(FlowLibraryError::InvalidName);
         }
 
-        self.change(path, expected_id, |saved| saved.name = name.to_owned())?;
+        let (saved, mut latest) = self.latest(path, expected_id)?;
+        latest.name = name.to_owned();
+        write_atomically(path, toml::to_string_pretty(&latest)?.as_bytes())?;
+        take_latest(saved, latest);
         self.sort();
 
         Ok(())
@@ -219,14 +250,36 @@ impl FlowLibrary {
         Ok(())
     }
 
-    /// Changes the latest content of a flow's file, as long as it still
-    /// holds the expected flow, and writes the file whole.
-    fn change(
+    /// Saves a flow in the latest content of its file, and writes the file
+    /// whole. Unless `overwrite` is set, a flow changed outside the app
+    /// stays.
+    fn save(
         &mut self,
         path: &Path,
         expected_id: &str,
-        change: impl FnOnce(&mut SavedFlow),
+        flow: Flow,
+        overwrite: bool,
     ) -> Result<(), FlowLibraryError> {
+        let (saved, mut updated) = self.latest(path, expected_id)?;
+        if !overwrite && flow_changed(saved, &updated) {
+            return Err(FlowLibraryError::ChangedOnDisk);
+        }
+
+        updated.flow = flow;
+        updated.outside_changes = saved.outside_changes;
+        write_atomically(path, toml::to_string_pretty(&updated)?.as_bytes())?;
+        *saved = updated;
+
+        Ok(())
+    }
+
+    /// A flow as it is known here and as its file has it now, as long as
+    /// both are still the expected flow.
+    fn latest(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+    ) -> Result<(&mut SavedFlow, SavedFlow), FlowLibraryError> {
         let saved = self
             .flows
             .iter_mut()
@@ -236,16 +289,12 @@ impl FlowLibrary {
             return Err(FlowLibraryError::Replaced);
         }
 
-        let mut updated = read(path)?;
-        if updated.id != expected_id {
+        let latest = read(path)?;
+        if latest.id != expected_id {
             return Err(FlowLibraryError::Replaced);
         }
 
-        change(&mut updated);
-        write_atomically(path, toml::to_string_pretty(&updated)?.as_bytes())?;
-        *saved = updated;
-
-        Ok(())
+        Ok((saved, latest))
     }
 
     fn sort(&mut self) {
@@ -404,6 +453,23 @@ fn read(path: &Path) -> Result<SavedFlow, FlowLibraryError> {
     Ok(saved)
 }
 
+/// Makes the `latest` content of a flow's file the known one. A flow that
+/// changed outside the app is counted, so a tab opened before can tell that
+/// it edits an older flow, and saving it asks whose changes to keep.
+fn take_latest(saved: &mut SavedFlow, mut latest: SavedFlow) {
+    latest.outside_changes = saved.outside_changes + u64::from(flow_changed(saved, &latest));
+    *saved = latest;
+}
+
+/// Whether the flow in a file differs from the one last read from it or
+/// saved to it.
+fn flow_changed(known: &SavedFlow, latest: &SavedFlow) -> bool {
+    // Compared as they are written, in case a flow reads back in another
+    // form than it was saved in.
+    known.flow != latest.flow
+        && toml::to_string(&known.flow).ok() != toml::to_string(&latest.flow).ok()
+}
+
 /// Replaces the file whole, so a write that fails midway leaves the previous
 /// flow.
 fn write_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
@@ -436,6 +502,8 @@ pub enum FlowLibraryError {
     NotFound,
     #[error("This flow was replaced by a different flow. Your edits have not been saved.")]
     Replaced,
+    #[error("This flow was changed outside Request Eagle. Your edits have not been saved.")]
+    ChangedOnDisk,
     #[error("Could not read {}: {source}", path.display())]
     Parse {
         path: PathBuf,

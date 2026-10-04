@@ -41,7 +41,7 @@ pub use collection_page::{CollectionPage, CollectionSettings, RunCollection, Sav
 pub use collection_runner::CollectionRunner;
 pub use cookie_page::CookiePage;
 pub use cookies::Cookies;
-pub use environment_editor::EnvironmentEditor;
+pub use environment_editor::{EnvironmentEditor, SaveEnvironment};
 pub use environments::{Environments, EnvironmentsEvent};
 pub use flow_editor::{
     AddBlock, ArrangeBlocks, CopyBlocks, DeleteSelection, DuplicateBlocks, FlowEditor, PasteBlocks,

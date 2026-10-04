@@ -93,6 +93,7 @@ fn write_collection(
             scripts: imported.scripts,
             auth: imported.auth,
         },
+        false,
     )?;
 
     write_items(path, &imported.items, &collection.reserved_paths())?;

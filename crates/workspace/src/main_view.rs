@@ -18,11 +18,12 @@ use crate::session::{SavedFile, SavedTab};
 use collection::{
     CollectionEditError, Collections, CollectionsEvent, SavedLocation, directory_name,
 };
+use flow::FlowLibraryError;
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
     EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
-    SaveCollection, Storage, WebSocketDraft,
+    SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -204,6 +205,17 @@ impl Page {
         }
     }
 
+    /// What the page edits, as the prompts about saving it call it.
+    fn kind(&self) -> &'static str {
+        match self {
+            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => "request",
+            Page::Flow(_) => "flow",
+            Page::Collection(_) => "collection",
+            Page::Environment(_) => "environment",
+            Page::Runner(_) | Page::Cookies(_) => "tab",
+        }
+    }
+
     fn icon(&self) -> Option<&'static str> {
         match self {
             Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => None,
@@ -324,8 +336,8 @@ pub(crate) struct PageTab {
     pub(crate) title: SharedString,
     pub(crate) label: Option<&'static str>,
     dirty: bool,
-    /// How many changes from outside the app the tab's saved request had
-    /// taken when the tab was opened from it or last saved.
+    /// How many changes from outside the app the tab's saved request or flow
+    /// had taken when the tab was opened from it or last saved.
     outside_changes: u64,
     pub(crate) page: Page,
     /// The history entry the tab was opened from.
@@ -338,6 +350,32 @@ struct TabRename {
     tab: u64,
     input: Entity<InputState>,
     _subscription: Subscription,
+}
+
+/// Why a tab was not saved.
+enum SaveFailure {
+    /// What the tab edits was changed outside the app, so the tab asks
+    /// whose changes to keep.
+    ChangedOnDisk,
+    Error(String),
+}
+
+impl From<CollectionEditError> for SaveFailure {
+    fn from(error: CollectionEditError) -> Self {
+        match error {
+            CollectionEditError::ChangedOnDisk => Self::ChangedOnDisk,
+            error => Self::Error(error.to_string()),
+        }
+    }
+}
+
+impl From<FlowLibraryError> for SaveFailure {
+    fn from(error: FlowLibraryError) -> Self {
+        match error {
+            FlowLibraryError::ChangedOnDisk => Self::ChangedOnDisk,
+            error => Self::Error(error.to_string()),
+        }
+    }
 }
 
 /// The page of a tab changed, such as a request being edited in it.
@@ -353,8 +391,8 @@ pub(crate) struct MainView {
     scroll_to_tab: Option<usize>,
     focus: FocusHandle,
     pending_close: Option<u64>,
-    /// The request tab that could not be saved, because its request was
-    /// changed outside the app. It asks whose changes to keep.
+    /// The tab that could not be saved, because what it edits was changed
+    /// outside the app. It asks whose changes to keep.
     changed_on_disk: Option<u64>,
     rename: Option<TabRename>,
     save_error: Option<String>,
@@ -490,10 +528,7 @@ impl MainView {
                 else {
                     return false;
                 };
-                let environments = self.environments.clone();
-                let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
-
-                self.open_tab(name, Page::Environment(editor), cx);
+                self.open_environment_tab(name, window, cx);
             }
             SavedTab::Flow { path, id, draft } => {
                 let Some(saved) = self
@@ -605,9 +640,17 @@ impl MainView {
         index
     }
 
-    /// How many changes from outside the app the saved request of a page
-    /// has taken so far.
+    /// How many changes from outside the app the saved request or flow of a
+    /// page has taken so far.
     fn outside_changes(&self, page: &Page, cx: &App) -> u64 {
+        if let Page::Flow(editor) = page {
+            return self
+                .flows
+                .read(cx)
+                .get(&editor.read(cx).path)
+                .map_or(0, |saved| saved.outside_changes);
+        }
+
         page.location(cx)
             .and_then(|location| self.collections.read(cx).registry().file(&location.path))
             .map_or(0, |file| file.outside_changes())
@@ -1140,13 +1183,36 @@ impl MainView {
             self.select_tab(index, cx);
             editor
         } else {
-            let environments = self.environments.clone();
-            let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
-            self.open_tab(name, Page::Environment(editor.clone()), cx);
-            editor
+            self.open_environment_tab(name, window, cx)
         };
 
         self.focus(window, cx);
+        editor
+    }
+
+    /// Show a global environment's editor in a new tab, which its Save
+    /// button saves.
+    fn open_environment_tab(
+        &mut self,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EnvironmentEditor> {
+        let environments = self.environments.clone();
+        let editor = cx.new(|cx| EnvironmentEditor::new(name.clone(), environments, cx));
+        let index = self.open_tab(name, Page::Environment(editor.clone()), cx);
+        let id = self.tabs[index].id;
+        let subscription = cx.subscribe_in(
+            &editor,
+            window,
+            move |this, _, _: &SaveEnvironment, window, cx| {
+                if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
+                    this.save_tab(index, false, window, cx);
+                }
+            },
+        );
+        self.tabs[index]._subscriptions.push(subscription);
+
         editor
     }
 
@@ -1294,8 +1360,8 @@ impl MainView {
         }
     }
 
-    /// `overwrite` saves a request over the changes made to it outside the
-    /// app, once the user chose to.
+    /// `overwrite` saves the tab over the changes made outside the app to
+    /// what it edits, once the user chose to.
     fn save_tab(
         &mut self,
         index: usize,
@@ -1313,21 +1379,29 @@ impl MainView {
             return;
         };
         let id = tab.id;
+        let outside_changes = tab.outside_changes;
 
         match tab.page.clone() {
             Page::Environment(editor) => {
-                // The editor shows its own save errors next to the variables.
-                let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
+                if !overwrite && editor.read(cx).changed_outside(cx) {
+                    self.changed_on_disk = Some(id);
+                } else {
+                    // The editor shows its own save errors next to the variables.
+                    let saved = editor.update(cx, |editor, cx| editor.save(cx)).is_ok();
 
-                if saved && self.pending_close == Some(id) {
-                    self.remove_tab(index, cx);
+                    if saved && self.pending_close == Some(id) {
+                        self.remove_tab(index, cx);
+                    }
                 }
             }
             Page::Collection(page) => {
                 let path = page.read(cx).path.clone();
-                let result = page.read(cx).settings().and_then(|settings| {
-                    self.collections
-                        .update(cx, |collections, cx| {
+                let result = page
+                    .read(cx)
+                    .settings()
+                    .map_err(SaveFailure::Error)
+                    .and_then(|settings| {
+                        let path = self.collections.update(cx, |collections, cx| {
                             collections.save_collection(
                                 &path,
                                 &settings.name,
@@ -1336,27 +1410,26 @@ impl MainView {
                                     scripts: settings.scripts.clone(),
                                     auth: settings.auth.clone(),
                                 },
+                                overwrite,
                                 cx,
                             )
-                        })
-                        .map(|path| (path, settings))
-                        .map_err(|error| error.to_string())
-                });
+                        })?;
+
+                        Ok((path, settings))
+                    });
 
                 match result {
                     Ok((path, settings)) => {
                         page.update(cx, |page, cx| page.mark_saved(path, settings, cx));
                         self.close_saved_tab(index, window, cx);
                     }
-                    Err(error) => {
-                        self.save_error = Some(format!("Could not save collection: {error}"))
-                    }
+                    Err(failure) => self.save_failed(id, "collection", failure),
                 }
             }
             // The jar saves itself whenever it changes.
             Page::Runner(_) | Page::Cookies(_) => {}
             Page::Flow(editor) => {
-                let (path, id, flow, check) = {
+                let (path, flow_id, flow, check) = {
                     let editor = editor.read(cx);
                     (
                         editor.path.clone(),
@@ -1365,18 +1438,28 @@ impl MainView {
                         editor.check(),
                     )
                 };
-                let result = check.and_then(|()| {
-                    self.flows
-                        .update(cx, |flows, _| flows.save(&path, &id, flow.clone()))
-                        .map_err(|error| error.to_string())
+                let result = check.map_err(SaveFailure::Error).and_then(|()| {
+                    let flow = flow.clone();
+                    self.flows.update(cx, |flows, _| {
+                        if overwrite {
+                            flows.overwrite(&path, &flow_id, flow)
+                        } else {
+                            flows.save(&path, &flow_id, outside_changes, flow)
+                        }
+                    })?;
+
+                    Ok(())
                 });
 
                 match result {
                     Ok(()) => {
                         editor.update(cx, |editor, cx| editor.mark_saved(flow, cx));
+                        // The saved flow is the one the tab edits from now on.
+                        self.tabs[index].outside_changes =
+                            self.outside_changes(&self.tabs[index].page, cx);
                         self.close_saved_tab(index, window, cx);
                     }
-                    Err(error) => self.save_error = Some(format!("Could not save flow: {error}")),
+                    Err(failure) => self.save_failed(id, "flow", failure),
                 }
             }
             Page::Request(draft) => {
@@ -1455,53 +1538,112 @@ impl MainView {
             }
         });
 
-        match &result {
+        match result {
             // The saved request is the one the tab edits from now on.
             Ok(()) => {
                 if let Some(tab) = tab {
                     self.tabs[tab].outside_changes = self.outside_changes(&self.tabs[tab].page, cx);
                 }
-            }
-            Err(CollectionEditError::ChangedOnDisk) => self.changed_on_disk = Some(tab_id),
-            Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
-        }
 
-        result.is_ok()
+                true
+            }
+            Err(error) => {
+                self.save_failed(tab_id, "request", error.into());
+
+                false
+            }
+        }
     }
 
-    /// Discard a request tab's changes for the ones made to its file outside
-    /// the app.
+    /// Show why a tab was not saved, or ask whose changes to keep.
+    fn save_failed(&mut self, tab_id: u64, kind: &str, failure: SaveFailure) {
+        match failure {
+            SaveFailure::ChangedOnDisk => self.changed_on_disk = Some(tab_id),
+            SaveFailure::Error(error) => {
+                self.save_error = Some(format!("Could not save {kind}: {error}"));
+            }
+        }
+    }
+
+    /// Discard a tab's changes for the ones made outside the app to what it
+    /// edits.
     fn reload_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let tab = &self.tabs[index];
-        let Some(location) = tab.page.location(cx).cloned() else {
-            return;
-        };
+        let page = tab.page.clone();
         let closing = self.pending_close == Some(tab.id);
-
         self.changed_on_disk = None;
-        let result = self.collections.update(cx, |collections, cx| {
-            collections.reload_request(&location.path, &location.id, cx)
-        });
-        let request = self
-            .collections
-            .read(cx)
-            .request(&location.path)
-            .map(|(location, file)| (location, file.request.clone()));
 
-        match (result, request) {
-            // A tab that was being closed has nothing left to save.
-            (Ok(()), Some(_)) if closing => self.remove_tab(index, cx),
-            // The file's request opens in place of the changed one.
-            (Ok(()), Some((location, request))) => {
-                let title = location.name.clone().into();
-                self.restore_request(title, None, request, Storage::Saved(location), cx);
-                self.tabs.swap_remove(index);
+        // What the tab opens from is read from its files again.
+        let result = match &page {
+            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => {
+                page.location(cx).cloned().map_or(Ok(()), |location| {
+                    self.collections
+                        .update(cx, |collections, cx| {
+                            collections.reload_request(&location.path, &location.id, cx)
+                        })
+                        .map_err(|error| error.to_string())
+                })
+            }
+            Page::Flow(editor) => {
+                let (path, id) = {
+                    let editor = editor.read(cx);
+                    (editor.path.clone(), editor.id.clone())
+                };
+                self.flows
+                    .update(cx, |flows, cx| flows.reload(&path, &id, cx))
+                    .map_err(|error| error.to_string())
+            }
+            Page::Collection(page) => {
+                let path = page.read(cx).path.clone();
+                self.collections
+                    .update(cx, |collections, _| collections.reload_collection(&path))
+                    .map_err(|error| error.to_string())
+            }
+            // Its editor reads the environment's file when it opens.
+            Page::Environment(_) | Page::Runner(_) | Page::Cookies(_) => Ok(()),
+        };
+
+        if let Err(error) = result {
+            self.save_error = Some(format!("Could not reload {}: {error}", page.kind()));
+            cx.notify();
+            return;
+        }
+
+        // A tab that was being closed has nothing left to save. Otherwise
+        // another tab opens in its place, from what is saved now.
+        self.remove_tab(index, cx);
+        if !closing {
+            let count = self.tabs.len();
+
+            match &page {
+                Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => {
+                    if let Some(location) = page.location(cx).cloned() {
+                        self.open_saved(&location.path, window, cx);
+                    }
+                }
+                Page::Collection(page) => {
+                    let path = page.read(cx).path.clone();
+                    self.open_saved(&path, window, cx);
+                }
+                Page::Flow(editor) => {
+                    let path = editor.read(cx).path.clone();
+                    if let Some(saved) = self.flows.read(cx).get(&path).cloned() {
+                        self.open_flow(saved, cx);
+                    }
+                }
+                Page::Environment(editor) => {
+                    let name = editor.read(cx).name.clone();
+                    self.open_environment_tab(name, window, cx);
+                }
+                Page::Runner(_) | Page::Cookies(_) => {}
+            }
+
+            if self.tabs.len() > count
+                && let Some(tab) = self.tabs.pop()
+            {
+                self.tabs.insert(index, tab);
                 self.select_tab(index, cx);
             }
-            (Err(error), _) => {
-                self.save_error = Some(format!("Could not reload request: {error}"));
-            }
-            (Ok(()), None) => {}
         }
 
         self.focus(window, cx);
@@ -1666,33 +1808,32 @@ impl MainView {
         }
     }
 
-    /// Asks whose changes to keep, after a save found the request changed
-    /// outside the app.
+    /// Asks whose changes to keep, after a save found what the tab edits
+    /// changed outside the app.
     fn changed_on_disk_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let changed_tab = |this: &Self| {
             this.tabs
                 .iter()
                 .position(|tab| Some(tab.id) == this.changed_on_disk)
         };
+        let kind = changed_tab(self).map_or("tab", |index| self.tabs[index].page.kind());
 
         h_flex()
-            .debug_selector(|| "request-changed-on-disk-prompt".into())
+            .debug_selector(|| "changed-on-disk-prompt".into())
             .flex_none()
             .px_3()
             .py_2()
             .gap_2()
             .bg(cx.theme().muted)
+            .child(div().flex_1().child(format!(
+                "This {kind} was changed outside Request Eagle. Keep your changes?"
+            )))
             .child(
-                div()
-                    .flex_1()
-                    .child("This request was changed outside Request Eagle. Keep your changes?"),
-            )
-            .child(
-                Button::new("overwrite-changed-request")
-                    .debug_selector(|| "overwrite-changed-request".into())
+                Button::new("overwrite-changed-tab")
+                    .debug_selector(|| "overwrite-changed-tab".into())
                     .small()
                     .label("Overwrite")
-                    .tooltip("Save your changes over the ones in the file")
+                    .tooltip("Save your changes over the ones made outside")
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if let Some(index) = changed_tab(this) {
                             this.save_tab(index, true, window, cx);
@@ -1700,11 +1841,13 @@ impl MainView {
                     })),
             )
             .child(
-                Button::new("reload-changed-request")
-                    .debug_selector(|| "reload-changed-request".into())
+                Button::new("reload-changed-tab")
+                    .debug_selector(|| "reload-changed-tab".into())
                     .small()
                     .label("Reload")
-                    .tooltip("Discard your changes and open the request from its file")
+                    .tooltip(format!(
+                        "Discard your changes and open the {kind} as it is saved now"
+                    ))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if let Some(index) = changed_tab(this) {
                             this.reload_tab(index, window, cx);
@@ -1712,8 +1855,8 @@ impl MainView {
                     })),
             )
             .child(
-                Button::new("cancel-changed-request")
-                    .debug_selector(|| "cancel-changed-request".into())
+                Button::new("cancel-changed-tab")
+                    .debug_selector(|| "cancel-changed-tab".into())
                     .small()
                     .label("Cancel")
                     .on_click(cx.listener(|this, _, window, cx| {

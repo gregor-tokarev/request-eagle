@@ -947,6 +947,115 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
 }
 
 #[test]
+fn saving_cannot_replace_collection_settings_changed_outside_the_app_without_a_choice() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let environment = collection.join("environment.toml");
+    let settings = collection.join(".request-eagle-collection.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let scripts = |source: &str| SharedSettings {
+        scripts: request::RequestScripts {
+            pre_request: source.into(),
+            post_response: String::new(),
+        },
+        auth: Auth::Inherit,
+    };
+    let known = |registry: &CollectionRegistry| {
+        let entry = &registry.collections()[0];
+        assert_eq!(entry.path, collection);
+        entry.local_env().entries.clone()
+    };
+
+    // Saved again by the app, the settings are still the known ones.
+    registry
+        .update_collection(&collection, known(&registry), scripts("first();"))
+        .unwrap();
+    registry
+        .update_collection(&collection, known(&registry), scripts("second();"))
+        .unwrap();
+
+    let outside_environment = "base_url = 'https://outside.example'\n";
+    fs::write(&environment, outside_environment).unwrap();
+    let outside_settings = fs::read_to_string(&settings)
+        .unwrap()
+        .replace("second();", "outside();");
+    fs::write(&settings, &outside_settings).unwrap();
+
+    // A file that is not written keeps the change made to it, whatever is
+    // saved to the other one.
+    let result = registry.update_collection(&collection, known(&registry), scripts("third();"));
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    let result = registry.update_collection(
+        &collection,
+        [("token".into(), "mine".into())].into(),
+        scripts("second();"),
+    );
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    assert_eq!(
+        fs::read_to_string(&environment).unwrap(),
+        outside_environment
+    );
+    assert_eq!(fs::read_to_string(&settings).unwrap(), outside_settings);
+    assert_eq!(registry.collections()[0].scripts().pre_request, "second();");
+
+    registry
+        .overwrite_collection(
+            &collection,
+            [("token".into(), "mine".into())].into(),
+            scripts("third();"),
+        )
+        .unwrap();
+
+    let reloaded = CollectionRegistry::from_path(root);
+    assert_eq!(reloaded.collections()[0].scripts().pre_request, "third();");
+    assert_eq!(
+        reloaded.collections()[0].local_env().resolve("token"),
+        Some("mine")
+    );
+    assert!(
+        reloaded.collections()[0]
+            .local_env()
+            .resolve("base_url")
+            .is_none()
+    );
+}
+
+#[test]
+fn reloading_a_collection_takes_the_settings_changed_outside_the_app() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let mut registry = CollectionRegistry::from_path(root);
+    fs::write(
+        collection.join("environment.toml"),
+        "base_url = 'https://outside.example'\n",
+    )
+    .unwrap();
+    fs::write(
+        collection.join(".request-eagle-collection.toml"),
+        "[scripts]\npre_request = 'outside();'\n",
+    )
+    .unwrap();
+
+    registry.reload_collection(&collection).unwrap();
+
+    let entry = &registry.collections()[0];
+    assert_eq!(
+        entry.local_env().resolve("base_url"),
+        Some("https://outside.example")
+    );
+    assert_eq!(entry.scripts().pre_request, "outside();");
+
+    // Changes made from the reloaded settings save as usual.
+    let variables = entry.local_env().entries.clone();
+    registry
+        .update_collection(&collection, variables, SharedSettings::default())
+        .unwrap();
+    assert!(!collection.join(".request-eagle-collection.toml").exists());
+}
+
+#[test]
 fn collection_settings_files_cannot_be_replaced_by_entries() {
     let fixture = Fixture::new();
     let root = &fixture.0;

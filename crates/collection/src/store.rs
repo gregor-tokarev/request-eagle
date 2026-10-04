@@ -271,12 +271,14 @@ impl Collections {
 
     /// Save a collection page's edits, renaming the collection's directory
     /// when its name changed. Returns the collection's path after the save.
+    /// Unless `overwrite` is set, settings changed outside the app stay.
     pub fn save_collection(
         &mut self,
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
         shared: SharedSettings,
+        overwrite: bool,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
         // Rename first: an invalid or taken name then fails before any file
@@ -286,9 +288,20 @@ impl Collections {
         } else {
             self.rename(path, name, cx)?
         };
-        self.registry.update_collection(&path, variables, shared)?;
+        if overwrite {
+            self.registry
+                .overwrite_collection(&path, variables, shared)?;
+        } else {
+            self.registry.update_collection(&path, variables, shared)?;
+        }
 
         Ok(path)
+    }
+
+    /// Take the changes made to a collection's variables, scripts and
+    /// authorization outside the app.
+    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
+        self.registry.reload_collection(path)
     }
 
     /// Rename a collection, folder or request. Returns its path after the
