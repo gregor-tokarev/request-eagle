@@ -363,6 +363,59 @@ fn saving_cannot_replace_a_request_changed_outside_the_app_without_a_choice() {
 }
 
 #[test]
+fn renaming_a_request_changed_outside_the_app_still_leaves_saving_a_choice() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let edited = || -> Request {
+        HttpRequest {
+            path: "/local".into(),
+            ..HttpRequest::default()
+        }
+        .into()
+    };
+
+    // A tab and the sidebar rename a request in different ways.
+    type Rename = fn(&mut CollectionRegistry, &std::path::Path);
+    let renames: [Rename; 2] = [
+        |registry, path| registry.rename_request(path, "list", "Renamed").unwrap(),
+        |registry, path| {
+            registry.rename(path, "Renamed").unwrap();
+        },
+    ];
+
+    for rename in renames {
+        let mut registry = CollectionRegistry::from_path(root);
+        let original_content = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            original_content.replace("path = '/users'", "path = '/outside'"),
+        )
+        .unwrap();
+
+        rename(&mut registry, &path);
+
+        let renamed_content = fs::read_to_string(&path).unwrap();
+        assert!(renamed_content.contains("Renamed"));
+        assert!(renamed_content.contains("path = '/outside'"));
+        assert_eq!(registry.file(&path).unwrap().name, "Renamed");
+
+        let result = registry.update_request(&path, "list", edited());
+
+        assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), renamed_content);
+
+        registry.reload_request(&path, "list").unwrap();
+        let Request::Http(request) = &registry.file(&path).unwrap().request else {
+            panic!("expected an HTTP request");
+        };
+        assert_eq!(request.path, "/outside");
+
+        fs::write(&path, original_content).unwrap();
+    }
+}
+
+#[test]
 fn saving_keeps_external_changes_that_leave_the_request_as_it_was() {
     let fixture = Fixture::new();
     let root = &fixture.0;

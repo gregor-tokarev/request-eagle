@@ -74,6 +74,15 @@ impl Environment {
 /// Replaces the file whole, so a save that fails midway leaves the previous
 /// variables rather than a part of the new ones.
 fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
+    // A link to variables shared from elsewhere stays a link: the file it
+    // leads to is the one replaced.
+    let target = match fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(error) => return Err(error),
+    };
+    let path = target.as_path();
+
     let permissions = match fs::metadata(path) {
         Ok(metadata) => {
             let permissions = metadata.permissions();

@@ -116,41 +116,50 @@ impl Page {
         }
     }
 
-    /// The tab as the next launch reopens it.
-    fn saved(&self, title: &SharedString, cx: &App) -> SavedTab {
-        let request = |storage: &Storage, request: request::Request| SavedTab::Request {
-            title: title.to_string(),
-            file: storage.location().map(|location| SavedFile {
-                path: location.path.clone(),
-                id: location.id.clone(),
-                collection: location.collection.clone(),
-            }),
-            name: match storage {
-                Storage::Unsaved { name } => name.as_ref().map(ToString::to_string),
-                Storage::Saved(_) => None,
-            },
-            draft: (storage.location().is_none() || self.is_dirty(cx)).then_some(request),
-        };
+    /// The tab as the next launch reopens it. `dirty` is the tab's marker of
+    /// unsaved changes. The session is saved while tabs are edited, so a
+    /// request is copied only when the session keeps it.
+    fn saved(&self, title: &SharedString, dirty: bool, cx: &App) -> SavedTab {
+        fn request<R: Clone + Into<request::Request>>(
+            title: &SharedString,
+            storage: &Storage,
+            request: &R,
+            dirty: bool,
+        ) -> SavedTab {
+            SavedTab::Request {
+                title: title.to_string(),
+                file: storage.location().map(|location| SavedFile {
+                    path: location.path.clone(),
+                    id: location.id.clone(),
+                    collection: location.collection.clone(),
+                }),
+                name: match storage {
+                    Storage::Unsaved { name } => name.as_ref().map(ToString::to_string),
+                    Storage::Saved(_) => None,
+                },
+                draft: (storage.location().is_none() || dirty).then(|| request.clone().into()),
+            }
+        }
 
         match self {
             Page::Request(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.storage, draft.request.clone().into())
+                request(title, &draft.storage, &draft.request, dirty)
             }
             Page::Grpc(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.storage, draft.request.clone().into())
+                request(title, &draft.storage, &draft.request, dirty)
             }
             Page::WebSocket(draft) => {
                 let draft = draft.read(cx);
-                request(&draft.storage, draft.request.clone().into())
+                request(title, &draft.storage, &draft.request, dirty)
             }
             Page::Flow(editor) => {
                 let editor = editor.read(cx);
                 SavedTab::Flow {
                     path: editor.path.clone(),
                     id: editor.id.to_string(),
-                    draft: editor.is_dirty().then(|| Box::new(editor.flow().clone())),
+                    draft: dirty.then(|| Box::new(editor.flow().clone())),
                 }
             }
             Page::Collection(page) => SavedTab::Collection {
@@ -561,7 +570,7 @@ impl MainView {
     pub(crate) fn saved_tabs(&self, cx: &App) -> Vec<SavedTab> {
         self.tabs
             .iter()
-            .map(|tab| tab.page.saved(&tab.title, cx))
+            .map(|tab| tab.page.saved(&tab.title, tab.dirty, cx))
             .collect()
     }
 

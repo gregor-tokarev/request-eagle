@@ -23,14 +23,7 @@ impl CollectionRegistry {
         expected_id: &str,
         request: Request,
     ) -> Result<(), CollectionEditError> {
-        self.update_file(path, expected_id, |known, file| {
-            if request_changed(known, file) {
-                return Err(CollectionEditError::ChangedOnDisk);
-            }
-
-            file.request = request;
-            Ok(())
-        })
+        self.save_request(path, expected_id, request, false)
     }
 
     /// Saves a request over the one its file holds now, once the user chose
@@ -41,10 +34,7 @@ impl CollectionRegistry {
         expected_id: &str,
         request: Request,
     ) -> Result<(), CollectionEditError> {
-        self.update_file(path, expected_id, |_, file| {
-            file.request = request;
-            Ok(())
-        })
+        self.save_request(path, expected_id, request, true)
     }
 
     /// Reads a request's file again, taking the changes made to it outside
@@ -77,28 +67,35 @@ impl CollectionRegistry {
             return Err(CollectionEditError::InvalidName);
         }
 
-        self.update_file(path, expected_id, |_, file| {
-            file.name = name.to_owned();
-            Ok(())
-        })
+        let file = self.file_mut(path, expected_id)?;
+        let latest = load_file(path)?;
+        if latest.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        rename_file(file, latest, name)
     }
 
-    /// Changes the latest content of a request file, keeping comments and
-    /// external edits, as long as it is still the expected request. `change`
-    /// gets the file as it was last read here, and as it is now.
-    fn update_file(
+    /// Saves a request in the latest content of its file, keeping comments
+    /// and external edits, as long as it is still the expected request.
+    /// Unless `overwrite` is set, a request changed outside the app stays.
+    fn save_request(
         &mut self,
         path: &Path,
         expected_id: &str,
-        change: impl FnOnce(&FileEntry, &mut FileEntry) -> Result<(), CollectionEditError>,
+        request: Request,
+        overwrite: bool,
     ) -> Result<(), CollectionEditError> {
         let file = self.file_mut(path, expected_id)?;
         let mut updated = load_file(path)?;
         if updated.id != expected_id {
             return Err(CollectionEditError::RequestReplaced);
         }
+        if !overwrite && request_changed(file, &updated) {
+            return Err(CollectionEditError::ChangedOnDisk);
+        }
 
-        change(file, &mut updated)?;
+        updated.request = request;
         save_file(&mut updated)?;
         *file = updated;
 
@@ -166,10 +163,8 @@ impl CollectionRegistry {
                 match entry {
                     Entry::File(file) => {
                         // Read the latest content so external edits and comments survive.
-                        let mut updated = load_file(path)?;
-                        updated.name = name.to_owned();
-                        save_file(&mut updated)?;
-                        *file = updated;
+                        let latest = load_file(path)?;
+                        rename_file(file, latest, name)?;
                         return Ok(path.to_path_buf());
                     }
                     Entry::Directory(folder) => {
@@ -212,6 +207,28 @@ impl CollectionRegistry {
 
         Err(CollectionEditError::NotFound)
     }
+}
+
+/// Names a request in the `latest` content of its file. A request changed
+/// outside the app stays in the file without becoming the known one: a tab
+/// that edits the request was opened before the change, and saving it still
+/// has to ask whose changes to keep.
+fn rename_file(
+    file: &mut FileEntry,
+    mut latest: FileEntry,
+    name: &str,
+) -> Result<(), CollectionEditError> {
+    let changed_outside = latest.id == file.id && request_changed(file, &latest);
+    latest.name = name.to_owned();
+    save_file(&mut latest)?;
+
+    if changed_outside {
+        file.name = latest.name;
+    } else {
+        *file = latest;
+    }
+
+    Ok(())
 }
 
 /// Whether the request in a file differs from the one last read from it.
