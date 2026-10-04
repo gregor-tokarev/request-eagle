@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use crate::actions::*;
 use crate::{
@@ -7,8 +7,8 @@ use crate::{
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
     flow_panel::{FlowPanel, FlowPanelEvent},
     history_panel::{HistoryPanel, HistoryPanelEvent},
-    main_view::{MainView, Page},
-    session::{SavedSidebar, SavedWindow, Session},
+    main_view::{MainView, Page, TabEdited},
+    session::{SavedSidebar, SavedWindow, Session, SessionWriter},
     top_panel::TopPanel,
 };
 use collection::{CollectionRegistry, Collections};
@@ -27,6 +27,10 @@ use request_history::History;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
 use tab_ui::Environments;
 use updater::Updater;
+
+/// How long after a tab changes its session is saved. Changes that follow
+/// within the delay are saved together.
+const CHECKPOINT_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SidebarSection {
@@ -64,13 +68,21 @@ pub(crate) struct Workspace {
 
     pub(crate) command_palette: Option<WeakEntity<list::ListState<CommandPalette>>>,
 
-    /// Where the window, sidebar and tabs are saved when the window closes.
+    /// Where the window, sidebar and tabs are saved, shortly after tabs
+    /// change and when the window closes.
     session_path: PathBuf,
+    session_writer: Arc<SessionWriter>,
+    /// Counts the sessions captured, so an earlier one never replaces a
+    /// later one.
+    sessions_captured: u64,
+    /// Whether the session is about to be saved after a change to the tabs.
+    checkpoint_scheduled: bool,
 
     _sidebar_subscription: Subscription,
     _environment_panel_subscription: Subscription,
     _flow_panel_subscription: Subscription,
     _history_subscription: Subscription,
+    _tabs_subscriptions: [Subscription; 2],
     _settings_subscription: Option<Subscription>,
 }
 
@@ -194,6 +206,17 @@ impl Workspace {
             )
         });
 
+        // The tab strip redraws as tabs open, close and are selected; edits
+        // inside a tab are reported apart, so they do not redraw it.
+        let tabs_subscriptions = [
+            cx.observe_in(&main_view, window, |this, _, window, cx| {
+                this.checkpoint_session(window, cx)
+            }),
+            cx.subscribe_in(&main_view, window, |this, _, _: &TabEdited, window, cx| {
+                this.checkpoint_session(window, cx)
+            }),
+        ];
+
         // Start in the collections tree, or in the tabs while it is hidden or
         // folded.
         if sidebar_state.visible && sidebar_state.collections {
@@ -227,16 +250,58 @@ impl Workspace {
             updater,
             command_palette: None,
             session_path,
+            session_writer: Arc::default(),
+            sessions_captured: 0,
+            checkpoint_scheduled: false,
             _sidebar_subscription: sidebar_subscription,
             _environment_panel_subscription: environment_panel_subscription,
             _flow_panel_subscription: flow_panel_subscription,
             _history_subscription: history_subscription,
+            _tabs_subscriptions: tabs_subscriptions,
             _settings_subscription: None,
         }
     }
 
     /// Save the window, sidebar and tabs for the next launch.
-    fn save_session(&self, window: &Window, cx: &App) {
+    fn save_session(&mut self, window: &Window, cx: &App) {
+        let (number, session) = self.capture_session(window, cx);
+
+        self.session_writer.save(number, &session);
+    }
+
+    /// Save the session shortly after the tabs change, so a crash or a forced
+    /// exit keeps what was typed until then.
+    fn checkpoint_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.checkpoint_scheduled {
+            return;
+        }
+        self.checkpoint_scheduled = true;
+
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(CHECKPOINT_DELAY).await;
+
+            let Ok((number, session, writer)) = this.update_in(cx, |this, window, cx| {
+                this.checkpoint_scheduled = false;
+                let (number, session) = this.capture_session(window, cx);
+
+                (number, session, this.session_writer.clone())
+            }) else {
+                return;
+            };
+
+            // Flushing the file to disk would hold up typing.
+            cx.background_executor()
+                .spawn(async move { writer.save(number, &session) })
+                .await;
+        })
+        .detach();
+    }
+
+    /// The window, sidebar and tabs as they are now, and the session's place
+    /// among those captured.
+    fn capture_session(&mut self, window: &Window, cx: &App) -> (u64, Session) {
+        self.sessions_captured += 1;
+
         let session = Session {
             path: self.session_path.clone(),
             window: SavedWindow::capture(window, cx),
@@ -260,12 +325,7 @@ impl Workspace {
             selected_tab: self.main_view.read(cx).selected,
         };
 
-        if let Err(error) = session.save() {
-            eprintln!(
-                "Could not save the session to {}: {error}",
-                self.session_path.display()
-            );
-        }
+        (self.sessions_captured, session)
     }
 
     pub(crate) fn open_settings(
@@ -1046,7 +1106,7 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
     let closing = workspace.downgrade();
     window.on_window_should_close(cx, move |window, cx| {
         if let Some(workspace) = closing.upgrade() {
-            workspace.read(cx).save_session(window, cx);
+            workspace.update(cx, |workspace, cx| workspace.save_session(window, cx));
         }
 
         true
@@ -1057,7 +1117,7 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
     cx.on_app_quit(move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             if let Some(workspace) = workspace.upgrade() {
-                workspace.read(cx).save_session(window, cx);
+                workspace.update(cx, |workspace, cx| workspace.save_session(window, cx));
             }
         });
 
@@ -1067,8 +1127,8 @@ fn save_session_on_close(workspace: &Entity<Workspace>, window: &Window, cx: &mu
 }
 
 /// `cookies` is the jar that every request shares, or why it could not be
-/// read. `session` is how the workspace last looked; it is saved again when
-/// the window closes.
+/// read. `session` is how the workspace last looked; it is saved again
+/// shortly after tabs change and when the window closes.
 // Each store is loaded once at startup and handed over here.
 #[allow(clippy::too_many_arguments)]
 pub fn init(

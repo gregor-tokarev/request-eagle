@@ -93,14 +93,56 @@ impl FlowPanel {
         }
     }
 
-    /// Save a flow tab's blocks and connections.
+    /// Save a flow tab's blocks and connections, unless the flow changed
+    /// outside the app. `outside_changes` is the flow's count when the tab
+    /// opened it: a rename since can have read a changed flow from the file.
     pub(crate) fn save(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        outside_changes: u64,
+        flow: Flow,
+    ) -> Result<(), FlowLibraryError> {
+        // A file that holds another flow by now is reported as replaced.
+        if self.library.get(path).is_some_and(|saved| {
+            saved.id == expected_id && saved.outside_changes != outside_changes
+        }) {
+            return Err(FlowLibraryError::ChangedOnDisk);
+        }
+
+        self.library.update(path, expected_id, flow)
+    }
+
+    /// Save a flow tab's blocks and connections over the changes made to
+    /// the flow outside the app.
+    pub(crate) fn overwrite(
         &mut self,
         path: &Path,
         expected_id: &str,
         flow: Flow,
     ) -> Result<(), FlowLibraryError> {
-        self.library.update(path, expected_id, flow)
+        self.library.overwrite(path, expected_id, flow)
+    }
+
+    /// Take the changes made to a flow's file outside the app.
+    pub(crate) fn reload(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FlowLibraryError> {
+        self.library.reload(path, expected_id)?;
+
+        // The file can hold another name too.
+        if let Some(saved) = self.library.get(path) {
+            cx.emit(FlowPanelEvent::Renamed {
+                path: path.to_path_buf(),
+                name: saved.name.clone().into(),
+            });
+        }
+        cx.notify();
+
+        Ok(())
     }
 
     /// Rename a flow, such as from its tab, unless its file now holds

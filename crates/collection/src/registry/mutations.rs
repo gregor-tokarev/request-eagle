@@ -4,24 +4,56 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use environment::EnvironmentSaveError;
+use environment::{EnvironmentLoadError, EnvironmentSaveError};
 use thiserror::Error;
 
 use crate::collection::{is_reserved, load_file, save_file};
 use crate::{
-    CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry, SharedSettings,
+    Collection, CollectionLoadError, CollectionRegistry, CollectionSaveError, Entry, FileEntry,
+    SharedSettings,
 };
 use request::Request;
 
 impl CollectionRegistry {
-    /// Saves a request without replacing its identity or externally edited metadata.
+    /// Saves a request without replacing its identity or externally edited
+    /// metadata. A request that changed in its file since it was last read
+    /// here is not saved, so a change made outside the app is not lost.
     pub fn update_request(
         &mut self,
         path: &Path,
         expected_id: &str,
         request: Request,
     ) -> Result<(), CollectionEditError> {
-        self.update_file(path, expected_id, |file| file.request = request)
+        self.save_request(path, expected_id, request, false)
+    }
+
+    /// Saves a request over the one its file holds now, once the user chose
+    /// to keep their own changes. Externally edited metadata still stays.
+    pub fn overwrite_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        request: Request,
+    ) -> Result<(), CollectionEditError> {
+        self.save_request(path, expected_id, request, true)
+    }
+
+    /// Reads a request's file again, taking the changes made to it outside
+    /// the app.
+    pub fn reload_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+    ) -> Result<(), CollectionEditError> {
+        let file = self.file_mut(path, expected_id)?;
+        let latest = load_file(path)?;
+        if latest.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        take_latest(file, latest);
+
+        Ok(())
     }
 
     /// Renames a request, unless its file now holds a different request.
@@ -36,53 +68,120 @@ impl CollectionRegistry {
             return Err(CollectionEditError::InvalidName);
         }
 
-        self.update_file(path, expected_id, |file| file.name = name.to_owned())
+        let file = self.file_mut(path, expected_id)?;
+        let latest = load_file(path)?;
+        if latest.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        rename_file(file, latest, name)
     }
 
-    /// Changes the latest content of a request file, keeping comments and
-    /// external edits, as long as it is still the expected request.
-    fn update_file(
+    /// Saves a request in the latest content of its file, keeping comments
+    /// and external edits, as long as it is still the expected request.
+    /// Unless `overwrite` is set, a request changed outside the app stays.
+    fn save_request(
         &mut self,
         path: &Path,
         expected_id: &str,
-        change: impl FnOnce(&mut FileEntry),
+        request: Request,
+        overwrite: bool,
     ) -> Result<(), CollectionEditError> {
-        for collection in &mut self.collections {
-            if let Some(Entry::File(file)) = find_entry(&mut collection.entries, path) {
-                if file.id != expected_id {
-                    return Err(CollectionEditError::RequestReplaced);
-                }
-
-                let mut updated = load_file(path)?;
-                if updated.id != expected_id {
-                    return Err(CollectionEditError::RequestReplaced);
-                }
-
-                change(&mut updated);
-                save_file(&mut updated)?;
-                *file = updated;
-
-                return Ok(());
-            }
+        let file = self.file_mut(path, expected_id)?;
+        let mut updated = load_file(path)?;
+        if updated.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+        if !overwrite && request_changed(file, &updated) {
+            return Err(CollectionEditError::ChangedOnDisk);
         }
 
-        Err(CollectionEditError::NotFound)
+        updated.request = request;
+        updated.outside_changes = file.outside_changes;
+        save_file(&mut updated)?;
+        *file = updated;
+
+        Ok(())
+    }
+
+    /// The request at `path`, as long as it is still the expected one.
+    fn file_mut(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+    ) -> Result<&mut FileEntry, CollectionEditError> {
+        let file = self
+            .collections
+            .iter_mut()
+            .find_map(
+                |collection| match find_entry(&mut collection.entries, path) {
+                    Some(Entry::File(file)) => Some(file),
+                    _ => None,
+                },
+            )
+            .ok_or(CollectionEditError::NotFound)?;
+
+        if file.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        Ok(file)
     }
 
     /// Saves the collection's variables to `environment.toml` and its scripts
     /// and authorization to the settings file, leaving unchanged files as
-    /// they are.
+    /// they are. A file that changed since it was last read here is not
+    /// saved, so a change made outside the app is not lost.
     pub fn update_collection(
         &mut self,
         path: &Path,
         variables: HashMap<String, String>,
         shared: SharedSettings,
     ) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?
+            .save_settings(variables, shared, false)
+    }
+
+    /// Fails when `update_collection` would, because a file it writes
+    /// changed outside the app. Asked before a save that also renames the
+    /// collection.
+    pub fn check_collection(
+        &self,
+        path: &Path,
+        variables: &HashMap<String, String>,
+        shared: &SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        self.collections
+            .iter()
+            .find(|collection| collection.path == path)
+            .ok_or(CollectionEditError::NotFound)?
+            .check_unchanged_outside(variables, shared)
+    }
+
+    /// Saves the collection's variables, scripts and authorization over the
+    /// ones their files hold now, once the user chose to keep their own
+    /// changes.
+    pub fn overwrite_collection(
+        &mut self,
+        path: &Path,
+        variables: HashMap<String, String>,
+        shared: SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?
+            .save_settings(variables, shared, true)
+    }
+
+    /// Reads a collection's variables, scripts and authorization again,
+    /// taking the changes made to their files outside the app.
+    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
+        self.collection_mut(path)?.reload_settings()
+    }
+
+    fn collection_mut(&mut self, path: &Path) -> Result<&mut Collection, CollectionEditError> {
         self.collections
             .iter_mut()
             .find(|collection| collection.path == path)
-            .ok_or(CollectionEditError::NotFound)?
-            .save_settings(variables, shared)
+            .ok_or(CollectionEditError::NotFound)
     }
 
     /// Request names live in TOML; collection and folder names live on disk.
@@ -106,10 +205,8 @@ impl CollectionRegistry {
                 match entry {
                     Entry::File(file) => {
                         // Read the latest content so external edits and comments survive.
-                        let mut updated = load_file(path)?;
-                        updated.name = name.to_owned();
-                        save_file(&mut updated)?;
-                        *file = updated;
+                        let latest = load_file(path)?;
+                        rename_file(file, latest, name)?;
                         return Ok(path.to_path_buf());
                     }
                     Entry::Directory(folder) => {
@@ -152,6 +249,42 @@ impl CollectionRegistry {
 
         Err(CollectionEditError::NotFound)
     }
+}
+
+/// Names a request in the `latest` content of its file, which becomes the
+/// known one.
+fn rename_file(
+    file: &mut FileEntry,
+    mut latest: FileEntry,
+    name: &str,
+) -> Result<(), CollectionEditError> {
+    latest.name = name.to_owned();
+    save_file(&mut latest)?;
+    take_latest(file, latest);
+
+    Ok(())
+}
+
+/// Makes the `latest` content of a request's file the known one. A request
+/// that changed outside the app is counted, so a tab opened before can tell
+/// that it edits an older request, and saving it asks whose changes to keep.
+fn take_latest(file: &mut FileEntry, mut latest: FileEntry) {
+    latest.outside_changes = file.outside_changes + u64::from(request_changed(file, &latest));
+    *file = latest;
+}
+
+/// Whether the request in a file differs from the one last read from it.
+/// Comments, the name and fields the app does not know are left out: saving
+/// keeps them as the file has them.
+fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
+    if latest.raw_content == known.raw_content {
+        return false;
+    }
+
+    // Compared as the file held it, not as the editor handed it over to be
+    // saved, in case a request reads back in another form than it was written.
+    toml::from_str::<FileEntry>(&known.raw_content)
+        .map_or(true, |known| known.request != latest.request)
 }
 
 fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
@@ -270,6 +403,8 @@ pub enum CollectionEditError {
     NotFound,
     #[error("This request was replaced by a different request. Your edits have not been saved.")]
     RequestReplaced,
+    #[error("The file was changed outside Request Eagle. Your edits have not been saved.")]
+    ChangedOnDisk,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
     #[error("{0}")]
@@ -280,4 +415,6 @@ pub enum CollectionEditError {
     Save(#[from] CollectionSaveError),
     #[error("{0}")]
     Environment(#[from] EnvironmentSaveError),
+    #[error("{0}")]
+    EnvironmentLoad(#[from] EnvironmentLoadError),
 }

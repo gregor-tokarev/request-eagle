@@ -93,6 +93,7 @@ fn write_collection(
             scripts: imported.scripts,
             auth: imported.auth,
         },
+        false,
     )?;
 
     write_items(path, &imported.items, &collection.reserved_paths())?;
@@ -142,6 +143,7 @@ fn write_items(
             ImportedItem::Request { name, request } => {
                 let entry = FileEntry {
                     raw_content: String::new(),
+                    outside_changes: 0,
                     path: parent.join(name),
                     id: Uuid::new_v4().to_string(),
                     name: name.clone(),

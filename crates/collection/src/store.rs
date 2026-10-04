@@ -211,16 +211,59 @@ impl Collections {
         }
     }
 
-    /// Save a request's changes, unless its file now holds another request.
+    /// Save a request's changes, unless its file now holds another request,
+    /// or the request in it changed outside the app. `outside_changes` is
+    /// the file's count when the edited request was opened from it: a
+    /// rename since can have read a changed request from the file.
     pub fn update_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        outside_changes: u64,
+        request: Request,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        // A file that holds another request by now is reported as replaced.
+        if self
+            .registry
+            .file(path)
+            .is_some_and(|file| file.id == expected_id && file.outside_changes() != outside_changes)
+        {
+            return Err(CollectionEditError::ChangedOnDisk);
+        }
+
+        self.registry.update_request(path, expected_id, request)?;
+        self.request_saved(path, cx);
+
+        Ok(())
+    }
+
+    /// Save a request's changes over the ones made to its file outside the
+    /// app.
+    pub fn overwrite_request(
         &mut self,
         path: &Path,
         expected_id: &str,
         request: Request,
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
-        self.registry.update_request(path, expected_id, request)?;
-        self.changed(cx);
+        self.registry
+            .overwrite_request(path, expected_id, request)?;
+        self.request_saved(path, cx);
+
+        Ok(())
+    }
+
+    /// Take the changes made to a request's file outside the app.
+    pub fn reload_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.reload_request(path, expected_id)?;
+        // The file can hold another name too.
+        self.relocated(path, path, cx);
         cx.emit(CollectionsEvent::RequestSaved(path.to_path_buf()));
 
         Ok(())
@@ -228,14 +271,21 @@ impl Collections {
 
     /// Save a collection page's edits, renaming the collection's directory
     /// when its name changed. Returns the collection's path after the save.
+    /// Unless `overwrite` is set, settings changed outside the app stay.
     pub fn save_collection(
         &mut self,
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
         shared: SharedSettings,
+        overwrite: bool,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
+        // Asked before the rename, so declining the save leaves the name too.
+        if !overwrite {
+            self.registry.check_collection(path, &variables, &shared)?;
+        }
+
         // Rename first: an invalid or taken name then fails before any file
         // changes. The rename event keeps the tab in step if a later write fails.
         let path = if path.file_name().is_some_and(|current| current == name) {
@@ -243,9 +293,20 @@ impl Collections {
         } else {
             self.rename(path, name, cx)?
         };
-        self.registry.update_collection(&path, variables, shared)?;
+        if overwrite {
+            self.registry
+                .overwrite_collection(&path, variables, shared)?;
+        } else {
+            self.registry.update_collection(&path, variables, shared)?;
+        }
 
         Ok(path)
+    }
+
+    /// Take the changes made to a collection's variables, scripts and
+    /// authorization outside the app.
+    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
+        self.registry.reload_collection(path)
     }
 
     /// Rename a collection, folder or request. Returns its path after the
@@ -300,6 +361,11 @@ impl Collections {
         cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
 
         Ok(())
+    }
+
+    fn request_saved(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.changed(cx);
+        cx.emit(CollectionsEvent::RequestSaved(path.to_path_buf()));
     }
 
     fn created(&mut self, path: &Path, cx: &mut Context<Self>) {

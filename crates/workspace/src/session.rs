@@ -1,4 +1,9 @@
-use std::{fs, io, io::Write as _, path::PathBuf};
+use std::{
+    fs, io,
+    io::Write as _,
+    path::PathBuf,
+    sync::{Mutex, PoisonError},
+};
 
 use gpui_kit::{App, Bounds, DisplayId, Pixels, Window, WindowBounds, point};
 use serde::{Deserialize, Serialize};
@@ -37,7 +42,7 @@ impl Session {
 
     /// Replace the file whole, so a save that fails midway leaves the
     /// previous session.
-    pub(crate) fn save(&self) -> io::Result<()> {
+    fn write(&self, content: &[u8]) -> io::Result<()> {
         let directory = self
             .path
             .parent()
@@ -45,7 +50,9 @@ impl Session {
         fs::create_dir_all(directory)?;
 
         let mut file = tempfile::NamedTempFile::new_in(directory)?;
-        file.write_all(&serde_json::to_vec_pretty(self)?)?;
+        file.write_all(content)?;
+        // The file is replaced often, so a power cut must not leave it empty.
+        file.as_file().sync_all()?;
         file.persist(&self.path)?;
 
         Ok(())
@@ -76,6 +83,51 @@ impl Session {
         };
 
         Some((display.id(), bounds))
+    }
+}
+
+/// Saves sessions to their file: in the background shortly after tabs change,
+/// and when the window closes.
+#[derive(Default)]
+pub(crate) struct SessionWriter {
+    saved: Mutex<SavedSession>,
+}
+
+#[derive(Default)]
+struct SavedSession {
+    /// The place of the newest saved session among those captured.
+    number: u64,
+    /// What the file holds, so an unchanged session is not written again.
+    content: Vec<u8>,
+}
+
+impl SessionWriter {
+    /// Save the `number`th session captured. Saves in the background finish
+    /// in any order, so a session captured before the newest saved one is
+    /// left out.
+    pub(crate) fn save(&self, number: u64, session: &Session) {
+        if let Err(error) = self.write(number, session) {
+            eprintln!(
+                "Could not save the session to {}: {error}",
+                session.path.display()
+            );
+        }
+    }
+
+    fn write(&self, number: u64, session: &Session) -> io::Result<()> {
+        let mut saved = self.saved.lock().unwrap_or_else(PoisonError::into_inner);
+        if number < saved.number {
+            return Ok(());
+        }
+
+        let content = serde_json::to_vec_pretty(session)?;
+        if content != saved.content {
+            session.write(&content)?;
+            saved.content = content;
+        }
+        saved.number = number;
+
+        Ok(())
     }
 }
 

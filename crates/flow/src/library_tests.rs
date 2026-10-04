@@ -148,6 +148,77 @@ fn updates_and_renames_keep_the_file_unless_it_holds_another_flow() {
 }
 
 #[test]
+fn saving_cannot_replace_a_flow_changed_outside_the_app_without_a_choice() {
+    let fixture = Fixture::new();
+    let mut library = FlowLibrary::load(&fixture.0);
+    let path = library.create("Sync", Flow::starter()).unwrap();
+    let id = library.get(&path).unwrap().id.clone();
+
+    // Saved again by the app, the flow is still the known one.
+    library.update(&path, &id, greeting()).unwrap();
+    library.update(&path, &id, Flow::starter()).unwrap();
+
+    // Another editor, or the CLI, saves the flow meanwhile.
+    FlowLibrary::load(&fixture.0)
+        .update(&path, &id, greeting())
+        .unwrap();
+    let outside = fs::read_to_string(&path).unwrap();
+
+    assert!(matches!(
+        library.update(&path, &id, Flow::default()),
+        Err(FlowLibraryError::ChangedOnDisk)
+    ));
+    assert_eq!(fs::read_to_string(&path).unwrap(), outside);
+    assert_eq!(library.get(&path).unwrap().flow, Flow::starter());
+
+    library.overwrite(&path, &id, Flow::default()).unwrap();
+
+    assert_eq!(
+        FlowLibrary::load(&fixture.0).get(&path).unwrap().flow,
+        Flow::default()
+    );
+    library.update(&path, &id, greeting()).unwrap();
+}
+
+#[test]
+fn reloading_and_renaming_take_a_flow_changed_outside_the_app_and_count_the_change() {
+    let fixture = Fixture::new();
+    let mut library = FlowLibrary::load(&fixture.0);
+    let path = library.create("Sync", Flow::starter()).unwrap();
+    let id = library.get(&path).unwrap().id.clone();
+
+    // Nothing changed outside the app, so tabs edit the known flow.
+    library.rename(&path, &id, "Nightly").unwrap();
+    library.reload(&path, &id).unwrap();
+    assert_eq!(library.get(&path).unwrap().outside_changes, 0);
+
+    FlowLibrary::load(&fixture.0)
+        .update(&path, &id, greeting())
+        .unwrap();
+    library.rename(&path, &id, "Nightly sync").unwrap();
+
+    // A tab opened now shows the flow as the file has it, and a tab opened
+    // before can tell that it edits an older one.
+    let saved = library.get(&path).unwrap();
+    assert_eq!(saved.name, "Nightly sync");
+    assert_eq!(saved.flow, greeting());
+    assert_eq!(saved.outside_changes, 1);
+
+    FlowLibrary::load(&fixture.0)
+        .update(&path, &id, Flow::default())
+        .unwrap();
+    library.reload(&path, &id).unwrap();
+
+    let saved = library.get(&path).unwrap();
+    assert_eq!(saved.flow, Flow::default());
+    assert_eq!(saved.outside_changes, 2);
+
+    // Saving keeps the count, which the saving tab already has.
+    library.update(&path, &id, greeting()).unwrap();
+    assert_eq!(library.get(&path).unwrap().outside_changes, 2);
+}
+
+#[test]
 fn duplicates_and_deletes() {
     let fixture = Fixture::new();
     let mut library = FlowLibrary::load(&fixture.0);

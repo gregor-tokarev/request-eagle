@@ -1,10 +1,12 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    fs, io,
+    fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
 };
 
 use thiserror::Error;
+use uuid::Uuid;
 
 pub struct Environment {
     pub path: PathBuf,
@@ -43,9 +45,11 @@ impl Environment {
                 source,
             })?;
 
-        fs::write(path, source).map_err(|source| EnvironmentSaveError::Write {
-            path: path.to_path_buf(),
-            source,
+        write_file_atomically(path, source.as_bytes()).map_err(|source| {
+            EnvironmentSaveError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
         })
     }
 
@@ -65,6 +69,54 @@ impl Environment {
             entries,
         })
     }
+}
+
+/// Replaces the file whole, so a save that fails midway leaves the previous
+/// variables rather than a part of the new ones.
+fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
+    // A link to variables shared from elsewhere stays a link: the file it
+    // leads to is the one replaced.
+    let target = match fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(error) => return Err(error),
+    };
+    let path = target.as_path();
+
+    let permissions = match fs::metadata(path) {
+        Ok(metadata) => {
+            let permissions = metadata.permissions();
+            if permissions.readonly() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "The environment file is read-only.",
+                ));
+            }
+
+            Some(permissions)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let temporary = path.with_file_name(format!(".request-eagle-{}.tmp", Uuid::new_v4()));
+    let mut file = fs::File::create_new(&temporary)?;
+    let result = (|| {
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+
+        fs::rename(&temporary, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+
+    result
 }
 
 #[derive(Debug, Error)]

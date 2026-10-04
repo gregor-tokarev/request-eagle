@@ -15,6 +15,11 @@ pub enum Entry {
 pub struct FileEntry {
     #[serde(skip)]
     pub(crate) raw_content: String,
+    /// How many times the request was taken from its file after it changed
+    /// outside the app. A tab keeps the count it opened with, and a later
+    /// count tells it that it edits an older request than this one.
+    #[serde(skip)]
+    pub(crate) outside_changes: u64,
     #[serde(skip)]
     pub path: PathBuf,
 
@@ -35,6 +40,10 @@ pub struct DirEntry {
 impl FileEntry {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, crate::CollectionLoadError> {
         crate::collection::load_file(path.as_ref())
+    }
+
+    pub fn outside_changes(&self) -> u64 {
+        self.outside_changes
     }
 }
 

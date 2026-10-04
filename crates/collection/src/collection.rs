@@ -87,12 +87,18 @@ impl Collection {
 
     /// Saves variables, scripts and authorization together. If the second
     /// file cannot be written, the first is restored, so a failed save
-    /// changes nothing.
+    /// changes nothing. Unless `overwrite` is set, neither file is written
+    /// over a change made to it outside the app.
     pub(crate) fn save_settings(
         &mut self,
         variables: HashMap<String, String>,
         shared: SharedSettings,
+        overwrite: bool,
     ) -> Result<(), CollectionEditError> {
+        if !overwrite {
+            self.check_unchanged_outside(&variables, &shared)?;
+        }
+
         let scripts_path = self.path.join(SETTINGS_FILE_NAME);
         let scripts_changed = self.scripts != shared.scripts || self.auth != shared.auth;
         let variables_changed = self.local_env.entries != variables;
@@ -138,6 +144,62 @@ impl Collection {
         }
 
         Ok(())
+    }
+
+    /// Fails when saving these settings would write over a change made to
+    /// their files outside the app. Only a file that is about to be written
+    /// can lose a change.
+    pub(crate) fn check_unchanged_outside(
+        &self,
+        variables: &HashMap<String, String>,
+        shared: &SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        let scripts_changed = self.scripts != shared.scripts || self.auth != shared.auth;
+        let variables_changed = self.local_env.entries != *variables;
+
+        if (scripts_changed && self.settings_changed_outside())
+            || (variables_changed && self.variables_changed_outside())
+        {
+            return Err(CollectionEditError::ChangedOnDisk);
+        }
+
+        Ok(())
+    }
+
+    /// Reads the variables, scripts and authorization again, taking the
+    /// changes made to their files outside the app.
+    pub(crate) fn reload_settings(&mut self) -> Result<(), CollectionEditError> {
+        let SharedSettings { scripts, auth } = Self::load_settings(&self.path)?;
+        let local_env = Environment::from_file(&self.local_env.path)?;
+
+        self.local_env = local_env;
+        self.scripts = scripts;
+        self.auth = auth;
+
+        Ok(())
+    }
+
+    /// Whether the settings file holds other scripts or authorization than
+    /// those last read from it or saved to it. A file that cannot be read
+    /// anymore changed too.
+    fn settings_changed_outside(&self) -> bool {
+        let known = SharedSettings {
+            scripts: self.scripts.clone(),
+            auth: self.auth.clone(),
+        };
+
+        // Compared as they are written, in case settings read back in
+        // another form than they were saved in.
+        Self::load_settings(&self.path).map_or(true, |latest| {
+            latest != known && toml::to_string(&latest).ok() != toml::to_string(&known).ok()
+        })
+    }
+
+    /// Whether `environment.toml` holds other variables than those last
+    /// read from it or saved to it.
+    fn variables_changed_outside(&self) -> bool {
+        Environment::from_file(&self.local_env.path)
+            .map_or(true, |latest| latest.entries != self.local_env.entries)
     }
 
     /// The collection's own files, which requests and folders cannot replace.

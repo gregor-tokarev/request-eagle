@@ -165,8 +165,9 @@ request_custom = 'keep the request metadata'
         settings: Default::default(),
     };
 
+    // The external edit changed the request too, so the save is a choice.
     registry
-        .update_request(&path, "list", updated.clone().into())
+        .overwrite_request(&path, "list", updated.clone().into())
         .unwrap();
 
     let cached = registry.file(&path).unwrap();
@@ -321,6 +322,177 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
         panic!("expected an HTTP request");
     };
     assert_eq!(request.path, "/users");
+}
+
+#[test]
+fn saving_cannot_replace_a_request_changed_outside_the_app_without_a_choice() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let original_content = fs::read_to_string(&path).unwrap();
+    let external_content = original_content.replace("path = '/users'", "path = '/people'");
+    fs::write(&path, &external_content).unwrap();
+    let edited = || -> Request {
+        HttpRequest {
+            method: Method::Post,
+            path: "/users".into(),
+            ..HttpRequest::default()
+        }
+        .into()
+    };
+
+    let result = registry.update_request(&path, "list", edited());
+
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), external_content);
+    assert_eq!(registry.file(&path).unwrap().raw_content, original_content);
+
+    // Saving again is no choice either.
+    let result = registry.update_request(&path, "list", edited());
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+
+    registry.overwrite_request(&path, "list", edited()).unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("# keep this comment"));
+    assert_eq!(FileEntry::from_path(&path).unwrap().request, edited());
+
+    // The file is the one the registry knows again.
+    registry.update_request(&path, "list", edited()).unwrap();
+}
+
+#[test]
+fn renaming_takes_a_request_changed_outside_the_app_and_counts_the_change() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+
+    // A tab and the sidebar rename a request in different ways.
+    type Rename = fn(&mut CollectionRegistry, &std::path::Path, &str);
+    let renames: [Rename; 2] = [
+        |registry, path, name| registry.rename_request(path, "list", name).unwrap(),
+        |registry, path, name| {
+            registry.rename(path, name).unwrap();
+        },
+    ];
+
+    for rename in renames {
+        let mut registry = CollectionRegistry::from_path(root);
+        let original_content = fs::read_to_string(&path).unwrap();
+
+        // Nothing changed outside the app, so tabs edit the known request.
+        rename(&mut registry, &path, "Renamed");
+        assert_eq!(registry.file(&path).unwrap().outside_changes(), 0);
+
+        let renamed_content = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            renamed_content.replace("path = '/users'", "path = '/outside'"),
+        )
+        .unwrap();
+
+        rename(&mut registry, &path, "Renamed again");
+
+        // A tab opened now shows the request as the file has it, and a tab
+        // opened before can tell that it edits an older one.
+        let cached = registry.file(&path).unwrap();
+        assert_eq!(cached.name, "Renamed again");
+        assert_eq!(cached.outside_changes(), 1);
+        let Request::Http(request) = &cached.request else {
+            panic!("expected an HTTP request");
+        };
+        assert_eq!(request.path, "/outside");
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("path = '/outside'")
+        );
+
+        // Saving keeps the count, which the saving tab already has.
+        registry
+            .update_request(&path, "list", HttpRequest::default().into())
+            .unwrap();
+        assert_eq!(registry.file(&path).unwrap().outside_changes(), 1);
+
+        fs::write(&path, original_content).unwrap();
+    }
+}
+
+#[test]
+fn saving_keeps_external_changes_that_leave_the_request_as_it_was() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let external_content = fs::read_to_string(&path)
+        .unwrap()
+        .replace("# keep this comment", "# an external comment")
+        .replace("name = 'List users'", "name = 'External name'")
+        .replace("custom = 'keep'", "custom = 'external'")
+        .replace("path = '/users'", "path = \"/users\" # reformatted");
+    fs::write(&path, external_content).unwrap();
+
+    registry
+        .update_request(
+            &path,
+            "list",
+            HttpRequest {
+                path: "/users/edited".into(),
+                ..HttpRequest::default()
+            }
+            .into(),
+        )
+        .unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    for kept in [
+        "# an external comment",
+        "name = 'External name'",
+        "custom = 'external'",
+        "# reformatted",
+        "/users/edited",
+    ] {
+        assert!(saved.contains(kept), "missing {kept}");
+    }
+    assert_eq!(registry.file(&path).unwrap().name, "External name");
+}
+
+#[test]
+fn reloading_a_request_takes_the_changes_made_outside_the_app() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let original_content = fs::read_to_string(&path).unwrap();
+    let external_content = original_content
+        .replace("name = 'List users'", "name = 'People'")
+        .replace("path = '/users'", "path = '/people'");
+    fs::write(&path, &external_content).unwrap();
+
+    registry.reload_request(&path, "list").unwrap();
+
+    let cached = registry.file(&path).unwrap();
+    assert_eq!(cached.name, "People");
+    assert_eq!(cached.raw_content, external_content);
+    assert_eq!(cached.outside_changes(), 1);
+    let Request::Http(request) = &cached.request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(request.path, "/people");
+
+    // Changes made from the reloaded request save as usual.
+    registry
+        .update_request(&path, "list", HttpRequest::default().into())
+        .unwrap();
+
+    let replaced_content = external_content.replace("id = 'list'", "id = 'another'");
+    fs::write(&path, &replaced_content).unwrap();
+
+    let result = registry.reload_request(&path, "list");
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(registry.file(&path).unwrap().id, "list");
 }
 
 #[test]
@@ -772,6 +944,120 @@ fn a_failed_variable_save_restores_the_previous_scripts() {
         .unwrap();
     assert_eq!(current.scripts().pre_request, "console.log('saved');");
     assert!(current.local_env().resolve("token").is_none());
+}
+
+#[test]
+fn saving_cannot_replace_collection_settings_changed_outside_the_app_without_a_choice() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let environment = collection.join("environment.toml");
+    let settings = collection.join(".request-eagle-collection.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let scripts = |source: &str| SharedSettings {
+        scripts: request::RequestScripts {
+            pre_request: source.into(),
+            post_response: String::new(),
+        },
+        auth: Auth::Inherit,
+    };
+    let known = |registry: &CollectionRegistry| {
+        let entry = &registry.collections()[0];
+        assert_eq!(entry.path, collection);
+        entry.local_env().entries.clone()
+    };
+
+    // Saved again by the app, the settings are still the known ones.
+    registry
+        .update_collection(&collection, known(&registry), scripts("first();"))
+        .unwrap();
+    registry
+        .update_collection(&collection, known(&registry), scripts("second();"))
+        .unwrap();
+
+    let outside_environment = "base_url = 'https://outside.example'\n";
+    fs::write(&environment, outside_environment).unwrap();
+    let outside_settings = fs::read_to_string(&settings)
+        .unwrap()
+        .replace("second();", "outside();");
+    fs::write(&settings, &outside_settings).unwrap();
+
+    // A file that is not written keeps the change made to it, whatever is
+    // saved to the other one.
+    let result = registry.check_collection(&collection, &known(&registry), &scripts("third();"));
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    registry
+        .check_collection(&collection, &known(&registry), &scripts("second();"))
+        .unwrap();
+    let result = registry.update_collection(&collection, known(&registry), scripts("third();"));
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    let result = registry.update_collection(
+        &collection,
+        [("token".into(), "mine".into())].into(),
+        scripts("second();"),
+    );
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    assert_eq!(
+        fs::read_to_string(&environment).unwrap(),
+        outside_environment
+    );
+    assert_eq!(fs::read_to_string(&settings).unwrap(), outside_settings);
+    assert_eq!(registry.collections()[0].scripts().pre_request, "second();");
+
+    registry
+        .overwrite_collection(
+            &collection,
+            [("token".into(), "mine".into())].into(),
+            scripts("third();"),
+        )
+        .unwrap();
+
+    let reloaded = CollectionRegistry::from_path(root);
+    assert_eq!(reloaded.collections()[0].scripts().pre_request, "third();");
+    assert_eq!(
+        reloaded.collections()[0].local_env().resolve("token"),
+        Some("mine")
+    );
+    assert!(
+        reloaded.collections()[0]
+            .local_env()
+            .resolve("base_url")
+            .is_none()
+    );
+}
+
+#[test]
+fn reloading_a_collection_takes_the_settings_changed_outside_the_app() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let collection = root.join("API");
+    let mut registry = CollectionRegistry::from_path(root);
+    fs::write(
+        collection.join("environment.toml"),
+        "base_url = 'https://outside.example'\n",
+    )
+    .unwrap();
+    fs::write(
+        collection.join(".request-eagle-collection.toml"),
+        "[scripts]\npre_request = 'outside();'\n",
+    )
+    .unwrap();
+
+    registry.reload_collection(&collection).unwrap();
+
+    let entry = &registry.collections()[0];
+    assert_eq!(
+        entry.local_env().resolve("base_url"),
+        Some("https://outside.example")
+    );
+    assert_eq!(entry.scripts().pre_request, "outside();");
+
+    // Changes made from the reloaded settings save as usual.
+    let variables = entry.local_env().entries.clone();
+    registry
+        .update_collection(&collection, variables, SharedSettings::default())
+        .unwrap();
+    assert!(!collection.join(".request-eagle-collection.toml").exists());
 }
 
 #[test]
