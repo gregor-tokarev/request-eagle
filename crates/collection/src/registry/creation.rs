@@ -101,6 +101,7 @@ impl CollectionRegistry {
             let mut entry = FileEntry {
                 path: path.clone(),
                 raw_content: String::new(),
+                outside_changes: 0,
                 id: id.clone(),
                 name,
                 schema_version: 1,

@@ -212,14 +212,25 @@ impl Collections {
     }
 
     /// Save a request's changes, unless its file now holds another request,
-    /// or the request in it changed outside the app.
+    /// or the request in it changed outside the app. `outside_changes` is
+    /// the file's count when the edited request was opened from it: a
+    /// rename since can have read a changed request from the file.
     pub fn update_request(
         &mut self,
         path: &Path,
         expected_id: &str,
+        outside_changes: u64,
         request: Request,
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
+        if self
+            .registry
+            .file(path)
+            .is_some_and(|file| file.outside_changes() != outside_changes)
+        {
+            return Err(CollectionEditError::ChangedOnDisk);
+        }
+
         self.registry.update_request(path, expected_id, request)?;
         self.request_saved(path, cx);
 

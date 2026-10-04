@@ -363,53 +363,57 @@ fn saving_cannot_replace_a_request_changed_outside_the_app_without_a_choice() {
 }
 
 #[test]
-fn renaming_a_request_changed_outside_the_app_still_leaves_saving_a_choice() {
+fn renaming_takes_a_request_changed_outside_the_app_and_counts_the_change() {
     let fixture = Fixture::new();
     let root = &fixture.0;
     let path = root.join("API/Users/list.toml");
-    let edited = || -> Request {
-        HttpRequest {
-            path: "/local".into(),
-            ..HttpRequest::default()
-        }
-        .into()
-    };
 
     // A tab and the sidebar rename a request in different ways.
-    type Rename = fn(&mut CollectionRegistry, &std::path::Path);
+    type Rename = fn(&mut CollectionRegistry, &std::path::Path, &str);
     let renames: [Rename; 2] = [
-        |registry, path| registry.rename_request(path, "list", "Renamed").unwrap(),
-        |registry, path| {
-            registry.rename(path, "Renamed").unwrap();
+        |registry, path, name| registry.rename_request(path, "list", name).unwrap(),
+        |registry, path, name| {
+            registry.rename(path, name).unwrap();
         },
     ];
 
     for rename in renames {
         let mut registry = CollectionRegistry::from_path(root);
         let original_content = fs::read_to_string(&path).unwrap();
+
+        // Nothing changed outside the app, so tabs edit the known request.
+        rename(&mut registry, &path, "Renamed");
+        assert_eq!(registry.file(&path).unwrap().outside_changes(), 0);
+
+        let renamed_content = fs::read_to_string(&path).unwrap();
         fs::write(
             &path,
-            original_content.replace("path = '/users'", "path = '/outside'"),
+            renamed_content.replace("path = '/users'", "path = '/outside'"),
         )
         .unwrap();
 
-        rename(&mut registry, &path);
+        rename(&mut registry, &path, "Renamed again");
 
-        let renamed_content = fs::read_to_string(&path).unwrap();
-        assert!(renamed_content.contains("Renamed"));
-        assert!(renamed_content.contains("path = '/outside'"));
-        assert_eq!(registry.file(&path).unwrap().name, "Renamed");
-
-        let result = registry.update_request(&path, "list", edited());
-
-        assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
-        assert_eq!(fs::read_to_string(&path).unwrap(), renamed_content);
-
-        registry.reload_request(&path, "list").unwrap();
-        let Request::Http(request) = &registry.file(&path).unwrap().request else {
+        // A tab opened now shows the request as the file has it, and a tab
+        // opened before can tell that it edits an older one.
+        let cached = registry.file(&path).unwrap();
+        assert_eq!(cached.name, "Renamed again");
+        assert_eq!(cached.outside_changes(), 1);
+        let Request::Http(request) = &cached.request else {
             panic!("expected an HTTP request");
         };
         assert_eq!(request.path, "/outside");
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("path = '/outside'")
+        );
+
+        // Saving keeps the count, which the saving tab already has.
+        registry
+            .update_request(&path, "list", HttpRequest::default().into())
+            .unwrap();
+        assert_eq!(registry.file(&path).unwrap().outside_changes(), 1);
 
         fs::write(&path, original_content).unwrap();
     }
@@ -471,6 +475,7 @@ fn reloading_a_request_takes_the_changes_made_outside_the_app() {
     let cached = registry.file(&path).unwrap();
     assert_eq!(cached.name, "People");
     assert_eq!(cached.raw_content, external_content);
+    assert_eq!(cached.outside_changes(), 1);
     let Request::Http(request) = &cached.request else {
         panic!("expected an HTTP request");
     };

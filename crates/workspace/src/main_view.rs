@@ -324,6 +324,9 @@ pub(crate) struct PageTab {
     pub(crate) title: SharedString,
     pub(crate) label: Option<&'static str>,
     dirty: bool,
+    /// How many changes from outside the app the tab's saved request had
+    /// taken when the tab was opened from it or last saved.
+    outside_changes: u64,
     pub(crate) page: Page,
     /// The history entry the tab was opened from.
     history: Option<String>,
@@ -589,6 +592,7 @@ impl MainView {
             title: page.title(cx).unwrap_or_else(|| title.into()),
             label: page.label(cx),
             dirty: page.is_dirty(cx),
+            outside_changes: self.outside_changes(&page, cx),
             page,
             history: None,
             _subscriptions: subscriptions,
@@ -599,6 +603,14 @@ impl MainView {
         self.select_tab(index, cx);
 
         index
+    }
+
+    /// How many changes from outside the app the saved request of a page
+    /// has taken so far.
+    fn outside_changes(&self, page: &Page, cx: &App) -> u64 {
+        page.location(cx)
+            .and_then(|location| self.collections.read(cx).registry().file(&location.path))
+            .map_or(0, |file| file.outside_changes())
     }
 
     /// Show the saved collection or request at `path`, reusing its tab when
@@ -1432,16 +1444,24 @@ impl MainView {
             }
         };
 
+        let tab = self.tabs.iter().position(|tab| tab.id == tab_id);
+        let outside_changes = tab.map_or(0, |tab| self.tabs[tab].outside_changes);
         let result = self.collections.update(cx, |collections, cx| {
             if overwrite {
                 collections.overwrite_request(&location.path, &location.id, request, cx)
             } else {
-                collections.update_request(&location.path, &location.id, request, cx)
+                let (path, id) = (&location.path, &location.id);
+                collections.update_request(path, id, outside_changes, request, cx)
             }
         });
 
         match &result {
-            Ok(()) => {}
+            // The saved request is the one the tab edits from now on.
+            Ok(()) => {
+                if let Some(tab) = tab {
+                    self.tabs[tab].outside_changes = self.outside_changes(&self.tabs[tab].page, cx);
+                }
+            }
             Err(CollectionEditError::ChangedOnDisk) => self.changed_on_disk = Some(tab_id),
             Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
         }

@@ -50,7 +50,7 @@ impl CollectionRegistry {
             return Err(CollectionEditError::RequestReplaced);
         }
 
-        *file = latest;
+        take_latest(file, latest);
 
         Ok(())
     }
@@ -96,6 +96,7 @@ impl CollectionRegistry {
         }
 
         updated.request = request;
+        updated.outside_changes = file.outside_changes;
         save_file(&mut updated)?;
         *file = updated;
 
@@ -209,26 +210,26 @@ impl CollectionRegistry {
     }
 }
 
-/// Names a request in the `latest` content of its file. A request changed
-/// outside the app stays in the file without becoming the known one: a tab
-/// that edits the request was opened before the change, and saving it still
-/// has to ask whose changes to keep.
+/// Names a request in the `latest` content of its file, which becomes the
+/// known one.
 fn rename_file(
     file: &mut FileEntry,
     mut latest: FileEntry,
     name: &str,
 ) -> Result<(), CollectionEditError> {
-    let changed_outside = latest.id == file.id && request_changed(file, &latest);
     latest.name = name.to_owned();
     save_file(&mut latest)?;
-
-    if changed_outside {
-        file.name = latest.name;
-    } else {
-        *file = latest;
-    }
+    take_latest(file, latest);
 
     Ok(())
+}
+
+/// Makes the `latest` content of a request's file the known one. A request
+/// that changed outside the app is counted, so a tab opened before can tell
+/// that it edits an older request, and saving it asks whose changes to keep.
+fn take_latest(file: &mut FileEntry, mut latest: FileEntry) {
+    latest.outside_changes = file.outside_changes + u64::from(request_changed(file, &latest));
+    *file = latest;
 }
 
 /// Whether the request in a file differs from the one last read from it.
