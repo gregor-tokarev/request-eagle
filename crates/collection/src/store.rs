@@ -211,7 +211,8 @@ impl Collections {
         }
     }
 
-    /// Save a request's changes, unless its file now holds another request.
+    /// Save a request's changes, unless its file now holds another request,
+    /// or the request in it changed outside the app.
     pub fn update_request(
         &mut self,
         path: &Path,
@@ -220,7 +221,37 @@ impl Collections {
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
         self.registry.update_request(path, expected_id, request)?;
-        self.changed(cx);
+        self.request_saved(path, cx);
+
+        Ok(())
+    }
+
+    /// Save a request's changes over the ones made to its file outside the
+    /// app.
+    pub fn overwrite_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        request: Request,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry
+            .overwrite_request(path, expected_id, request)?;
+        self.request_saved(path, cx);
+
+        Ok(())
+    }
+
+    /// Take the changes made to a request's file outside the app.
+    pub fn reload_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.reload_request(path, expected_id)?;
+        // The file can hold another name too.
+        self.relocated(path, path, cx);
         cx.emit(CollectionsEvent::RequestSaved(path.to_path_buf()));
 
         Ok(())
@@ -300,6 +331,11 @@ impl Collections {
         cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
 
         Ok(())
+    }
+
+    fn request_saved(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.changed(cx);
+        cx.emit(CollectionsEvent::RequestSaved(path.to_path_buf()));
     }
 
     fn created(&mut self, path: &Path, cx: &mut Context<Self>) {

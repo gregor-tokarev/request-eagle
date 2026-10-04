@@ -165,8 +165,9 @@ request_custom = 'keep the request metadata'
         settings: Default::default(),
     };
 
+    // The external edit changed the request too, so the save is a choice.
     registry
-        .update_request(&path, "list", updated.clone().into())
+        .overwrite_request(&path, "list", updated.clone().into())
         .unwrap();
 
     let cached = registry.file(&path).unwrap();
@@ -321,6 +322,119 @@ fn stale_save_cannot_overwrite_an_externally_replaced_request() {
         panic!("expected an HTTP request");
     };
     assert_eq!(request.path, "/users");
+}
+
+#[test]
+fn saving_cannot_replace_a_request_changed_outside_the_app_without_a_choice() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let original_content = fs::read_to_string(&path).unwrap();
+    let external_content = original_content.replace("path = '/users'", "path = '/people'");
+    fs::write(&path, &external_content).unwrap();
+    let edited = || -> Request {
+        HttpRequest {
+            method: Method::Post,
+            path: "/users".into(),
+            ..HttpRequest::default()
+        }
+        .into()
+    };
+
+    let result = registry.update_request(&path, "list", edited());
+
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    assert_eq!(fs::read_to_string(&path).unwrap(), external_content);
+    assert_eq!(registry.file(&path).unwrap().raw_content, original_content);
+
+    // Saving again is no choice either.
+    let result = registry.update_request(&path, "list", edited());
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+
+    registry.overwrite_request(&path, "list", edited()).unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("# keep this comment"));
+    assert_eq!(FileEntry::from_path(&path).unwrap().request, edited());
+
+    // The file is the one the registry knows again.
+    registry.update_request(&path, "list", edited()).unwrap();
+}
+
+#[test]
+fn saving_keeps_external_changes_that_leave_the_request_as_it_was() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let external_content = fs::read_to_string(&path)
+        .unwrap()
+        .replace("# keep this comment", "# an external comment")
+        .replace("name = 'List users'", "name = 'External name'")
+        .replace("custom = 'keep'", "custom = 'external'")
+        .replace("path = '/users'", "path = \"/users\" # reformatted");
+    fs::write(&path, external_content).unwrap();
+
+    registry
+        .update_request(
+            &path,
+            "list",
+            HttpRequest {
+                path: "/users/edited".into(),
+                ..HttpRequest::default()
+            }
+            .into(),
+        )
+        .unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    for kept in [
+        "# an external comment",
+        "name = 'External name'",
+        "custom = 'external'",
+        "# reformatted",
+        "/users/edited",
+    ] {
+        assert!(saved.contains(kept), "missing {kept}");
+    }
+    assert_eq!(registry.file(&path).unwrap().name, "External name");
+}
+
+#[test]
+fn reloading_a_request_takes_the_changes_made_outside_the_app() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let path = root.join("API/Users/list.toml");
+    let mut registry = CollectionRegistry::from_path(root);
+    let original_content = fs::read_to_string(&path).unwrap();
+    let external_content = original_content
+        .replace("name = 'List users'", "name = 'People'")
+        .replace("path = '/users'", "path = '/people'");
+    fs::write(&path, &external_content).unwrap();
+
+    registry.reload_request(&path, "list").unwrap();
+
+    let cached = registry.file(&path).unwrap();
+    assert_eq!(cached.name, "People");
+    assert_eq!(cached.raw_content, external_content);
+    let Request::Http(request) = &cached.request else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(request.path, "/people");
+
+    // Changes made from the reloaded request save as usual.
+    registry
+        .update_request(&path, "list", HttpRequest::default().into())
+        .unwrap();
+
+    let replaced_content = external_content.replace("id = 'list'", "id = 'another'");
+    fs::write(&path, &replaced_content).unwrap();
+
+    let result = registry.reload_request(&path, "list");
+
+    assert!(matches!(result, Err(CollectionEditError::RequestReplaced)));
+    assert_eq!(registry.file(&path).unwrap().id, "list");
 }
 
 #[test]

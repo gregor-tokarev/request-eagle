@@ -15,7 +15,9 @@ use crate::flow_panel::FlowPanel;
 use crate::history_panel::{HistoryPanel, short_address};
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
-use collection::{Collections, CollectionsEvent, SavedLocation, directory_name};
+use collection::{
+    CollectionEditError, Collections, CollectionsEvent, SavedLocation, directory_name,
+};
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
@@ -339,6 +341,9 @@ pub(crate) struct MainView {
     scroll_to_tab: Option<usize>,
     focus: FocusHandle,
     pending_close: Option<u64>,
+    /// The request tab that could not be saved, because its request was
+    /// changed outside the app. It asks whose changes to keep.
+    changed_on_disk: Option<u64>,
     rename: Option<TabRename>,
     save_error: Option<String>,
     variable_sessions: environment::EnvironmentSessions,
@@ -389,6 +394,7 @@ impl MainView {
             scroll_to_tab: None,
             focus: cx.focus_handle(),
             pending_close: None,
+            changed_on_disk: None,
             rename: None,
             save_error: None,
             variable_sessions: environment::EnvironmentSessions::default(),
@@ -803,7 +809,7 @@ impl MainView {
             window,
             move |this, _, _: &SaveCollection, window, cx| {
                 if let Some(index) = this.tabs.iter().position(|tab| tab.id == id) {
-                    this.save_tab(index, window, cx);
+                    this.save_tab(index, false, window, cx);
                 }
             },
         );
@@ -1187,6 +1193,7 @@ impl MainView {
 
         if self.selected != Some(index) {
             self.pending_close = None;
+            self.changed_on_disk = None;
             self.save_error = None;
         }
 
@@ -1242,6 +1249,7 @@ impl MainView {
 
     fn remove_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         self.pending_close = None;
+        self.changed_on_disk = None;
         self.save_error = None;
         self.tabs.remove(index);
         self.selected = self.selected.and_then(|selected| {
@@ -1261,14 +1269,23 @@ impl MainView {
 
     pub(crate) fn save_active_request(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.selected {
-            self.save_tab(index, window, cx);
+            self.save_tab(index, false, window, cx);
         }
     }
 
-    fn save_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// `overwrite` saves a request over the changes made to it outside the
+    /// app, once the user chose to.
+    fn save_tab(
+        &mut self,
+        index: usize,
+        overwrite: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Saving an unsaved request suggests the name being typed in its tab.
         // A rejected rename keeps its error.
         self.save_error = None;
+        self.changed_on_disk = None;
         self.commit_rename(cx);
 
         let Some(tab) = self.tabs.get(index) else {
@@ -1345,7 +1362,8 @@ impl MainView {
                 let request = draft.read(cx).request.clone();
                 let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), overwrite, window, cx)
+                {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -1354,7 +1372,8 @@ impl MainView {
                 let request = draft.read(cx).request.clone();
                 let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), overwrite, window, cx)
+                {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -1363,7 +1382,8 @@ impl MainView {
                 let request = draft.read(cx).request.clone();
                 let storage = draft.read(cx).storage.clone();
 
-                if self.save_request_at(id, storage, request.clone().into(), window, cx) {
+                if self.save_request_at(id, storage, request.clone().into(), overwrite, window, cx)
+                {
                     draft.update(cx, |draft, cx| draft.mark_saved(request, cx));
                     self.close_saved_tab(index, window, cx);
                 }
@@ -1375,12 +1395,15 @@ impl MainView {
 
     /// Save a request tab to its file. An unsaved request opens the dialog
     /// that chooses where, suggesting the name given in its tab; that dialog
-    /// marks the tab saved itself.
+    /// marks the tab saved itself. A request changed outside the app is
+    /// saved only with `overwrite`; without it, the tab asks whose changes
+    /// to keep.
     fn save_request_at(
         &mut self,
         tab_id: u64,
         storage: Storage,
         request: request::Request,
+        overwrite: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -1401,14 +1424,59 @@ impl MainView {
         };
 
         let result = self.collections.update(cx, |collections, cx| {
-            collections.update_request(&location.path, &location.id, request, cx)
+            if overwrite {
+                collections.overwrite_request(&location.path, &location.id, request, cx)
+            } else {
+                collections.update_request(&location.path, &location.id, request, cx)
+            }
         });
 
-        if let Err(error) = &result {
-            self.save_error = Some(format!("Could not save request: {error}"));
+        match &result {
+            Ok(()) => {}
+            Err(CollectionEditError::ChangedOnDisk) => self.changed_on_disk = Some(tab_id),
+            Err(error) => self.save_error = Some(format!("Could not save request: {error}")),
         }
 
         result.is_ok()
+    }
+
+    /// Discard a request tab's changes for the ones made to its file outside
+    /// the app.
+    fn reload_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = &self.tabs[index];
+        let Some(location) = tab.page.location(cx).cloned() else {
+            return;
+        };
+        let closing = self.pending_close == Some(tab.id);
+
+        self.changed_on_disk = None;
+        let result = self.collections.update(cx, |collections, cx| {
+            collections.reload_request(&location.path, &location.id, cx)
+        });
+        let request = self
+            .collections
+            .read(cx)
+            .request(&location.path)
+            .map(|(location, file)| (location, file.request.clone()));
+
+        match (result, request) {
+            // A tab that was being closed has nothing left to save.
+            (Ok(()), Some(_)) if closing => self.remove_tab(index, cx),
+            // The file's request opens in place of the changed one.
+            (Ok(()), Some((location, request))) => {
+                let title = location.name.clone().into();
+                self.restore_request(title, None, request, Storage::Saved(location), cx);
+                self.tabs.swap_remove(index);
+                self.select_tab(index, cx);
+            }
+            (Err(error), _) => {
+                self.save_error = Some(format!("Could not reload request: {error}"));
+            }
+            (Ok(()), None) => {}
+        }
+
+        self.focus(window, cx);
+        cx.notify();
     }
 
     /// Attach a new request draft to the file it was saved as.
@@ -1567,6 +1635,64 @@ impl MainView {
             }
             None => tab.page.set_name(name.into(), cx),
         }
+    }
+
+    /// Asks whose changes to keep, after a save found the request changed
+    /// outside the app.
+    fn changed_on_disk_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let changed_tab = |this: &Self| {
+            this.tabs
+                .iter()
+                .position(|tab| Some(tab.id) == this.changed_on_disk)
+        };
+
+        h_flex()
+            .debug_selector(|| "request-changed-on-disk-prompt".into())
+            .flex_none()
+            .px_3()
+            .py_2()
+            .gap_2()
+            .bg(cx.theme().muted)
+            .child(
+                div()
+                    .flex_1()
+                    .child("This request was changed outside Request Eagle. Keep your changes?"),
+            )
+            .child(
+                Button::new("overwrite-changed-request")
+                    .debug_selector(|| "overwrite-changed-request".into())
+                    .small()
+                    .label("Overwrite")
+                    .tooltip("Save your changes over the ones in the file")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if let Some(index) = changed_tab(this) {
+                            this.save_tab(index, true, window, cx);
+                        }
+                    })),
+            )
+            .child(
+                Button::new("reload-changed-request")
+                    .debug_selector(|| "reload-changed-request".into())
+                    .small()
+                    .label("Reload")
+                    .tooltip("Discard your changes and open the request from its file")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if let Some(index) = changed_tab(this) {
+                            this.reload_tab(index, window, cx);
+                        }
+                    })),
+            )
+            .child(
+                Button::new("cancel-changed-request")
+                    .debug_selector(|| "cancel-changed-request".into())
+                    .small()
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.changed_on_disk = None;
+                        this.focus(window, cx);
+                        cx.notify();
+                    })),
+            )
     }
 
     fn close_confirmation(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1987,9 +2113,14 @@ impl Render for MainView {
                     .child(div().flex_1())
                     .child(self.environment_picker.clone()),
             )
-            .when(self.pending_close.is_some(), |this| {
-                this.child(self.close_confirmation(cx))
+            // Saving from the close confirmation can find the request changed.
+            .when(self.changed_on_disk.is_some(), |this| {
+                this.child(self.changed_on_disk_prompt(cx))
             })
+            .when(
+                self.pending_close.is_some() && self.changed_on_disk.is_none(),
+                |this| this.child(self.close_confirmation(cx)),
+            )
             .when_some(self.save_error.clone(), |this, error| {
                 this.child(
                     div()

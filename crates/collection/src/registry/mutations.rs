@@ -14,14 +14,55 @@ use crate::{
 use request::Request;
 
 impl CollectionRegistry {
-    /// Saves a request without replacing its identity or externally edited metadata.
+    /// Saves a request without replacing its identity or externally edited
+    /// metadata. A request that changed in its file since it was last read
+    /// here is not saved, so a change made outside the app is not lost.
     pub fn update_request(
         &mut self,
         path: &Path,
         expected_id: &str,
         request: Request,
     ) -> Result<(), CollectionEditError> {
-        self.update_file(path, expected_id, |file| file.request = request)
+        self.update_file(path, expected_id, |known, file| {
+            if request_changed(known, file) {
+                return Err(CollectionEditError::ChangedOnDisk);
+            }
+
+            file.request = request;
+            Ok(())
+        })
+    }
+
+    /// Saves a request over the one its file holds now, once the user chose
+    /// to keep their own changes. Externally edited metadata still stays.
+    pub fn overwrite_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+        request: Request,
+    ) -> Result<(), CollectionEditError> {
+        self.update_file(path, expected_id, |_, file| {
+            file.request = request;
+            Ok(())
+        })
+    }
+
+    /// Reads a request's file again, taking the changes made to it outside
+    /// the app.
+    pub fn reload_request(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+    ) -> Result<(), CollectionEditError> {
+        let file = self.file_mut(path, expected_id)?;
+        let latest = load_file(path)?;
+        if latest.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        *file = latest;
+
+        Ok(())
     }
 
     /// Renames a request, unless its file now holds a different request.
@@ -36,37 +77,56 @@ impl CollectionRegistry {
             return Err(CollectionEditError::InvalidName);
         }
 
-        self.update_file(path, expected_id, |file| file.name = name.to_owned())
+        self.update_file(path, expected_id, |_, file| {
+            file.name = name.to_owned();
+            Ok(())
+        })
     }
 
     /// Changes the latest content of a request file, keeping comments and
-    /// external edits, as long as it is still the expected request.
+    /// external edits, as long as it is still the expected request. `change`
+    /// gets the file as it was last read here, and as it is now.
     fn update_file(
         &mut self,
         path: &Path,
         expected_id: &str,
-        change: impl FnOnce(&mut FileEntry),
+        change: impl FnOnce(&FileEntry, &mut FileEntry) -> Result<(), CollectionEditError>,
     ) -> Result<(), CollectionEditError> {
-        for collection in &mut self.collections {
-            if let Some(Entry::File(file)) = find_entry(&mut collection.entries, path) {
-                if file.id != expected_id {
-                    return Err(CollectionEditError::RequestReplaced);
-                }
-
-                let mut updated = load_file(path)?;
-                if updated.id != expected_id {
-                    return Err(CollectionEditError::RequestReplaced);
-                }
-
-                change(&mut updated);
-                save_file(&mut updated)?;
-                *file = updated;
-
-                return Ok(());
-            }
+        let file = self.file_mut(path, expected_id)?;
+        let mut updated = load_file(path)?;
+        if updated.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
         }
 
-        Err(CollectionEditError::NotFound)
+        change(file, &mut updated)?;
+        save_file(&mut updated)?;
+        *file = updated;
+
+        Ok(())
+    }
+
+    /// The request at `path`, as long as it is still the expected one.
+    fn file_mut(
+        &mut self,
+        path: &Path,
+        expected_id: &str,
+    ) -> Result<&mut FileEntry, CollectionEditError> {
+        let file = self
+            .collections
+            .iter_mut()
+            .find_map(
+                |collection| match find_entry(&mut collection.entries, path) {
+                    Some(Entry::File(file)) => Some(file),
+                    _ => None,
+                },
+            )
+            .ok_or(CollectionEditError::NotFound)?;
+
+        if file.id != expected_id {
+            return Err(CollectionEditError::RequestReplaced);
+        }
+
+        Ok(file)
     }
 
     /// Saves the collection's variables to `environment.toml` and its scripts
@@ -152,6 +212,20 @@ impl CollectionRegistry {
 
         Err(CollectionEditError::NotFound)
     }
+}
+
+/// Whether the request in a file differs from the one last read from it.
+/// Comments, the name and fields the app does not know are left out: saving
+/// keeps them as the file has them.
+fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
+    if latest.raw_content == known.raw_content {
+        return false;
+    }
+
+    // Compared as the file held it, not as the editor handed it over to be
+    // saved, in case a request reads back in another form than it was written.
+    toml::from_str::<FileEntry>(&known.raw_content)
+        .map_or(true, |known| known.request != latest.request)
 }
 
 fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
@@ -270,6 +344,8 @@ pub enum CollectionEditError {
     NotFound,
     #[error("This request was replaced by a different request. Your edits have not been saved.")]
     RequestReplaced,
+    #[error("This request was changed outside Request Eagle. Your edits have not been saved.")]
+    ChangedOnDisk,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
     #[error("{0}")]
