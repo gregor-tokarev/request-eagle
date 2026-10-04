@@ -142,6 +142,22 @@ impl CollectionRegistry {
             .save_settings(variables, shared, false)
     }
 
+    /// Fails when `update_collection` would, because a file it writes
+    /// changed outside the app. Asked before a save that also renames the
+    /// collection.
+    pub fn check_collection(
+        &self,
+        path: &Path,
+        variables: &HashMap<String, String>,
+        shared: &SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        self.collections
+            .iter()
+            .find(|collection| collection.path == path)
+            .ok_or(CollectionEditError::NotFound)?
+            .check_unchanged_outside(variables, shared)
+    }
+
     /// Saves the collection's variables, scripts and authorization over the
     /// ones their files hold now, once the user chose to keep their own
     /// changes.

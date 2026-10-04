@@ -984,6 +984,11 @@ fn saving_cannot_replace_collection_settings_changed_outside_the_app_without_a_c
 
     // A file that is not written keeps the change made to it, whatever is
     // saved to the other one.
+    let result = registry.check_collection(&collection, &known(&registry), &scripts("third();"));
+    assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
+    registry
+        .check_collection(&collection, &known(&registry), &scripts("second();"))
+        .unwrap();
     let result = registry.update_collection(&collection, known(&registry), scripts("third();"));
     assert!(matches!(result, Err(CollectionEditError::ChangedOnDisk)));
     let result = registry.update_collection(

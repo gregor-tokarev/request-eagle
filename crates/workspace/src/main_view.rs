@@ -1599,8 +1599,15 @@ impl MainView {
                     .update(cx, |collections, _| collections.reload_collection(&path))
                     .map_err(|error| error.to_string())
             }
-            // Its editor reads the environment's file when it opens.
-            Page::Environment(_) | Page::Runner(_) | Page::Cookies(_) => Ok(()),
+            // Its editor reads the environment's file when it opens. A file
+            // that cannot be read keeps the tab and its changes.
+            Page::Environment(editor) => {
+                let path = self.environments.read(cx).path(&editor.read(cx).name);
+                environment::Environment::from_file(path)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }
+            Page::Runner(_) | Page::Cookies(_) => Ok(()),
         };
 
         if let Err(error) = result {

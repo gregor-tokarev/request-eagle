@@ -281,6 +281,11 @@ impl Collections {
         overwrite: bool,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
+        // Asked before the rename, so declining the save leaves the name too.
+        if !overwrite {
+            self.registry.check_collection(path, &variables, &shared)?;
+        }
+
         // Rename first: an invalid or taken name then fails before any file
         // changes. The rename event keeps the tab in step if a later write fails.
         let path = if path.file_name().is_some_and(|current| current == name) {

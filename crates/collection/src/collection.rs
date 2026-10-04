@@ -95,18 +95,13 @@ impl Collection {
         shared: SharedSettings,
         overwrite: bool,
     ) -> Result<(), CollectionEditError> {
+        if !overwrite {
+            self.check_unchanged_outside(&variables, &shared)?;
+        }
+
         let scripts_path = self.path.join(SETTINGS_FILE_NAME);
         let scripts_changed = self.scripts != shared.scripts || self.auth != shared.auth;
         let variables_changed = self.local_env.entries != variables;
-
-        // Only a file that is about to be written can lose a change.
-        if !overwrite
-            && ((scripts_changed && self.settings_changed_outside())
-                || (variables_changed && self.variables_changed_outside()))
-        {
-            return Err(CollectionEditError::ChangedOnDisk);
-        }
-
         let previous_scripts = if scripts_changed && variables_changed {
             match fs::read(&scripts_path) {
                 Ok(bytes) => Some(bytes),
@@ -146,6 +141,26 @@ impl Collection {
         if scripts_changed {
             self.scripts = shared.scripts;
             self.auth = shared.auth;
+        }
+
+        Ok(())
+    }
+
+    /// Fails when saving these settings would write over a change made to
+    /// their files outside the app. Only a file that is about to be written
+    /// can lose a change.
+    pub(crate) fn check_unchanged_outside(
+        &self,
+        variables: &HashMap<String, String>,
+        shared: &SharedSettings,
+    ) -> Result<(), CollectionEditError> {
+        let scripts_changed = self.scripts != shared.scripts || self.auth != shared.auth;
+        let variables_changed = self.local_env.entries != *variables;
+
+        if (scripts_changed && self.settings_changed_outside())
+            || (variables_changed && self.variables_changed_outside())
+        {
+            return Err(CollectionEditError::ChangedOnDisk);
         }
 
         Ok(())
