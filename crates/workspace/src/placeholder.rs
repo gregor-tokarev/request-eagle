@@ -119,7 +119,7 @@ pub(crate) fn placeholder(focus: &FocusHandle, window: &Window, cx: &App) -> imp
                 .w_full()
                 .max_w(rems(10.))
                 .aspect_square()
-                .p(rems(2.))
+                .p(rems(1.5))
                 .rounded(theme.radius_full())
                 .bg(theme.muted)
                 .child(
