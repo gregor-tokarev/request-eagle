@@ -2,8 +2,9 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use keybindings_service::{self as keybindings, Command};
+use request_eagle_theme::shortcut_keycaps;
 
-use super::{KeybindingsPage, keycaps::shortcut_keycaps};
+use super::KeybindingsPage;
 
 pub(super) struct Recording {
     pub(super) command: Command,

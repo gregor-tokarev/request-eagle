@@ -8,6 +8,7 @@ mod environment_picker;
 mod flow_panel;
 mod history_panel;
 mod main_view;
+mod placeholder;
 mod save_request;
 mod session;
 mod top_panel;

@@ -13,6 +13,7 @@ use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab, S
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::flow_panel::FlowPanel;
 use crate::history_panel::{HistoryPanel, short_address};
+use crate::placeholder::placeholder;
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
 use collection::{
@@ -409,8 +410,8 @@ pub(crate) struct MainView {
 }
 
 impl MainView {
-    /// Reopens `tabs`, the tabs open when the app last closed, or opens an
-    /// empty request when none of them can be opened.
+    /// Reopens `tabs`, the tabs open when the app last closed. Without any,
+    /// the placeholder offers ways to open one.
     // The sidebar's sections are handed over once, at startup.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -466,9 +467,6 @@ impl MainView {
 
         if let Some(index) = selected {
             view.select_tab(index, cx);
-        }
-        if view.tabs.is_empty() {
-            view.new_tab(cx);
         }
 
         view
@@ -2314,7 +2312,6 @@ impl Render for MainView {
             .child(
                 div()
                     .id("tab-content")
-                    .role(Role::TabPanel)
                     .debug_selector(|| "tab-content".into())
                     .flex_1()
                     .min_h_0()
@@ -2328,9 +2325,12 @@ impl Render for MainView {
                             }
                         },
                     ))
-                    .when_some(self.selected, |this, index| {
-                        this.aria_label(self.tabs[index].title.clone())
-                            .child(self.tabs[index].page.render())
+                    .map(|this| match self.selected {
+                        Some(index) => this
+                            .role(Role::TabPanel)
+                            .aria_label(self.tabs[index].title.clone())
+                            .child(self.tabs[index].page.render()),
+                        None => this.child(placeholder(&self.focus, window, cx)),
                     }),
             )
     }
