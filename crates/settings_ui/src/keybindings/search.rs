@@ -1,8 +1,9 @@
 use gpui_kit::component::{Size, button::*, input::Input, *};
 use gpui_kit::*;
 use keybindings_service::Command;
+use request_eagle_theme::shortcut_keycaps;
 
-use super::{KeybindingsPage, keycaps::shortcut_keycaps, recorder::is_modifier_only};
+use super::{KeybindingsPage, recorder::is_modifier_only};
 
 impl KeybindingsPage {
     fn toggle_search_recorder(&mut self, window: &mut Window, cx: &mut Context<Self>) {

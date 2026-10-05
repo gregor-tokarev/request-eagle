@@ -1,5 +1,6 @@
-use gpui_kit::component::{kbd::Kbd, *};
+use gpui_kit::component::*;
 use gpui_kit::*;
+use request_eagle_theme::shortcut_keycaps;
 
 pub(super) fn shortcut(keys: Option<&str>, cx: &App) -> AnyElement {
     match keys {
@@ -21,42 +22,4 @@ pub(super) fn shortcut(keys: Option<&str>, cx: &App) -> AnyElement {
             .child("Not set")
             .into_any_element(),
     }
-}
-
-pub(super) fn shortcut_keycaps(stroke: &Keystroke, cx: &App) -> AnyElement {
-    let mac = cfg!(target_os = "macos");
-    let modifiers = [
-        (stroke.modifiers.platform, if mac { "⌘" } else { "Win" }),
-        (stroke.modifiers.control, if mac { "⌃" } else { "Ctrl" }),
-        (stroke.modifiers.alt, if mac { "⌥" } else { "Alt" }),
-        (stroke.modifiers.shift, if mac { "⇧" } else { "Shift" }),
-        (stroke.modifiers.function, "Fn"),
-    ];
-
-    let mut key = stroke.clone();
-    key.modifiers = Modifiers::default();
-
-    let labels = modifiers
-        .into_iter()
-        .filter(|(pressed, _)| *pressed)
-        .map(|(_, label)| label.to_owned())
-        .chain(std::iter::once(Kbd::format(&key)));
-
-    h_flex()
-        .gap_1()
-        .children(labels.map(|label| {
-            div()
-                .h_6()
-                .min_w_6()
-                .px_1()
-                .flex_none()
-                .rounded(cx.theme().radius_tokens().md)
-                .bg(cx.theme().foreground.opacity(0.06))
-                .text_color(cx.theme().muted_foreground)
-                .text_sm()
-                .text_center()
-                .line_height(rems(1.5))
-                .child(label)
-        }))
-        .into_any_element()
 }

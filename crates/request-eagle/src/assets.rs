@@ -6,7 +6,9 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 54] = [
+const LOCAL_ICONS: [(&str, &[u8]); 55] = [
+    // The app's mark, shown while no tab is open.
+    ("icons/logo.svg", include_bytes!("../assets/icons/logo.svg")),
     (
         "icons/arrow-up-down.svg",
         include_bytes!("../assets/icons/arrow-up-down.svg"),
