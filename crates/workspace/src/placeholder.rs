@@ -69,8 +69,28 @@ pub(crate) fn placeholder(focus: &FocusHandle, window: &Window, cx: &App) -> imp
             .w_full()
             .text_color(theme.muted_foreground)
             .accessibility_label(label)
-            .child(div().flex_1().child(label))
-            .children(shortcut(action, window, cx))
+            // Each line fills the row and the row clips what wraps, so a
+            // shortcut without room drops below it rather than squeezing the
+            // label.
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex_wrap()
+                    .gap_2()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex_grow(1.)
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .child(div().truncate().child(label)),
+                    )
+                    .children(shortcut(action, window, cx)),
+            )
             .on_click(run(action))
     });
     let kind_buttons = kinds.map(|(id, icon, label, action)| {
@@ -84,34 +104,38 @@ pub(crate) fn placeholder(focus: &FocusHandle, window: &Window, cx: &App) -> imp
             .on_click(run(action))
     });
 
+    // The mark and the commands narrow with a narrow pane, such as beside a
+    // wide sidebar.
     v_flex()
         .debug_selector(|| "tabs-placeholder".into())
         .size_full()
+        .px_4()
         .items_center()
         .justify_center()
         .gap_8()
         .child(
             div()
                 .flex_none()
-                .size(rems(10.))
-                .flex()
-                .items_center()
-                .justify_center()
+                .w_full()
+                .max_w(rems(10.))
+                .aspect_square()
+                .p(rems(2.))
                 .rounded(theme.radius_full())
                 .bg(theme.muted)
                 .child(
                     Icon::default()
                         .path("icons/logo.svg")
-                        .size(rems(6.))
+                        .size_full()
                         .text_color(theme.background),
                 ),
         )
         .child(
             v_flex()
                 .flex_none()
-                .w(rems(18.))
+                .w_full()
+                .max_w(rems(18.))
                 .children(command_rows)
-                .child(h_flex().mt_3().children(kind_buttons)),
+                .child(h_flex().flex_wrap().mt_3().children(kind_buttons)),
         )
 }
 
@@ -123,6 +147,7 @@ fn shortcut(action: &dyn Action, window: &Window, cx: &App) -> Option<AnyElement
     Some(
         h_flex()
             .flex_none()
+            .h_full()
             .gap_1()
             .children(
                 binding
