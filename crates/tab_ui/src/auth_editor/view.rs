@@ -14,22 +14,13 @@ use super::fields::{Choice, Field, Row, description, rows};
 use crate::variable_input::{VariableTarget, with_variables};
 
 impl AuthEditor {
-    /// A field's label beside its control.
-    fn row(label: &'static str, top: bool, control: impl IntoElement, cx: &App) -> Div {
-        h_flex()
+    /// A field's label above its control, as Auth Type sits above its select.
+    fn row(label: &'static str, control: impl IntoElement, cx: &App) -> Div {
+        v_flex()
             .w_full()
-            .gap_3()
-            .when(top, |row| row.items_start())
-            .when(!top, |row| row.items_center())
-            .child(
-                div()
-                    .w(rems(9.))
-                    .flex_none()
-                    .when(top, |label| label.pt_1())
-                    .text_color(cx.theme().muted_foreground)
-                    .child(label),
-            )
-            .child(div().flex_1().min_w_0().child(control))
+            .gap_2()
+            .child(div().text_color(cx.theme().muted_foreground).child(label))
+            .child(control)
     }
 
     fn text_row(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -56,7 +47,6 @@ impl AuthEditor {
 
         Self::row(
             label,
-            field.multiline(),
             div()
                 .debug_selector(move || format!("auth-field-{label}"))
                 .child(control),
@@ -70,7 +60,6 @@ impl AuthEditor {
 
         Self::row(
             label,
-            false,
             div()
                 .debug_selector(move || format!("auth-choice-{label}"))
                 .max_w(rems(20.))
@@ -169,11 +158,9 @@ impl Render for AuthEditor {
                 Row::Choice(choice) => self.choice_row(choice, window, cx),
                 Row::Pkce => {
                     let pkce = matches!(&self.auth, Auth::OAuth2(auth) if auth.pkce);
-                    Self::row(
-                        "PKCE",
-                        false,
+                    div().child(
                         Switch::new("auth-pkce")
-                            .accessibility_label("Use PKCE")
+                            .label("Use PKCE")
                             .checked(pkce)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 if let Auth::OAuth2(auth) = &mut this.auth {
@@ -181,14 +168,11 @@ impl Render for AuthEditor {
                                     this.changed(cx);
                                 }
                             })),
-                        cx,
                     )
                 }
                 Row::SecretBase64 => {
                     let base64 = matches!(&self.auth, Auth::Jwt(auth) if auth.secret_base64);
-                    Self::row(
-                        "",
-                        false,
+                    div().child(
                         Checkbox::new("auth-secret-base64")
                             .label("Secret is Base64 encoded")
                             .checked(base64)
@@ -198,14 +182,13 @@ impl Render for AuthEditor {
                                     this.changed(cx);
                                 }
                             })),
-                        cx,
                     )
                 }
                 // A line separates a group from the rows above it.
                 Row::Heading(heading) => div()
                     .w_full()
                     .when(!content.is_empty(), |heading| {
-                        heading.pt_3().border_t_1().border_color(cx.theme().border)
+                        heading.pt_4().border_t_1().border_color(cx.theme().border)
                     })
                     .font_weight(FontWeight::MEDIUM)
                     .child(heading),
@@ -248,7 +231,7 @@ impl Render for AuthEditor {
                     .flex_1()
                     .min_w(rems(20.))
                     .max_w(rems(40.))
-                    .gap_3()
+                    .gap_4()
                     .children(content),
             )
     }
