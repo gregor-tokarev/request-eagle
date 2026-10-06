@@ -851,6 +851,8 @@ fn pm_members_complete_as_typescript_does_without_it() {
         "const pm = {custom: 1};\npm.|",
         "items.map(pm => pm.|)",
         "pm.|\nconst {pm} = api;",
+        "const f = () => pm.cu|;\n// a comment\u{2028}const pm = {custom: 1};",
+        "const f = () => pm.cu|;\n// a comment\rconst pm = {custom: 1};",
     ] {
         let (source, offset) = marked(source);
         assert!(

@@ -193,8 +193,9 @@ fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> Option<bool> {
                 },
                 _ => visit(index, ch),
             },
+            // Each of JavaScript's line terminators ends a line comment.
             State::LineComment => {
-                if ch == '\n' {
+                if matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
                     state = State::Code;
                 }
             }
@@ -208,7 +209,7 @@ fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> Option<bool> {
                 '\\' => {
                     chars.next();
                 }
-                '\n' => state = State::Code,
+                '\n' | '\r' => state = State::Code,
                 _ if ch == quote => state = State::Code,
                 _ => {}
             },
