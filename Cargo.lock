@@ -2919,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2958,7 +2958,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3008,7 +3008,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3051,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -3217,8 +3217,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-linux"
 version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aac7022e347409454777701082201742710052813964a1e25160f7e22c965ad"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3264,8 +3263,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a43af845b260b09393e923c4f1e1a67a10fcfc847b4815192bbfd02ed9fe725"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
 dependencies = [
  "accesskit",
  "accesskit_macos",
