@@ -1,4 +1,6 @@
-use lsp_types::{CompletionItem, CompletionTextEdit, HoverContents, ParameterLabel};
+use lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionTextEdit, HoverContents, ParameterLabel,
+};
 use request::ScriptPhase;
 
 fn marked(source: &str) -> (String, usize) {
@@ -718,4 +720,144 @@ fn active_cancellation_preserves_the_compiler_for_same_and_changed_source_querie
         .unwrap()
         .join()
         .unwrap();
+}
+
+/// What TypeScript completes after each `pm` path, as the member table keeps
+/// it. Run with UPDATE_PM_MEMBERS=1 to write the table after changing pm.d.ts.
+#[test]
+fn pm_member_table_matches_typescript() {
+    use std::collections::{BTreeMap, VecDeque};
+
+    use crate::{compiler::interface_name, worker::typescript_completions};
+
+    // The paths whose members are kept, from `pm` down.
+    const PATH_DEPTH: usize = 4;
+
+    let complete = |source: String, phase| {
+        smol::block_on(typescript_completions(source.clone(), source.len(), phase)).unwrap()
+    };
+    // Strings, numbers, booleans, arrays and dates have the standard library's
+    // members, which TypeScript completes when they are needed.
+    let primitives = ["\"\".", "(0).", "true.", "[].", "new Date()."].map(|source| {
+        labels(&complete(source.into(), ScriptPhase::PreRequest))
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    });
+
+    let mut table = BTreeMap::<String, BTreeMap<String, Vec<CompletionItem>>>::new();
+    for phase in [
+        ScriptPhase::PreRequest,
+        ScriptPhase::PostResponse,
+        ScriptPhase::BeforeInvoke,
+        ScriptPhase::OnMessage,
+        ScriptPhase::AfterResponse,
+    ] {
+        let mut members = BTreeMap::new();
+        let mut paths = VecDeque::from(["pm".to_owned()]);
+
+        while let Some(path) = paths.pop_front() {
+            let items = complete(format!("{path}."), phase);
+            if primitives.iter().any(|members| *members == labels(&items)) {
+                continue;
+            }
+
+            for item in &items {
+                let object = matches!(
+                    item.kind,
+                    Some(CompletionItemKind::FIELD | CompletionItemKind::PROPERTY)
+                );
+                if object && path.split('.').count() < PATH_DEPTH {
+                    paths.push_back(format!("{path}.{}", item.label));
+                }
+            }
+
+            if !items.is_empty() {
+                let items = items
+                    .into_iter()
+                    .map(|mut item| {
+                        let Some(CompletionTextEdit::Edit(edit)) = item.text_edit.take() else {
+                            panic!("simple completion edit");
+                        };
+                        item.filter_text = None;
+                        item.insert_text = (edit.new_text != item.label).then_some(edit.new_text);
+                        item
+                    })
+                    .collect::<Vec<_>>();
+                members.insert(path, items);
+            }
+        }
+
+        table.insert(interface_name(phase).to_owned(), members);
+    }
+
+    let json = serde_json::to_string_pretty(&table).unwrap() + "\n";
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/src/pm_members.json");
+    if std::env::var_os("UPDATE_PM_MEMBERS").is_some() {
+        std::fs::write(file, &json).unwrap();
+    }
+    assert!(
+        std::fs::read_to_string(file).unwrap() == json,
+        "pm.d.ts and the member table differ; run this test with UPDATE_PM_MEMBERS=1"
+    );
+}
+
+#[test]
+fn pm_members_complete_as_typescript_does_without_it() {
+    use crate::{members, worker::typescript_completions};
+
+    for (source, phase) in [
+        ("pm.|", ScriptPhase::PreRequest),
+        (
+            "const 𐐀 = '🚀';\npm.request.he|aders",
+            ScriptPhase::PreRequest,
+        ),
+        ("pm.response.to.be.|", ScriptPhase::PostResponse),
+        (
+            "if (ok) {\n  pm.environment.s|et('a', 1)",
+            ScriptPhase::PreRequest,
+        ),
+        ("const text = `${pm.envi|}`;", ScriptPhase::PreRequest),
+        ("pm.message.|", ScriptPhase::OnMessage),
+        // A combining mark continues the identifier the edit replaces.
+        ("pm.environment.se|x\u{301}t", ScriptPhase::PreRequest),
+        (
+            "// a pm token\nconst name = 'pm';\npm.variables.|",
+            ScriptPhase::PreRequest,
+        ),
+        // A comment can end the script without a line break.
+        ("pm.environment.se|;\n// end", ScriptPhase::PreRequest),
+    ] {
+        let (source, offset) = marked(source);
+        let table = members::completions(&source, offset, phase).expect(&source);
+        let typescript =
+            smol::block_on(typescript_completions(source.clone(), offset, phase)).unwrap();
+        assert!(!table.is_empty(), "{source}");
+        assert_eq!(table, typescript, "{source}");
+    }
+
+    for source in [
+        "// pm.|",
+        "/* pm.| */",
+        "const text = 'pm.|';",
+        "const text = `pm.|`;",
+        "client.pm.|",
+        "pm?.|",
+        "pm.environment.get('name').|",
+        "pm.unknown.|",
+        "const half = total / 2; pm.|",
+        // A local `pm` is TypeScript's to resolve.
+        "function inspect(pm = {custom: 1}) { pm.cu| }",
+        "const pm = {custom: 1};\npm.|",
+        "items.map(pm => pm.|)",
+        "pm.|\nconst {pm} = api;",
+        "const f = () => pm.cu|;\n// a comment\u{2028}const pm = {custom: 1};",
+        "const f = () => pm.cu|;\n// a comment\rconst pm = {custom: 1};",
+    ] {
+        let (source, offset) = marked(source);
+        assert!(
+            members::completions(&source, offset, ScriptPhase::PreRequest).is_none(),
+            "{source}"
+        );
+    }
 }

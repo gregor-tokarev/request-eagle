@@ -364,15 +364,9 @@ impl<S: Scripts> ScriptEditor<S> {
         });
         self.signatures[index] =
             Some(cx.new(|cx| ScriptSignature::new(editor.clone(), phase, window, cx)));
-        script_intelligence::warm_up();
         self._subscriptions.push(cx.subscribe(
             &editor,
             move |this, editor, event: &InputEvent, cx| {
-                // Reload the compiler if it was released while scripts were idle.
-                if matches!(event, InputEvent::Focus) {
-                    script_intelligence::warm_up();
-                }
-
                 if matches!(event, InputEvent::Change) {
                     *this.scripts.script_mut(phase) = editor.read(cx).value().to_string();
                     cx.emit(ScriptsChanged(this.scripts.clone()));

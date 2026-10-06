@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use gpui_kit::base::input::{self, Rope, RopeExt};
+use gpui_kit::base::input;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 
@@ -13,8 +13,9 @@ const SCROLLBAR: Rems = rems(0.75);
 /// offsets indexes wrapped rows; only visible rows become shaped glyph layouts.
 /// In particular, a one-line JSON response never becomes one giant ShapedLine.
 pub(crate) struct VirtualBody {
-    text: Rope,
     pub(super) source: SharedString,
+    /// Where each line of the source starts.
+    lines: Vec<usize>,
     pub(super) focus: FocusHandle,
     rows: Vec<usize>,
     font: Font,
@@ -42,12 +43,14 @@ pub(super) struct PaintedRow {
 impl VirtualBody {
     pub(crate) fn new(source: SharedString, wrap: bool, cx: &mut App) -> Self {
         let font = font(cx.theme().mono_font_family.clone());
-        let text = Rope::from(source.as_ref());
+        let lines = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
+            .collect();
         let max_line_bytes = source.split('\n').map(str::len).max().unwrap_or(0);
 
         Self {
             source,
-            text,
+            lines,
             rows: vec![0],
             font,
             rem_size: cx.theme().font_size,
@@ -83,6 +86,11 @@ impl VirtualBody {
             self.selection = self.selection.end..self.selection.end;
         }
         cx.notify();
+    }
+
+    /// The index of the line that contains `offset`.
+    fn line_at(&self, offset: usize) -> usize {
+        self.lines.partition_point(|start| *start <= offset) - 1
     }
 
     fn first_row(&self) -> usize {
@@ -162,14 +170,13 @@ impl VirtualBody {
         }
 
         if let Some(offset) = self.reveal.take() {
-            let position = self.text.offset_to_point(offset);
             let row = self
                 .rows
                 .partition_point(|start| *start <= offset)
                 .saturating_sub(1);
             self.scroll.y = ROW_HEIGHT.to_pixels(self.rem_size) * row - bounds.size.height / 2.;
             if !self.wrap {
-                let prefix = &self.source[self.text.line_start_offset(position.row)..offset];
+                let prefix = &self.source[self.lines[self.line_at(offset)]..offset];
                 let cell = window
                     .text_system()
                     .advance(
@@ -224,9 +231,9 @@ impl VirtualBody {
                 std::slice::from_ref(&run),
                 None,
             );
-            let position = self.text.offset_to_point(range.start);
-            let number = if position.column == 0 {
-                let number: SharedString = (position.row + 1).to_string().into();
+            let line_index = self.line_at(range.start);
+            let number = if self.lines[line_index] == range.start {
+                let number: SharedString = (line_index + 1).to_string().into();
                 Some(window.text_system().shape_line(
                     number.clone(),
                     FONT_SIZE.to_pixels(self.rem_size),
@@ -447,13 +454,15 @@ impl Render for VirtualBody {
             }))
             .on_action(cx.listener(|this, _: &input::SelectAll, _, cx| {
                 this.anchor = 0;
-                this.selection = 0..this.text.len();
+                this.selection = 0..this.source.len();
                 cx.notify();
                 cx.stop_propagation();
             }))
             .on_action(cx.listener(|this, _: &input::MoveToStart, _, cx| this.move_to(0, cx)))
             .on_action(
-                cx.listener(|this, _: &input::MoveToEnd, _, cx| this.move_to(this.text.len(), cx)),
+                cx.listener(|this, _: &input::MoveToEnd, _, cx| {
+                    this.move_to(this.source.len(), cx)
+                }),
             )
             .on_action(cx.listener(|this, _: &input::MovePageDown, _, cx| {
                 this.scroll.y += this.bounds.size.height;

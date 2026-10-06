@@ -12,6 +12,17 @@ const INITIALIZATION_LIMIT: Duration = Duration::from_secs(15);
 const QUERY_LIMIT: Duration = Duration::from_secs(2);
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 
+/// The interface pm.d.ts declares for the phase's `pm`.
+pub(crate) fn interface_name(phase: ScriptPhase) -> &'static str {
+    match phase {
+        ScriptPhase::PreRequest => "PreRequestAPI",
+        ScriptPhase::PostResponse => "PostResponseAPI",
+        ScriptPhase::BeforeInvoke => "GrpcBeforeInvokeAPI",
+        ScriptPhase::OnMessage => "GrpcOnMessageAPI",
+        ScriptPhase::AfterResponse => "GrpcAfterResponseAPI",
+    }
+}
+
 // Compiled from the vendored compiler by build.rs.
 static COMPILER_BYTECODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/typescript.bin"));
 
@@ -86,15 +97,7 @@ impl Compiler {
         let result = self.context.with(|cx| {
             let execute = || -> rquickjs::Result<Option<String>> {
                 let query: Function = cx.globals().get("requestEagleLanguageQuery")?;
-                // The interface pm.d.ts declares for the phase's `pm`.
-                let phase = match phase {
-                    ScriptPhase::PreRequest => "PreRequestAPI",
-                    ScriptPhase::PostResponse => "PostResponseAPI",
-                    ScriptPhase::BeforeInvoke => "GrpcBeforeInvokeAPI",
-                    ScriptPhase::OnMessage => "GrpcOnMessageAPI",
-                    ScriptPhase::AfterResponse => "GrpcAfterResponseAPI",
-                };
-
+                let phase = interface_name(phase);
                 let cancellation = Function::new(cx.clone(), cancelled)?;
 
                 query.call((source, offset, phase, kind, cancellation))

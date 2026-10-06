@@ -38,7 +38,7 @@ struct Page {
 }
 
 impl PdfPreview {
-    pub(super) fn new(bytes: Vec<u8>, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(bytes: Arc<Vec<u8>>, cx: &mut Context<Self>) -> Self {
         let loading = cx.background_spawn(async move {
             // The document comes from a server; a malformed one must not take
             // the app down with it.

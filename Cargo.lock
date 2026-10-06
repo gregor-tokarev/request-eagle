@@ -2919,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2958,7 +2958,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3008,7 +3008,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3051,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=e44d39248944fa18ae9636cc8987a8ccfada8c9b#e44d39248944fa18ae9636cc8987a8ccfada8c9b"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -3217,8 +3217,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-linux"
 version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aac7022e347409454777701082201742710052813964a1e25160f7e22c965ad"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3264,8 +3263,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a43af845b260b09393e923c4f1e1a67a10fcfc847b4815192bbfd02ed9fe725"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=ca77ce2d16bb443c424fc161a9b2e71c910e0da5#ca77ce2d16bb443c424fc161a9b2e71c910e0da5"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -7140,6 +7138,7 @@ dependencies = [
  "rustix",
  "tempfile",
  "theme",
+ "tikv-jemallocator",
  "updater",
  "windows-sys 0.61.2",
  "winresource",
@@ -7643,6 +7642,7 @@ dependencies = [
  "rquickjs",
  "serde_json",
  "smol",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -8619,6 +8619,26 @@ dependencies = [
  "quick-error 2.0.1",
  "weezl",
  "zune-jpeg 0.5.15",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

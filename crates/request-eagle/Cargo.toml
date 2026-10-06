@@ -27,6 +27,9 @@ workspace = { package = "workspace", path = "../workspace" }
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "stdio"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = "0.7.0"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 

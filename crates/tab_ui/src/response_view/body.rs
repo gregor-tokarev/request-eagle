@@ -61,7 +61,7 @@ impl ResponseContent {
     /// Images and documents show as themselves; a page shows its source.
     pub(super) fn default_mode(&self) -> BodyMode {
         match self.preview {
-            Some(Preview::Image(_) | Preview::Pdf) => BodyMode::Preview,
+            Some(Preview::Image(_) | Preview::Pdf(_)) => BodyMode::Preview,
             _ if self.pretty.is_some() => BodyMode::Pretty,
             _ if !self.binary => BodyMode::Raw,
             _ => BodyMode::Hex,
@@ -101,8 +101,8 @@ impl Body {
                 let image = image.clone();
                 Body::Image(cx.new(|cx| ImagePreview::new(image, cx)))
             }
-            (BodyMode::Preview, Some(Preview::Pdf)) => {
-                let bytes = content.http().body.clone();
+            (BodyMode::Preview, Some(Preview::Pdf(bytes))) => {
+                let bytes = bytes.clone();
                 Body::Pdf(cx.new(|cx| PdfPreview::new(bytes, cx)))
             }
             (BodyMode::Pretty, _) => {
@@ -122,7 +122,7 @@ impl Body {
                 Body::Pretty(cx.new(|_| ResponseBodyEditor(editor)))
             }
             (BodyMode::Hex, _) => {
-                let body = &content.http().body;
+                let body = content.body();
                 let dump = hex_dump(&body[..body.len().min(HEX_LIMIT)]);
                 Body::Raw {
                     view: cx.new(|cx| VirtualBody::new(dump.into(), false, cx)),
@@ -173,7 +173,7 @@ impl ResponseView {
             Some(Preview::Image(image)) => Some(image.clone()),
             _ => None,
         };
-        let size = content.http().body.len();
+        let size = content.body().len();
         let pages = match body {
             Body::Pdf(pdf) => pdf.read(cx).page_count(),
             _ => None,

@@ -1,6 +1,7 @@
 use gpui_kit::{Image, ImageFormat, SharedString};
 use request::{Execution, HttpResponse, Response};
 use std::{
+    borrow::Cow,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -33,14 +34,17 @@ const HTML_PREVIEW_LIMIT: usize = 512 * 1024;
 pub(super) enum Preview {
     Html,
     Image(Arc<Image>),
-    Pdf,
+    /// The document's bytes, which its preview shares.
+    Pdf(Arc<Vec<u8>>),
 }
 
 impl ResponseContent {
-    /// Prepare display text off the UI thread; keep the original response intact.
-    pub fn new(execution: Execution) -> Self {
+    /// Prepare display text off the UI thread. The body is kept once: in its
+    /// preview, as its text when the text reads as its bytes, or else in the
+    /// response.
+    pub fn new(mut execution: Execution) -> Self {
         let started = Instant::now();
-        let Response::Http(response) = &execution.response;
+        let Response::Http(response) = &mut execution.response;
         let content_type = response
             .headers
             .get("content-type")
@@ -54,27 +58,43 @@ impl ResponseContent {
             .and_then(|(_, label)| {
                 encoding_rs::Encoding::for_label(label.trim().trim_matches('"').as_bytes())
             });
-        let body = &response.body;
+        let body = std::mem::take(&mut response.body);
 
-        let image = image_format(&media_type, body);
+        let image = image_format(&media_type, &body);
         let pdf =
             !body.is_empty() && (media_type == "application/pdf" || body.starts_with(b"%PDF-"));
         let binary = match image {
             Some(ImageFormat::Svg) => false,
             Some(_) => true,
-            None => pdf || (!is_text(&media_type) && looks_binary(body)),
+            None => pdf || (!is_text(&media_type) && looks_binary(&body)),
         };
 
-        // Text is UTF-8 unless the response names another charset.
-        let raw: SharedString = if binary {
-            SharedString::default()
-        } else {
-            charset
+        // Text is UTF-8 unless the response names another charset. `None`
+        // means that decoding left the bytes as they are.
+        let decoded = (!binary).then(|| {
+            match charset
                 .unwrap_or(encoding_rs::UTF_8)
-                .decode_without_bom_handling(body)
+                .decode_without_bom_handling(&body)
                 .0
-                .into_owned()
-                .into()
+            {
+                Cow::Borrowed(_) => None,
+                Cow::Owned(text) => Some(text),
+            }
+        });
+        let (raw, mut body): (SharedString, _) = match decoded {
+            None => (SharedString::default(), Some(body)),
+            Some(Some(text)) => (text.into(), Some(body)),
+            // An SVG image keeps its bytes for its preview.
+            Some(None) if image.is_some() => (
+                String::from_utf8_lossy(&body).into_owned().into(),
+                Some(body),
+            ),
+            Some(None) => (
+                String::from_utf8(body)
+                    .expect("text decoded unchanged is UTF-8")
+                    .into(),
+                None,
+            ),
         };
         let language = if binary {
             "text"
@@ -103,11 +123,10 @@ impl ResponseContent {
         }
 
         let preview = match image {
-            Some(format) => Some(Preview::Image(Arc::new(Image::from_bytes(
-                format,
-                body.clone(),
-            )))),
-            None if pdf => Some(Preview::Pdf),
+            Some(format) => body
+                .take()
+                .map(|bytes| Preview::Image(Arc::new(Image::from_bytes(format, bytes)))),
+            None if pdf => body.take().map(|bytes| Preview::Pdf(Arc::new(bytes))),
             // A rendered page lays out all of its text at once.
             None if language == "html"
                 && !raw.trim().is_empty()
@@ -117,6 +136,8 @@ impl ResponseContent {
             }
             None => None,
         };
+        // Bytes that neither the preview nor the text took stay in the response.
+        response.body = body.unwrap_or_default();
 
         let headers = response
             .headers
@@ -178,6 +199,17 @@ impl ResponseContent {
         response
     }
 
+    /// The body's bytes, as received after decompression.
+    pub(super) fn body(&self) -> &[u8] {
+        match &self.preview {
+            Some(Preview::Image(image)) => image.bytes(),
+            Some(Preview::Pdf(bytes)) => bytes,
+            // The text took over the bytes it reads as.
+            _ if self.http().body.is_empty() => self.raw.as_bytes(),
+            _ => &self.http().body,
+        }
+    }
+
     /// What the body is, as the body toolbar names it.
     pub(super) fn label(&self) -> &'static str {
         match &self.preview {
@@ -192,7 +224,7 @@ impl ResponseContent {
                 ImageFormat::Ico => "ICO",
                 ImageFormat::Pnm => "PNM",
             },
-            Some(Preview::Pdf) => "PDF",
+            Some(Preview::Pdf(_)) => "PDF",
             _ if self.binary => "Binary",
             _ => match self.language {
                 "json" => "JSON",
