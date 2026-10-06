@@ -2,6 +2,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+#[cfg(target_os = "linux")]
+mod allocator;
 mod application;
 mod assets;
 mod logs;
