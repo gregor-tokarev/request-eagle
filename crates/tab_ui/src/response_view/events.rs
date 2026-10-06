@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use aho_corasick::AhoCorasick;
 use gpui_kit::base::SelectableText;
@@ -14,7 +14,6 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::ServerSentEvent;
 
 use super::VirtualBody;
-use crate::loading::spinning;
 
 const PREVIEW_CHARS: usize = 200;
 
@@ -512,9 +511,10 @@ impl EventLog {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
         let header = if self.is_open() && self.entries.is_empty() {
             EmptyHeader::new()
-                .media(media.child(spinning(
-                    Icon::new(IconName::LoaderCircle),
+                .media(media.child(Icon::new(IconName::Loader).with_animation(
                     "response-events-waiting",
+                    Animation::new(Duration::from_secs(1)).repeat(),
+                    |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                 )))
                 .title(EmptyTitle::new().child("Waiting for events…"))
         } else {

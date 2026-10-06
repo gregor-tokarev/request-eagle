@@ -20,7 +20,6 @@ mod environments;
 mod flow_editor;
 mod grpc_draft;
 mod grpc_response;
-mod loading;
 mod request_draft;
 mod request_sent;
 mod request_settings;

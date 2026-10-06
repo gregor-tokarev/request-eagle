@@ -12,7 +12,6 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{GrpcError, GrpcEvent, GrpcFailure, GrpcStatus, MethodKind, ScriptReport};
 
 use crate::actions::SendRequest;
-use crate::loading::spinning;
 use crate::response_view::script_results;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -453,9 +452,10 @@ impl GrpcResponse {
                 };
 
                 EmptyHeader::new()
-                    .media(media.child(spinning(
-                        Icon::new(IconName::LoaderCircle),
+                    .media(media.child(Icon::new(IconName::Loader).with_animation(
                         "grpc-response-loading",
+                        Animation::new(Duration::from_secs(1)).repeat(),
+                        |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                     )))
                     .title(EmptyTitle::new().child(title))
             }

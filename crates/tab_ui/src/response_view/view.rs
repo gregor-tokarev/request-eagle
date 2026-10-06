@@ -15,7 +15,6 @@ use super::content::ResponseContent;
 use super::events::EventLog;
 use super::scripts::script_results;
 use crate::actions::SendRequest;
-use crate::loading::spinning;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -358,9 +357,10 @@ impl ResponseView {
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
         let header = match &self.state {
             ResponseState::Waiting => EmptyHeader::new()
-                .media(media.child(spinning(
-                    Icon::new(IconName::LoaderCircle),
+                .media(media.child(Icon::new(IconName::Loader).with_animation(
                     "response-loading",
+                    Animation::new(std::time::Duration::from_secs(1)).repeat(),
+                    |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                 )))
                 .title(EmptyTitle::new().child("Sending request…")),
             ResponseState::Failed(message) => EmptyHeader::new()
