@@ -21,8 +21,9 @@ fn table() -> &'static Table {
     })
 }
 
+/// Whether `ch` can continue a JavaScript identifier.
 fn is_identifier(ch: char) -> bool {
-    ch.is_alphanumeric() || matches!(ch, '_' | '$' | '\u{200c}' | '\u{200d}')
+    unicode_ident::is_xid_continue(ch) || matches!(ch, '$' | '\u{200c}' | '\u{200d}')
 }
 
 /// The members to complete at `offset`, when it follows a `pm` path the table
@@ -33,7 +34,7 @@ pub(crate) fn completions(
     phase: ScriptPhase,
 ) -> Option<Vec<CompletionItem>> {
     let before = &source[..offset];
-    if !in_code(before) {
+    if !scan_code(before, |_, _| {}) || !pm_is_global(source) {
         return None;
     }
 
@@ -94,10 +95,40 @@ fn position(source: &str, offset: usize) -> Position {
     )
 }
 
-/// Whether the end of `source` is code, rather than inside a comment or a
-/// string. After a `/` that may start a regular expression, it is left to
-/// TypeScript to tell.
-fn in_code(source: &str) -> bool {
+/// Whether every `pm` in the code of `source` starts a member access, as in
+/// `pm.request`. Otherwise `pm` may name a parameter or a variable, and
+/// TypeScript tells which.
+fn pm_is_global(source: &str) -> bool {
+    // Whether the identifier from `start` to `end`, between the code `before`
+    // and `next` to it, is a `pm` that does not start a member access.
+    let bound = |start: usize, end: usize, before: Option<char>, next: Option<char>| {
+        &source[start..end] == "pm" && before != Some('.') && next != Some('.')
+    };
+    let mut global = true;
+    let mut previous = None;
+    // Where the current identifier starts, and the code before it.
+    let mut word = None;
+
+    let complete = scan_code(source, |index, ch| {
+        if is_identifier(ch) {
+            word.get_or_insert((index, previous));
+        } else if let Some((start, before)) = word.take() {
+            global &= !bound(start, index, before, Some(ch));
+        }
+        previous = Some(ch);
+    });
+    if let Some((start, before)) = word {
+        global &= !bound(start, source.len(), before, None);
+    }
+
+    complete && global
+}
+
+/// Calls `visit` with each character of `source` that is code, rather than a
+/// comment or a string, and returns whether `source` ends in code. After a `/`
+/// that may start a regular expression, it stops and returns false, leaving
+/// the rest to TypeScript.
+fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> bool {
     enum State {
         Code,
         LineComment,
@@ -110,9 +141,11 @@ fn in_code(source: &str) -> bool {
     // `${…}` substitution.
     let mut templates: Vec<usize> = Vec::new();
     let mut in_template_text = false;
-    let mut chars = source.chars().peekable();
+    let mut chars = source.char_indices().peekable();
 
-    while let Some(ch) = chars.next() {
+    while let Some((index, ch)) = chars.next() {
+        let next = chars.peek().map(|(_, next)| *next);
+
         if in_template_text {
             match ch {
                 '\\' => {
@@ -122,7 +155,7 @@ fn in_code(source: &str) -> bool {
                     templates.pop();
                     in_template_text = false;
                 }
-                '$' if chars.peek() == Some(&'{') => {
+                '$' if next == Some('{') => {
                     chars.next();
                     in_template_text = false;
                 }
@@ -133,8 +166,8 @@ fn in_code(source: &str) -> bool {
 
         match state {
             State::Code => match ch {
-                '/' if chars.peek() == Some(&'/') => state = State::LineComment,
-                '/' if chars.peek() == Some(&'*') => {
+                '/' if next == Some('/') => state = State::LineComment,
+                '/' if next == Some('*') => {
                     chars.next();
                     state = State::BlockComment;
                 }
@@ -148,13 +181,17 @@ fn in_code(source: &str) -> bool {
                     if let Some(depth) = templates.last_mut() {
                         *depth += 1;
                     }
+                    visit(index, ch);
                 }
                 '}' => match templates.last_mut() {
                     Some(0) => in_template_text = true,
-                    Some(depth) => *depth -= 1,
-                    None => {}
+                    Some(depth) => {
+                        *depth -= 1;
+                        visit(index, ch);
+                    }
+                    None => visit(index, ch),
                 },
-                _ => {}
+                _ => visit(index, ch),
             },
             State::LineComment => {
                 if ch == '\n' {
@@ -162,7 +199,7 @@ fn in_code(source: &str) -> bool {
                 }
             }
             State::BlockComment => {
-                if ch == '*' && chars.peek() == Some(&'/') {
+                if ch == '*' && next == Some('/') {
                     chars.next();
                     state = State::Code;
                 }

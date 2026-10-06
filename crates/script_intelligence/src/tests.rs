@@ -819,6 +819,12 @@ fn pm_members_complete_as_typescript_does_without_it() {
         ),
         ("const text = `${pm.envi|}`;", ScriptPhase::PreRequest),
         ("pm.message.|", ScriptPhase::OnMessage),
+        // A combining mark continues the identifier the edit replaces.
+        ("pm.environment.se|x\u{301}t", ScriptPhase::PreRequest),
+        (
+            "// a pm token\nconst name = 'pm';\npm.variables.|",
+            ScriptPhase::PreRequest,
+        ),
     ] {
         let (source, offset) = marked(source);
         let table = members::completions(&source, offset, phase).expect(&source);
@@ -838,6 +844,11 @@ fn pm_members_complete_as_typescript_does_without_it() {
         "pm.environment.get('name').|",
         "pm.unknown.|",
         "const half = total / 2; pm.|",
+        // A local `pm` is TypeScript's to resolve.
+        "function inspect(pm = {custom: 1}) { pm.cu| }",
+        "const pm = {custom: 1};\npm.|",
+        "items.map(pm => pm.|)",
+        "pm.|\nconst {pm} = api;",
     ] {
         let (source, offset) = marked(source);
         assert!(

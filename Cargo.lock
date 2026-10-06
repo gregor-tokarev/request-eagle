@@ -7642,6 +7642,7 @@ dependencies = [
  "rquickjs",
  "serde_json",
  "smol",
+ "unicode-ident",
 ]
 
 [[package]]
