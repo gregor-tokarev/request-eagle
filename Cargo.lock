@@ -2919,7 +2919,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2958,7 +2958,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3008,7 +3008,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3051,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.0"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "anyhow",
  "gpui-pre",
@@ -3217,7 +3217,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-linux"
 version = "0.3.7"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3263,7 +3263,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.7"
-source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc#81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc"
+source = "git+https://github.com/gregor-tokarev/gpui-kit?rev=7398d394d83ea91c75390bc297795d762c377fba#7398d394d83ea91c75390bc297795d762c377fba"
 dependencies = [
  "accesskit",
  "accesskit_macos",

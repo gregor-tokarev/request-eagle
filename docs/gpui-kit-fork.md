@@ -6,8 +6,8 @@ platform crates. GPUI Kit's own changes touch ten files:
 
 - Upstream tag: `v0.7.0`, commit `0c830f4d257e69fdd17200650533ab4ca9a40cc0`.
 - Fork branch: [`request-eagle/patches-0.7.0`](https://github.com/gregor-tokarev/gpui-kit/tree/request-eagle/patches-0.7.0),
-  pinned at [`81c79c8f`](https://github.com/gregor-tokarev/gpui-kit/commit/81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc).
-- All changes: [`0c830f4d...81c79c8f`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...81c79c8fb85b7b7b1aeb449fa9a7b466762c5fdc).
+  pinned at [`7398d394`](https://github.com/gregor-tokarev/gpui-kit/commit/7398d394d83ea91c75390bc297795d762c377fba).
+- All changes: [`0c830f4d...7398d394`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...7398d394d83ea91c75390bc297795d762c377fba).
 - Completion changes: [`4eb43a09`](https://github.com/gregor-tokarev/gpui-kit/commit/4eb43a09ed12cedb409a826d055678164a28bae8), [`9b588e02`](https://github.com/gregor-tokarev/gpui-kit/commit/9b588e027112fadcc00ccd979e01437402e8a2e0) and [`6aa23423`](https://github.com/gregor-tokarev/gpui-kit/commit/6aa2342323f92d4af2b026b294da7422e8d98389).
 - Query reuse: [`55ed1bb5`](https://github.com/gregor-tokarev/gpui-kit/commit/55ed1bb5b4afa407ca6fb195003820ae0327c309).
 - Vim cursor support: [`cc673b8f`](https://github.com/gregor-tokarev/gpui-kit/commit/cc673b8f9c51aba0cd912078f52699032c44245c) and [`e9affedd`](https://github.com/gregor-tokarev/gpui-kit/commit/e9affedd20e6bc04f7a9412f0e6491fd10672ce3).
@@ -17,7 +17,8 @@ platform crates. GPUI Kit's own changes touch ten files:
   [`291bd0c3`](https://github.com/gregor-tokarev/gpui-kit/commit/291bd0c3ca2181ce88baeea2320185568d7a27fe)
   adds the published crates unchanged under `patches/`, and
   [`c113cdd1`](https://github.com/gregor-tokarev/gpui-kit/commit/c113cdd18491183a8ad00d869ebf775625667e90)
-  patches them.
+  and [`7398d394`](https://github.com/gregor-tokarev/gpui-kit/commit/7398d394d83ea91c75390bc297795d762c377fba)
+  patch them.
 
 The fork branch must stay on GitHub: Cargo fetches the pinned commit from it.
 
