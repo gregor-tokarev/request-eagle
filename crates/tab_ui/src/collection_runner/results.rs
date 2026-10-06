@@ -11,6 +11,7 @@ use super::detail::empty_state;
 use super::run::{Outcome, RunRequest, RunResult, count_label, duration_label, failure_summary};
 use super::runner::{CollectionRunner, Run, RunStatus};
 use super::setup::wrapped_tooltip;
+use crate::loading::spinning;
 use crate::response_view::{badge, log_line, status_color};
 
 /// Which results the list shows, as Postman's result tabs choose them.
@@ -576,13 +577,10 @@ impl CollectionRunner {
             None
         } else if run.results.is_empty() && run.is_active() {
             Some(empty_state(
-                Icon::new(IconName::Loader)
-                    .text_color(theme.muted_foreground)
-                    .with_animation(
-                        "run-first-request",
-                        Animation::new(std::time::Duration::from_secs(1)).repeat(),
-                        |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
-                    ),
+                spinning(
+                    Icon::new(IconName::LoaderCircle).text_color(theme.muted_foreground),
+                    "run-first-request",
+                ),
                 "Sending the first request",
                 run.in_flight().map(|request| request.name.clone()),
             ))

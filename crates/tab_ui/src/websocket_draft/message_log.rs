@@ -18,6 +18,7 @@ use request::{
 
 use super::draft::{ConnectionState, WebSocketDraft};
 use crate::actions::SendRequest;
+use crate::loading::spinning;
 use crate::response_view::{ResponseBodyEditor, VirtualBody, exceeds_editor_limit, hex_dump};
 
 /// A stream can run for hours. Keep the newest messages within both limits.
@@ -697,10 +698,9 @@ impl MessageLog {
         let connection = self.connection(cx);
         let header = if connection == ConnectionState::Connecting {
             EmptyHeader::new()
-                .media(media.child(Icon::new(IconName::Loader).with_animation(
+                .media(media.child(spinning(
+                    Icon::new(IconName::LoaderCircle),
                     "websocket-connecting",
-                    Animation::new(std::time::Duration::from_secs(1)).repeat(),
-                    |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                 )))
                 .title(EmptyTitle::new().child("Connecting…"))
         } else if !self.entries.is_empty() {
