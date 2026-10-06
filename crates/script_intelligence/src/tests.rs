@@ -825,6 +825,8 @@ fn pm_members_complete_as_typescript_does_without_it() {
             "// a pm token\nconst name = 'pm';\npm.variables.|",
             ScriptPhase::PreRequest,
         ),
+        // A comment can end the script without a line break.
+        ("pm.environment.se|;\n// end", ScriptPhase::PreRequest),
     ] {
         let (source, offset) = marked(source);
         let table = members::completions(&source, offset, phase).expect(&source);

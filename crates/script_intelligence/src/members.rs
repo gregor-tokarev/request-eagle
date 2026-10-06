@@ -34,7 +34,7 @@ pub(crate) fn completions(
     phase: ScriptPhase,
 ) -> Option<Vec<CompletionItem>> {
     let before = &source[..offset];
-    if !scan_code(before, |_, _| {}) || !pm_is_global(source) {
+    if scan_code(before, |_, _| {}) != Some(true) || !pm_is_global(source) {
         return None;
     }
 
@@ -109,7 +109,7 @@ fn pm_is_global(source: &str) -> bool {
     // Where the current identifier starts, and the code before it.
     let mut word = None;
 
-    let complete = scan_code(source, |index, ch| {
+    let scanned = scan_code(source, |index, ch| {
         if is_identifier(ch) {
             word.get_or_insert((index, previous));
         } else if let Some((start, before)) = word.take() {
@@ -121,14 +121,14 @@ fn pm_is_global(source: &str) -> bool {
         global &= !bound(start, source.len(), before, None);
     }
 
-    complete && global
+    scanned.is_some() && global
 }
 
 /// Calls `visit` with each character of `source` that is code, rather than a
 /// comment or a string, and returns whether `source` ends in code. After a `/`
-/// that may start a regular expression, it stops and returns false, leaving
+/// that may start a regular expression, it stops and returns `None`, leaving
 /// the rest to TypeScript.
-fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> bool {
+fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> Option<bool> {
     enum State {
         Code,
         LineComment,
@@ -171,7 +171,7 @@ fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> bool {
                     chars.next();
                     state = State::BlockComment;
                 }
-                '/' => return false,
+                '/' => return None,
                 '"' | '\'' => state = State::Quoted(ch),
                 '`' => {
                     templates.push(0);
@@ -215,5 +215,5 @@ fn scan_code(source: &str, mut visit: impl FnMut(usize, char)) -> bool {
         }
     }
 
-    matches!(state, State::Code) && !in_template_text
+    Some(matches!(state, State::Code) && !in_template_text)
 }
