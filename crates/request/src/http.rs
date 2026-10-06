@@ -7,7 +7,7 @@ use std::{
 use bytes::Bytes;
 use http_client::http::{
     HeaderMap,
-    header::{COOKIE, HOST},
+    header::{CONTENT_LENGTH, COOKIE, HOST},
     uri::Authority,
 };
 use http_client::{Request, Url};
@@ -244,7 +244,7 @@ impl HttpExecutor {
             ))
         });
 
-        let (body, encoded_response_body_bytes) = match event_stream {
+        let (mut body, encoded_response_body_bytes) = match event_stream {
             Some((events, decoder)) => {
                 events
                     .read(&parts, stream, decoder, self.max_response_bytes)
@@ -252,6 +252,17 @@ impl HttpExecutor {
             }
             None => {
                 let mut body = Vec::new();
+                // Growing by doubling while reading would touch nearly twice
+                // the memory a large body needs. The extra byte lets the read
+                // find the end without growing a buffer that is already full.
+                if let Some(length) = content_length(&parts.headers).filter(|_| has_body) {
+                    let length = self
+                        .max_response_bytes
+                        .map_or(length, |limit| length.min(limit));
+                    if let Ok(capacity) = usize::try_from(length.saturating_add(1)) {
+                        let _ = body.try_reserve_exact(capacity);
+                    }
+                }
 
                 match self.max_response_bytes {
                     Some(limit_bytes) => {
@@ -287,6 +298,8 @@ impl HttpExecutor {
                 }
             }
         };
+        // Decoders also grow their output as they go.
+        body.shrink_to_fit();
         let download = received.elapsed();
         let response_header_bytes = parts
             .headers
@@ -429,4 +442,15 @@ fn validate_host(headers: &HeaderMap) -> Result<Option<Authority>, ExecutionErro
     }
 
     Ok(Some(authority))
+}
+
+/// The body length the server announced, before any content coding is undone.
+fn content_length(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get(CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }

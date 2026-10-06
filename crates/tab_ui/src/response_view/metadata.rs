@@ -20,7 +20,7 @@ impl ResponseView {
         let response = content.http();
         let status = response.status;
         let metrics = response.metrics;
-        let body_bytes = content.omitted_body.unwrap_or(response.body.len());
+        let body_bytes = content.omitted_body.unwrap_or(content.body().len());
         let downloaded_body_bytes = metrics.encoded_response_body_bytes.unwrap_or(body_bytes);
         let processing = content.processing;
         let elapsed = content.execution.elapsed + processing;

@@ -459,6 +459,42 @@ fn measures_waiting_and_download_separately() {
 }
 
 #[test]
+fn large_bodies_keep_no_spare_memory_with_or_without_a_length() {
+    smol::block_on(async {
+        let body = vec![b'x'; 1 << 20];
+        for length in [true, false] {
+            let mut response = b"HTTP/1.1 200 OK\r\nConnection: close\r\n".to_vec();
+            if length {
+                response.extend(format!("Content-Length: {}\r\n", body.len()).bytes());
+            }
+            response.extend(b"\r\n");
+            response.extend(&body);
+            let (url, server) = serve(response).await;
+
+            let execution = executor()
+                .execute(
+                    HttpRequest {
+                        path: url,
+                        ..HttpRequest::default()
+                    },
+                    no_variables(),
+                )
+                .await
+                .unwrap();
+            server.await;
+
+            let Response::Http(response) = &execution.response;
+            assert_eq!(response.body, body, "length: {length}");
+            assert_eq!(
+                response.body.capacity(),
+                response.body.len(),
+                "length: {length}"
+            );
+        }
+    });
+}
+
+#[test]
 fn executes_all_existing_methods() {
     smol::block_on(async {
         let executor = executor();

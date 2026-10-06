@@ -12,7 +12,7 @@ impl ResponseView {
             return;
         };
 
-        let body = content.http().body.clone();
+        let body = content.body().to_vec();
         let response = self.responses;
         let directory = std::env::home_dir()
             .map(|home| home.join("Downloads"))
@@ -85,7 +85,7 @@ impl ResponseContent {
     fn extension(&self) -> &'static str {
         match &self.preview {
             Some(Preview::Image(image)) => image.format.extension(),
-            Some(Preview::Pdf) => "pdf",
+            Some(Preview::Pdf(_)) => "pdf",
             _ if self.binary => "bin",
             _ => match self.language {
                 "json" => "json",

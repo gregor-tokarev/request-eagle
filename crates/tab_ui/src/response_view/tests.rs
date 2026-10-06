@@ -37,7 +37,7 @@ fn response_formatting_preserves_the_entire_body() {
     assert_eq!(json.raw, "{\"a\":1}");
     assert_eq!(json.pretty.as_deref(), Some("{\n  \"a\": 1\n}"));
     assert_eq!(json.language, "json");
-    assert_eq!(json.http().body, b"{\"a\":1}");
+    assert_eq!(json.body(), b"{\"a\":1}");
     assert_eq!(response(b"<html></html>", "text/html").language, "html");
     assert_eq!(response(b"1.2.3.4", "text/plain").language, "text");
     assert!(response(b"{broken", "application/json").pretty.is_none());
@@ -46,7 +46,7 @@ fn response_formatting_preserves_the_entire_body() {
     let large = response(oversized.as_bytes(), "text/plain");
     assert_eq!(large.raw.as_ref(), oversized);
     assert_eq!(large.raw.len(), 1_048_577);
-    assert_eq!(large.http().body.len(), 1_048_577);
+    assert_eq!(large.body().len(), 1_048_577);
 }
 
 #[test]
@@ -272,6 +272,39 @@ fn bodies_are_recognized_by_media_type_and_signature() {
             .modes()
             .contains(&BodyMode::Preview)
     );
+}
+
+#[test]
+fn bodies_are_kept_once_and_read_back_unchanged() {
+    // UTF-8 text is the body: the text and the bytes are the same memory.
+    let json = response(b"{\"a\":1}", "application/json");
+    assert_eq!(json.body(), b"{\"a\":1}");
+    assert_eq!(json.body().as_ptr(), json.raw.as_ptr());
+    assert!(json.http().body.is_empty());
+
+    // Text decoded from another charset keeps the bytes as received.
+    let latin = response(b"caf\xe9", "text/plain; charset=ISO-8859-1");
+    assert_eq!(latin.raw, "caf\u{e9}");
+    assert_eq!(latin.body(), b"caf\xe9");
+
+    let image = bmp(2, 2);
+    let previewed = response(&image, "image/bmp");
+    assert_eq!(previewed.body(), image);
+    assert!(previewed.http().body.is_empty());
+
+    let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+    let drawing = response(svg, "image/svg+xml");
+    assert_eq!(drawing.body(), svg);
+    assert_eq!(drawing.raw.as_bytes(), svg);
+
+    let document = pdf(1);
+    let pages = response(&document, "application/pdf");
+    assert_eq!(pages.body(), document);
+    assert!(pages.http().body.is_empty());
+
+    let bytes = [0, 1, 2, 255];
+    assert_eq!(with_headers(&bytes, &[]).body(), bytes);
+    assert!(response(b"", "application/json").body().is_empty());
 }
 
 #[test]
