@@ -74,7 +74,12 @@ impl ScriptSignature {
             cx.background_executor()
                 .timer(Duration::from_millis(75))
                 .await;
-            let help = script_intelligence::signature_help(text.to_string(), offset, phase).await;
+            // Moving the caret does not load TypeScript; typing does.
+            let help = if script_intelligence::is_running() {
+                script_intelligence::signature_help(text.to_string(), offset, phase).await
+            } else {
+                Ok(None)
+            };
             let _ = this.update(cx, |this, cx| {
                 let current = this.snapshot.as_ref().is_some_and(|(current, cursor)| {
                     *cursor == offset && ropes_are_instances(current, &text)

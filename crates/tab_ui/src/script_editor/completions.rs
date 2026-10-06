@@ -113,6 +113,11 @@ impl HoverProvider for ScriptCompletions {
         _: &mut Window,
         cx: &mut App,
     ) -> Task<anyhow::Result<Option<Hover>>> {
+        // Hovering over a script does not load TypeScript; typing does.
+        if !script_intelligence::is_running() {
+            return Task::ready(Ok(None));
+        }
+
         let text = text.clone();
         let phase = self.phase;
         let editor = self.editor.clone();

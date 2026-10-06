@@ -1,0 +1,4946 @@
+{
+  "GrpcAfterResponseAPI": {
+    "pm": [
+      {
+        "label": "collectionVariables",
+        "kind": 10,
+        "detail": "CollectionVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "crypto",
+        "kind": 10,
+        "detail": "Crypto",
+        "sortText": "11"
+      },
+      {
+        "label": "encoding",
+        "kind": 10,
+        "detail": "Encoding",
+        "sortText": "11"
+      },
+      {
+        "label": "environment",
+        "kind": 10,
+        "detail": "EnvironmentVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "expect",
+        "kind": 2,
+        "detail": "expect(actual: unknown, message?: string): Assertion",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Start a fluent assertion; an optional message prefixes assertion failures."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "globals",
+        "kind": 10,
+        "detail": "GlobalVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "request",
+        "kind": 10,
+        "detail": "GrpcSentRequest",
+        "sortText": "11"
+      },
+      {
+        "label": "response",
+        "kind": 10,
+        "detail": "GrpcResponse",
+        "sortText": "11"
+      },
+      {
+        "label": "schema",
+        "kind": 10,
+        "detail": "SchemaAPI",
+        "sortText": "11"
+      },
+      {
+        "label": "sendRequest",
+        "kind": 2,
+        "detail": "sendRequest(config: string | RequestOptions): Promise<Response> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Send an additional HTTP request using the current execution settings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "test",
+        "kind": 2,
+        "detail": "test(name: string, callback: () => PromiseLike<unknown>): Promise<void> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Run an async test. A rejected promise is reported as a failed test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "variables",
+        "kind": 10,
+        "detail": "LocalVariables",
+        "sortText": "11"
+      }
+    ],
+    "pm.collectionVariables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all collection variables visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the collection's variables from its environment.toml, with session changes."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing its file.\nThe active global environment still overrides it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including the value in environment.toml and globals."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.crypto": [
+      {
+        "label": "hmacSha256",
+        "kind": 2,
+        "detail": "hmacSha256(secret: string, text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "HMAC-SHA256, returned as lowercase hexadecimal. Each input is limited to 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "randomBytes",
+        "kind": 2,
+        "detail": "randomBytes(count: number): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return secure random bytes as hexadecimal, with two characters per byte."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sha256",
+        "kind": 2,
+        "detail": "sha256(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "SHA-256 of UTF-8 text, returned as lowercase hexadecimal. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.encoding": [
+      {
+        "label": "base64Decode",
+        "kind": 2,
+        "detail": "base64Decode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode standard Base64 to UTF-8 text. Invalid Base64 or UTF-8 throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64Encode",
+        "kind": 2,
+        "detail": "base64Encode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as standard padded Base64. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlDecode",
+        "kind": 2,
+        "detail": "base64UrlDecode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode padded or unpadded URL-safe Base64 to UTF-8 text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlEncode",
+        "kind": 2,
+        "detail": "base64UrlEncode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as URL-safe Base64 without padding. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.environment": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all environment values visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the active global environment, then the collection's variables."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing a file."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including file values and collection variables."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.globals": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read a value every collection shares for this session."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for requests in every collection. Collection variables and environments override it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "sortText": "11"
+      }
+    ],
+    "pm.request": [
+      {
+        "label": "message",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The composed message as JSON text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "messages",
+        "kind": 10,
+        "detail": "GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The messages sent during the call, up to the latest 8 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "metadata",
+        "kind": 10,
+        "detail": "Metadata",
+        "sortText": "11"
+      },
+      {
+        "label": "methodPath",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The method as package.Service/Method."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "url",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The server address."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.messages": [
+      {
+        "label": "all",
+        "kind": 2,
+        "detail": "all(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the messages into a plain array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "at",
+        "kind": 2,
+        "detail": "at(index: number): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the item located at the specified index."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "concat",
+        "kind": 2,
+        "detail": "concat(...items: ConcatArray<GrpcMessage>[]): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Combines two or more arrays.\nThis method returns a new array without modifying any existing arrays."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "copyWithin",
+        "kind": 2,
+        "detail": "copyWithin(target: number, start: number, end?: number): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the this object after copying a section of the array identified by start and end\nto the same array starting at position target"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "count",
+        "kind": 2,
+        "detail": "count(): number",
+        "sortText": "11"
+      },
+      {
+        "label": "each",
+        "kind": 2,
+        "detail": "each(callback: (message: GrpcMessage, index: number) => void): void",
+        "sortText": "11"
+      },
+      {
+        "label": "entries",
+        "kind": 2,
+        "detail": "entries(): ArrayIterator<[number, GrpcMessage]>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of key, value pairs for every entry in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "every",
+        "kind": 2,
+        "detail": "every<S>(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => value is S, thisArg?: any): this is S[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether all the members of an array satisfy the specified test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "fill",
+        "kind": 2,
+        "detail": "fill(value: GrpcMessage, start?: number, end?: number): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Changes all array elements from `start` to `end` index to a static `value` and returns the modified array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "filter",
+        "kind": 2,
+        "detail": "filter<S extends GrpcMessage>(predicate: (message: GrpcMessage, index: number, messages: GrpcMessage[]) => message is S): S[] (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the elements of an array that meet the condition specified in a callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "find",
+        "kind": 2,
+        "detail": "find<S>(predicate: (value: GrpcMessage, index: number, obj: GrpcMessage[]) => value is S, thisArg?: any): S | undefined (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the value of the first element in the array where predicate is true, and undefined\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findIndex",
+        "kind": 2,
+        "detail": "findIndex(predicate: (value: GrpcMessage, index: number, obj: GrpcMessage[]) => unknown, thisArg?: any): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the first element in the array where predicate is true, and -1\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findLast",
+        "kind": 2,
+        "detail": "findLast<S>(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => value is S, thisArg?: any): S | undefined (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the value of the last element in the array where predicate is true, and undefined\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findLastIndex",
+        "kind": 2,
+        "detail": "findLastIndex(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => unknown, thisArg?: any): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the last element in the array where predicate is true, and -1\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "flat",
+        "kind": 2,
+        "detail": "flat<A, D>(this: A, depth?: D | undefined): FlatArray<A, D>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a new array with all sub-array elements concatenated into it recursively up to the\nspecified depth."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "flatMap",
+        "kind": 2,
+        "detail": "flatMap<U, This>(callback: (this: This, value: GrpcMessage, index: number, array: GrpcMessage[]) => U | readonly U[], thisArg?: This | undefined): U[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls a defined callback function on each element of an array. Then, flattens the result into\na new array.\nThis is identical to a map followed by flat with depth 1."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "forEach",
+        "kind": 2,
+        "detail": "forEach(callbackfn: (value: GrpcMessage, index: number, array: GrpcMessage[]) => void, thisArg?: any): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Performs the specified action for each element in an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "idx",
+        "kind": 2,
+        "detail": "idx(index: number): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the message at an index; negative indexes count from the end."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "includes",
+        "kind": 2,
+        "detail": "includes(searchElement: GrpcMessage, fromIndex?: number): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether an array includes a certain element, returning true or false as appropriate."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "indexOf",
+        "kind": 2,
+        "detail": "indexOf(searchElement: GrpcMessage, fromIndex?: number): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the first occurrence of a value in an array, or -1 if it is not present."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "join",
+        "kind": 2,
+        "detail": "join(separator?: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Adds all the elements of an array into a string, separated by the specified separator string."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "keys",
+        "kind": 2,
+        "detail": "keys(): ArrayIterator<number>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of keys in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "lastIndexOf",
+        "kind": 2,
+        "detail": "lastIndexOf(searchElement: GrpcMessage, fromIndex?: number): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the last occurrence of a specified value in an array, or -1 if it is not present."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "length",
+        "kind": 10,
+        "detail": "number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Gets or sets the length of the array. This is a number one higher than the highest index in the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "map",
+        "kind": 2,
+        "detail": "map<U>(callbackfn: (value: GrpcMessage, index: number, array: GrpcMessage[]) => U, thisArg?: any): U[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls a defined callback function on each element of an array, and returns an array that contains the results."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "pop",
+        "kind": 2,
+        "detail": "pop(): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes the last element from an array and returns it.\nIf the array is empty, undefined is returned and the array is not modified."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "push",
+        "kind": 2,
+        "detail": "push(...items: GrpcMessage[]): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Appends new elements to the end of an array, and returns the new length of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reduce",
+        "kind": 2,
+        "detail": "reduce(callbackfn: (previousValue: GrpcMessage, currentValue: GrpcMessage, currentIndex: number, array: GrpcMessage[]) => GrpcMessage): GrpcMessage (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls the specified callback function for all the elements in an array. The return value of the callback function is the accumulated result, and is provided as an argument in the next call to the callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reduceRight",
+        "kind": 2,
+        "detail": "reduceRight(callbackfn: (previousValue: GrpcMessage, currentValue: GrpcMessage, currentIndex: number, array: GrpcMessage[]) => GrpcMessage): GrpcMessage (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls the specified callback function for all the elements in an array, in descending order. The return value of the callback function is the accumulated result, and is provided as an argument in the next call to the callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reverse",
+        "kind": 2,
+        "detail": "reverse(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Reverses the elements in an array in place.\nThis method mutates the array and returns a reference to the same array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "shift",
+        "kind": 2,
+        "detail": "shift(): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes the first element from an array and returns it.\nIf the array is empty, undefined is returned and the array is not modified."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "slice",
+        "kind": 2,
+        "detail": "slice(start?: number, end?: number): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of a section of an array.\nFor both start and end, a negative index can be used to indicate an offset from the end of the array.\nFor example, -2 refers to the second to last element of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "some",
+        "kind": 2,
+        "detail": "some(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => unknown, thisArg?: any): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether the specified callback function returns true for any element of an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sort",
+        "kind": 2,
+        "detail": "sort(compareFn?: ((a: GrpcMessage, b: GrpcMessage) => number) | undefined): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Sorts an array in place.\nThis method mutates the array and returns a reference to the same array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "splice",
+        "kind": 2,
+        "detail": "splice(start: number, deleteCount?: number): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes elements from an array and, if necessary, inserts new elements in their place, returning the deleted elements."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "to",
+        "kind": 10,
+        "detail": "GrpcMessageAssertions",
+        "sortText": "11"
+      },
+      {
+        "label": "toLocaleString",
+        "kind": 2,
+        "detail": "toLocaleString(): string (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a string representation of an array. The elements are converted to string using their toLocaleString methods."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toReversed",
+        "kind": 2,
+        "detail": "toReversed(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of an array with its elements reversed."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toSorted",
+        "kind": 2,
+        "detail": "toSorted(compareFn?: ((a: GrpcMessage, b: GrpcMessage) => number) | undefined): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of an array with its elements sorted."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toSpliced",
+        "kind": 2,
+        "detail": "toSpliced(start: number, deleteCount: number, ...items: GrpcMessage[]): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copies an array and removes elements and, if necessary, inserts new elements in their place. Returns the copied array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toString",
+        "kind": 2,
+        "detail": "toString(): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a string representation of an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unshift",
+        "kind": 2,
+        "detail": "unshift(...items: GrpcMessage[]): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Inserts new elements at the start of an array, and returns the new length of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "values",
+        "kind": 2,
+        "detail": "values(): ArrayIterator<GrpcMessage>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of values in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "with",
+        "kind": 2,
+        "detail": "with(index: number, value: GrpcMessage): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copies an array, then overwrites the value at the provided index with the\ngiven value. If the index is negative, then it replaces from the end\nof the array."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.messages.to": [
+      {
+        "label": "have",
+        "kind": 10,
+        "detail": "{ property(path: string, value?: unknown): void; jsonSchema(schema: JSONSchema): void; }",
+        "sortText": "11"
+      },
+      {
+        "label": "include",
+        "kind": 2,
+        "detail": "include(fields: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that a message has these fields. Nested objects match the fields they name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "not",
+        "kind": 10,
+        "detail": "{ include(fields: unknown): void; }",
+        "sortText": "11"
+      }
+    ],
+    "pm.request.metadata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: MetadataKey): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: MetadataKey): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: MetadataKey): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<MetadataKey>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response": [
+      {
+        "label": "code",
+        "kind": 10,
+        "detail": "number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The status code: 0 for OK."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "messages",
+        "kind": 10,
+        "detail": "GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The received messages, up to the latest 8 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "metadata",
+        "kind": 10,
+        "detail": "Metadata",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The server's initial metadata, its response headers."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "responseTime",
+        "kind": 10,
+        "detail": "number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Milliseconds from invoking until the status arrived."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "status",
+        "kind": 10,
+        "detail": "GrpcStatusName",
+        "sortText": "11"
+      },
+      {
+        "label": "statusMessage",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The server's status message, or an empty string."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "to",
+        "kind": 10,
+        "detail": "{ readonly have: GrpcResponseHaveAssertions; readonly be: GrpcResponseBeAssertions; }",
+        "sortText": "11"
+      },
+      {
+        "label": "trailers",
+        "kind": 10,
+        "detail": "Metadata",
+        "sortText": "11"
+      }
+    ],
+    "pm.response.messages": [
+      {
+        "label": "all",
+        "kind": 2,
+        "detail": "all(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the messages into a plain array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "at",
+        "kind": 2,
+        "detail": "at(index: number): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the item located at the specified index."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "concat",
+        "kind": 2,
+        "detail": "concat(...items: ConcatArray<GrpcMessage>[]): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Combines two or more arrays.\nThis method returns a new array without modifying any existing arrays."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "copyWithin",
+        "kind": 2,
+        "detail": "copyWithin(target: number, start: number, end?: number): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the this object after copying a section of the array identified by start and end\nto the same array starting at position target"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "count",
+        "kind": 2,
+        "detail": "count(): number",
+        "sortText": "11"
+      },
+      {
+        "label": "each",
+        "kind": 2,
+        "detail": "each(callback: (message: GrpcMessage, index: number) => void): void",
+        "sortText": "11"
+      },
+      {
+        "label": "entries",
+        "kind": 2,
+        "detail": "entries(): ArrayIterator<[number, GrpcMessage]>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of key, value pairs for every entry in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "every",
+        "kind": 2,
+        "detail": "every<S>(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => value is S, thisArg?: any): this is S[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether all the members of an array satisfy the specified test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "fill",
+        "kind": 2,
+        "detail": "fill(value: GrpcMessage, start?: number, end?: number): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Changes all array elements from `start` to `end` index to a static `value` and returns the modified array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "filter",
+        "kind": 2,
+        "detail": "filter<S extends GrpcMessage>(predicate: (message: GrpcMessage, index: number, messages: GrpcMessage[]) => message is S): S[] (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the elements of an array that meet the condition specified in a callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "find",
+        "kind": 2,
+        "detail": "find<S>(predicate: (value: GrpcMessage, index: number, obj: GrpcMessage[]) => value is S, thisArg?: any): S | undefined (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the value of the first element in the array where predicate is true, and undefined\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findIndex",
+        "kind": 2,
+        "detail": "findIndex(predicate: (value: GrpcMessage, index: number, obj: GrpcMessage[]) => unknown, thisArg?: any): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the first element in the array where predicate is true, and -1\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findLast",
+        "kind": 2,
+        "detail": "findLast<S>(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => value is S, thisArg?: any): S | undefined (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the value of the last element in the array where predicate is true, and undefined\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "findLastIndex",
+        "kind": 2,
+        "detail": "findLastIndex(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => unknown, thisArg?: any): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the last element in the array where predicate is true, and -1\notherwise."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "flat",
+        "kind": 2,
+        "detail": "flat<A, D>(this: A, depth?: D | undefined): FlatArray<A, D>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a new array with all sub-array elements concatenated into it recursively up to the\nspecified depth."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "flatMap",
+        "kind": 2,
+        "detail": "flatMap<U, This>(callback: (this: This, value: GrpcMessage, index: number, array: GrpcMessage[]) => U | readonly U[], thisArg?: This | undefined): U[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls a defined callback function on each element of an array. Then, flattens the result into\na new array.\nThis is identical to a map followed by flat with depth 1."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "forEach",
+        "kind": 2,
+        "detail": "forEach(callbackfn: (value: GrpcMessage, index: number, array: GrpcMessage[]) => void, thisArg?: any): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Performs the specified action for each element in an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "idx",
+        "kind": 2,
+        "detail": "idx(index: number): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the message at an index; negative indexes count from the end."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "includes",
+        "kind": 2,
+        "detail": "includes(searchElement: GrpcMessage, fromIndex?: number): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether an array includes a certain element, returning true or false as appropriate."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "indexOf",
+        "kind": 2,
+        "detail": "indexOf(searchElement: GrpcMessage, fromIndex?: number): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the first occurrence of a value in an array, or -1 if it is not present."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "join",
+        "kind": 2,
+        "detail": "join(separator?: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Adds all the elements of an array into a string, separated by the specified separator string."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "keys",
+        "kind": 2,
+        "detail": "keys(): ArrayIterator<number>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of keys in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "lastIndexOf",
+        "kind": 2,
+        "detail": "lastIndexOf(searchElement: GrpcMessage, fromIndex?: number): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns the index of the last occurrence of a specified value in an array, or -1 if it is not present."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "length",
+        "kind": 10,
+        "detail": "number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Gets or sets the length of the array. This is a number one higher than the highest index in the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "map",
+        "kind": 2,
+        "detail": "map<U>(callbackfn: (value: GrpcMessage, index: number, array: GrpcMessage[]) => U, thisArg?: any): U[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls a defined callback function on each element of an array, and returns an array that contains the results."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "pop",
+        "kind": 2,
+        "detail": "pop(): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes the last element from an array and returns it.\nIf the array is empty, undefined is returned and the array is not modified."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "push",
+        "kind": 2,
+        "detail": "push(...items: GrpcMessage[]): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Appends new elements to the end of an array, and returns the new length of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reduce",
+        "kind": 2,
+        "detail": "reduce(callbackfn: (previousValue: GrpcMessage, currentValue: GrpcMessage, currentIndex: number, array: GrpcMessage[]) => GrpcMessage): GrpcMessage (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls the specified callback function for all the elements in an array. The return value of the callback function is the accumulated result, and is provided as an argument in the next call to the callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reduceRight",
+        "kind": 2,
+        "detail": "reduceRight(callbackfn: (previousValue: GrpcMessage, currentValue: GrpcMessage, currentIndex: number, array: GrpcMessage[]) => GrpcMessage): GrpcMessage (+2 overloads)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Calls the specified callback function for all the elements in an array, in descending order. The return value of the callback function is the accumulated result, and is provided as an argument in the next call to the callback function."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "reverse",
+        "kind": 2,
+        "detail": "reverse(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Reverses the elements in an array in place.\nThis method mutates the array and returns a reference to the same array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "shift",
+        "kind": 2,
+        "detail": "shift(): GrpcMessage | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes the first element from an array and returns it.\nIf the array is empty, undefined is returned and the array is not modified."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "slice",
+        "kind": 2,
+        "detail": "slice(start?: number, end?: number): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of a section of an array.\nFor both start and end, a negative index can be used to indicate an offset from the end of the array.\nFor example, -2 refers to the second to last element of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "some",
+        "kind": 2,
+        "detail": "some(predicate: (value: GrpcMessage, index: number, array: GrpcMessage[]) => unknown, thisArg?: any): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Determines whether the specified callback function returns true for any element of an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sort",
+        "kind": 2,
+        "detail": "sort(compareFn?: ((a: GrpcMessage, b: GrpcMessage) => number) | undefined): GrpcMessageList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Sorts an array in place.\nThis method mutates the array and returns a reference to the same array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "splice",
+        "kind": 2,
+        "detail": "splice(start: number, deleteCount?: number): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Removes elements from an array and, if necessary, inserts new elements in their place, returning the deleted elements."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "to",
+        "kind": 10,
+        "detail": "GrpcMessageAssertions",
+        "sortText": "11"
+      },
+      {
+        "label": "toLocaleString",
+        "kind": 2,
+        "detail": "toLocaleString(): string (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a string representation of an array. The elements are converted to string using their toLocaleString methods."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toReversed",
+        "kind": 2,
+        "detail": "toReversed(): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of an array with its elements reversed."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toSorted",
+        "kind": 2,
+        "detail": "toSorted(compareFn?: ((a: GrpcMessage, b: GrpcMessage) => number) | undefined): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a copy of an array with its elements sorted."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toSpliced",
+        "kind": 2,
+        "detail": "toSpliced(start: number, deleteCount: number, ...items: GrpcMessage[]): GrpcMessage[] (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copies an array and removes elements and, if necessary, inserts new elements in their place. Returns the copied array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toString",
+        "kind": 2,
+        "detail": "toString(): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns a string representation of an array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unshift",
+        "kind": 2,
+        "detail": "unshift(...items: GrpcMessage[]): number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Inserts new elements at the start of an array, and returns the new length of the array."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "values",
+        "kind": 2,
+        "detail": "values(): ArrayIterator<GrpcMessage>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Returns an iterable of values in the array"
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "with",
+        "kind": 2,
+        "detail": "with(index: number, value: GrpcMessage): GrpcMessage[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copies an array, then overwrites the value at the provided index with the\ngiven value. If the index is negative, then it replaces from the end\nof the array."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.messages.to": [
+      {
+        "label": "have",
+        "kind": 10,
+        "detail": "{ property(path: string, value?: unknown): void; jsonSchema(schema: JSONSchema): void; }",
+        "sortText": "11"
+      },
+      {
+        "label": "include",
+        "kind": 2,
+        "detail": "include(fields: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that a message has these fields. Nested objects match the fields they name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "not",
+        "kind": 10,
+        "detail": "{ include(fields: unknown): void; }",
+        "sortText": "11"
+      }
+    ],
+    "pm.response.metadata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: MetadataKey): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: MetadataKey): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: MetadataKey): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<MetadataKey>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to": [
+      {
+        "label": "be",
+        "kind": 10,
+        "detail": "GrpcResponseBeAssertions",
+        "sortText": "11"
+      },
+      {
+        "label": "have",
+        "kind": 10,
+        "detail": "GrpcResponseHaveAssertions",
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to.be": [
+      {
+        "label": "error",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a status other than OK."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "ok",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert status 0 OK."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to.have": [
+      {
+        "label": "message",
+        "kind": 2,
+        "detail": "message(expected: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that a received message deeply equals this one."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "metadata",
+        "kind": 2,
+        "detail": "metadata(key: MetadataKey, value?: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that the server sent this metadata; optionally compare its first value."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "status",
+        "kind": 2,
+        "detail": "status(codeOrName: number | GrpcStatusName): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert the status code or name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "statusCode",
+        "kind": 2,
+        "detail": "statusCode(code: number): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert the status code, such as 0 for OK."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "trailer",
+        "kind": 2,
+        "detail": "trailer(key: MetadataKey, value?: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that the server sent this trailer; optionally compare its first value."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.trailers": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: MetadataKey): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: MetadataKey): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: MetadataKey): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<MetadataKey>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.schema": [
+      {
+        "label": "validate",
+        "kind": 2,
+        "detail": "validate(data: unknown, schema: JSONSchema): SchemaValidation",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Validate JSON data. Invalid or unsupported schemas throw; mismatches return valid: false."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.variables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all local overrides, leaving stored values visible."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the local override first, then the environment, collection variables and globals."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Set an override for this execution, including its post-response phase."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove a local override, revealing its stored value if present."
+        },
+        "sortText": "11"
+      }
+    ]
+  },
+  "GrpcBeforeInvokeAPI": {
+    "pm": [
+      {
+        "label": "collectionVariables",
+        "kind": 10,
+        "detail": "CollectionVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "crypto",
+        "kind": 10,
+        "detail": "Crypto",
+        "sortText": "11"
+      },
+      {
+        "label": "encoding",
+        "kind": 10,
+        "detail": "Encoding",
+        "sortText": "11"
+      },
+      {
+        "label": "environment",
+        "kind": 10,
+        "detail": "EnvironmentVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "execution",
+        "kind": 10,
+        "detail": "{ skipRequest(reason?: string): never; }",
+        "sortText": "11"
+      },
+      {
+        "label": "expect",
+        "kind": 2,
+        "detail": "expect(actual: unknown, message?: string): Assertion",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Start a fluent assertion; an optional message prefixes assertion failures."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "globals",
+        "kind": 10,
+        "detail": "GlobalVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "request",
+        "kind": 10,
+        "detail": "GrpcInvokeRequest",
+        "sortText": "11"
+      },
+      {
+        "label": "schema",
+        "kind": 10,
+        "detail": "SchemaAPI",
+        "sortText": "11"
+      },
+      {
+        "label": "sendRequest",
+        "kind": 2,
+        "detail": "sendRequest(config: string | RequestOptions): Promise<Response> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Send an additional HTTP request using the current execution settings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "test",
+        "kind": 2,
+        "detail": "test(name: string, callback: () => PromiseLike<unknown>): Promise<void> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Run an async test. A rejected promise is reported as a failed test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "variables",
+        "kind": 10,
+        "detail": "LocalVariables",
+        "sortText": "11"
+      }
+    ],
+    "pm.collectionVariables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all collection variables visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the collection's variables from its environment.toml, with session changes."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing its file.\nThe active global environment still overrides it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including the value in environment.toml and globals."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.crypto": [
+      {
+        "label": "hmacSha256",
+        "kind": 2,
+        "detail": "hmacSha256(secret: string, text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "HMAC-SHA256, returned as lowercase hexadecimal. Each input is limited to 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "randomBytes",
+        "kind": 2,
+        "detail": "randomBytes(count: number): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return secure random bytes as hexadecimal, with two characters per byte."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sha256",
+        "kind": 2,
+        "detail": "sha256(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "SHA-256 of UTF-8 text, returned as lowercase hexadecimal. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.encoding": [
+      {
+        "label": "base64Decode",
+        "kind": 2,
+        "detail": "base64Decode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode standard Base64 to UTF-8 text. Invalid Base64 or UTF-8 throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64Encode",
+        "kind": 2,
+        "detail": "base64Encode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as standard padded Base64. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlDecode",
+        "kind": 2,
+        "detail": "base64UrlDecode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode padded or unpadded URL-safe Base64 to UTF-8 text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlEncode",
+        "kind": 2,
+        "detail": "base64UrlEncode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as URL-safe Base64 without padding. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.environment": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all environment values visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the active global environment, then the collection's variables."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing a file."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including file values and collection variables."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.execution": [
+      {
+        "label": "skipRequest",
+        "kind": 2,
+        "detail": "skipRequest(reason?: string): never",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Stop the script and do not invoke the method, with a visible reason."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.globals": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read a value every collection shares for this session."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for requests in every collection. Collection variables and environments override it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "sortText": "11"
+      }
+    ],
+    "pm.request": [
+      {
+        "label": "message",
+        "kind": 1,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assign text or an object to change the message unary and server streaming methods send."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "metadata",
+        "kind": 10,
+        "detail": "Metadata",
+        "sortText": "11"
+      },
+      {
+        "label": "methodPath",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The method as package.Service/Method."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "url",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assign a server address, which may contain {{variables}}."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.metadata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: MetadataKey): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: MetadataKey): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: MetadataKey): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<MetadataKey>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.schema": [
+      {
+        "label": "validate",
+        "kind": 2,
+        "detail": "validate(data: unknown, schema: JSONSchema): SchemaValidation",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Validate JSON data. Invalid or unsupported schemas throw; mismatches return valid: false."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.variables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all local overrides, leaving stored values visible."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the local override first, then the environment, collection variables and globals."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Set an override for this execution, including its post-response phase."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove a local override, revealing its stored value if present."
+        },
+        "sortText": "11"
+      }
+    ]
+  },
+  "GrpcOnMessageAPI": {
+    "pm": [
+      {
+        "label": "collectionVariables",
+        "kind": 10,
+        "detail": "CollectionVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "crypto",
+        "kind": 10,
+        "detail": "Crypto",
+        "sortText": "11"
+      },
+      {
+        "label": "encoding",
+        "kind": 10,
+        "detail": "Encoding",
+        "sortText": "11"
+      },
+      {
+        "label": "environment",
+        "kind": 10,
+        "detail": "EnvironmentVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "expect",
+        "kind": 2,
+        "detail": "expect(actual: unknown, message?: string): Assertion",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Start a fluent assertion; an optional message prefixes assertion failures."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "globals",
+        "kind": 10,
+        "detail": "GlobalVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "message",
+        "kind": 10,
+        "detail": "GrpcMessage",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The message the server just sent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "request",
+        "kind": 10,
+        "detail": "GrpcRequest",
+        "sortText": "11"
+      },
+      {
+        "label": "schema",
+        "kind": 10,
+        "detail": "SchemaAPI",
+        "sortText": "11"
+      },
+      {
+        "label": "sendRequest",
+        "kind": 2,
+        "detail": "sendRequest(config: string | RequestOptions): Promise<Response> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Send an additional HTTP request using the current execution settings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "test",
+        "kind": 2,
+        "detail": "test(name: string, callback: () => PromiseLike<unknown>): Promise<void> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Run an async test. A rejected promise is reported as a failed test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "variables",
+        "kind": 10,
+        "detail": "LocalVariables",
+        "sortText": "11"
+      }
+    ],
+    "pm.collectionVariables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all collection variables visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the collection's variables from its environment.toml, with session changes."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing its file.\nThe active global environment still overrides it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including the value in environment.toml and globals."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.crypto": [
+      {
+        "label": "hmacSha256",
+        "kind": 2,
+        "detail": "hmacSha256(secret: string, text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "HMAC-SHA256, returned as lowercase hexadecimal. Each input is limited to 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "randomBytes",
+        "kind": 2,
+        "detail": "randomBytes(count: number): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return secure random bytes as hexadecimal, with two characters per byte."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sha256",
+        "kind": 2,
+        "detail": "sha256(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "SHA-256 of UTF-8 text, returned as lowercase hexadecimal. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.encoding": [
+      {
+        "label": "base64Decode",
+        "kind": 2,
+        "detail": "base64Decode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode standard Base64 to UTF-8 text. Invalid Base64 or UTF-8 throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64Encode",
+        "kind": 2,
+        "detail": "base64Encode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as standard padded Base64. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlDecode",
+        "kind": 2,
+        "detail": "base64UrlDecode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode padded or unpadded URL-safe Base64 to UTF-8 text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlEncode",
+        "kind": 2,
+        "detail": "base64UrlEncode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as URL-safe Base64 without padding. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.environment": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all environment values visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the active global environment, then the collection's variables."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing a file."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including file values and collection variables."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.globals": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read a value every collection shares for this session."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for requests in every collection. Collection variables and environments override it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "sortText": "11"
+      }
+    ],
+    "pm.message": [
+      {
+        "label": "data",
+        "kind": 10,
+        "detail": "any",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The message as JSON, with lowerCamelCase field names. 64-bit integers are strings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "timestamp",
+        "kind": 10,
+        "detail": "Date",
+        "documentation": {
+          "kind": "markdown",
+          "value": "When the message was sent or received."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request": [
+      {
+        "label": "message",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The composed message as JSON text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "metadata",
+        "kind": 10,
+        "detail": "Metadata",
+        "sortText": "11"
+      },
+      {
+        "label": "methodPath",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The method as package.Service/Method."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "url",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The server address."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.metadata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: MetadataKey): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: MetadataKey): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: MetadataKey): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<MetadataKey>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<MetadataKey>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.schema": [
+      {
+        "label": "validate",
+        "kind": 2,
+        "detail": "validate(data: unknown, schema: JSONSchema): SchemaValidation",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Validate JSON data. Invalid or unsupported schemas throw; mismatches return valid: false."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.variables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all local overrides, leaving stored values visible."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the local override first, then the environment, collection variables and globals."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Set an override for this execution, including its post-response phase."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove a local override, revealing its stored value if present."
+        },
+        "sortText": "11"
+      }
+    ]
+  },
+  "PostResponseAPI": {
+    "pm": [
+      {
+        "label": "collectionVariables",
+        "kind": 10,
+        "detail": "CollectionVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "cookies",
+        "kind": 10,
+        "detail": "ExchangeCookies",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookies the request sent, from its Cookie header and the cookie jar, replaced or deleted by those the response set."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "crypto",
+        "kind": 10,
+        "detail": "Crypto",
+        "sortText": "11"
+      },
+      {
+        "label": "encoding",
+        "kind": 10,
+        "detail": "Encoding",
+        "sortText": "11"
+      },
+      {
+        "label": "environment",
+        "kind": 10,
+        "detail": "EnvironmentVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "execution",
+        "kind": 10,
+        "detail": "{ setNextRequest(name: string | null): void; }",
+        "sortText": "11"
+      },
+      {
+        "label": "expect",
+        "kind": 2,
+        "detail": "expect(actual: unknown, message?: string): Assertion",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Start a fluent assertion; an optional message prefixes assertion failures."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "globals",
+        "kind": 10,
+        "detail": "GlobalVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "request",
+        "kind": 10,
+        "detail": "Request",
+        "sortText": "11"
+      },
+      {
+        "label": "response",
+        "kind": 10,
+        "detail": "PrimaryResponse",
+        "sortText": "11"
+      },
+      {
+        "label": "schema",
+        "kind": 10,
+        "detail": "SchemaAPI",
+        "sortText": "11"
+      },
+      {
+        "label": "sendRequest",
+        "kind": 2,
+        "detail": "sendRequest(config: string | RequestOptions): Promise<Response> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Send an additional HTTP request using the current execution settings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "test",
+        "kind": 2,
+        "detail": "test(name: string, callback: () => PromiseLike<unknown>): Promise<void> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Run an async test. A rejected promise is reported as a failed test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "variables",
+        "kind": 10,
+        "detail": "LocalVariables",
+        "sortText": "11"
+      }
+    ],
+    "pm.collectionVariables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all collection variables visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the collection's variables from its environment.toml, with session changes."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing its file.\nThe active global environment still overrides it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including the value in environment.toml and globals."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.cookies": [
+      {
+        "label": "all",
+        "kind": 2,
+        "detail": "all(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "count",
+        "kind": 2,
+        "detail": "count(): number",
+        "sortText": "11"
+      },
+      {
+        "label": "each",
+        "kind": 2,
+        "detail": "each(callback: (cookie: Cookie, index: number) => void): void",
+        "sortText": "11"
+      },
+      {
+        "label": "filter",
+        "kind": 2,
+        "detail": "filter(callback: (cookie: Cookie, index: number) => unknown): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "find",
+        "kind": 2,
+        "detail": "find(callback: (cookie: Cookie, index: number) => unknown): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the value of the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string, value?: string): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Whether a cookie has this name, and this value when given."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "idx",
+        "kind": 2,
+        "detail": "idx(index: number): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "jar",
+        "kind": 2,
+        "detail": "jar(): CookieJar",
+        "sortText": "11"
+      },
+      {
+        "label": "map",
+        "kind": 2,
+        "detail": "map<T>(callback: (cookie: Cookie, index: number) => T): T[]",
+        "sortText": "11"
+      },
+      {
+        "label": "one",
+        "kind": 2,
+        "detail": "one(name: string): Cookie | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookie names mapped to values."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.crypto": [
+      {
+        "label": "hmacSha256",
+        "kind": 2,
+        "detail": "hmacSha256(secret: string, text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "HMAC-SHA256, returned as lowercase hexadecimal. Each input is limited to 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "randomBytes",
+        "kind": 2,
+        "detail": "randomBytes(count: number): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return secure random bytes as hexadecimal, with two characters per byte."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sha256",
+        "kind": 2,
+        "detail": "sha256(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "SHA-256 of UTF-8 text, returned as lowercase hexadecimal. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.encoding": [
+      {
+        "label": "base64Decode",
+        "kind": 2,
+        "detail": "base64Decode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode standard Base64 to UTF-8 text. Invalid Base64 or UTF-8 throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64Encode",
+        "kind": 2,
+        "detail": "base64Encode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as standard padded Base64. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlDecode",
+        "kind": 2,
+        "detail": "base64UrlDecode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode padded or unpadded URL-safe Base64 to UTF-8 text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlEncode",
+        "kind": 2,
+        "detail": "base64UrlEncode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as URL-safe Base64 without padding. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.environment": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all environment values visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the active global environment, then the collection's variables."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing a file."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including file values and collection variables."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.execution": [
+      {
+        "label": "setNextRequest",
+        "kind": 2,
+        "detail": "setNextRequest(name: string | null): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Has no effect: Request Eagle sends one request at a time."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.globals": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read a value every collection shares for this session."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for requests in every collection. Collection variables and environments override it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "sortText": "11"
+      }
+    ],
+    "pm.request": [
+      {
+        "label": "body",
+        "kind": 10,
+        "detail": "RequestBody",
+        "sortText": "11"
+      },
+      {
+        "label": "headers",
+        "kind": 10,
+        "detail": "Headers",
+        "sortText": "11"
+      },
+      {
+        "label": "method",
+        "kind": 10,
+        "detail": "HttpMethod",
+        "sortText": "11"
+      },
+      {
+        "label": "url",
+        "kind": 1,
+        "detail": "RequestURL",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the URL object, or assign a string to replace the URL."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.body": [
+      {
+        "label": "file",
+        "kind": 10,
+        "detail": "{ readonly src: string; } | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The file a binary body sends."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "formdata",
+        "kind": 10,
+        "detail": "FormData | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "A multipart form's parts."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "mode",
+        "kind": 10,
+        "detail": "\"raw\" | \"urlencoded\" | \"formdata\" | \"file\"",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The body's type. A request without a body is raw."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "raw",
+        "kind": 10,
+        "detail": "string | null",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decoded raw text, or null when absent. After the response, the sent body. Assign text to replace the body with raw text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "update",
+        "kind": 2,
+        "detail": "update(text: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace the outgoing body with text. GET and HEAD omit request bodies."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "urlencoded",
+        "kind": 10,
+        "detail": "Entries<string> | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "A URL-encoded form's fields."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.body.file": [
+      {
+        "label": "src",
+        "kind": 10,
+        "detail": "string",
+        "sortText": "11",
+        "insertText": "?.src"
+      }
+    ],
+    "pm.request.body.formdata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(part: FormPart): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append a part, preserving existing parts with the same name."
+        },
+        "sortText": "11",
+        "insertText": "?.add"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11",
+        "insertText": "?.clear"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the last matching part's value, or undefined when absent or a file."
+        },
+        "sortText": "11",
+        "insertText": "?.get"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11",
+        "insertText": "?.has"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all parts with this name."
+        },
+        "sortText": "11",
+        "insertText": "?.remove"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): FormPart[]",
+        "sortText": "11",
+        "insertText": "?.toJSON"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(part: FormPart): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching parts with this one."
+        },
+        "sortText": "11",
+        "insertText": "?.upsert"
+      }
+    ],
+    "pm.request.body.urlencoded": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<string>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11",
+        "insertText": "?.add"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11",
+        "insertText": "?.clear"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11",
+        "insertText": "?.get"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11",
+        "insertText": "?.has"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11",
+        "insertText": "?.remove"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<string>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11",
+        "insertText": "?.toJSON"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<string>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11",
+        "insertText": "?.upsert"
+      }
+    ],
+    "pm.request.headers": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: HeaderName): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: HeaderName): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: HeaderName): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<HeaderName>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response": [
+      {
+        "label": "code",
+        "kind": 10,
+        "detail": "number",
+        "sortText": "11"
+      },
+      {
+        "label": "cookies",
+        "kind": 10,
+        "detail": "CookieList",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookies the response's Set-Cookie headers set."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "headers",
+        "kind": 10,
+        "detail": "Headers",
+        "sortText": "11"
+      },
+      {
+        "label": "json",
+        "kind": 2,
+        "detail": "json(): any",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Parse the response body as JSON. Invalid JSON throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "responseTime",
+        "kind": 10,
+        "detail": "number",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Elapsed response time in milliseconds."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "status",
+        "kind": 10,
+        "detail": "string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Canonical HTTP status text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "text",
+        "kind": 2,
+        "detail": "text(): string",
+        "sortText": "11"
+      },
+      {
+        "label": "to",
+        "kind": 10,
+        "detail": "{ readonly have: ResponseHaveAssertions; readonly be: ResponseBeAssertions; }",
+        "sortText": "11"
+      }
+    ],
+    "pm.response.cookies": [
+      {
+        "label": "all",
+        "kind": 2,
+        "detail": "all(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "count",
+        "kind": 2,
+        "detail": "count(): number",
+        "sortText": "11"
+      },
+      {
+        "label": "each",
+        "kind": 2,
+        "detail": "each(callback: (cookie: Cookie, index: number) => void): void",
+        "sortText": "11"
+      },
+      {
+        "label": "filter",
+        "kind": 2,
+        "detail": "filter(callback: (cookie: Cookie, index: number) => unknown): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "find",
+        "kind": 2,
+        "detail": "find(callback: (cookie: Cookie, index: number) => unknown): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the value of the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string, value?: string): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Whether a cookie has this name, and this value when given."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "idx",
+        "kind": 2,
+        "detail": "idx(index: number): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "map",
+        "kind": 2,
+        "detail": "map<T>(callback: (cookie: Cookie, index: number) => T): T[]",
+        "sortText": "11"
+      },
+      {
+        "label": "one",
+        "kind": 2,
+        "detail": "one(name: string): Cookie | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookie names mapped to values."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.headers": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: HeaderName): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: HeaderName): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: HeaderName): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<HeaderName>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to": [
+      {
+        "label": "be",
+        "kind": 10,
+        "detail": "ResponseBeAssertions",
+        "sortText": "11"
+      },
+      {
+        "label": "have",
+        "kind": 10,
+        "detail": "ResponseHaveAssertions",
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to.be": [
+      {
+        "label": "clientError",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a status from 400 through 499."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "error",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a status from 400 through 599."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "json",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that the response body is valid JSON."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "ok",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert status 200."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "serverError",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a status from 500 through 599."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "success",
+        "kind": 10,
+        "detail": "void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a status from 200 through 299."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.response.to.have": [
+      {
+        "label": "body",
+        "kind": 2,
+        "detail": "body(content?: string | RegExp | Record<string, unknown>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert a nonempty body, exact text, a regular expression, or a parsed JSON object."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "header",
+        "kind": 2,
+        "detail": "header(name: HeaderName, value?: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that a header exists; optionally compare its first value."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "jsonBody",
+        "kind": 2,
+        "detail": "jsonBody(path?: string, value?: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert valid JSON; optionally check a nested property and its value."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "jsonSchema",
+        "kind": 2,
+        "detail": "jsonSchema(schema: JSONSchema): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert that the parsed JSON response matches a schema."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "status",
+        "kind": 2,
+        "detail": "status(codeOrReason: number | string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Assert the status code or canonical status text."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.schema": [
+      {
+        "label": "validate",
+        "kind": 2,
+        "detail": "validate(data: unknown, schema: JSONSchema): SchemaValidation",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Validate JSON data. Invalid or unsupported schemas throw; mismatches return valid: false."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.variables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all local overrides, leaving stored values visible."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the local override first, then the environment, collection variables and globals."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Set an override for this execution, including its post-response phase."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove a local override, revealing its stored value if present."
+        },
+        "sortText": "11"
+      }
+    ]
+  },
+  "PreRequestAPI": {
+    "pm": [
+      {
+        "label": "collectionVariables",
+        "kind": 10,
+        "detail": "CollectionVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "cookies",
+        "kind": 10,
+        "detail": "ExchangeCookies",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookies the request sends: those in its Cookie header and the cookie jar's for its URL."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "crypto",
+        "kind": 10,
+        "detail": "Crypto",
+        "sortText": "11"
+      },
+      {
+        "label": "encoding",
+        "kind": 10,
+        "detail": "Encoding",
+        "sortText": "11"
+      },
+      {
+        "label": "environment",
+        "kind": 10,
+        "detail": "EnvironmentVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "execution",
+        "kind": 10,
+        "detail": "{ skipRequest(reason?: string): never; setNextRequest(name: string | null): void; }",
+        "sortText": "11"
+      },
+      {
+        "label": "expect",
+        "kind": 2,
+        "detail": "expect(actual: unknown, message?: string): Assertion",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Start a fluent assertion; an optional message prefixes assertion failures."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "globals",
+        "kind": 10,
+        "detail": "GlobalVariables",
+        "sortText": "11"
+      },
+      {
+        "label": "request",
+        "kind": 10,
+        "detail": "Request",
+        "sortText": "11"
+      },
+      {
+        "label": "schema",
+        "kind": 10,
+        "detail": "SchemaAPI",
+        "sortText": "11"
+      },
+      {
+        "label": "sendRequest",
+        "kind": 2,
+        "detail": "sendRequest(config: string | RequestOptions): Promise<Response> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Send an additional HTTP request using the current execution settings."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "test",
+        "kind": 2,
+        "detail": "test(name: string, callback: () => PromiseLike<unknown>): Promise<void> (+1 overload)",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Run an async test. A rejected promise is reported as a failed test."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "variables",
+        "kind": 10,
+        "detail": "LocalVariables",
+        "sortText": "11"
+      }
+    ],
+    "pm.collectionVariables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all collection variables visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the collection's variables from its environment.toml, with session changes."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing its file.\nThe active global environment still overrides it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including the value in environment.toml and globals."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.cookies": [
+      {
+        "label": "all",
+        "kind": 2,
+        "detail": "all(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "count",
+        "kind": 2,
+        "detail": "count(): number",
+        "sortText": "11"
+      },
+      {
+        "label": "each",
+        "kind": 2,
+        "detail": "each(callback: (cookie: Cookie, index: number) => void): void",
+        "sortText": "11"
+      },
+      {
+        "label": "filter",
+        "kind": 2,
+        "detail": "filter(callback: (cookie: Cookie, index: number) => unknown): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "find",
+        "kind": 2,
+        "detail": "find(callback: (cookie: Cookie, index: number) => unknown): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the value of the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string, value?: string): boolean",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Whether a cookie has this name, and this value when given."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "idx",
+        "kind": 2,
+        "detail": "idx(index: number): Cookie | undefined",
+        "sortText": "11"
+      },
+      {
+        "label": "jar",
+        "kind": 2,
+        "detail": "jar(): CookieJar",
+        "sortText": "11"
+      },
+      {
+        "label": "map",
+        "kind": 2,
+        "detail": "map<T>(callback: (cookie: Cookie, index: number) => T): T[]",
+        "sortText": "11"
+      },
+      {
+        "label": "one",
+        "kind": 2,
+        "detail": "one(name: string): Cookie | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first cookie with this name, or undefined."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): Cookie[]",
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Cookie names mapped to values."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.crypto": [
+      {
+        "label": "hmacSha256",
+        "kind": 2,
+        "detail": "hmacSha256(secret: string, text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "HMAC-SHA256, returned as lowercase hexadecimal. Each input is limited to 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "randomBytes",
+        "kind": 2,
+        "detail": "randomBytes(count: number): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return secure random bytes as hexadecimal, with two characters per byte."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "sha256",
+        "kind": 2,
+        "detail": "sha256(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "SHA-256 of UTF-8 text, returned as lowercase hexadecimal. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.encoding": [
+      {
+        "label": "base64Decode",
+        "kind": 2,
+        "detail": "base64Decode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode standard Base64 to UTF-8 text. Invalid Base64 or UTF-8 throws."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64Encode",
+        "kind": 2,
+        "detail": "base64Encode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as standard padded Base64. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlDecode",
+        "kind": 2,
+        "detail": "base64UrlDecode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decode padded or unpadded URL-safe Base64 to UTF-8 text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "base64UrlEncode",
+        "kind": 2,
+        "detail": "base64UrlEncode(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Encode UTF-8 text as URL-safe Base64 without padding. Input limit: 1 MiB."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.environment": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide all environment values visible to this script."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the active global environment, then the collection's variables."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for other requests in this collection without changing a file."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Hide the value for this session, including file values and collection variables."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.execution": [
+      {
+        "label": "setNextRequest",
+        "kind": 2,
+        "detail": "setNextRequest(name: string | null): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Has no effect: Request Eagle sends one request at a time."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "skipRequest",
+        "kind": 2,
+        "detail": "skipRequest(reason?: string): never",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Stop the pre-request script and skip sending the primary request with a visible reason."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.globals": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read a value every collection shares for this session."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Save a session value for requests in every collection. Collection variables and environments override it."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "sortText": "11"
+      }
+    ],
+    "pm.request": [
+      {
+        "label": "body",
+        "kind": 10,
+        "detail": "RequestBody",
+        "sortText": "11"
+      },
+      {
+        "label": "headers",
+        "kind": 10,
+        "detail": "Headers",
+        "sortText": "11"
+      },
+      {
+        "label": "method",
+        "kind": 10,
+        "detail": "HttpMethod",
+        "sortText": "11"
+      },
+      {
+        "label": "url",
+        "kind": 1,
+        "detail": "RequestURL",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the URL object, or assign a string to replace the URL."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.body": [
+      {
+        "label": "file",
+        "kind": 10,
+        "detail": "{ readonly src: string; } | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The file a binary body sends."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "formdata",
+        "kind": 10,
+        "detail": "FormData | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "A multipart form's parts."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "mode",
+        "kind": 10,
+        "detail": "\"raw\" | \"urlencoded\" | \"formdata\" | \"file\"",
+        "documentation": {
+          "kind": "markdown",
+          "value": "The body's type. A request without a body is raw."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "raw",
+        "kind": 10,
+        "detail": "string | null",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Decoded raw text, or null when absent. After the response, the sent body. Assign text to replace the body with raw text."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "update",
+        "kind": 2,
+        "detail": "update(text: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace the outgoing body with text. GET and HEAD omit request bodies."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "urlencoded",
+        "kind": 10,
+        "detail": "Entries<string> | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "A URL-encoded form's fields."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.request.body.file": [
+      {
+        "label": "src",
+        "kind": 10,
+        "detail": "string",
+        "sortText": "11",
+        "insertText": "?.src"
+      }
+    ],
+    "pm.request.body.formdata": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(part: FormPart): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append a part, preserving existing parts with the same name."
+        },
+        "sortText": "11",
+        "insertText": "?.add"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11",
+        "insertText": "?.clear"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the last matching part's value, or undefined when absent or a file."
+        },
+        "sortText": "11",
+        "insertText": "?.get"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11",
+        "insertText": "?.has"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all parts with this name."
+        },
+        "sortText": "11",
+        "insertText": "?.remove"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): FormPart[]",
+        "sortText": "11",
+        "insertText": "?.toJSON"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(part: FormPart): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching parts with this one."
+        },
+        "sortText": "11",
+        "insertText": "?.upsert"
+      }
+    ],
+    "pm.request.body.urlencoded": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<string>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11",
+        "insertText": "?.add"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11",
+        "insertText": "?.clear"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11",
+        "insertText": "?.get"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11",
+        "insertText": "?.has"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11",
+        "insertText": "?.remove"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<string>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11",
+        "insertText": "?.toJSON"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<string>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11",
+        "insertText": "?.upsert"
+      }
+    ],
+    "pm.request.headers": [
+      {
+        "label": "add",
+        "kind": 2,
+        "detail": "add(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Append an entry, preserving existing entries with the same name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: HeaderName): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Return the first matching value, or undefined when absent."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: HeaderName): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "remove",
+        "kind": 2,
+        "detail": "remove(name: HeaderName): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all entries with this name."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toJSON",
+        "kind": 2,
+        "detail": "toJSON(): KeyValue<HeaderName>[]",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the entries, including repeated names."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "upsert",
+        "kind": 2,
+        "detail": "upsert(entry: KeyValue<HeaderName>): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Replace all matching entries with this one."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.schema": [
+      {
+        "label": "validate",
+        "kind": 2,
+        "detail": "validate(data: unknown, schema: JSONSchema): SchemaValidation",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Validate JSON data. Invalid or unsupported schemas throw; mismatches return valid: false."
+        },
+        "sortText": "11"
+      }
+    ],
+    "pm.variables": [
+      {
+        "label": "clear",
+        "kind": 2,
+        "detail": "clear(): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove all local overrides, leaving stored values visible."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "get",
+        "kind": 2,
+        "detail": "get(name: string): string | undefined",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Read the local override first, then the environment, collection variables and globals."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "has",
+        "kind": 2,
+        "detail": "has(name: string): boolean",
+        "sortText": "11"
+      },
+      {
+        "label": "replaceIn",
+        "kind": 2,
+        "detail": "replaceIn(text: string): string",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Substitute {{name}} references once. Unknown names remain unchanged."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "set",
+        "kind": 2,
+        "detail": "set(name: string, value: unknown): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Set an override for this execution, including its post-response phase."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "toObject",
+        "kind": 2,
+        "detail": "toObject(): Record<string, string>",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Copy the values currently visible in this scope."
+        },
+        "sortText": "11"
+      },
+      {
+        "label": "unset",
+        "kind": 2,
+        "detail": "unset(name: string): void",
+        "documentation": {
+          "kind": "markdown",
+          "value": "Remove a local override, revealing its stored value if present."
+        },
+        "sortText": "11"
+      }
+    ]
+  }
+}
