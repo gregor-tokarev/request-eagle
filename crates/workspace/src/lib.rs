@@ -22,5 +22,5 @@ mod history_panel_tests;
 mod session_tests;
 
 pub use actions::{OpenGeneralSettings, OpenSettings};
-pub use session::Session;
+pub use session::{Session, maximized};
 pub use workspace::init;

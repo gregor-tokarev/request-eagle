@@ -1,5 +1,5 @@
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{App, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, px, rems};
+use gpui_kit::{App, TitlebarOptions, WindowKind, WindowOptions, point, px, rems};
 
 pub(crate) fn use_window_options(session: &workspace::Session, cx: &mut App) -> WindowOptions {
     // Open where the window was closed, unless that display is gone. The
@@ -11,7 +11,9 @@ pub(crate) fn use_window_options(session: &workspace::Session, cx: &mut App) -> 
 
             (
                 display.as_ref().map(|display| display.id()),
-                display.map(|display| WindowBounds::Maximized(display.default_bounds())),
+                display.map(|display| {
+                    workspace::maximized(display.as_ref(), display.default_bounds())
+                }),
             )
         }
     };
