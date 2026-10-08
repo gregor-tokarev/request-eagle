@@ -7120,7 +7120,7 @@ dependencies = [
 
 [[package]]
 name = "request-eagle"
-version = "0.1.28"
+version = "0.1.29"
 dependencies = [
  "chrono",
  "collection",
