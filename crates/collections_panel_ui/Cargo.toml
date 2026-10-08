@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+analytics = { path = "../analytics" }
 collection = { path = "../collection" }
 environment = { path = "../environment" }
 gpui-kit = { workspace = true, features = ["component"] }
@@ -12,6 +13,7 @@ import = { path = "../import" }
 keybindings_service = { path = "../keybindings_service" }
 request = { path = "../request" }
 request_eagle_theme = { package = "theme", path = "../theme" }
+serde_json = "1"
 suffix = "1.3.0"
 
 [dev-dependencies]

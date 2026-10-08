@@ -231,6 +231,12 @@ impl RequestDraft {
         let response = self.response.clone();
         response.update(cx, |response, cx| response.start(cx));
 
+        analytics::capture(
+            "request_sent",
+            serde_json::json!({ "protocol": "http", "saved": self.storage.location().is_some() }),
+            cx,
+        );
+
         let scope = self.variables.clone();
         // History keeps where the files were found, so the request can be
         // sent again from it.

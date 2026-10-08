@@ -11,18 +11,34 @@ use std::{
 };
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Preferences {
     pub appearance: AppearancePreferences,
     pub request: RequestPreferences,
     pub vim_mode: bool,
     pub update_track: UpdateTrack,
+    /// Send anonymous usage data to learn which features people use.
+    pub share_usage_data: bool,
     /// The global environment selected in the workspace, by name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) proxy_credentials_id: Option<String>,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            appearance: AppearancePreferences::default(),
+            request: RequestPreferences::default(),
+            vim_mode: false,
+            update_track: UpdateTrack::default(),
+            share_usage_data: true,
+            active_environment: None,
+            proxy_credentials_id: None,
+        }
+    }
 }
 
 /// File-backed preferences for clients that do not have an application context.

@@ -329,6 +329,13 @@ impl WebSocketDraft {
         };
         let (socket, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
+
+        analytics::capture(
+            "request_sent",
+            serde_json::json!({ "protocol": "websocket", "saved": self.storage.location().is_some() }),
+            cx,
+        );
+
         let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),

@@ -52,6 +52,12 @@ pub fn credential_error(cx: &App) -> Option<&str> {
     cx.try_global::<Storage>()?.credential_error.as_deref()
 }
 
+/// Why preferences.json could not be read, in which case the app runs with
+/// defaults.
+pub fn load_error(cx: &App) -> Option<&str> {
+    cx.try_global::<Storage>()?.load_error.as_deref()
+}
+
 /// Load before opening the workspace. Keyring operations run off the UI thread.
 pub fn load(directory: impl AsRef<Path>, cx: &mut App) -> Task<Result<()>> {
     init(cx);

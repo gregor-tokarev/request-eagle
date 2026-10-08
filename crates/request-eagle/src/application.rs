@@ -78,6 +78,13 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     let updater = updater::init(env!("CARGO_PKG_VERSION"), cx);
     actions::init(updater.clone(), cx);
 
+    analytics::init(&home.join(".request-eagle"), env!("CARGO_PKG_VERSION"), cx);
+    analytics::capture(
+        "app_opened",
+        serde_json::json!({ "update_track": cx.global::<preferences::Preferences>().update_track }),
+        cx,
+    );
+
     let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".request-eagle/collections"));
