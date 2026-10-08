@@ -65,6 +65,18 @@ Without scripts, or when GitHub cannot be reached, the buttons lead to the
 latest release on GitHub instead. So does a button whose file the latest
 release does not have.
 
+## Analytics
+
+Both pages report visits to [Umami](https://umami.is), self-hosted at
+<https://umami-production-9a44.up.railway.app> as the "Request Eagle"
+website. The tracker in `src/layouts/Page.astro` counts only visits to
+`requesteagle.tokarev.work`, so previews and local builds stay out of the
+figures. Umami sets no cookies.
+
+Each download button also records a `Download` event. Its `package` property
+names the file: macOS disk image, macOS ZIP, Windows installer or Debian
+package.
+
 ## Motion
 
 `src/scripts/landing.js` drives the scroll-linked and pointer-driven motion;
