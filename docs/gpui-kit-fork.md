@@ -6,8 +6,8 @@ platform crates. GPUI Kit's own changes touch nine files:
 
 - Upstream tag: `v0.7.0`, commit `0c830f4d257e69fdd17200650533ab4ca9a40cc0`.
 - Fork branch: [`request-eagle/patches-0.7.0`](https://github.com/gregor-tokarev/gpui-kit/tree/request-eagle/patches-0.7.0),
-  pinned at [`ca77ce2d`](https://github.com/gregor-tokarev/gpui-kit/commit/ca77ce2d16bb443c424fc161a9b2e71c910e0da5).
-- All changes: [`0c830f4d...ca77ce2d`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...ca77ce2d16bb443c424fc161a9b2e71c910e0da5).
+  pinned at [`60435d31`](https://github.com/gregor-tokarev/gpui-kit/commit/60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
+- All changes: [`0c830f4d...60435d31`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
 - Completion changes: [`4eb43a09`](https://github.com/gregor-tokarev/gpui-kit/commit/4eb43a09ed12cedb409a826d055678164a28bae8), [`9b588e02`](https://github.com/gregor-tokarev/gpui-kit/commit/9b588e027112fadcc00ccd979e01437402e8a2e0) and [`6aa23423`](https://github.com/gregor-tokarev/gpui-kit/commit/6aa2342323f92d4af2b026b294da7422e8d98389).
 - Query reuse: [`55ed1bb5`](https://github.com/gregor-tokarev/gpui-kit/commit/55ed1bb5b4afa407ca6fb195003820ae0327c309).
 - Vim cursor support: [`cc673b8f`](https://github.com/gregor-tokarev/gpui-kit/commit/cc673b8f9c51aba0cd912078f52699032c44245c) and [`e9affedd`](https://github.com/gregor-tokarev/gpui-kit/commit/e9affedd20e6bc04f7a9412f0e6491fd10672ce3).
@@ -18,6 +18,7 @@ platform crates. GPUI Kit's own changes touch nine files:
   [`c113cdd1`](https://github.com/gregor-tokarev/gpui-kit/commit/c113cdd18491183a8ad00d869ebf775625667e90)
   and [`7398d394`](https://github.com/gregor-tokarev/gpui-kit/commit/7398d394d83ea91c75390bc297795d762c377fba)
   patch them.
+- macOS windows without the opening animation: [`60435d31`](https://github.com/gregor-tokarev/gpui-kit/commit/60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
 
 The fork branch must stay on GitHub: Cargo fetches the pinned commit from it.
 
@@ -81,6 +82,12 @@ a frame, and GPUI's frame waker restarts it, as GPUI already does on Wayland
 and the web. On X11 the waker pings the event loop, which restarts the timer;
 on macOS it posts one step through the window's dispatch source, which
 restarts the display link.
+
+The opening animation fix shows a new macOS window at once. AppKit animated
+every new normal window onto the screen for about 0.3 s, and the app took no
+input until the animation ended, so Request Eagle answered its first key
+press at 0.66 s after launch instead of 0.35 s. Normal windows now set
+AppKit's animation behavior to none; pop-ups keep the utility animation.
 
 When upstream includes equivalent behavior, remove these overrides and this
 document together, retaining the app regression tests.
