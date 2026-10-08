@@ -37,8 +37,8 @@ const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest"
             <p>For Apple Silicon Macs. The app installs its own updates.</p>
 
             <div class="platform__actions">
-              <a class="button" href={latest} data-file="-arm64.dmg"><span>Disk image</span></a>
-              <a class="button button--outline" href={latest} data-file="-arm64.zip"><span>ZIP</span></a>
+              <a class="button" href={latest} data-file="-arm64.dmg" data-umami-event="Download" data-umami-event-package="macOS disk image"><span>Disk image</span></a>
+              <a class="button button--outline" href={latest} data-file="-arm64.zip" data-umami-event="Download" data-umami-event-package="macOS ZIP"><span>ZIP</span></a>
             </div>
           </section>
 
@@ -47,7 +47,7 @@ const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest"
             <p>For Windows 10 and 11 on x64. Installs for your account, without an administrator.</p>
 
             <div class="platform__actions">
-              <a class="button" href={latest} data-file="-x64-setup.exe"><span>Installer</span></a>
+              <a class="button" href={latest} data-file="-x64-setup.exe" data-umami-event="Download" data-umami-event-package="Windows installer"><span>Installer</span></a>
             </div>
           </section>
 
@@ -56,7 +56,7 @@ const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest"
             <p>For Debian 12, Ubuntu 22.04 and newer on x64. Open the package to install it.</p>
 
             <div class="platform__actions">
-              <a class="button" href={latest} data-file="_amd64.deb"><span>Debian package</span></a>
+              <a class="button" href={latest} data-file="_amd64.deb" data-umami-event="Download" data-umami-event-package="Debian package"><span>Debian package</span></a>
             </div>
           </section>
         </div>
