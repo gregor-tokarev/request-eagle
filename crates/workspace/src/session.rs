@@ -5,7 +5,7 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
-use gpui_kit::{App, Bounds, DisplayId, Pixels, Window, WindowBounds, point};
+use gpui_kit::{App, Bounds, DisplayId, Pixels, PlatformDisplay, Window, WindowBounds, point};
 use serde::{Deserialize, Serialize};
 
 /// The window, sidebar and tabs as the app last left them, so the next launch
@@ -73,10 +73,13 @@ impl Session {
                 WindowBounds::Windowed(fit_bounds(bounds, display.bounds()))
             }
             // Without a size to return to, as the first window.
-            SavedBounds::Maximized(bounds) => WindowBounds::Maximized(match bounds {
-                Some(bounds) => fit_bounds(bounds, display.bounds()),
-                None => display.default_bounds(),
-            }),
+            SavedBounds::Maximized(bounds) => maximized(
+                display.as_ref(),
+                match bounds {
+                    Some(bounds) => fit_bounds(bounds, display.bounds()),
+                    None => display.default_bounds(),
+                },
+            ),
             SavedBounds::Fullscreen(bounds) => {
                 WindowBounds::Fullscreen(fit_bounds(bounds, display.bounds()))
             }
@@ -167,6 +170,18 @@ enum SavedBounds {
     Windowed(Bounds<Pixels>),
     Maximized(Option<Bounds<Pixels>>),
     Fullscreen(Bounds<Pixels>),
+}
+
+/// How a maximized window opens, returning to `restore` when it is restored.
+/// On macOS it opens filling the display's visible area instead: maximizing
+/// animates the window to full size, and the app takes no input until the
+/// animation ends, about a third of a second after launch.
+pub fn maximized(display: &dyn PlatformDisplay, restore: Bounds<Pixels>) -> WindowBounds {
+    if cfg!(target_os = "macos") {
+        WindowBounds::Windowed(display.visible_bounds())
+    } else {
+        WindowBounds::Maximized(restore)
+    }
 }
 
 /// Keep a window on its display after the display became smaller.
