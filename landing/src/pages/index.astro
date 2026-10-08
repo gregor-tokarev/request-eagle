@@ -100,32 +100,32 @@ const themes = await Promise.all(
     <section class="race" id="speed" data-race>
       <div class="wrap">
         <div class="race__intro">
-          <h2 class="display" data-reveal="left">Ready in<br>0.2 seconds.</h2>
+          <h2 class="display" data-reveal="left">Ready in<br>0.36 seconds.</h2>
 
           <p data-reveal="left">
-            That is the time from launch until the request editor is on screen.
-            Postman takes 3.9 seconds, 18 times as long.
+            That is the time from launch until it answers your first keystroke.
+            Postman takes 4.3 seconds, 12 times as long.
           </p>
         </div>
 
         <p class="visually-hidden">
-          Request Eagle is ready 0.22 seconds after launch. Postman is ready after 3.86 seconds.
+          Request Eagle answers a keystroke 0.36 seconds after launch. Postman answers after 4.33 seconds.
         </p>
 
         <!-- The lanes replay both launches in real time. The figures are medians from docs/startup-benchmark.md. -->
         <div class="race__lanes" data-reveal aria-hidden="true">
-          <div class="lane lane--eagle is-ready" data-lane data-ms="216">
+          <div class="lane lane--eagle is-ready" data-lane data-ms="359">
             <div class="lane__head">
               <span class="lane__name">Request Eagle</span>
-              <span class="lane__time" data-time>0.22 s</span>
+              <span class="lane__time" data-time>0.36 s</span>
             </div>
             <div class="lane__track"><div class="lane__fill" data-fill></div></div>
           </div>
 
-          <div class="lane is-ready" data-lane data-ms="3859">
+          <div class="lane is-ready" data-lane data-ms="4331">
             <div class="lane__head">
               <span class="lane__name">Postman</span>
-              <span class="lane__time" data-time>3.86 s</span>
+              <span class="lane__time" data-time>4.33 s</span>
             </div>
             <div class="lane__track"><div class="lane__fill" data-fill></div></div>
           </div>
@@ -138,10 +138,12 @@ const themes = await Promise.all(
             <summary>How this was measured</summary>
 
             <p>
-              Both apps were launched ten times in turn on one machine while the screen was recorded
-              at 60 frames per second. The time runs from starting the process to the last frame in
-              which the window was still being drawn. The figures are medians: 216 ms for
-              Request Eagle 0.1.15, and 3,859 ms for Postman 12.30.3 used without an account.
+              Both apps were launched five times in turn on a MacBook Pro with an M5 Pro while the
+              screen was recorded at 60 frames per second. From the launch, a shortcut was pressed
+              every 50 ms: Cmd+K, which opens Request Eagle's command palette, and Cmd+comma, which
+              opens Postman's settings. The time runs from the launch to the first frame showing the
+              app's answer. The figures are medians: 359 ms for Request Eagle 0.1.28, and 4,331 ms
+              for Postman 12.31.3 signed in to an account.
             </p>
           </details>
         </div>
