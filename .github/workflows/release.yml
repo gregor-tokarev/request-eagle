@@ -34,6 +34,11 @@ on:
 permissions:
   contents: write
 
+# Release builds send anonymous usage data to this PostHog project; see
+# docs/analytics.md. A project token only sends events, so it is public.
+env:
+  REQUEST_EAGLE_POSTHOG_TOKEN: phc_n9Bb8O4Xw0diLGriQ4FKjrfHvUnFWDYcwo0fdBbd36m
+
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
