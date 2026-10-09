@@ -13,7 +13,7 @@ Events are sent without a person profile.
 | Event | When | Properties |
 | --- | --- | --- |
 | `app_opened` | The window opens | `update_track` |
-| `request_sent` | An HTTP request is sent, a gRPC method invoked or a WebSocket connected | `protocol` (`http`, `grpc` or `websocket`), `saved` |
+| `request_sent` | A request went out, when history records it: an HTTP request, a gRPC call that started or a WebSocket that connected | `protocol` (`http`, `grpc` or `websocket`), `saved` |
 | `collection_run_started` | The Collection Runner starts | `requests` |
 | `flow_run_started` | A flow runs | `blocks` |
 | `import_finished` | Collections or environments were imported, or failed to | `collections`, `environments`, `skipped_requests`, `failed` |

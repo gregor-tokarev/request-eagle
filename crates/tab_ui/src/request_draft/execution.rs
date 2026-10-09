@@ -231,12 +231,6 @@ impl RequestDraft {
         let response = self.response.clone();
         response.update(cx, |response, cx| response.start(cx));
 
-        analytics::capture(
-            "request_sent",
-            serde_json::json!({ "protocol": "http", "saved": self.storage.location().is_some() }),
-            cx,
-        );
-
         let scope = self.variables.clone();
         // History keeps where the files were found, so the request can be
         // sent again from it.
@@ -346,6 +340,7 @@ impl RequestDraft {
                         Ok(response) => sent.record.response = Some(response),
                         Err(error) => sent.record.error = Some(error),
                     }
+                    this.capture_sent(cx);
                     cx.emit(sent);
                 }
 
@@ -424,6 +419,15 @@ impl RequestDraft {
         }
     }
 
+    /// Count a request that went out in usage data, as history keeps it.
+    fn capture_sent(&self, cx: &App) {
+        analytics::capture(
+            "request_sent",
+            serde_json::json!({ "protocol": "http", "saved": self.storage.location().is_some() }),
+            cx,
+        );
+    }
+
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         // Dropping its task cancels the request.
         let exchange = std::mem::replace(&mut self.exchange, Exchange::Idle);
@@ -437,6 +441,7 @@ impl RequestDraft {
             && dispatch.started()
         {
             sent.record.error = Some("Request cancelled".into());
+            self.capture_sent(cx);
             cx.emit(sent);
         }
 

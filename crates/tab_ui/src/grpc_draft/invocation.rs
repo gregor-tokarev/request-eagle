@@ -137,12 +137,6 @@ impl GrpcDraft {
             cx.background_executor()
                 .spawn(client.invoke(&self.request, variables, &definition));
 
-        analytics::capture(
-            "request_sent",
-            serde_json::json!({ "protocol": "grpc", "saved": self.storage.location().is_some() }),
-            cx,
-        );
-
         self.call = Call::Starting(cx.spawn_in(window, async move |this, cx| {
             let result = invoke.await;
             Self::follow(this, result, server, sent, cx).await;
@@ -177,12 +171,6 @@ impl GrpcDraft {
         self.response.update(cx, |response, cx| {
             response.wait("Running the Before invoke script…".into(), cx)
         });
-
-        analytics::capture(
-            "request_sent",
-            serde_json::json!({ "protocol": "grpc", "saved": self.storage.location().is_some() }),
-            cx,
-        );
 
         self.call = Call::Starting(cx.spawn_in(window, async move |this, cx| {
             let prepared = match prepare.await {
@@ -265,6 +253,14 @@ impl GrpcDraft {
 
             let events = match result {
                 Ok((call, events)) => {
+                    analytics::capture(
+                        "request_sent",
+                        serde_json::json!({
+                            "protocol": "grpc",
+                            "saved": this.storage.location().is_some(),
+                        }),
+                        cx,
+                    );
                     cx.emit(sent);
                     let kind = call.kind;
                     this.response

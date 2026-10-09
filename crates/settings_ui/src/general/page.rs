@@ -260,6 +260,12 @@ impl Render for GeneralSettings {
                         .err()
                         .map(|error| format!("Could not save the usage data setting: {error}"));
 
+                        // Turning usage data off stops it until the app quits,
+                        // even when the choice could not be saved.
+                        if this.usage_data_error.is_some() && !*checked {
+                            cx.global_mut::<Preferences>().share_usage_data = false;
+                        }
+
                         cx.notify();
                     })),
             );
