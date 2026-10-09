@@ -171,6 +171,7 @@ impl GrpcDraft {
         self.response.update(cx, |response, cx| {
             response.wait("Running the Before invoke script…".into(), cx)
         });
+
         self.call = Call::Starting(cx.spawn_in(window, async move |this, cx| {
             let prepared = match prepare.await {
                 Ok(prepared) => prepared,
@@ -234,6 +235,7 @@ impl GrpcDraft {
         RequestSent {
             record: request_history::Record::sent(request),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         }
     }
 

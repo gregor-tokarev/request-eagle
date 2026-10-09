@@ -151,6 +151,12 @@ impl FlowEditor {
             }
         };
 
+        analytics::capture(
+            "flow_run_started",
+            serde_json::json!({ "blocks": self.flow.blocks.len() }),
+            cx,
+        );
+
         let flow = self.flow.clone();
         let (sender, mut events) = futures::channel::mpsc::unbounded();
         let run = cx.background_executor().spawn(async move {

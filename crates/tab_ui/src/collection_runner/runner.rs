@@ -603,6 +603,12 @@ impl CollectionRunner {
             return;
         }
 
+        analytics::capture(
+            "collection_run_started",
+            serde_json::json!({ "requests": selected.len() }),
+            cx,
+        );
+
         // What the run uses is taken now, so changing the environment or
         // moving the source while it prepares changes nothing about it.
         let collection = self.collection.clone();

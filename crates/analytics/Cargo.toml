@@ -1,0 +1,15 @@
+[package]
+name = "analytics"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+log = "0.4"
+preferences = { path = "../preferences" }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -8,6 +8,7 @@ license.workspace = true
 dev-profiler = ["dep:gpui-fps"]
 
 [dependencies]
+analytics = { path = "../analytics" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 collection = { path = "../collection" }
 environment = { path = "../environment" }
@@ -20,6 +21,7 @@ keybindings_service = { path = "../keybindings_service" }
 log = "0.4"
 reqwest_client.workspace = true
 request = { path = "../request" }
+serde_json = "1"
 updater = { path = "../updater" }
 request-eagle-theme = { package = "theme", path = "../theme" }
 workspace = { package = "workspace", path = "../workspace" }

@@ -329,9 +329,11 @@ impl WebSocketDraft {
         };
         let (socket, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
+
         let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         };
 
         let task = cx.spawn(async move |this, cx| {

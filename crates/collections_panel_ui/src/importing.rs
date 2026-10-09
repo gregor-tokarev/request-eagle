@@ -204,6 +204,8 @@ impl ImportDialog {
 
         match import::parse_curl(&source) {
             Ok(request) => {
+                analytics::capture("curl_imported", serde_json::json!({}), cx);
+
                 window.close_dialog(cx);
                 let _ = self.panel.update(cx, |_, cx| {
                     cx.emit(CollectionPanelEvent::OpenUnsavedRequest(request))
@@ -314,6 +316,17 @@ impl ImportDialog {
             skipped,
             mut failed,
         } = outcome;
+
+        analytics::capture(
+            "import_finished",
+            serde_json::json!({
+                "collections": collections.len(),
+                "environments": environments.len(),
+                "skipped_requests": skipped.len(),
+                "failed": failed.len(),
+            }),
+            cx,
+        );
 
         // A single failure stays in the dialog, so it can be tried again.
         if collections.is_empty() && environments.is_empty() && failed.len() <= 1 {

@@ -268,6 +268,7 @@ impl RequestDraft {
         let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         };
         let went_out = dispatch.clone();
         let task = cx.background_executor().spawn(async move {

@@ -208,6 +208,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "analytics"
+version = "0.1.0"
+dependencies = [
+ "gpui-kit",
+ "log",
+ "preferences",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1375,12 +1387,14 @@ dependencies = [
 name = "collections_panel_ui"
 version = "0.1.0"
 dependencies = [
+ "analytics",
  "collection",
  "environment",
  "gpui-kit",
  "import",
  "keybindings_service",
  "request",
+ "serde_json",
  "suffix",
  "tempfile",
  "theme",
@@ -7122,6 +7136,7 @@ dependencies = [
 name = "request-eagle"
 version = "0.1.29"
 dependencies = [
+ "analytics",
  "chrono",
  "collection",
  "environment",
@@ -7136,6 +7151,7 @@ dependencies = [
  "preferences",
  "request",
  "rustix",
+ "serde_json",
  "tempfile",
  "theme",
  "tikv-jemallocator",
@@ -8451,6 +8467,7 @@ name = "tab_ui"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "analytics",
  "anyhow",
  "chrono",
  "collection",
@@ -10716,6 +10733,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workspace"
 version = "0.1.0"
 dependencies = [
+ "analytics",
  "chrono",
  "collection",
  "collections_panel_ui",

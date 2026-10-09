@@ -22,7 +22,7 @@ pub use request::{
 };
 #[cfg(feature = "ui")]
 pub use store::{
-    add_client_certificate, credential_error, init, load, remove_client_certificate, update,
-    update_proxy,
+    add_client_certificate, credential_error, init, load, load_error, remove_client_certificate,
+    update, update_proxy,
 };
 pub use update_track::UpdateTrack;

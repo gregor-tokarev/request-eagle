@@ -28,6 +28,7 @@ pub(crate) struct GeneralSettings {
     request: Entity<RequestSettings>,
     update_track_error: Option<String>,
     error: Option<String>,
+    usage_data_error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -86,6 +87,7 @@ impl GeneralSettings {
             request: cx.new(|cx| RequestSettings::new(window, cx)),
             update_track_error: None,
             error: None,
+            usage_data_error: None,
             _subscriptions: vec![subscription, preferences, track_subscription],
         }
     }
@@ -244,6 +246,30 @@ impl Render for GeneralSettings {
                     })),
             );
 
+        let usage_data = div()
+            .debug_selector(|| "share-usage-data".into())
+            .flex_shrink_0()
+            .child(
+                Switch::new("share-usage-data")
+                    .accessibility_label("Share usage data")
+                    .checked(cx.global::<Preferences>().share_usage_data)
+                    .on_click(cx.listener(|this, checked, _, cx| {
+                        this.usage_data_error = preferences::update(cx, |preferences| {
+                            preferences.share_usage_data = *checked;
+                        })
+                        .err()
+                        .map(|error| format!("Could not save the usage data setting: {error}"));
+
+                        // Turning usage data off stops it until the app quits,
+                        // even when the choice could not be saved.
+                        if this.usage_data_error.is_some() && !*checked {
+                            cx.global_mut::<Preferences>().share_usage_data = false;
+                        }
+
+                        cx.notify();
+                    })),
+            );
+
         v_flex()
             .w_full()
             .max_w(layout::PAGE_WIDTH)
@@ -328,6 +354,18 @@ impl Render for GeneralSettings {
                                     ),
                             ),
                     ),
+            )
+            .child(
+                section("Privacy")
+                    .child(row(
+                        "Share usage data",
+                        "Send anonymous statistics about which features you use, to help improve Request Eagle. Your requests, responses and collections are never sent.",
+                        usage_data,
+                        cx,
+                    ))
+                    .when_some(self.usage_data_error.clone(), |this, error| {
+                        this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+                    }),
             )
     }
 }

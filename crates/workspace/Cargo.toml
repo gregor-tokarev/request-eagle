@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+analytics = { path = "../analytics" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 environment = { path = "../environment" }
 collection = { path = "../collection" }

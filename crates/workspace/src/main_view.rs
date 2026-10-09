@@ -261,7 +261,8 @@ impl Page {
         }
     }
 
-    /// Keep the requests a request tab sends in history.
+    /// Keep the requests a request tab sends in history, and count them in
+    /// usage data.
     fn record_history(
         &self,
         history: Entity<HistoryPanel>,
@@ -273,6 +274,17 @@ impl Page {
             cx: &mut Context<MainView>,
         ) -> Subscription {
             cx.subscribe(page, move |_, _, sent: &RequestSent, cx| {
+                let protocol = match sent.record.request {
+                    request::Request::Http(_) => "http",
+                    request::Request::Grpc(_) => "grpc",
+                    request::Request::WebSocket(_) => "websocket",
+                };
+                analytics::capture(
+                    "request_sent",
+                    serde_json::json!({ "protocol": protocol, "saved": sent.saved }),
+                    cx,
+                );
+
                 history.update(cx, |history, cx| history.record(sent, cx));
             })
         }
