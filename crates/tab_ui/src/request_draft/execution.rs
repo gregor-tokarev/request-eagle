@@ -268,6 +268,7 @@ impl RequestDraft {
         let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         };
         let went_out = dispatch.clone();
         let task = cx.background_executor().spawn(async move {
@@ -340,7 +341,6 @@ impl RequestDraft {
                         Ok(response) => sent.record.response = Some(response),
                         Err(error) => sent.record.error = Some(error),
                     }
-                    this.capture_sent(cx);
                     cx.emit(sent);
                 }
 
@@ -419,15 +419,6 @@ impl RequestDraft {
         }
     }
 
-    /// Count a request that went out in usage data, as history keeps it.
-    fn capture_sent(&self, cx: &App) {
-        analytics::capture(
-            "request_sent",
-            serde_json::json!({ "protocol": "http", "saved": self.storage.location().is_some() }),
-            cx,
-        );
-    }
-
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         // Dropping its task cancels the request.
         let exchange = std::mem::replace(&mut self.exchange, Exchange::Idle);
@@ -441,7 +432,6 @@ impl RequestDraft {
             && dispatch.started()
         {
             sent.record.error = Some("Request cancelled".into());
-            self.capture_sent(cx);
             cx.emit(sent);
         }
 

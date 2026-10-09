@@ -333,6 +333,7 @@ impl WebSocketDraft {
         let sent = RequestSent {
             record: request_history::Record::sent(recorded),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         };
 
         let task = cx.spawn(async move |this, cx| {
@@ -388,14 +389,6 @@ impl WebSocketDraft {
                         std::mem::replace(&mut self.connection, Connection::Disconnected)
                     {
                         self.connection = Connection::Connected { socket, task };
-                        analytics::capture(
-                            "request_sent",
-                            serde_json::json!({
-                                "protocol": "websocket",
-                                "saved": self.storage.location().is_some(),
-                            }),
-                            cx,
-                        );
                         cx.emit(sent);
                     }
                 }

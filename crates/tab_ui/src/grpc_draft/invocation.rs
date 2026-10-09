@@ -235,6 +235,7 @@ impl GrpcDraft {
         RequestSent {
             record: request_history::Record::sent(request),
             sent_at: SystemTime::now(),
+            saved: self.storage.location().is_some(),
         }
     }
 
@@ -253,14 +254,6 @@ impl GrpcDraft {
 
             let events = match result {
                 Ok((call, events)) => {
-                    analytics::capture(
-                        "request_sent",
-                        serde_json::json!({
-                            "protocol": "grpc",
-                            "saved": this.storage.location().is_some(),
-                        }),
-                        cx,
-                    );
                     cx.emit(sent);
                     let kind = call.kind;
                     this.response

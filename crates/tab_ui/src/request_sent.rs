@@ -5,4 +5,6 @@ use std::time::SystemTime;
 pub struct RequestSent {
     pub record: request_history::Record,
     pub sent_at: SystemTime,
+    /// Whether the request was saved in a collection when it was sent.
+    pub saved: bool,
 }
