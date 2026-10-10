@@ -524,11 +524,26 @@ impl Options {
             return Err(CurlError::BodyWithoutMethod(method.as_str()));
         }
 
-        // Sending adds these itself, as the commands Request Eagle writes do.
+        // Sending names Request Eagle unless the request names a client, so
+        // a command that removes cURL's name keeps an empty one.
+        if self.removed.iter().any(|name| name == "user-agent") && !self.has_header("user-agent") {
+            self.headers.push(("User-Agent".into(), String::new()));
+        }
+
+        // Sending adds these itself, as the commands Request Eagle writes do,
+        // unless the request sends the header again.
+        let count = |name: &str| {
+            self.headers
+                .iter()
+                .filter(|(header, _)| header.eq_ignore_ascii_case(name))
+                .count()
+        };
+        let (user_agents, lengths) = (count("user-agent"), count("content-length"));
         self.headers.retain(|(name, value)| {
             let name = name.to_ascii_lowercase();
-            !(name == "user-agent" && value == request::USER_AGENT
+            !(name == "user-agent" && user_agents == 1 && value == request::USER_AGENT
                 || name == "content-length"
+                    && lengths == 1
                     && value == "0"
                     && body.is_none()
                     && matches!(method, Method::Post | Method::Put | Method::Patch))

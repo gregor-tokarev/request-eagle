@@ -341,6 +341,34 @@ fn leaves_out_headers_the_command_removes() {
 }
 
 #[test]
+fn a_removed_client_name_stays_empty() {
+    let request = parse_curl("curl -H 'User-Agent:' https://example.com").unwrap();
+    assert_eq!(request.headers, headers(&[("User-Agent", "")]));
+
+    let request = parse_curl("curl -H 'User-Agent:' -A RequestEagle https://example.com").unwrap();
+    assert!(request.headers.is_empty());
+}
+
+#[test]
+fn keeps_generated_headers_the_command_sends_twice() {
+    let request = parse_curl(
+        "curl -H 'User-Agent: RequestEagle' -H 'User-Agent: custom' \
+         -H 'Content-Length: 0' -H 'Content-Length: 0' -X POST https://example.com",
+    )
+    .unwrap();
+
+    assert_eq!(
+        request.headers,
+        headers(&[
+            ("User-Agent", "RequestEagle"),
+            ("User-Agent", "custom"),
+            ("Content-Length", "0"),
+            ("Content-Length", "0"),
+        ])
+    );
+}
+
+#[test]
 fn reads_the_commands_request_eagle_writes() {
     let requests = [
         HttpRequest {
@@ -388,6 +416,16 @@ fn reads_the_commands_request_eagle_writes() {
         HttpRequest {
             method: Method::Post,
             path: "http://localhost:3000/jobs/run".into(),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "http://localhost:3000/anonymous".into(),
+            headers: headers(&[("User-Agent", "")]),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "http://localhost:3000/twice".into(),
+            headers: headers(&[("User-Agent", "RequestEagle"), ("User-Agent", "custom")]),
             ..HttpRequest::default()
         },
     ];
