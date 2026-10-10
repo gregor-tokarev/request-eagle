@@ -30,6 +30,13 @@ jobs:
       - name: Test every crate, including the macOS credential backend
         run: cargo test --locked --workspace --no-fail-fast
 
+      - name: Run gRPC code snippets with grpcurl
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          brew install grpcurl
+          cargo test --locked -p request --test grpcurl -- --ignored
+
   arch:
     runs-on: ubuntu-latest
     container: archlinux:base-devel

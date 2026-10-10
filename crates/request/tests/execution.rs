@@ -1264,7 +1264,7 @@ fn generated_preview_matches_headers_received_by_the_server() {
                 .skip(1)
                 .filter(|line| !line.is_empty())
                 .count(),
-            6
+            7
         );
         assert_eq!(received.body, b"abc");
     });

@@ -4,6 +4,10 @@ use url::{Position, Url};
 
 use crate::{Field, Method};
 
+/// The client name requests send unless they name their own. Some servers
+/// turn away requests without one, or with the name of a command-line tool.
+pub const USER_AGENT: &str = "RequestEagle";
+
 /// Defaults shared by request execution and the header editor's preview.
 /// Host is conveyed as :authority on HTTP/2. Explicit header names take
 /// precedence, case-insensitively. Body length is in bytes, not characters.
@@ -41,6 +45,10 @@ pub fn generated_headers(
                 ));
             }
         }
+    }
+
+    if !has("user-agent") {
+        generated.push(("User-Agent".into(), USER_AGENT.into()));
     }
 
     if !has("accept") {

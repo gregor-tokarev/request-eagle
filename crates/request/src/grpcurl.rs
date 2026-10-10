@@ -8,18 +8,21 @@ use environment::VariableResolver;
 
 use crate::curl::{keep_unknown, quote};
 use crate::grpc::Target;
-use crate::{Field, GrpcDefinition, GrpcRequest};
+use crate::{Field, GrpcDefinition, GrpcRequest, RequestPreferences};
 
 impl GrpcRequest {
-    /// The grpcurl command that makes this call as Request Eagle does.
-    /// `{{variables}}` that `values` defines are filled in as invoking fills
-    /// them; others, and generated ones such as `{{$guid}}`, stay as written.
-    /// Relative `.proto` paths resolve from `collection`. Without a method,
-    /// the command lists the server's services.
+    /// The grpcurl command that makes this call as Request Eagle does, with
+    /// the certificate checks of the request's settings or, where they have
+    /// none, of `preferences`. `{{variables}}` that `values` defines are
+    /// filled in as invoking fills them; others, and generated ones such as
+    /// `{{$guid}}`, stay as written. Relative `.proto` paths resolve from
+    /// `collection`. Without a method, the command lists the server's
+    /// services.
     pub fn grpcurl_command(
         &self,
         values: &HashMap<String, String>,
         collection: Option<&Path>,
+        preferences: &RequestPreferences,
     ) -> String {
         // A reference without its closing braces cannot be filled in, so the
         // text is written as it is.
@@ -51,10 +54,14 @@ impl GrpcRequest {
             }
         };
 
+        let verify = settings
+            .verify_certificates
+            .unwrap_or(preferences.ssl_certificate_verification);
+
         let mut command = String::from("grpcurl");
         if !tls {
             command.push_str(" -plaintext");
-        } else if settings.verify_certificates == Some(false) {
+        } else if !verify {
             command.push_str(" -insecure");
         }
         // Request Eagle shows the fields that have their default value
@@ -65,7 +72,7 @@ impl GrpcRequest {
 
         let mut options = Vec::new();
         let server_name = settings.server_name.trim();
-        if tls && settings.verify_certificates != Some(false) && !server_name.is_empty() {
+        if tls && verify && !server_name.is_empty() {
             options.push(("-servername", server_name.to_owned()));
         }
         if let Some(megabytes) = settings.max_response_message_mb {

@@ -6,6 +6,7 @@ fn previews_only_headers_the_transport_adds() {
         generated_headers(Method::Get, "https://example.com/path", &[], 0),
         [
             ("Host".into(), "example.com".into()),
+            ("User-Agent".into(), "RequestEagle".into()),
             ("Accept".into(), "*/*".into()),
             ("Accept-Encoding".into(), "gzip, deflate, br, zstd".into())
         ]
@@ -14,18 +15,19 @@ fn previews_only_headers_the_transport_adds() {
     for method in [Method::Post, Method::Put, Method::Patch] {
         let headers = generated_headers(method, "http://[::1]:8080/path", &[], 0);
         assert_eq!(headers[0], ("Host".into(), "[::1]:8080".into()));
-        assert_eq!(headers[3], ("Content-Length".into(), "0".into()));
+        assert_eq!(headers[4], ("Content-Length".into(), "0".into()));
     }
 
     let body = "{\"name\":\"🦅\"}";
     let headers = generated_headers(Method::Post, "https://example.com", &[], body.len());
     assert_eq!(
-        headers[3],
+        headers[4],
         ("Content-Length".into(), body.len().to_string())
     );
     assert_eq!(
         generated_headers(Method::Get, "", &[], 0),
         [
+            ("User-Agent".into(), "RequestEagle".into()),
             ("Accept".into(), "*/*".into()),
             ("Accept-Encoding".into(), "gzip, deflate, br, zstd".into())
         ]
@@ -36,6 +38,7 @@ fn previews_only_headers_the_transport_adds() {
 fn explicit_headers_override_defaults_case_insensitively() {
     let headers = [
         Field::new("hOsT", "virtual.example"),
+        Field::new("user-AGENT", "custom"),
         Field::new("ACCEPT", "application/json"),
         Field::new("AcCePt-EnCoDiNg", "identity"),
         Field::new("content-LENGTH", "12"),

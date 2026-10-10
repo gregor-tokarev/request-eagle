@@ -67,7 +67,7 @@ pub use event_stream::{
     Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
 };
 pub use executor::RequestExecutor;
-pub use generated_headers::generated_headers;
+pub use generated_headers::{USER_AGENT, generated_headers};
 pub use grpc::{
     GrpcCall, GrpcClient, GrpcDefinition, GrpcError, GrpcEvent, GrpcEvents, GrpcFailure,
     GrpcMessage, GrpcMethod, GrpcRequest, GrpcService, GrpcSettings, GrpcStatus, MethodKind,

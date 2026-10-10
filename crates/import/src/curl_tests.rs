@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use request::{
     Auth, AwsSignatureAuth, BearerAuth, Body, Field, FormPart, HttpRequest, HttpSettings, Method,
-    PasswordAuth, RawLanguage,
+    PasswordAuth, RawLanguage, RequestPreferences,
 };
 
 use crate::{CurlError, is_curl, parse_curl};
@@ -162,8 +162,8 @@ fn reads_json_forms_and_credentials() {
     assert_eq!(
         request.headers,
         headers(&[
-            ("User-Agent", "agent"),
             ("Referer", "https://ref.example"),
+            ("User-Agent", "agent"),
             ("Cookie", "a=1; b=2"),
         ])
     );
@@ -341,6 +341,67 @@ fn leaves_out_headers_the_command_removes() {
 }
 
 #[test]
+fn reads_the_client_name_as_curl_sends_it() {
+    let user_agents = |command: &str| {
+        parse_curl(command)
+            .unwrap()
+            .headers
+            .into_iter()
+            .filter(|field| field.key == "User-Agent")
+            .map(|field| field.value)
+            .collect::<Vec<_>>()
+    };
+
+    // The last `-A` counts, and a header overrides it.
+    assert_eq!(
+        user_agents("curl -A one -A two https://example.com"),
+        ["two"]
+    );
+    assert_eq!(
+        user_agents("curl -A one -H 'User-Agent: two' https://example.com"),
+        ["two"]
+    );
+    assert_eq!(
+        user_agents("curl -H 'User-Agent: two' -A one https://example.com"),
+        ["two"]
+    );
+    // Sending names Request Eagle itself.
+    assert!(user_agents("curl -A custom -A RequestEagle https://example.com").is_empty());
+    assert_eq!(
+        user_agents("curl -A RequestEagle -A custom https://example.com"),
+        ["custom"]
+    );
+
+    // A removed name stays empty, so sending does not name Request Eagle.
+    for command in [
+        "curl -H 'User-Agent:' https://example.com",
+        "curl -H 'User-Agent:' -A one https://example.com",
+        "curl -A one -H 'User-Agent:' https://example.com",
+    ] {
+        assert_eq!(user_agents(command), [""], "{command}");
+    }
+}
+
+#[test]
+fn keeps_generated_headers_the_command_sends_twice() {
+    let request = parse_curl(
+        "curl -H 'User-Agent: RequestEagle' -H 'User-Agent: custom' \
+         -H 'Content-Length: 0' -H 'Content-Length: 0' -X POST https://example.com",
+    )
+    .unwrap();
+
+    assert_eq!(
+        request.headers,
+        headers(&[
+            ("User-Agent", "RequestEagle"),
+            ("User-Agent", "custom"),
+            ("Content-Length", "0"),
+            ("Content-Length", "0"),
+        ])
+    );
+}
+
+#[test]
 fn reads_the_commands_request_eagle_writes() {
     let requests = [
         HttpRequest {
@@ -385,10 +446,25 @@ fn reads_the_commands_request_eagle_writes() {
             path: "http://localhost:3000/".into(),
             ..HttpRequest::default()
         },
+        HttpRequest {
+            method: Method::Post,
+            path: "http://localhost:3000/jobs/run".into(),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "http://localhost:3000/anonymous".into(),
+            headers: headers(&[("User-Agent", "")]),
+            ..HttpRequest::default()
+        },
+        HttpRequest {
+            path: "http://localhost:3000/twice".into(),
+            headers: headers(&[("User-Agent", "RequestEagle"), ("User-Agent", "custom")]),
+            ..HttpRequest::default()
+        },
     ];
 
     for request in requests {
-        let command = request.curl_command(&HashMap::new(), None);
+        let command = request.curl_command(&HashMap::new(), None, &RequestPreferences::default());
         assert_eq!(parse_curl(&command).as_ref(), Ok(&request), "{command}");
     }
 }
@@ -422,7 +498,9 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
         },
         ..HttpRequest::default()
     };
-    let imported = parse_curl(&exported.curl_command(&HashMap::new(), None)).unwrap();
+    let imported =
+        parse_curl(&exported.curl_command(&HashMap::new(), None, &RequestPreferences::default()))
+            .unwrap();
     assert_eq!(imported.settings, exported.settings);
 
     assert!(
@@ -496,6 +574,6 @@ fn credentials_become_the_requests_authorization() {
         }),
         ..HttpRequest::default()
     };
-    let command = request.curl_command(&HashMap::new(), None);
+    let command = request.curl_command(&HashMap::new(), None, &RequestPreferences::default());
     assert_eq!(parse_curl(&command).unwrap().auth, request.auth);
 }

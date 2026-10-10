@@ -279,6 +279,8 @@ struct Options {
     headers: Vec<(String, String)>,
     /// Lowercase names of headers removed with `-H 'Name:'`.
     removed: Vec<String>,
+    /// The last `--user-agent`, which a User-Agent header overrides.
+    user_agent: Option<String>,
     data: Option<String>,
     /// The file `--data-binary @file` sends.
     file: Option<String>,
@@ -317,7 +319,7 @@ impl Options {
                 }
                 self.header(&value);
             }
-            "user-agent" => self.headers.push(("User-Agent".into(), value)),
+            "user-agent" => self.user_agent = Some(value),
             "referer" => {
                 let referer = value.strip_suffix(";auto").unwrap_or(&value);
                 if !referer.is_empty() {
@@ -473,6 +475,10 @@ impl Options {
 
         let auth = self.auth(&url);
 
+        if let Some(user_agent) = self.user_agent.take() {
+            self.add_default("User-Agent", &user_agent);
+        }
+
         if !self.cookies.is_empty() {
             self.headers
                 .push(("Cookie".into(), self.cookies.join("; ")));
@@ -523,6 +529,31 @@ impl Options {
         if body.is_some() && matches!(method, Method::Get | Method::Head) {
             return Err(CurlError::BodyWithoutMethod(method.as_str()));
         }
+
+        // Sending names Request Eagle unless the request names a client, so
+        // a command that removes cURL's name keeps an empty one.
+        if self.removed.iter().any(|name| name == "user-agent") && !self.has_header("user-agent") {
+            self.headers.push(("User-Agent".into(), String::new()));
+        }
+
+        // Sending adds these itself, as the commands Request Eagle writes do,
+        // unless the request sends the header again.
+        let count = |name: &str| {
+            self.headers
+                .iter()
+                .filter(|(header, _)| header.eq_ignore_ascii_case(name))
+                .count()
+        };
+        let (user_agents, lengths) = (count("user-agent"), count("content-length"));
+        self.headers.retain(|(name, value)| {
+            let name = name.to_ascii_lowercase();
+            !(name == "user-agent" && user_agents == 1 && value == request::USER_AGENT
+                || name == "content-length"
+                    && lengths == 1
+                    && value == "0"
+                    && body.is_none()
+                    && matches!(method, Method::Post | Method::Put | Method::Patch))
+        });
 
         Ok(HttpRequest {
             method,
