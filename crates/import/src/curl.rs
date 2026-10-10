@@ -279,6 +279,8 @@ struct Options {
     headers: Vec<(String, String)>,
     /// Lowercase names of headers removed with `-H 'Name:'`.
     removed: Vec<String>,
+    /// The last `--user-agent`, which a User-Agent header overrides.
+    user_agent: Option<String>,
     data: Option<String>,
     /// The file `--data-binary @file` sends.
     file: Option<String>,
@@ -317,7 +319,7 @@ impl Options {
                 }
                 self.header(&value);
             }
-            "user-agent" => self.headers.push(("User-Agent".into(), value)),
+            "user-agent" => self.user_agent = Some(value),
             "referer" => {
                 let referer = value.strip_suffix(";auto").unwrap_or(&value);
                 if !referer.is_empty() {
@@ -472,6 +474,10 @@ impl Options {
         }
 
         let auth = self.auth(&url);
+
+        if let Some(user_agent) = self.user_agent.take() {
+            self.add_default("User-Agent", &user_agent);
+        }
 
         if !self.cookies.is_empty() {
             self.headers

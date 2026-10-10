@@ -162,8 +162,8 @@ fn reads_json_forms_and_credentials() {
     assert_eq!(
         request.headers,
         headers(&[
-            ("User-Agent", "agent"),
             ("Referer", "https://ref.example"),
+            ("User-Agent", "agent"),
             ("Cookie", "a=1; b=2"),
         ])
     );
@@ -341,12 +341,45 @@ fn leaves_out_headers_the_command_removes() {
 }
 
 #[test]
-fn a_removed_client_name_stays_empty() {
-    let request = parse_curl("curl -H 'User-Agent:' https://example.com").unwrap();
-    assert_eq!(request.headers, headers(&[("User-Agent", "")]));
+fn reads_the_client_name_as_curl_sends_it() {
+    let user_agents = |command: &str| {
+        parse_curl(command)
+            .unwrap()
+            .headers
+            .into_iter()
+            .filter(|field| field.key == "User-Agent")
+            .map(|field| field.value)
+            .collect::<Vec<_>>()
+    };
 
-    let request = parse_curl("curl -H 'User-Agent:' -A RequestEagle https://example.com").unwrap();
-    assert!(request.headers.is_empty());
+    // The last `-A` counts, and a header overrides it.
+    assert_eq!(
+        user_agents("curl -A one -A two https://example.com"),
+        ["two"]
+    );
+    assert_eq!(
+        user_agents("curl -A one -H 'User-Agent: two' https://example.com"),
+        ["two"]
+    );
+    assert_eq!(
+        user_agents("curl -H 'User-Agent: two' -A one https://example.com"),
+        ["two"]
+    );
+    // Sending names Request Eagle itself.
+    assert!(user_agents("curl -A custom -A RequestEagle https://example.com").is_empty());
+    assert_eq!(
+        user_agents("curl -A RequestEagle -A custom https://example.com"),
+        ["custom"]
+    );
+
+    // A removed name stays empty, so sending does not name Request Eagle.
+    for command in [
+        "curl -H 'User-Agent:' https://example.com",
+        "curl -H 'User-Agent:' -A one https://example.com",
+        "curl -A one -H 'User-Agent:' https://example.com",
+    ] {
+        assert_eq!(user_agents(command), [""], "{command}");
+    }
 }
 
 #[test]
