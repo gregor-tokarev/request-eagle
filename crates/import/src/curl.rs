@@ -524,6 +524,16 @@ impl Options {
             return Err(CurlError::BodyWithoutMethod(method.as_str()));
         }
 
+        // Sending adds these itself, as the commands Request Eagle writes do.
+        self.headers.retain(|(name, value)| {
+            let name = name.to_ascii_lowercase();
+            !(name == "user-agent" && value == request::USER_AGENT
+                || name == "content-length"
+                    && value == "0"
+                    && body.is_none()
+                    && matches!(method, Method::Post | Method::Put | Method::Patch))
+        });
+
         Ok(HttpRequest {
             method,
             path: url,

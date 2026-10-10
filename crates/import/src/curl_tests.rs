@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use request::{
     Auth, AwsSignatureAuth, BearerAuth, Body, Field, FormPart, HttpRequest, HttpSettings, Method,
-    PasswordAuth, RawLanguage,
+    PasswordAuth, RawLanguage, RequestPreferences,
 };
 
 use crate::{CurlError, is_curl, parse_curl};
@@ -385,10 +385,15 @@ fn reads_the_commands_request_eagle_writes() {
             path: "http://localhost:3000/".into(),
             ..HttpRequest::default()
         },
+        HttpRequest {
+            method: Method::Post,
+            path: "http://localhost:3000/jobs/run".into(),
+            ..HttpRequest::default()
+        },
     ];
 
     for request in requests {
-        let command = request.curl_command(&HashMap::new(), None);
+        let command = request.curl_command(&HashMap::new(), None, &RequestPreferences::default());
         assert_eq!(parse_curl(&command).as_ref(), Ok(&request), "{command}");
     }
 }
@@ -422,7 +427,9 @@ fn reads_certificate_checks_and_the_timeout_into_the_request_settings() {
         },
         ..HttpRequest::default()
     };
-    let imported = parse_curl(&exported.curl_command(&HashMap::new(), None)).unwrap();
+    let imported =
+        parse_curl(&exported.curl_command(&HashMap::new(), None, &RequestPreferences::default()))
+            .unwrap();
     assert_eq!(imported.settings, exported.settings);
 
     assert!(
@@ -496,6 +503,6 @@ fn credentials_become_the_requests_authorization() {
         }),
         ..HttpRequest::default()
     };
-    let command = request.curl_command(&HashMap::new(), None);
+    let command = request.curl_command(&HashMap::new(), None, &RequestPreferences::default());
     assert_eq!(parse_curl(&command).unwrap().auth, request.auth);
 }

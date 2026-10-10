@@ -518,7 +518,7 @@ fn curl_snippets_carry_the_authorization() {
         ..HttpRequest::default()
     };
     let values = HashMap::from([("user".to_owned(), "eagle".to_owned())]);
-    let command = request.curl_command(&values, None);
+    let command = request.curl_command(&values, None, &RequestPreferences::default());
     assert!(
         command.ends_with("\\\n--user 'eagle:{{unknown}}'"),
         "{command}"
@@ -532,7 +532,7 @@ fn curl_snippets_carry_the_authorization() {
         }),
         ..request.clone()
     }
-    .curl_command(&values, None);
+    .curl_command(&values, None, &RequestPreferences::default());
     assert!(
         command.contains("'https://example.com/items?key=eagle'"),
         "{command}"
@@ -542,7 +542,7 @@ fn curl_snippets_carry_the_authorization() {
         auth: AuthKind::Digest.new_auth(),
         ..request.clone()
     }
-    .curl_command(&values, None);
+    .curl_command(&values, None, &RequestPreferences::default());
     assert!(
         command.ends_with("\\\n--digest \\\n--user ':'"),
         "{command}"
@@ -558,7 +558,7 @@ fn curl_snippets_carry_the_authorization() {
         })),
         ..request
     }
-    .curl_command(&values, None);
+    .curl_command(&values, None, &RequestPreferences::default());
     assert!(
         command
             .ends_with("\\\n--aws-sigv4 'aws:amz:us-east-1:execute-api' \\\n--user 'AKID:secret'"),
@@ -582,7 +582,7 @@ fn curl_snippets_carry_the_authorization() {
         })),
         ..HttpRequest::default()
     }
-    .curl_command(&values, None);
+    .curl_command(&values, None, &RequestPreferences::default());
     assert!(command.contains("X-Amz-Signature="), "{command}");
     assert!(!command.contains("--aws-sigv4"), "{command}");
 }

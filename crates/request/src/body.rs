@@ -215,7 +215,7 @@ fn read(path: &Path) -> Result<Vec<u8>, ExecutionError> {
 }
 
 /// The media type of a file, by its extension.
-fn file_type(path: &Path) -> String {
+pub(crate) fn file_type(path: &Path) -> String {
     mime_guess::from_path(path)
         .first_or_octet_stream()
         .essence_str()

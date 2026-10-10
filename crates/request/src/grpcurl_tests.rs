@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Field, GrpcRequest, GrpcSettings};
+use crate::{Field, GrpcRequest, GrpcSettings, RequestPreferences};
 
 fn values(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -37,7 +37,8 @@ fn writes_calls_with_metadata_and_a_message() {
     assert_eq!(
         request.grpcurl_command(
             &values(&[("host", "localhost"), ("token", "abc"), ("name", "Rex")]),
-            None
+            None,
+            &RequestPreferences::default(),
         ),
         "grpcurl -plaintext \\\n\
          -H 'Authorization: Bearer abc' \\\n\
@@ -49,7 +50,9 @@ fn writes_calls_with_metadata_and_a_message() {
 
 #[test]
 fn connects_as_invoking_does() {
-    let command = |request: GrpcRequest| request.grpcurl_command(&HashMap::new(), None);
+    let command = |request: GrpcRequest| {
+        request.grpcurl_command(&HashMap::new(), None, &RequestPreferences::default())
+    };
 
     // Without a port, invoking connects to 443 over TLS or plaintext.
     assert_eq!(
@@ -104,7 +107,11 @@ fn keeps_unknown_and_generated_variables() {
     };
 
     assert_eq!(
-        request.grpcurl_command(&values(&[("$guid", "fixed")]), None),
+        request.grpcurl_command(
+            &values(&[("$guid", "fixed")]),
+            None,
+            &RequestPreferences::default()
+        ),
         "grpcurl \\\n\
          -H 'x-request-id: {{$guid}}' \\\n\
          -d '{\"id\": \"{{id}}\", \"literal\": \"{{name}}\"}' \\\n\
@@ -118,7 +125,11 @@ fn keeps_unknown_and_generated_variables() {
     };
     assert!(
         request
-            .grpcurl_command(&values(&[("id", "7")]), None)
+            .grpcurl_command(
+                &values(&[("id", "7")]),
+                None,
+                &RequestPreferences::default()
+            )
             .contains(r#"-d '{"id": "{{id"}'"#)
     );
 }
@@ -130,7 +141,7 @@ fn applies_the_request_settings() {
             settings,
             ..unary("grpcs://example.com:443")
         }
-        .grpcurl_command(&HashMap::new(), None)
+        .grpcurl_command(&HashMap::new(), None, &RequestPreferences::default())
     };
 
     assert_eq!(
@@ -144,6 +155,29 @@ fn applies_the_request_settings() {
          -max-msg-sz 8388608 \\\n\
          example.com:443 helloworld.Greeter/SayHello"
     );
+    // Unless the request's settings say otherwise, the preference decides
+    // whether certificates are checked.
+    let unchecked = RequestPreferences {
+        ssl_certificate_verification: false,
+        ..RequestPreferences::default()
+    };
+    let request = unary("grpcs://example.com:443");
+    assert_eq!(
+        request.grpcurl_command(&HashMap::new(), None, &unchecked),
+        "grpcurl -insecure example.com:443 helloworld.Greeter/SayHello"
+    );
+    let checked = GrpcRequest {
+        settings: GrpcSettings {
+            verify_certificates: Some(true),
+            ..request.settings.clone()
+        },
+        ..request
+    };
+    assert_eq!(
+        checked.grpcurl_command(&HashMap::new(), None, &unchecked),
+        "grpcurl example.com:443 helloworld.Greeter/SayHello"
+    );
+
     // Without certificate checks, the server name does not matter.
     assert_eq!(
         command(GrpcSettings {
@@ -172,7 +206,7 @@ fn names_proto_files_as_their_import_paths_do() {
             definition,
             ..unary("localhost:50051")
         }
-        .grpcurl_command(&HashMap::new(), collection)
+        .grpcurl_command(&HashMap::new(), collection, &RequestPreferences::default())
     };
 
     // Relative paths resolve from the collection, and the file's directory

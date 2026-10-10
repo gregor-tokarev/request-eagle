@@ -99,7 +99,11 @@ impl SnippetDraft for RequestDraft {
             auth: self.effective_auth(),
             ..self.sent_request()
         }
-        .curl_command(values, super::execution::active_jar(cx).as_ref())
+        .curl_command(
+            values,
+            super::execution::active_jar(cx).as_ref(),
+            &crate::request_settings::preferences(cx),
+        )
     }
 
     fn variables(&self) -> &Entity<VariableScope> {

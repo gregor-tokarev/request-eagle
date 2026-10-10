@@ -15,6 +15,7 @@ fn templated_header_names_defer_potentially_overridden_defaults() {
 
     for name in [
         "Host",
+        "User-Agent",
         "Accept",
         "Accept-Encoding",
         "Content-Length",

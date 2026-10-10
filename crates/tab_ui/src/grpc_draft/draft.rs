@@ -87,12 +87,16 @@ impl SnippetDraft for GrpcDraft {
         &self.request
     }
 
-    fn command(&self, values: &HashMap<String, String>, _: &App) -> String {
+    fn command(&self, values: &HashMap<String, String>, cx: &App) -> String {
         GrpcRequest {
             auth: self.effective_auth(),
             ..self.request.clone()
         }
-        .grpcurl_command(values, self.collection_path().as_deref())
+        .grpcurl_command(
+            values,
+            self.collection_path().as_deref(),
+            &crate::request_settings::preferences(cx),
+        )
     }
 
     fn variables(&self) -> &Entity<VariableScope> {

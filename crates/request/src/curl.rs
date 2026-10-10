@@ -3,24 +3,31 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::path::Path;
 
 use environment::VariableResolver;
 use url::{Url, form_urlencoded::byte_serialize};
 
-use crate::{Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, Method};
+use crate::{
+    Auth, AuthLocation, Body, CookieJar, Field, HttpRequest, HttpVersion, Method,
+    RequestPreferences,
+};
 
 impl HttpRequest {
-    /// The cURL command that sends this request as Request Eagle does,
-    /// following redirects and with the timeout and certificate checks of the
-    /// request's settings. `{{variables}}` that `values` defines are filled
-    /// in as sending fills them, including `:name` path variables; others,
-    /// and generated ones such as `{{$guid}}`, stay as written. The cookies
-    /// that `cookies` would add join the request's Cookie header, unless
-    /// the request's settings leave them out.
+    /// The cURL command that sends this request as Request Eagle does, with
+    /// the headers it adds that cURL would send differently or not at all,
+    /// and the redirects, timeout, certificate checks and HTTP version of the
+    /// request's settings or, where they have none, of `preferences`.
+    /// `{{variables}}` that `values` defines are filled in as sending fills
+    /// them, including `:name` path variables; others, and generated ones
+    /// such as `{{$guid}}`, stay as written. The cookies that `cookies` would
+    /// add join the request's Cookie header, unless the request's settings
+    /// leave them out.
     pub fn curl_command(
         &self,
         values: &HashMap<String, String>,
         cookies: Option<&CookieJar>,
+        preferences: &RequestPreferences,
     ) -> String {
         let mut request = self.clone();
         request.auth = request.auth.sending();
@@ -80,15 +87,42 @@ impl HttpRequest {
         let url = url(&request.path, &Field::pairs(&request.query));
         let data = request.body.as_ref().map(data).unwrap_or_default();
 
-        // cURL names the type of forms itself; it would send raw text and
-        // files as a URL-encoded form.
-        if let Some(body @ (Body::Raw { .. } | Body::Binary { .. })) = &request.body
-            && !data.is_empty()
-            && !headers
+        let has = |headers: &[(String, String)], name: &str| {
+            headers
                 .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                .any(|(header, _)| header.eq_ignore_ascii_case(name))
+        };
+
+        // cURL names the type of the forms it sends itself. It would send raw
+        // text and files as a URL-encoded form, and a form without fields as
+        // no body, which sending still names.
+        let content_type = match &request.body {
+            Some(Body::Raw { text, .. }) if text.is_empty() => None,
+            Some(body @ (Body::Raw { .. } | Body::Binary { .. })) => Some(body.content_type()),
+            Some(body @ Body::UrlEncoded { fields }) if fields.is_empty() => {
+                Some(body.content_type())
+            }
+            Some(Body::UrlEncoded { .. } | Body::Multipart { .. }) | None => None,
+        };
+        if let Some(content_type) = content_type
+            && !has(&headers, "content-type")
         {
-            headers.push(("Content-Type".into(), body.content_type()));
+            headers.push(("Content-Type".into(), content_type));
+        }
+
+        // cURL would name itself, which some servers turn away.
+        if !has(&headers, "user-agent") {
+            headers.push(("User-Agent".into(), crate::USER_AGENT.into()));
+        }
+
+        // cURL sends no length without a body, which some servers require
+        // for these methods.
+        if data.is_empty()
+            && matches!(request.method, Method::Post | Method::Put | Method::Patch)
+            && !has(&headers, "content-length")
+            && !has(&headers, "transfer-encoding")
+        {
+            headers.push(("Content-Length".into(), "0".into()));
         }
 
         // The jar's cookies for the request's own URL, which cURL sends on
@@ -112,15 +146,29 @@ impl HttpRequest {
 
         let settings = &request.settings;
         let mut command = String::from("curl");
-        if settings.follow_redirects != Some(false) {
+        if settings
+            .follow_redirects
+            .unwrap_or(preferences.follow_all_redirects)
+        {
             command.push_str(" --location");
         }
-        if settings.verify_certificates == Some(false) {
+        if !settings
+            .verify_certificates
+            .unwrap_or(preferences.ssl_certificate_verification)
+        {
             command.push_str(" --insecure");
         }
-        if let Some(timeout) = settings.timeout_ms.filter(|timeout| *timeout > 0) {
+        let timeout = settings.timeout_ms.unwrap_or(preferences.timeout_ms);
+        if timeout > 0 {
             // In seconds, which may have a fraction.
             command.push_str(&format!(" --max-time {}", timeout as f64 / 1000.));
+        }
+        match preferences.http_version {
+            // cURL also offers HTTP/2 to secure servers and uses HTTP/1.1
+            // with others.
+            HttpVersion::Auto => {}
+            HttpVersion::Http1_1 => command.push_str(" --http1.1"),
+            HttpVersion::Http2 => command.push_str(" --http2-prior-knowledge"),
         }
         // cURL would read brackets and braces as patterns of several URLs.
         if url.contains(['[', ']', '{', '}']) {
@@ -248,41 +296,37 @@ fn authorization(request: &mut HttpRequest) -> Vec<(&'static str, Option<String>
 
 /// The bytes cURL sends for a body that it does not read from files.
 pub(crate) fn sent_body(body: Option<&Body>) -> Option<Vec<u8>> {
-    // `--data-urlencode` keeps the unreserved characters of a value, writes
-    // a space as `+` and escapes the rest. A field without a name sends its
-    // value alone.
-    let escape = |value: &str| {
-        let mut escaped = String::with_capacity(value.len());
-        for byte in value.bytes() {
-            match byte {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                    escaped.push(char::from(byte));
-                }
-                b' ' => escaped.push('+'),
-                byte => {
-                    let _ = write!(escaped, "%{byte:02X}");
-                }
-            }
-        }
-        escaped
-    };
-
     match body {
         None => Some(Vec::new()),
         Some(Body::Raw { text, .. }) => Some(text.clone().into_bytes()),
         Some(Body::UrlEncoded { fields }) => Some(
             fields
                 .iter()
-                .map(|(name, value)| match name.as_str() {
-                    "" => escape(value),
-                    name => format!("{}={}", form_encode(name), escape(value)),
-                })
+                .map(|(name, value)| format!("{}={}", form_encode(name), data_urlencode(value)))
                 .collect::<Vec<_>>()
                 .join("&")
                 .into_bytes(),
         ),
         Some(Body::Multipart { .. } | Body::Binary { .. }) => None,
     }
+}
+
+/// A form value as `--data-urlencode` encodes it: the unreserved characters
+/// stay, a space becomes `+` and the rest is escaped.
+fn data_urlencode(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                escaped.push(char::from(byte));
+            }
+            b' ' => escaped.push('+'),
+            byte => {
+                let _ = write!(escaped, "%{byte:02X}");
+            }
+        }
+    }
+    escaped
 }
 
 /// The options that send the body, with their values.
@@ -293,17 +337,26 @@ fn data(body: &Body) -> Vec<(&'static str, String)> {
         Body::Raw { text, .. } if text.contains('@') => vec![("data-raw", text.clone())],
         Body::Raw { text, .. } => vec![("data", text.clone())],
         // cURL encodes the value, but expects the name to be encoded already.
+        // Without a name, it would send the value alone, without `=`.
         Body::UrlEncoded { fields } => fields
             .iter()
-            .map(|(name, value)| ("data-urlencode", format!("{}={value}", form_encode(name))))
+            .map(|(name, value)| match name.as_str() {
+                "" => ("data-raw", format!("={}", data_urlencode(value))),
+                name => ("data-urlencode", format!("{}={value}", form_encode(name))),
+            })
             .collect(),
         Body::Multipart { parts } => parts
             .iter()
             .map(|part| {
                 if part.file {
-                    // A quoted file name may contain `;` and `,`.
+                    // A quoted file name may contain `;` and `,`. cURL knows
+                    // the types of fewer files than sending does.
                     let path = part.value.replace('\\', "\\\\").replace('"', "\\\"");
-                    ("form", format!("{}=@\"{path}\"", part.name))
+                    let file_type = crate::body::file_type(Path::new(&part.value));
+                    (
+                        "form",
+                        format!("{}=@\"{path}\";type={file_type}", part.name),
+                    )
                 } else {
                     ("form-string", format!("{}={}", part.name, part.value))
                 }
