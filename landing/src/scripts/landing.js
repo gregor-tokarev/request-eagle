@@ -221,21 +221,19 @@ again.hidden = !motionAllowed();
 const picker = document.querySelector("[data-picker]");
 const themeStage = document.querySelector("[data-theme-stage]");
 const [current, next] = themeStage.querySelectorAll("img");
-const choices = [...picker.querySelectorAll("button")];
+const choices = [...picker.querySelectorAll("input")];
 
 const FADE = 450;
 const ROTATE_EVERY = 2800;
 
 let latestChoice = 0;
 
-async function showTheme(button) {
+async function showTheme(input) {
   const choice = ++latestChoice;
 
-  for (const other of choices) {
-    other.setAttribute("aria-pressed", String(other === button));
-  }
+  input.checked = true;
 
-  next.srcset = button.dataset.srcset;
+  next.srcset = input.dataset.srcset;
   await next.decode().catch(() => {});
 
   // A newer choice was made while this capture was loading.
@@ -246,8 +244,8 @@ async function showTheme(button) {
 
   if (choice !== latestChoice) return;
 
-  current.srcset = button.dataset.srcset;
-  current.alt = `Request Eagle in the ${button.textContent.trim()} theme.`;
+  current.srcset = input.dataset.srcset;
+  current.alt = `Request Eagle in the ${input.value} theme.`;
   await current.decode().catch(() => {});
 
   if (choice !== latestChoice) return;
@@ -256,7 +254,7 @@ async function showTheme(button) {
 }
 
 // The captures rotate once through while the stage is on screen. Reaching for the
-// picker ends the rotation, so its buttons never change under a pointer or focus.
+// picker ends the rotation, so its choices never change under a pointer or focus.
 let rotation = 0;
 let rotationsLeft = choices.length;
 
@@ -276,9 +274,9 @@ const stageWatcher = new IntersectionObserver(([entry]) => {
   if (!entry.isIntersecting) return;
 
   rotation = setInterval(() => {
-    const pressed = choices.findIndex((button) => button.getAttribute("aria-pressed") === "true");
+    const checked = choices.findIndex((input) => input.checked);
 
-    showTheme(choices[(pressed + 1) % choices.length]);
+    showTheme(choices[(checked + 1) % choices.length]);
 
     if (--rotationsLeft === 0) endRotation();
   }, ROTATE_EVERY);
@@ -289,12 +287,10 @@ if (motionAllowed()) stageWatcher.observe(themeStage);
 picker.addEventListener("pointerenter", endRotation);
 picker.addEventListener("focusin", endRotation);
 
-for (const button of choices) {
-  button.addEventListener("click", () => {
-    endRotation();
-    showTheme(button);
-  });
-}
+picker.addEventListener("change", (event) => {
+  endRotation();
+  showTheme(event.target);
+});
 
 // A preference changed mid-visit: bring everything in motion to rest, or let it move again.
 

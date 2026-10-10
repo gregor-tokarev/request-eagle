@@ -15,7 +15,7 @@
   transform-origin: 50% 100%;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.14),
-    0 -30px 120px -20px rgba(79, 195, 255, 0.4);
+    0 -30px 120px -20px rgba(134, 212, 255, 0.4);
 }
 
 .window img { width: 100%; }
@@ -152,7 +152,7 @@
 
 .lane--eagle .lane__fill {
   background: linear-gradient(90deg, var(--sky), #bfe9ff);
-  box-shadow: 0 0 30px rgba(79, 195, 255, 0.7);
+  box-shadow: 0 0 30px rgba(134, 212, 255, 0.7);
 }
 
 .race__foot {
@@ -342,10 +342,9 @@ pre .c { color: #8a97b0; }
 
 html:not(.js) .picker { display: none; }
 
-.picker button {
+.picker label {
+  position: relative;
   padding: 10px 16px;
-  border: 0;
-  background: transparent;
   color: var(--text);
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22);
   font: italic 700 13px var(--sans);
@@ -357,18 +356,29 @@ html:not(.js) .picker { display: none; }
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, translate 0.25s var(--ease);
 }
 
-.picker button > span { display: block; transform: skewX(10deg); }
+/* The radio itself stays in place for the keyboard and screen readers; the label draws the choice. */
+.picker input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 
-.picker button:hover { box-shadow: inset 0 0 0 2px var(--sky); color: var(--sky); translate: 0 -2px; }
+.picker label > span { display: block; transform: skewX(10deg); }
 
-.picker button[aria-pressed="true"] { background: var(--sky); color: var(--ink); box-shadow: none; }
+.picker label:hover { box-shadow: inset 0 0 0 2px var(--sky); color: var(--sky); translate: 0 -2px; }
+
+.picker label:has(:checked) { background: var(--sky); color: var(--ink); box-shadow: none; }
+
+.picker label:has(:focus-visible) { outline: 3px solid var(--sky); outline-offset: 3px; }
 
 /* Takeoff: the icon in its own slipstream. */
 
 .takeoff {
   position: relative;
   padding: 130px 0 calc(var(--slant) + 150px);
-  background: radial-gradient(55% 50% at 50% 30%, rgba(79, 195, 255, 0.17), transparent 70%);
+  background: radial-gradient(55% 50% at 50% 30%, rgba(134, 212, 255, 0.17), transparent 70%);
   text-align: center;
   overflow: hidden;
 }
@@ -396,7 +406,7 @@ html:not(.js) .picker { display: none; }
   position: absolute;
   inset: 25% -70% -60%;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(79, 195, 255, 0.6), rgba(79, 195, 255, 0));
+  background: radial-gradient(closest-side, rgba(134, 212, 255, 0.6), rgba(134, 212, 255, 0));
   filter: blur(26px);
   animation: pulse 3.4s ease-in-out infinite;
 }

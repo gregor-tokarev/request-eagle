@@ -262,9 +262,9 @@ const themes = await Promise.all(
               whole interface from 12 to 24 px.
             </p>
 
-            <div class="picker" role="group" aria-label="Preview a theme" data-picker>
+            <div class="picker" role="radiogroup" aria-label="Preview a theme" data-picker>
               {themes.map((theme, index) => (
-                <button type="button" aria-pressed={index === 0 ? "true" : "false"} data-srcset={theme.shot.srcSet.attribute}><span>{theme.name}</span></button>
+                <label><input type="radio" name="theme" autocomplete="off" value={theme.name} checked={index === 0} data-srcset={theme.shot.srcSet.attribute}><span>{theme.name}</span></label>
               ))}
             </div>
           </div>
