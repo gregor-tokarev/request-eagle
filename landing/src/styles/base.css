@@ -16,8 +16,8 @@
 }
 
 @font-face {
-  font-family: "Geist Mono";
-  src: url("../assets/fonts/geist-mono.woff2") format("woff2");
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/jetbrains-mono.woff2") format("woff2");
   font-weight: 400 500;
   font-display: swap;
 }
@@ -28,10 +28,10 @@
   --line: rgba(255, 255, 255, 0.1);
   --text: #eef3fb;
   --muted: #94a0b8;
-  --sky: #4fc3ff;
+  --sky: #86d4ff;
   --ink: #04121d;
   --sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --page: min(1240px, 100% - 56px);
   --slant: 5vw;
   --hero-top: 176px;
@@ -215,7 +215,7 @@ html:not(.js) .nav {
 
 .button--outline:hover { background: transparent; color: var(--sky); box-shadow: inset 0 0 0 2px var(--sky); }
 
-.button--outline::after { background: linear-gradient(100deg, transparent 30%, rgba(79, 195, 255, 0.28) 50%, transparent 70%); }
+.button--outline::after { background: linear-gradient(100deg, transparent 30%, rgba(134, 212, 255, 0.28) 50%, transparent 70%); }
 
 .button--small { height: 42px; padding: 0 20px; font-size: 13px; }
 
@@ -236,8 +236,8 @@ html:not(.js) .nav {
   width: var(--w, 30%);
   height: var(--h, 2px);
   border-radius: 4px;
-  background: linear-gradient(90deg, #e2f4ff, var(--sky) 25%, rgba(79, 195, 255, 0));
-  box-shadow: 0 0 16px rgba(79, 195, 255, 0.5);
+  background: linear-gradient(90deg, #e2f4ff, var(--sky) 25%, rgba(134, 212, 255, 0));
+  box-shadow: 0 0 16px rgba(134, 212, 255, 0.5);
   opacity: var(--o, 0.8);
   animation: rush var(--d, 4s) linear var(--delay, 0s) infinite;
 }
@@ -258,7 +258,7 @@ html:not(.js) .nav {
   position: relative;
   padding: var(--hero-top) 0 0;
   background:
-    radial-gradient(70% 60% at 85% 0%, rgba(79, 195, 255, 0.22), transparent 65%),
+    radial-gradient(70% 60% at 85% 0%, rgba(134, 212, 255, 0.22), transparent 65%),
     linear-gradient(180deg, #0b1324 0%, var(--night) 75%);
   overflow: hidden;
 }

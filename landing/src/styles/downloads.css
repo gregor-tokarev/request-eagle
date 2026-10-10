@@ -19,7 +19,7 @@
   transition: box-shadow 0.25s ease;
 }
 
-.platform:hover { box-shadow: inset 0 0 0 1px rgba(79, 195, 255, 0.45); }
+.platform:hover { box-shadow: inset 0 0 0 1px rgba(134, 212, 255, 0.45); }
 
 .platform h2 {
   margin: 0;
