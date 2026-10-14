@@ -1622,7 +1622,9 @@ impl MainView {
             Page::Collection(page) => {
                 let path = page.read(cx).path.clone();
                 self.collections
-                    .update(cx, |collections, _| collections.reload_collection(&path))
+                    .update(cx, |collections, cx| {
+                        collections.reload_collection(&path, cx)
+                    })
                     .map_err(|error| error.to_string())
             }
             // Its editor reads the environment's file when it opens. A file

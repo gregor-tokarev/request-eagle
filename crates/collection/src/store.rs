@@ -19,7 +19,11 @@ pub struct Collections {
     registry: CollectionRegistry,
     /// Counts the changes, so a view can tell whether it shows the latest.
     revision: u64,
-    reloading: Option<Task<()>>,
+    /// Reading every collection again, in the background.
+    reload: Option<Task<()>>,
+    reloading: bool,
+    /// Whether another reload was asked for while one was reading.
+    reload_pending: bool,
 }
 
 /// A change to the saved collections, emitted after it is made.
@@ -78,7 +82,9 @@ impl Collections {
         Self {
             registry,
             revision: 0,
-            reloading: None,
+            reload: None,
+            reloading: false,
+            reload_pending: false,
         }
     }
 
@@ -244,22 +250,29 @@ impl Collections {
 
     /// Read every collection from disk again, such as after Git changed
     /// their files. Reading takes a while, so it runs in the background.
+    /// Reloads asked for while one is reading are done together after it.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        if self.reloading {
+            self.reload_pending = true;
+            return;
+        }
         let Some(loaded_from) = self.registry.loaded_from() else {
             return;
         };
         let revision = self.revision;
+        self.reloading = true;
 
-        // Replacing the task drops a reload that has not finished yet.
-        self.reloading = Some(cx.spawn(async move |this, cx| {
+        self.reload = Some(cx.spawn(async move |this, cx| {
             let reloaded = cx
                 .background_executor()
                 .spawn(async move { loaded_from.load() })
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                // What was read can miss a change made meanwhile.
-                if this.revision != revision {
+                this.reloading = false;
+                // What was read can miss a change made meanwhile, and another
+                // reload was asked for after it started.
+                if this.revision != revision || std::mem::take(&mut this.reload_pending) {
                     this.reload(cx);
                     return;
                 }
@@ -377,14 +390,22 @@ impl Collections {
         } else {
             self.registry.update_collection(&path, variables, shared)?;
         }
+        self.changed(cx);
 
         Ok(path)
     }
 
     /// Take the changes made to a collection's variables, scripts and
     /// authorization outside the app.
-    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
-        self.registry.reload_collection(path)
+    pub fn reload_collection(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.reload_collection(path)?;
+        self.changed(cx);
+
+        Ok(())
     }
 
     /// Rename a collection, folder or request. Returns its path after the

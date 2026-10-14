@@ -421,6 +421,7 @@ impl Render for GitPanel {
                             .icon(Icon::default().path("icons/refresh-cw.svg"))
                             .accessibility_label("Refresh")
                             .tooltip("Refresh")
+                            .disabled(state.running.is_some())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.state.update(cx, |state, cx| state.refresh_all(cx))
                             })),

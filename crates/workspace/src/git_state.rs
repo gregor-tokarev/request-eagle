@@ -294,7 +294,13 @@ impl GitState {
     }
 
     /// Read the collections again too, as when the user asks to refresh.
+    /// A running action, which can leave files halfway, reads the status
+    /// once it is done, and that reloads the collections it changed.
     pub(crate) fn refresh_all(&mut self, cx: &mut Context<Self>) {
+        if self.running.is_some() {
+            return;
+        }
+
         self.collections
             .update(cx, |collections, cx| collections.reload(cx));
         self.schedule_refresh(cx);
