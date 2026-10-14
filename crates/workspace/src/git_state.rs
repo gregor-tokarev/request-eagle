@@ -142,6 +142,9 @@ pub(crate) struct GitState {
     departed: Vec<PathBuf>,
     /// The action running now. One runs at a time.
     pub(crate) running: Option<GitAction>,
+    /// Whether the collections are to be read again once the running action
+    /// is done.
+    reload_after_action: bool,
     /// Whether statuses are being read, so that refreshes wait for them.
     scanning: bool,
     refresh_pending: bool,
@@ -224,6 +227,7 @@ impl GitState {
             repositories: Vec::new(),
             departed: Vec::new(),
             running: None,
+            reload_after_action: false,
             scanning: false,
             refresh_pending: false,
             generation: 0,
@@ -294,10 +298,11 @@ impl GitState {
     }
 
     /// Read the collections again too, as when the user asks to refresh.
-    /// A running action, which can leave files halfway, reads the status
-    /// once it is done, and that reloads the collections it changed.
+    /// While an action runs, which can leave files halfway, this waits until
+    /// it is done.
     pub(crate) fn refresh_all(&mut self, cx: &mut Context<Self>) {
         if self.running.is_some() {
+            self.reload_after_action = true;
             return;
         }
 
@@ -647,7 +652,11 @@ impl GitState {
         cx.emit(GitEvent::Finished { action, errors });
         cx.notify();
 
-        self.schedule_refresh(cx);
+        if std::mem::take(&mut self.reload_after_action) {
+            self.refresh_all(cx);
+        } else {
+            self.schedule_refresh(cx);
+        }
     }
 }
 

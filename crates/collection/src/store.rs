@@ -271,8 +271,9 @@ impl Collections {
             let _ = this.update(cx, |this, cx| {
                 this.reloading = false;
                 // What was read can miss a change made meanwhile, and another
-                // reload was asked for after it started.
-                if this.revision != revision || std::mem::take(&mut this.reload_pending) {
+                // reload was asked for after it started. One more serves both.
+                let pending = std::mem::take(&mut this.reload_pending);
+                if this.revision != revision || pending {
                     this.reload(cx);
                     return;
                 }
