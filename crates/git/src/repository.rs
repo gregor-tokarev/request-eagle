@@ -28,7 +28,8 @@ impl Repository {
     /// `.git`, without running Git, so nothing runs for folders outside
     /// repositories. `path` does not have to exist anymore.
     pub fn containing(path: &Path) -> Option<Self> {
-        path.ancestors()
+        real_path(path)
+            .ancestors()
             .find(|folder| folder.join(".git").exists())
             .map(|root| Self {
                 root: root.to_path_buf(),
@@ -59,7 +60,7 @@ impl Repository {
         run(path, &args, None, TIMEOUT, true)?;
 
         Ok(Self {
-            root: path.to_path_buf(),
+            root: real_path(path),
         })
     }
 
@@ -99,6 +100,7 @@ impl Repository {
             .map(str::to_owned)
             .collect();
         status.interrupted = self.interrupted()?;
+        status.conflicted |= self.has_conflicts()?;
 
         Ok(status)
     }
@@ -112,10 +114,22 @@ impl Repository {
             return Ok(false);
         }
 
-        // New files must be known to Git before a commit can take them.
-        let mut add = vec![OsStr::new("add"), OsStr::new("--all")];
-        add.extend(FROM_INPUT.map(OsStr::new));
-        self.git(&add, Some(&self.pathspecs(&changes)), TIMEOUT)?;
+        // New files must be known to Git before a commit can take them. A
+        // staged deletion or rename is in neither the working tree nor what
+        // is staged anymore, so adding it would fail.
+        let unstaged: Vec<_> = changes
+            .iter()
+            .filter(|change| change.unstaged)
+            .map(|change| Change {
+                original: None,
+                ..change.clone()
+            })
+            .collect();
+        if !unstaged.is_empty() {
+            let mut add = vec![OsStr::new("add"), OsStr::new("--all")];
+            add.extend(FROM_INPUT.map(OsStr::new));
+            self.git(&add, Some(&self.pathspecs(&unstaged)), TIMEOUT)?;
+        }
 
         // Adding can leave nothing to commit, as for a file added and then
         // deleted, which a commit could not find.
@@ -296,13 +310,15 @@ impl Repository {
     fn relative(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
         paths
             .iter()
-            .filter_map(|path| path.strip_prefix(&self.root).ok())
-            .map(|path| {
-                if path.as_os_str().is_empty() {
+            .filter_map(|path| {
+                let path = real_path(path);
+                let path = path.strip_prefix(&self.root).ok()?;
+
+                Some(if path.as_os_str().is_empty() {
                     PathBuf::from(".")
                 } else {
                     path.to_path_buf()
-                }
+                })
             })
             .collect()
     }
@@ -330,5 +346,33 @@ impl Repository {
         timeout: Duration,
     ) -> Result<String, GitError> {
         run(&self.root, args, input, timeout, true)
+    }
+}
+
+/// `path` with the links in it followed, as Git sees it, so that a folder
+/// reached through a link is found in its repository and compares with the
+/// paths of changes. The part of `path` that does not exist stays as it is.
+pub fn real_path(path: &Path) -> PathBuf {
+    // Followed links come back as verbatim paths on Windows, which Git does
+    // not take, and links are rare there.
+    if cfg!(windows) {
+        return path.to_path_buf();
+    }
+
+    let mut missing = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(mut real) = fs::canonicalize(existing) {
+            real.extend(missing.iter().rev());
+            return real;
+        }
+
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name);
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
     }
 }

@@ -15,11 +15,14 @@ pub fn read(root: &Path, flows: &Path) -> CollectionRegistry {
     // The data directory lists the linked folders beside the flows directory.
     let links = flows.with_file_name(LINKS_FILE_NAME);
     let registry = CollectionRegistry::open(root, &links);
+    // Only 0.1.22 saved flows in collections, and only in the collections
+    // directory; linked folders are left as they are.
     let moved = flow::move_flows_out_of_collections(
         registry
             .skipped()
             .iter()
-            .map(|skipped| skipped.path.as_path()),
+            .map(|skipped| skipped.path.as_path())
+            .filter(|path| path.starts_with(root)),
         flows,
     );
 
@@ -75,7 +78,7 @@ pub fn dispatch(root: &Path, flows: &Path, command: Command) -> Result<Value> {
     // A linked folder that is gone cannot load, and unlinking it is how it
     // stops being reported.
     if let Command::CollectionsUnlink { path } = &command {
-        read(root, flows).unlink(path)?;
+        CollectionRegistry::open(root, flows.with_file_name(LINKS_FILE_NAME)).unlink(path)?;
         return Ok(json!({"path": path}));
     }
 

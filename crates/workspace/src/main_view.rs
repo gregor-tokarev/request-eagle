@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     mem,
     path::{Path, PathBuf},
 };
@@ -663,6 +662,14 @@ impl MainView {
                 .read(cx)
                 .get(&editor.read(cx).path)
                 .map_or(0, |saved| saved.outside_changes);
+        }
+
+        if let Page::Collection(page) = page {
+            return self
+                .collections
+                .read(cx)
+                .collection(&page.read(cx).path)
+                .map_or(0, |collection| collection.outside_changes());
         }
 
         page.location(cx)
@@ -1425,6 +1432,7 @@ impl MainView {
                                     scripts: settings.scripts.clone(),
                                     auth: settings.auth.clone(),
                                 },
+                                outside_changes,
                                 overwrite,
                                 cx,
                             )
@@ -1436,6 +1444,9 @@ impl MainView {
                 match result {
                     Ok((path, settings)) => {
                         page.update(cx, |page, cx| page.mark_saved(path, settings, cx));
+                        // The saved settings are the ones the tab edits from now on.
+                        self.tabs[index].outside_changes =
+                            self.outside_changes(&self.tabs[index].page, cx);
                         self.close_saved_tab(index, window, cx);
                     }
                     Err(failure) => self.save_failed(id, "collection", failure),
@@ -1738,19 +1749,9 @@ impl MainView {
                     .location(cx)
                     .and_then(|location| collections.registry().file(&location.path))
                     .is_some_and(|file| file.outside_changes() != tab.outside_changes),
-                Page::Collection(page) => {
-                    let page = page.read(cx);
-                    collections
-                        .collection(&page.path)
-                        .is_some_and(|collection| {
-                            page.settings().is_ok_and(|settings| {
-                                settings.variables.into_iter().collect::<HashMap<_, _>>()
-                                    != collection.local_env().entries
-                                    || settings.scripts != *collection.scripts()
-                                    || settings.auth != *collection.auth()
-                            })
-                        })
-                }
+                Page::Collection(page) => collections
+                    .collection(&page.read(cx).path)
+                    .is_some_and(|collection| collection.outside_changes() != tab.outside_changes),
                 _ => false,
             };
 

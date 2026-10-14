@@ -239,10 +239,9 @@ impl Workspace {
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.set_git_changes(changes, cx));
             }),
-            // Git can have run in a terminal meanwhile.
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
-                    this.git.update(cx, |git, cx| git.schedule_refresh(cx));
+                    this.git.update(cx, |git, cx| git.refresh_on_return(cx));
                 }
             }),
         ];

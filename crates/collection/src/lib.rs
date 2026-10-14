@@ -17,7 +17,7 @@ pub use entry::{DirEntry, Entry, FileEntry};
 pub use location::{SavedLocation, directory_name};
 pub use registry::{
     CollectionEditError, CollectionRegistry, ImportedCollection, ImportedItem, LINKS_FILE_NAME,
-    LinkedFolder, MovePlacement, SkippedPath,
+    LinkedFolder, LoadedFrom, MovePlacement, SkippedPath,
 };
 #[cfg(feature = "ui")]
 pub use store::{Collections, CollectionsEvent, SaveDestination};

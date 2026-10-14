@@ -26,6 +26,9 @@ pub struct Collection {
     pub(crate) local_env: Environment,
     pub(crate) scripts: RequestScripts,
     pub(crate) auth: Auth,
+    /// How many times its variables, scripts or authorization were read
+    /// again after they changed outside the app, as a request's file counts.
+    pub(crate) outside_changes: u64,
 }
 
 /// The settings a collection shares with its requests: scripts that run
@@ -68,6 +71,7 @@ impl Collection {
             local_env,
             scripts,
             auth,
+            outside_changes: 0,
         })
     }
 
@@ -172,10 +176,14 @@ impl Collection {
     pub(crate) fn reload_settings(&mut self) -> Result<(), CollectionEditError> {
         let SharedSettings { scripts, auth } = Self::load_settings(&self.path)?;
         let local_env = Environment::from_file(&self.local_env.path)?;
+        let changed = self.local_env.entries != local_env.entries
+            || self.scripts != scripts
+            || self.auth != auth;
 
         self.local_env = local_env;
         self.scripts = scripts;
         self.auth = auth;
+        self.outside_changes += u64::from(changed);
 
         Ok(())
     }
@@ -213,6 +221,20 @@ impl Collection {
 
     pub fn local_env(&self) -> &Environment {
         &self.local_env
+    }
+
+    /// A page opened from the collection keeps the count it opened with, and
+    /// a later count tells it that it edits older settings than these.
+    pub fn outside_changes(&self) -> u64 {
+        self.outside_changes
+    }
+
+    /// Whether `other`, the same collection read again, holds other
+    /// variables, scripts or authorization.
+    pub(crate) fn settings_differ(&self, other: &Collection) -> bool {
+        self.local_env.entries != other.local_env.entries
+            || self.scripts != other.scripts
+            || self.auth != other.auth
     }
 
     pub fn scripts(&self) -> &RequestScripts {

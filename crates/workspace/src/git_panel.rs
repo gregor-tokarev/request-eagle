@@ -168,17 +168,19 @@ impl GitPanel {
         let upstream = status.is_some_and(|status| status.upstream.is_some());
         let remote = status.is_some_and(|status| !status.remotes.is_empty());
         let interrupted = known.is_interrupted();
-        let id = known.repository.name();
 
         let action_button = |label: &'static str, action: GitAction, enabled: bool| {
             let root = root.clone();
-            Button::new(SharedString::from(format!("git-{label}-{id}")))
-                .debug_selector(move || format!("git-{}", label.to_lowercase()))
-                .small()
-                .label(label)
-                .loading(running == Some(action))
-                .disabled(busy || interrupted || !enabled)
-                .on_click(cx.listener(move |this, _, _, cx| this.act(action, root.clone(), cx)))
+            // Repositories can share a name, but not a folder.
+            Button::new(SharedString::from(format!(
+                "git-{label}-{}",
+                root.display()
+            )))
+            .debug_selector(move || format!("git-{}", label.to_lowercase()))
+            .label(label)
+            .loading(running == Some(action))
+            .disabled(busy || interrupted || !enabled)
+            .on_click(cx.listener(move |this, _, _, cx| this.act(action, root.clone(), cx)))
         };
 
         v_flex()
@@ -252,14 +254,14 @@ impl GitPanel {
                     this.child(
                         h_flex()
                             .gap_2()
-                            .child(div().flex_1().min_w_0().child(Input::new(&url).small()))
+                            .child(div().flex_1().min_w_0().child(Input::new(&url)))
                             .child(action_button("Publish", GitAction::Publish, filled).primary()),
                     )
                 })
             })
             .when(changes > 0 && !interrupted, |this| {
                 this.when_some(self.messages.get(&root), |this, (message, _)| {
-                    this.child(Input::new(message).small())
+                    this.child(Input::new(message))
                 })
             })
             .when(status.is_some() && (remote || changes > 0), |this| {
@@ -302,10 +304,8 @@ impl GitPanel {
                 };
                 // Named from its collection, which the user knows it by.
                 let path = known
-                    .collections
-                    .iter()
-                    .find(|collection| change.path.starts_with(collection))
-                    .and_then(|collection| collection.parent())
+                    .collection_of(&change.path)
+                    .and_then(|collection| collection.real_path.parent())
                     .unwrap_or(known.repository.root());
                 let path = change
                     .path
@@ -353,7 +353,6 @@ impl GitPanel {
             .child(
                 h_flex().pt_1().gap_2().child(self.track_button(cx)).child(
                     Button::new("git-open-folder")
-                        .small()
                         .label("Open Folder…")
                         .on_click(|_, window, cx| {
                             window.dispatch_action(OpenCollectionFolder.boxed_clone(), cx)
@@ -372,7 +371,6 @@ impl GitPanel {
 
         Button::new("git-init")
             .debug_selector(|| "git-init".into())
-            .small()
             .primary()
             .label("Track with Git")
             .loading(running == Some(GitAction::Init))
@@ -424,8 +422,7 @@ impl Render for GitPanel {
                             .accessibility_label("Refresh")
                             .tooltip("Refresh")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.state
-                                    .update(cx, |state, cx| state.schedule_refresh(cx))
+                                this.state.update(cx, |state, cx| state.refresh_all(cx))
                             })),
                     ),
             )

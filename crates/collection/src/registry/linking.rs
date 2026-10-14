@@ -113,28 +113,61 @@ impl CollectionRegistry {
         Ok(())
     }
 
+    /// Where the collections were loaded from, to load them again.
+    pub fn loaded_from(&self) -> Option<LoadedFrom> {
+        Some(LoadedFrom {
+            directory: self.directory.clone()?,
+            links_file: self.links_file.clone(),
+        })
+    }
+
     /// Reads every collection again, such as after Git changed their files.
-    /// A request whose file changed counts another change from outside the
-    /// app, so a tab opened from it before can tell.
     pub fn reload(&mut self) {
-        let Some(directory) = self.directory.clone() else {
-            return;
-        };
+        if let Some(loaded_from) = self.loaded_from() {
+            self.take_reloaded(loaded_from.load());
+        }
+    }
 
-        let mut reloaded = match &self.links_file {
-            Some(links_file) => Self::open(&directory, links_file),
-            None => Self::from_path(&directory),
-        };
-
+    /// Takes the collections loaded again with [`LoadedFrom::load`]. A
+    /// request or collection whose files changed counts another change from
+    /// outside the app, so a tab opened from it before can tell.
+    pub fn take_reloaded(&mut self, mut reloaded: CollectionRegistry) {
         let mut known = HashMap::new();
         for collection in &self.collections {
             index_files(&collection.entries, &mut known);
         }
+
         for collection in &mut reloaded.collections {
             carry_outside_changes(&mut collection.entries, &known);
+
+            if let Some(previous) = self
+                .collections
+                .iter()
+                .find(|previous| previous.path == collection.path)
+            {
+                collection.outside_changes =
+                    previous.outside_changes + u64::from(previous.settings_differ(collection));
+            }
         }
 
         *self = reloaded;
+    }
+}
+
+/// Where a registry was loaded from. Loading takes a while, so it can load
+/// again in the background.
+#[derive(Clone)]
+pub struct LoadedFrom {
+    directory: PathBuf,
+    links_file: Option<PathBuf>,
+}
+
+impl LoadedFrom {
+    pub fn load(&self) -> CollectionRegistry {
+        match &self.links_file {
+            Some(links_file) => CollectionRegistry::open(&self.directory, links_file),
+            None => CollectionRegistry::from_path(&self.directory),
+        }
     }
 }
 

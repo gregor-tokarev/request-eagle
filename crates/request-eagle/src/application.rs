@@ -94,11 +94,14 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
         .join(collection::LINKS_FILE_NAME);
     let mut collections = collection::CollectionRegistry::open(&collections_directory, &links_file);
     let flows_directory = home.join(".request-eagle/flows");
+    // Only 0.1.22 saved flows in collections, and only in the collections
+    // directory; linked folders are left as they are.
     let moved = flow::move_flows_out_of_collections(
         collections
             .skipped()
             .iter()
-            .map(|skipped| skipped.path.as_path()),
+            .map(|skipped| skipped.path.as_path())
+            .filter(|path| path.starts_with(&collections_directory)),
         &flows_directory,
     );
     if !moved.is_empty() {

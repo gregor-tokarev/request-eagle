@@ -57,11 +57,17 @@ impl GitAction {
     }
 }
 
+/// A collection in a repository's working tree.
+pub(crate) struct TrackedCollection {
+    pub(crate) path: PathBuf,
+    /// Its path with links followed, as the paths of changes start.
+    pub(crate) real_path: PathBuf,
+}
+
 /// A Git repository that holds collections.
 pub(crate) struct GitRepository {
     pub(crate) repository: Repository,
-    /// The collections in its working tree.
-    pub(crate) collections: Vec<PathBuf>,
+    pub(crate) collections: Vec<TrackedCollection>,
     /// What Request Eagle commits: its collections, the collections
     /// directory when it is in the working tree, and collections that left
     /// it in this session, so that their removal is committed too. Nothing
@@ -82,15 +88,20 @@ impl GitRepository {
     /// for the user to finish it.
     pub(crate) fn is_interrupted(&self) -> bool {
         self.status()
-            .is_some_and(|status| status.interrupted.is_some() || status.has_conflicts())
+            .is_some_and(|status| status.interrupted.is_some() || status.conflicted)
     }
 
-    /// The collection that holds `path`, by its name.
-    pub(crate) fn collection_name(&self, path: &Path) -> Option<String> {
+    /// The collection that holds a changed file.
+    pub(crate) fn collection_of(&self, change: &Path) -> Option<&TrackedCollection> {
         self.collections
             .iter()
-            .find(|collection| path.starts_with(collection))
-            .map(|collection| directory_name(collection))
+            .find(|collection| change.starts_with(&collection.real_path))
+    }
+
+    /// The collection that holds a changed file, by its name.
+    fn collection_name(&self, change: &Path) -> Option<String> {
+        self.collection_of(change)
+            .map(|collection| directory_name(&collection.path))
     }
 
     /// Names the commit after the collections it changes.
@@ -131,6 +142,12 @@ pub(crate) struct GitState {
     departed: Vec<PathBuf>,
     /// The action running now. One runs at a time.
     pub(crate) running: Option<GitAction>,
+    /// Whether statuses are being read, so that refreshes wait for them.
+    scanning: bool,
+    refresh_pending: bool,
+    /// Counts the actions started, so that a status read before one is not
+    /// taken after it.
+    generation: u64,
     /// Repositories whose last action committed, which moves their HEAD
     /// without changing any files.
     committed: Vec<Repository>,
@@ -207,6 +224,9 @@ impl GitState {
             repositories: Vec::new(),
             departed: Vec::new(),
             running: None,
+            scanning: false,
+            refresh_pending: false,
+            generation: 0,
             committed: Vec::new(),
             untracked_directory: false,
             init_error: None,
@@ -221,18 +241,30 @@ impl GitState {
     }
 
     /// Read every repository's status shortly, such as after collections
-    /// changed or the window came back to the front.
+    /// changed or the window came back to the front. Changes meanwhile are
+    /// read together, once the status being read now is in.
     pub(crate) fn schedule_refresh(&mut self, cx: &mut Context<Self>) {
         // A running action reads the status once it is done.
         if self.running.is_some() {
             return;
         }
+        if self.scanning {
+            self.refresh_pending = true;
+            return;
+        }
 
-        // Replacing the task cancels a refresh that has not run yet.
+        // Replacing the task cancels a refresh that has not started reading.
         self.refresh = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(REFRESH_DELAY).await;
 
-            let Ok(repositories) = this.update(cx, |this, cx| this.discover(cx)) else {
+            let Ok(Some((generation, repositories))) = this.update(cx, |this, cx| {
+                if this.running.is_some() {
+                    return None;
+                }
+
+                this.scanning = true;
+                Some((this.generation, this.discover(cx)))
+            }) else {
                 return;
             };
             let statuses = cx
@@ -248,8 +280,34 @@ impl GitState {
                 })
                 .await;
 
-            let _ = this.update(cx, |this, cx| this.apply_statuses(statuses, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.scanning = false;
+                // An action that started meanwhile makes it outdated.
+                if this.generation == generation {
+                    this.apply_statuses(statuses, cx);
+                }
+                if std::mem::take(&mut this.refresh_pending) {
+                    this.schedule_refresh(cx);
+                }
+            });
         }));
+    }
+
+    /// Read the collections again too, as when the user asks to refresh.
+    pub(crate) fn refresh_all(&mut self, cx: &mut Context<Self>) {
+        self.collections
+            .update(cx, |collections, cx| collections.reload(cx));
+        self.schedule_refresh(cx);
+    }
+
+    /// Refresh as the window comes back to the front: Git can have run in a
+    /// terminal meanwhile, and a linked folder that was gone can be back.
+    pub(crate) fn refresh_on_return(&mut self, cx: &mut Context<Self>) {
+        if self.collections.read(cx).linked_folder_returned() {
+            self.refresh_all(cx);
+        } else {
+            self.schedule_refresh(cx);
+        }
     }
 
     /// Find the repositories that hold collections, keeping what is known
@@ -285,7 +343,10 @@ impl GitState {
             };
 
             if collection {
-                repositories[index].collections.push(path.to_path_buf());
+                repositories[index].collections.push(TrackedCollection {
+                    path: path.to_path_buf(),
+                    real_path: git::real_path(path),
+                });
             }
             repositories[index].scope.push(path.to_path_buf());
         };
@@ -352,8 +413,10 @@ impl GitState {
 
             let interrupted = known.is_interrupted();
             known.status = Some(status);
-            // The failure was the conflict, which is resolved now.
+            // Resolving conflicts changes the files without moving HEAD. The
+            // failure was the conflict, which is resolved now.
             if interrupted && !known.is_interrupted() {
+                moved = true;
                 known.error = None;
             }
         }
@@ -393,12 +456,8 @@ impl GitState {
                 .into_iter()
                 .flat_map(|status| &status.changes)
             {
-                if let Some(collection) = known
-                    .collections
-                    .iter()
-                    .find(|collection| change.path.starts_with(collection))
-                {
-                    *changes.entry(collection.clone()).or_default() += 1;
+                if let Some(collection) = known.collection_of(&change.path) {
+                    *changes.entry(collection.path.clone()).or_default() += 1;
                 }
             }
         }
@@ -424,7 +483,7 @@ impl GitState {
 
         self.running = Some(GitAction::Init);
         self.init_error = None;
-        self.refresh = None;
+        self.generation += 1;
         cx.notify();
 
         self.action = Some(cx.spawn(async move |this, cx| {
@@ -521,7 +580,7 @@ impl GitState {
 
         // A status read now could catch a pull halfway.
         self.running = Some(action);
-        self.refresh = None;
+        self.generation += 1;
         cx.notify();
 
         let several = jobs.len() > 1;

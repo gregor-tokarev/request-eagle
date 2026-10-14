@@ -6,7 +6,7 @@ use std::{
 
 use tempfile::TempDir;
 
-use crate::{ChangeKind, GitError, Interrupted, Repository};
+use crate::{ChangeKind, GitError, Interrupted, Repository, real_path};
 
 const REQUEST: &str = "id = 'health'\nname = 'Health'\n";
 
@@ -110,17 +110,20 @@ fn the_status_lists_only_the_changes_asked_about() {
     let changes: Vec<_> = status
         .changes
         .iter()
-        .map(|change| (change.path.strip_prefix(root.path()).unwrap(), change.kind))
+        .map(|change| {
+            let path = change.path.strip_prefix(real_path(root.path())).unwrap();
+            (path.to_path_buf(), change.kind)
+        })
         .collect();
     assert_eq!(
         changes,
         [
             (
-                Path::new("collections/API/Health.toml"),
+                PathBuf::from("collections/API/Health.toml"),
                 ChangeKind::Modified
             ),
             (
-                Path::new("collections/API/New request.toml"),
+                PathBuf::from("collections/API/New request.toml"),
                 ChangeKind::Added
             ),
         ]
@@ -186,6 +189,52 @@ fn a_file_added_and_then_deleted_leaves_nothing_to_commit() {
             .commit(&collections(&repository), "Nothing")
             .unwrap()
     );
+}
+
+#[test]
+fn deletions_and_renames_staged_already_are_committed() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = project(root.path());
+    fs::write(root.path().join("collections/API/Other.toml"), REQUEST).unwrap();
+    git(root.path(), &["add", "--all"]);
+    git(root.path(), &["commit", "--message", "Other"]);
+    git(
+        root.path(),
+        &["rm", "--quiet", "collections/API/Other.toml"],
+    );
+    git(
+        root.path(),
+        &[
+            "mv",
+            "collections/API/Health.toml",
+            "collections/API/Status.toml",
+        ],
+    );
+
+    assert!(
+        repository
+            .commit(&collections(&repository), "Tidy")
+            .unwrap()
+    );
+    assert_eq!(
+        git(root.path(), &["ls-files", "collections"]).trim(),
+        "collections/API/Status.toml"
+    );
+}
+
+// Links are followed only where Git takes the paths that come out of it.
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_through_a_link_is_found_in_its_repository() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = project(&root.path().join("project"));
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(root.path().join("project/collections"), &alias).unwrap();
+    fs::write(alias.join("API/Health.toml"), "id = 'changed'\n").unwrap();
+
+    assert_eq!(Repository::containing(&alias), Some(repository.clone()));
+    let status = repository.status(&[alias]).unwrap();
+    assert_eq!(status.changes.len(), 1);
 }
 
 #[test]
@@ -257,7 +306,7 @@ fn a_conflicting_pull_stops_and_shows_the_conflict() {
 
     let status = mine.status(&collections(&mine)).unwrap();
     assert_eq!(status.interrupted, Some(Interrupted::Rebase));
-    assert!(status.has_conflicts());
+    assert!(status.conflicted);
 }
 
 #[test]
@@ -271,7 +320,28 @@ fn local_changes_that_conflict_when_put_back_are_reported() {
     fs::write(mine.root().join(health), "id = 'mine'\n").unwrap();
 
     assert_eq!(mine.pull(), Err(GitError::Conflicts));
-    assert!(mine.status(&collections(&mine)).unwrap().has_conflicts());
+    assert!(mine.status(&collections(&mine)).unwrap().conflicted);
+}
+
+#[test]
+fn conflicts_outside_the_paths_asked_about_are_reported() {
+    let (_root, mine, theirs) = shared();
+    fs::write(
+        theirs.root().join("src/main.rs"),
+        "fn main() { theirs() }\n",
+    )
+    .unwrap();
+    git(
+        theirs.root(),
+        &["commit", "--quiet", "--all", "--message", "Theirs"],
+    );
+    theirs.push().unwrap();
+    fs::write(mine.root().join("src/main.rs"), "fn main() { mine() }\n").unwrap();
+
+    assert_eq!(mine.pull(), Err(GitError::Conflicts));
+    let status = mine.status(&collections(&mine)).unwrap();
+    assert!(status.changes.is_empty());
+    assert!(status.conflicted);
 }
 
 #[test]
@@ -290,7 +360,7 @@ fn init_makes_a_repository_in_a_new_folder() {
 
     let repository = Repository::init(&collections).unwrap();
 
-    assert_eq!(repository.root(), collections);
+    assert_eq!(repository.root(), real_path(&collections));
     let status = repository
         .status(std::slice::from_ref(&collections))
         .unwrap();

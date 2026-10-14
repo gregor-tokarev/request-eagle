@@ -8,5 +8,5 @@ mod repository_tests;
 mod status_tests;
 
 pub use command::GitError;
-pub use repository::Repository;
+pub use repository::{Repository, real_path};
 pub use status::{Change, ChangeKind, Interrupted, Status};

@@ -60,15 +60,20 @@ fn reads_each_kind_of_change_with_paths_that_hold_spaces() {
         path: root.join(path),
         original: None,
         kind,
+        unstaged: true,
     };
     assert_eq!(
         status.changes,
         vec![
             change("API/Get user.toml", ChangeKind::Modified),
-            change("API/New.toml", ChangeKind::Added),
+            Change {
+                unstaged: false,
+                ..change("API/New.toml", ChangeKind::Added)
+            },
             change("API/Old.toml", ChangeKind::Deleted),
             Change {
                 original: Some(PathBuf::from("/repo/API/Original request.toml")),
+                unstaged: false,
                 ..change("API/Renamed request.toml", ChangeKind::Renamed)
             },
             change("API/Both.toml", ChangeKind::Conflicted),
@@ -76,5 +81,5 @@ fn reads_each_kind_of_change_with_paths_that_hold_spaces() {
             change(" Leading space.toml", ChangeKind::Added),
         ]
     );
-    assert!(status.has_conflicts());
+    assert!(status.conflicted);
 }

@@ -3,11 +3,15 @@ use std::{
     io::{self, Read, Write},
     path::Path,
     process::{Child, Command, Stdio},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
 use thiserror::Error;
+
+/// How long the output may take to close after Git is done.
+const OUTPUT_GRACE: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum GitError {
@@ -107,18 +111,19 @@ pub(crate) fn run(
         _ => error.into(),
     })?;
 
-    let stdout = read_in_background(child.stdout.take());
-    let stderr = read_in_background(child.stderr.take());
+    let stdout = Output::read(child.stdout.take());
+    let stderr = Output::read(child.stderr.take());
     // Git can stop before reading it all, and then says why itself.
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         let _ = stdin.write_all(input);
     }
 
-    // Past the timeout the readers are left behind: a program Git started,
-    // such as SSH, can keep the pipes open.
     let status = wait(&mut child, timeout)?;
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
+    // A program Git started, such as a hook's, can keep the pipes open after
+    // Git is done, and what Git printed is read by then.
+    let until = Instant::now() + OUTPUT_GRACE;
+    let stdout = stdout.collect(until);
+    let stderr = stderr.collect(until);
 
     if status.success() {
         Ok(stdout)
@@ -147,17 +152,41 @@ fn wait(child: &mut Child, timeout: Duration) -> io::Result<std::process::ExitSt
     }
 }
 
-/// Reads a pipe to its end on another thread, so that Git never blocks on a
-/// full pipe while it is waited for.
-fn read_in_background(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<String> {
-    thread::spawn(move || {
-        let mut output = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut output);
-        }
+/// What Git prints to a pipe, read on another thread so that Git never
+/// blocks on a full pipe while it is waited for.
+struct Output {
+    read: Arc<Mutex<Vec<u8>>>,
+    closed: mpsc::Receiver<()>,
+}
 
-        String::from_utf8_lossy(&output).into_owned()
-    })
+impl Output {
+    fn read(pipe: Option<impl Read + Send + 'static>) -> Self {
+        let read = Arc::new(Mutex::new(Vec::new()));
+        let (close, closed) = mpsc::channel();
+        let reader = read.clone();
+
+        thread::spawn(move || {
+            let mut buffer = [0; 8192];
+            if let Some(mut pipe) = pipe {
+                while let Ok(count @ 1..) = pipe.read(&mut buffer) {
+                    reader.lock().unwrap().extend_from_slice(&buffer[..count]);
+                }
+            }
+
+            let _ = close.send(());
+        });
+
+        Self { read, closed }
+    }
+
+    /// What was printed, once the pipe closes or `until` passes.
+    fn collect(self, until: Instant) -> String {
+        let _ = self
+            .closed
+            .recv_timeout(until.saturating_duration_since(Instant::now()));
+
+        String::from_utf8_lossy(&self.read.lock().unwrap()).into_owned()
+    }
 }
 
 /// What Git said went wrong, without its hints on which commands to run.

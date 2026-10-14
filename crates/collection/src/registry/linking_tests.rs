@@ -232,3 +232,38 @@ fn reloading_counts_the_requests_changed_on_disk() {
     assert!(registry.file(&status).is_none());
     assert!(registry.is_linked(&api));
 }
+
+#[test]
+fn reloading_counts_collection_settings_changed_on_disk() {
+    let root = fixture();
+    let api = root.path().join("project/api");
+    let mut registry = open(root.path());
+    link(&mut registry, &api).unwrap();
+    registry.reload();
+    assert_eq!(registry.collections()[0].outside_changes(), 0);
+
+    fs::write(api.join("environment.toml"), "base = 'remote'\n").unwrap();
+    registry.reload();
+
+    let [collection] = registry.collections() else {
+        panic!("expected the linked collection");
+    };
+    assert_eq!(collection.outside_changes(), 1);
+    assert_eq!(collection.local_env().resolve("base"), Some("remote"));
+}
+
+#[test]
+fn a_linked_folder_that_is_back_is_noticed() {
+    let root = fixture();
+    let api = root.path().join("project/api");
+    let moved = root.path().join("api");
+    let mut registry = open(root.path());
+    link(&mut registry, &api).unwrap();
+    fs::rename(&api, &moved).unwrap();
+    let registry = open(root.path());
+    assert!(!registry.linked_folder_returned());
+
+    fs::rename(&moved, &api).unwrap();
+
+    assert!(registry.linked_folder_returned());
+}

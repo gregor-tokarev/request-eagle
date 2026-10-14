@@ -18,6 +18,10 @@ pub struct Status {
     /// Changes not committed yet, in the paths that were asked about.
     pub changes: Vec<Change>,
     pub remotes: Vec<String>,
+    /// Whether files anywhere in the repository, not only in the paths asked
+    /// about, have conflicting changes, as a pull can leave in a project's
+    /// code.
+    pub conflicted: bool,
     /// A merge or rebase that stopped, such as on conflicts, and waits to be
     /// finished.
     pub interrupted: Option<Interrupted>,
@@ -35,6 +39,9 @@ pub struct Change {
     /// The path a renamed file had.
     pub original: Option<PathBuf>,
     pub kind: ChangeKind,
+    /// Whether the file differs from what is staged, so that committing it
+    /// has to stage it first. A staged deletion or rename does not.
+    pub unstaged: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,14 +53,6 @@ pub enum ChangeKind {
     Renamed,
     /// Changed on both sides of a merge or rebase.
     Conflicted,
-}
-
-impl Status {
-    pub fn has_conflicts(&self) -> bool {
-        self.changes
-            .iter()
-            .any(|change| change.kind == ChangeKind::Conflicted)
-    }
 }
 
 /// Reads `git status --porcelain=v2 --branch -z`. Paths are relative to
@@ -80,6 +79,7 @@ pub(crate) fn parse(output: &str, root: &Path) -> Status {
                     path: root.join(path),
                     original: None,
                     kind: change_kind(fields[0]),
+                    unstaged: is_unstaged(fields[0]),
                 }),
             // Followed by the path it was renamed or copied from.
             "2" => fields
@@ -90,16 +90,22 @@ pub(crate) fn parse(output: &str, root: &Path) -> Status {
                     path: root.join(path),
                     original: records.next().map(|original| root.join(original)),
                     kind: change_kind(fields[0]),
+                    unstaged: is_unstaged(fields[0]),
                 }),
-            "u" => fields.splitn(10, ' ').last().map(|path| Change {
-                path: root.join(path),
-                original: None,
-                kind: ChangeKind::Conflicted,
-            }),
+            "u" => {
+                status.conflicted = true;
+                fields.splitn(10, ' ').last().map(|path| Change {
+                    path: root.join(path),
+                    original: None,
+                    kind: ChangeKind::Conflicted,
+                    unstaged: true,
+                })
+            }
             "?" => Some(Change {
                 path: root.join(fields),
                 original: None,
                 kind: ChangeKind::Added,
+                unstaged: true,
             }),
             // Ignored files.
             _ => None,
@@ -109,6 +115,15 @@ pub(crate) fn parse(output: &str, root: &Path) -> Status {
     }
 
     status
+}
+
+/// Whether Git's two letters, the change staged and then the one in the
+/// working tree, tell of a change in the working tree.
+fn is_unstaged(letters: &str) -> bool {
+    letters
+        .chars()
+        .nth(1)
+        .is_some_and(|unstaged| unstaged != '.')
 }
 
 fn read_header(header: &str, status: &mut Status) {

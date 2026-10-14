@@ -9,7 +9,7 @@ mod mutations;
 pub use catalog::{CollectionRegistry, SkippedPath};
 pub(crate) use catalog::{ENVIRONMENT_FILE_NAME, is_hidden};
 pub use importing::{ImportedCollection, ImportedItem};
-pub use linking::LinkedFolder;
+pub use linking::{LinkedFolder, LoadedFrom};
 pub use links::FILE_NAME as LINKS_FILE_NAME;
 pub use movement::MovePlacement;
 pub use mutations::CollectionEditError;

@@ -32,6 +32,7 @@ impl CollectionRegistry {
             },
             scripts: Default::default(),
             auth: Default::default(),
+            outside_changes: 0,
         });
 
         Ok(path)

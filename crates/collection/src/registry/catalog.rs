@@ -139,6 +139,18 @@ impl CollectionRegistry {
         self.directory.as_deref()
     }
 
+    /// Whether a linked folder that was gone when the collections were
+    /// loaded is back.
+    pub fn linked_folder_returned(&self) -> bool {
+        self.linked.iter().any(|path| {
+            path.exists()
+                && !self
+                    .collections
+                    .iter()
+                    .any(|collection| collection.path == *path)
+        })
+    }
+
     /// Whether the collection at `path` is a folder linked from outside the
     /// collections directory.
     pub fn is_linked(&self, path: &Path) -> bool {

@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui_kit::{Context, EventEmitter};
+use gpui_kit::{Context, EventEmitter, Task};
 use request::Request;
 
 use crate::location::directory_name;
@@ -19,6 +19,7 @@ pub struct Collections {
     registry: CollectionRegistry,
     /// Counts the changes, so a view can tell whether it shows the latest.
     revision: u64,
+    reloading: Option<Task<()>>,
 }
 
 /// A change to the saved collections, emitted after it is made.
@@ -77,6 +78,7 @@ impl Collections {
         Self {
             registry,
             revision: 0,
+            reloading: None,
         }
     }
 
@@ -241,11 +243,38 @@ impl Collections {
     }
 
     /// Read every collection from disk again, such as after Git changed
-    /// their files.
+    /// their files. Reading takes a while, so it runs in the background.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
-        self.registry.reload();
-        self.changed(cx);
-        cx.emit(CollectionsEvent::Reloaded);
+        let Some(loaded_from) = self.registry.loaded_from() else {
+            return;
+        };
+        let revision = self.revision;
+
+        // Replacing the task drops a reload that has not finished yet.
+        self.reloading = Some(cx.spawn(async move |this, cx| {
+            let reloaded = cx
+                .background_executor()
+                .spawn(async move { loaded_from.load() })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                // What was read can miss a change made meanwhile.
+                if this.revision != revision {
+                    this.reload(cx);
+                    return;
+                }
+
+                this.registry.take_reloaded(reloaded);
+                this.changed(cx);
+                cx.emit(CollectionsEvent::Reloaded);
+            });
+        }));
+    }
+
+    /// Whether a linked folder that was gone is back, so that reloading
+    /// shows it again.
+    pub fn linked_folder_returned(&self) -> bool {
+        self.registry.linked_folder_returned()
     }
 
     /// Save a request's changes, unless its file now holds another request,
@@ -309,17 +338,29 @@ impl Collections {
     /// Save a collection page's edits, renaming the collection's directory
     /// when its name changed. Returns the collection's path after the save.
     /// Unless `overwrite` is set, settings changed outside the app stay.
+    /// `outside_changes` is the collection's count when the edited settings
+    /// were opened from it: they can be older than the ones read since, as
+    /// after a pull.
+    #[allow(clippy::too_many_arguments)]
     pub fn save_collection(
         &mut self,
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
         shared: SharedSettings,
+        outside_changes: u64,
         overwrite: bool,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
         // Asked before the rename, so declining the save leaves the name too.
         if !overwrite {
+            if self
+                .collection(path)
+                .is_some_and(|collection| collection.outside_changes() != outside_changes)
+            {
+                return Err(CollectionEditError::ChangedOnDisk);
+            }
+
             self.registry.check_collection(path, &variables, &shared)?;
         }
 
