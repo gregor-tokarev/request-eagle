@@ -12,12 +12,13 @@ use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
 use crate::location::directory_name;
+use crate::registry::is_hidden;
 use crate::toml_merge::merge_table;
 use crate::{CollectionEditError, DirEntry, Entry, FileEntry, SkippedPath};
 use request::{Auth, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
-const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
+pub(crate) const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
 
 pub struct Collection {
     pub path: PathBuf,
@@ -307,6 +308,11 @@ fn load_directory(
         };
 
         let entry = if file_type.is_dir() {
+            // Hidden folders, such as `.git`, are not the collection's.
+            if is_hidden(&child_path) {
+                continue;
+            }
+
             load_directory(&child_path, excluded, skipped).map(Entry::Directory)
         } else if file_type.is_file()
             && child_path

@@ -191,16 +191,34 @@ impl CollectionRegistry {
             return Err(CollectionEditError::InvalidName);
         }
 
-        for collection in &mut self.collections {
-            let reserved = collection.reserved_paths();
-            if collection.path == path {
-                let destination = rename_directory(path, name)?;
-                rebase_entries(&mut collection.entries, path, &destination);
-                rebase_path(&mut collection.local_env.path, path, &destination);
-                collection.path = destination.clone();
-                return Ok(destination);
+        if let Some(index) = self
+            .collections
+            .iter()
+            .position(|collection| collection.path == path)
+        {
+            let destination = rename_directory(path, name)?;
+            if self.is_linked(path)
+                && let Err(error) = self.update_links(|linked| {
+                    for linked in linked.iter_mut().filter(|linked| *linked == path) {
+                        *linked = destination.clone();
+                    }
+                })
+            {
+                // Put the folder back where the list of links says it is.
+                crate::order::rename_directory(&destination, path)?;
+                return Err(error.into());
             }
 
+            let collection = &mut self.collections[index];
+            rebase_entries(&mut collection.entries, path, &destination);
+            rebase_path(&mut collection.local_env.path, path, &destination);
+            collection.path = destination.clone();
+
+            return Ok(destination);
+        }
+
+        for collection in &mut self.collections {
+            let reserved = collection.reserved_paths();
             if let Some(entry) = find_entry(&mut collection.entries, path) {
                 match entry {
                     Entry::File(file) => {
@@ -226,7 +244,13 @@ impl CollectionRegistry {
         Err(CollectionEditError::NotFound)
     }
 
+    /// Deletes a collection, folder or request with everything in it. A
+    /// linked collection's folder is never deleted; it is unlinked instead.
     pub fn delete(&mut self, path: &Path) -> Result<(), CollectionEditError> {
+        if self.is_linked(path) {
+            return Err(CollectionEditError::LinkedCollection);
+        }
+
         if let Some(index) = self
             .collections
             .iter()
@@ -276,7 +300,7 @@ fn take_latest(file: &mut FileEntry, mut latest: FileEntry) {
 /// Whether the request in a file differs from the one last read from it.
 /// Comments, the name and fields the app does not know are left out: saving
 /// keeps them as the file has them.
-fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
+pub(super) fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
     if latest.raw_content == known.raw_content {
         return false;
     }
@@ -290,6 +314,10 @@ fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
 fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
     if name == "." || name == ".." || name.contains(['/', '\\', ':']) {
         return Err(CollectionEditError::InvalidName);
+    }
+    // Loading leaves hidden folders out.
+    if name.starts_with('.') {
+        return Err(CollectionEditError::HiddenName);
     }
 
     let destination = path.with_file_name(name);
@@ -407,6 +435,17 @@ pub enum CollectionEditError {
     ChangedOnDisk,
     #[error("A folder cannot be moved into itself or its descendants.")]
     InvalidMove,
+    #[error("Collection and folder names can't start with a dot.")]
+    HiddenName,
+    #[error("This folder is a collection already, or is inside or holds one.")]
+    AlreadyCollection,
+    #[error("This folder holds other files. Choose an empty folder or one with a collection.")]
+    NotACollection,
+    #[error(
+        "This collection is a folder opened from elsewhere, which is never deleted. Unlink it \
+         instead; its files stay."
+    )]
+    LinkedCollection,
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]

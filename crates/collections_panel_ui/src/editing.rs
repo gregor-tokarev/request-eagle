@@ -263,10 +263,14 @@ impl CollectionPanel {
         };
         let row = self.selected_row().unwrap_or(0);
 
-        match self
-            .collections
-            .update(cx, |collections, cx| collections.delete(&path, cx))
-        {
+        // A linked collection's folder stays; only the app forgets it.
+        match self.collections.update(cx, |collections, cx| {
+            if collections.registry().is_linked(&path) {
+                collections.unlink(&path, cx)
+            } else {
+                collections.delete(&path, cx)
+            }
+        }) {
             Ok(()) => {
                 self.pending_delete = None;
                 self.rename = None;

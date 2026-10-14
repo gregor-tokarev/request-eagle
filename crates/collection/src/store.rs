@@ -8,8 +8,8 @@ use request::Request;
 
 use crate::location::directory_name;
 use crate::{
-    Collection, CollectionEditError, CollectionRegistry, Entry, FileEntry, MovePlacement,
-    SavedLocation, SharedSettings,
+    Collection, CollectionEditError, CollectionRegistry, Entry, FileEntry, LinkedFolder,
+    MovePlacement, SavedLocation, SharedSettings,
 };
 
 /// The saved collections, which the sidebar shows and tabs open. Every change
@@ -44,8 +44,12 @@ pub enum CollectionsEvent {
         previous_path: PathBuf,
         location: SavedLocation,
     },
-    /// A collection, folder or request was deleted with everything in it.
+    /// A collection, folder or request was deleted with everything in it,
+    /// or a linked collection was removed from the app.
     Deleted(PathBuf),
+    /// Every collection was read from disk again, such as after Git changed
+    /// their files. Anything can have changed.
+    Reloaded,
 }
 
 /// A collection or folder that can hold a new request.
@@ -209,6 +213,39 @@ impl Collections {
         for path in paths {
             cx.emit(CollectionsEvent::Created(path));
         }
+    }
+
+    /// Show a folder from outside the collections directory as a collection.
+    pub fn link(
+        &mut self,
+        folder: LinkedFolder,
+        cx: &mut Context<Self>,
+    ) -> Result<PathBuf, CollectionEditError> {
+        let path = self.registry.link(folder)?;
+        self.created(&path, cx);
+
+        Ok(path)
+    }
+
+    /// Stop showing a linked collection, leaving its folder as it is.
+    pub fn unlink(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.unlink(path)?;
+        self.changed(cx);
+        cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
+
+        Ok(())
+    }
+
+    /// Read every collection from disk again, such as after Git changed
+    /// their files.
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.registry.reload();
+        self.changed(cx);
+        cx.emit(CollectionsEvent::Reloaded);
     }
 
     /// Save a request's changes, unless its file now holds another request,

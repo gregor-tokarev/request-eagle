@@ -116,3 +116,11 @@ script results.
   flows in `flows`. `--data-dir` selects another location for all of it;
   `--collections-dir` and `REQUEST_EAGLE_COLLECTIONS_DIR` move only the
   collections.
+- `collections.link` shows a folder outside the collections directory as a
+  collection where it is, such as one in a project's Git repository, and
+  `collections.unlink` forgets it without touching its files. The folder must
+  be empty or be a collection itself. Linked folders are listed in the data
+  directory's `linked-collections.json`, for this device only, and
+  `collections.list` marks them `linked`. `entries.delete` never deletes a
+  linked collection's folder. A linked folder that is gone is left out until
+  it is back or unlinked.
