@@ -101,9 +101,9 @@ pub(crate) struct Ready {
     pub(crate) options: Vec<SessionConfigOption>,
     /// The options as the agent last confirmed them.
     confirmed: Vec<SessionConfigOption>,
-    /// The options set to an exact choice, for each model, so an agent that
-    /// keeps its default is asked only once.
-    made_exact: HashSet<(String, String)>,
+    /// The options set to an exact choice that the agent has not reported
+    /// back yet, so an agent that keeps its default is not asked again.
+    making_exact: HashSet<String>,
 }
 
 pub(crate) struct Permission {
@@ -361,7 +361,7 @@ impl AgentPanel {
                         embedded_context,
                         confirmed: options.clone(),
                         options,
-                        made_exact: HashSet::new(),
+                        making_exact: HashSet::new(),
                     });
                 }
                 // Unless the settings say to ask, the agent runs tools
@@ -545,7 +545,7 @@ impl AgentPanel {
     fn make_exact(&mut self, cx: &mut Context<Self>) {
         let Some(Ready {
             options,
-            made_exact,
+            making_exact,
             ..
         }) = self
             .session
@@ -555,21 +555,21 @@ impl AgentPanel {
             return;
         };
 
-        let model = options
-            .iter()
-            .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
-            .and_then(|option| match &option.kind {
-                SessionConfigKind::Select(select) => Some(select.current_value.0.to_string()),
-                _ => None,
-            })
-            .unwrap_or_default();
+        // An option the agent reports exact, or no longer has, may fall back
+        // to its default later, such as reasoning after a switch to a model
+        // without it and back.
+        making_exact.retain(|id| {
+            options
+                .iter()
+                .any(|option| option.id.0.as_ref() == id && agent::exact_choice(option).is_some())
+        });
         let changes: Vec<(String, String)> = options
             .iter()
             .filter_map(|option| {
                 let value = agent::exact_choice(option)?;
                 let id = option.id.0.to_string();
-                made_exact
-                    .insert((model.clone(), id.clone()))
+                making_exact
+                    .insert(id.clone())
                     .then(|| (id, value.0.to_string()))
             })
             .collect();
