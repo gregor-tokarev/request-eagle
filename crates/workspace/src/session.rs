@@ -210,6 +210,8 @@ pub(crate) struct SavedSidebar {
     pub(crate) environments: bool,
     pub(crate) flows: bool,
     pub(crate) history: bool,
+    /// Whether it shows the Git panel instead of the collections.
+    pub(crate) git: bool,
     /// The collections and folders collapsed in the collections tree.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) collapsed: Vec<PathBuf>,
@@ -223,6 +225,7 @@ impl Default for SavedSidebar {
             environments: true,
             flows: true,
             history: true,
+            git: false,
             collapsed: Vec::new(),
         }
     }

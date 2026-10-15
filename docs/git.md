@@ -31,15 +31,17 @@ unplugged drive, shows again once it is back.
 The status bar shows the branch, the commits to pull (↓) and to push (↑) and
 how many changes are not committed. A collection with uncommitted changes
 shows their count beside its name. Click the status bar's Git item, or press
-Ctrl+Shift+G (Command+Shift+G on macOS), to open the Git panel. For each
-repository it lists the changes and offers:
+Ctrl+Shift+G (Command+Shift+G on macOS), and the sidebar shows the Git panel
+in place of the collections; do it again, or close the panel, to go back. For
+each repository the panel lists the changes and offers:
 
 - **Commit**: commits the collections' changes, with the message you type or
   one naming the collections that changed. Press Enter in the message to
   commit.
-- **Pull**: takes the remote's new commits. Your own commits are replayed on
-  top of them unless your Git settings choose otherwise.
-- **Push**: sends your commits. A new branch starts tracking the remote.
+- **Pull** (↓ beside the repository's name): takes the remote's new commits.
+  Your own commits are replayed on top of them unless your Git settings
+  choose otherwise.
+- **Push** (↑): sends your commits. A new branch starts tracking the remote.
 - **Sync**: commits, pulls and pushes in one go.
 
 The command palette has **Sync with Git**, **Pull changes** and **Push

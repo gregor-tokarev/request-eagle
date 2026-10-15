@@ -354,6 +354,22 @@ fn without_a_remote_there_is_nowhere_to_push_or_pull_from() {
 }
 
 #[test]
+fn a_remote_that_cannot_be_pushed_to_can_be_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = project(root.path());
+    let missing = root.path().join("missing.git");
+
+    repository
+        .add_remote("origin", missing.to_str().unwrap())
+        .unwrap();
+    assert!(matches!(repository.push(), Err(GitError::Failed(_))));
+    repository.remove_remote("origin").unwrap();
+
+    let status = repository.status(&collections(&repository)).unwrap();
+    assert!(status.remotes.is_empty());
+}
+
+#[test]
 fn init_makes_a_repository_in_a_new_folder() {
     let root = tempfile::tempdir().unwrap();
     let collections = root.path().join("collections");

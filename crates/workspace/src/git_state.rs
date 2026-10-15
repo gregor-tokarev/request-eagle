@@ -75,8 +75,6 @@ pub(crate) struct GitRepository {
     scope: Vec<PathBuf>,
     /// `None` until the status is read the first time.
     pub(crate) status: Option<Result<Status, GitError>>,
-    /// Why the last action in it failed.
-    pub(crate) error: Option<String>,
 }
 
 impl GitRepository {
@@ -158,8 +156,6 @@ pub(crate) struct GitState {
     /// repository, so that it can still start one when others hold
     /// collections.
     pub(crate) untracked_directory: bool,
-    /// Why starting a repository in the collections directory failed.
-    pub(crate) init_error: Option<String>,
     refresh: Option<Task<()>>,
     action: Option<Task<()>>,
     _fetching: Task<()>,
@@ -233,7 +229,6 @@ impl GitState {
             generation: 0,
             committed: Vec::new(),
             untracked_directory: false,
-            init_error: None,
             refresh: None,
             action: None,
             _fetching: fetching,
@@ -346,8 +341,7 @@ impl GitState {
                         repository,
                         collections: Vec::new(),
                         scope: Vec::new(),
-                        status: known.as_ref().and_then(|known| known.status.clone()),
-                        error: known.and_then(|known| known.error),
+                        status: known.and_then(|known| known.status),
                     });
                     repositories.len() - 1
                 }
@@ -424,12 +418,8 @@ impl GitState {
 
             let interrupted = known.is_interrupted();
             known.status = Some(status);
-            // Resolving conflicts changes the files without moving HEAD. The
-            // failure was the conflict, which is resolved now.
-            if interrupted && !known.is_interrupted() {
-                moved = true;
-                known.error = None;
-            }
+            // Resolving conflicts changes the files without moving HEAD.
+            moved |= interrupted && !known.is_interrupted();
         }
         self.committed.clear();
 
@@ -493,7 +483,6 @@ impl GitState {
         }
 
         self.running = Some(GitAction::Init);
-        self.init_error = None;
         self.generation += 1;
         cx.notify();
 
@@ -512,13 +501,8 @@ impl GitState {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                let errors: Vec<_> = result
-                    .err()
-                    .map(|error| error.to_string())
-                    .into_iter()
-                    .collect();
-                this.init_error = errors.first().cloned();
-                this.finish(GitAction::Init, errors, cx);
+                let errors = result.err().map(|error| error.to_string());
+                this.finish(GitAction::Init, errors.into_iter().collect(), cx);
             });
         }));
     }
@@ -543,7 +527,7 @@ impl GitState {
         let input = input.filter(|input| !input.trim().is_empty());
         let mut errors = Vec::new();
         let mut jobs = Vec::new();
-        for known in self.repositories.iter_mut().filter(|known| match root {
+        for known in self.repositories.iter().filter(|known| match root {
             Some(root) => known.repository.root() == root,
             None => known.status().is_some_and(|status| match action {
                 GitAction::Commit => !status.changes.is_empty(),
@@ -553,13 +537,12 @@ impl GitState {
         }) {
             if known.is_interrupted() {
                 errors.push(format!(
-                    "{}: Finish the merge or rebase in progress first.",
+                    "{}: Resolve the conflicts first.",
                     known.repository.name()
                 ));
                 continue;
             }
 
-            known.error = None;
             jobs.push(Job {
                 repository: known.repository.clone(),
                 scope: known.scope.clone(),
@@ -578,8 +561,8 @@ impl GitState {
                 errors.push(
                     match action {
                         GitAction::Commit => "There are no changes to commit.",
-                        GitAction::Pull => "No repository tracks a remote branch to pull from.",
-                        _ => "No repository has a remote yet. Add one in the Git panel.",
+                        GitAction::Pull => "There's no remote branch to pull from yet.",
+                        _ => "Add a remote in the Git panel first.",
                     }
                     .to_owned(),
                 );
@@ -619,20 +602,11 @@ impl GitState {
                         }
                         Err(error) => error,
                     };
-                    let error = error.to_string();
                     errors.push(if several {
                         format!("{}: {error}", repository.name())
                     } else {
-                        error.clone()
+                        error.to_string()
                     });
-
-                    if let Some(known) = this
-                        .repositories
-                        .iter_mut()
-                        .find(|known| known.repository == repository)
-                    {
-                        known.error = Some(error);
-                    }
                 }
 
                 this.finish(action, errors, cx);
@@ -689,9 +663,17 @@ impl Job {
             GitAction::Publish => {
                 let url = input.unwrap_or_default().trim();
                 repository.add_remote("origin", url)?;
-                repository.commit(&self.scope, &self.message)?;
 
-                repository.push()
+                let published = repository
+                    .commit(&self.scope, &self.message)
+                    .and_then(|_| repository.push());
+                // A remote that can't be pushed to, as with a mistyped URL,
+                // goes again, so that publishing can be tried again.
+                if published.is_err() {
+                    let _ = repository.remove_remote("origin");
+                }
+
+                published
             }
         }
     }

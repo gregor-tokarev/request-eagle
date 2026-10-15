@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use collection::{LinkedFolder, directory_name};
+use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
 use super::panel::CollectionPanel;
@@ -21,9 +22,12 @@ impl CollectionPanel {
             let paths = match paths.await {
                 Ok(Ok(Some(paths))) => paths,
                 Ok(Err(error)) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.error = Some(format!("Could not open the folder picker: {error}"));
-                        cx.notify();
+                    let _ = this.update_in(cx, |_, window, cx| {
+                        window.push_notification(
+                            Notification::error(error.to_string())
+                                .title("Couldn't open the folder picker"),
+                            cx,
+                        );
                     });
                     return;
                 }
@@ -60,7 +64,6 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut errors = Vec::new();
         let mut linked = None;
 
         for (path, folder) in folders {
@@ -71,10 +74,11 @@ impl CollectionPanel {
 
             match result {
                 Ok(path) => linked = Some(path),
-                Err(error) => errors.push(format!(
-                    "Could not open {} as a collection: {error}",
-                    directory_name(&path)
-                )),
+                Err(error) => window.push_notification(
+                    Notification::error(error.to_string())
+                        .title(format!("Couldn't open {}", directory_name(&path))),
+                    cx,
+                ),
             }
         }
 
@@ -84,7 +88,7 @@ impl CollectionPanel {
 
         self.rename = None;
         self.pending_delete = None;
-        self.error = (!errors.is_empty()).then(|| errors.join("\n"));
+        self.error = None;
         if let Some(path) = linked {
             self.reveal(&path, None, window, cx);
             window.focus(&self.focus, cx);

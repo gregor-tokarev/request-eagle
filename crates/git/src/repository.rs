@@ -243,6 +243,15 @@ impl Repository {
         .map(drop)
     }
 
+    pub fn remove_remote(&self, name: &str) -> Result<(), GitError> {
+        self.git(
+            &[OsStr::new("remote"), OsStr::new("remove"), OsStr::new(name)],
+            None,
+            TIMEOUT,
+        )
+        .map(drop)
+    }
+
     fn upstream(&self) -> Result<Option<String>, GitError> {
         let upstream = self.git(
             &[

@@ -1,4 +1,4 @@
-use gpui_kit::{Action, App, KeyBinding, NoAction, actions};
+use gpui_kit::{Action, App, actions};
 
 pub use tab_ui::SendRequest;
 
@@ -350,17 +350,13 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 fn register_git_actions(cx: &mut App) {
-    // The Git panel opens in a popover, where Space would close it rather
-    // than type in its message and URL fields.
-    cx.bind_keys([KeyBinding::new("space", NoAction, Some("GitPanel > Input"))]);
-
     keybindings_service::register(
         ToggleGitPanel,
         "Toggle Git panel",
-        "Show or hide the changes and actions of the Git repositories that hold collections.",
+        "Switch the sidebar between the collections and the Git repositories that hold them.",
         "Git",
         Some("secondary-shift-g"),
-        Some("Workspace"),
+        None,
         cx,
     )
     .expect("default Git panel keybinding should be valid");

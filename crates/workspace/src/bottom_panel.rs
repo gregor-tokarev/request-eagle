@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, button::*, h_flex, popover::Popover,
+    ActiveTheme as _, Icon, IconName, IconNamed, Selectable as _, Sizable as _, button::*, h_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
@@ -53,7 +53,8 @@ impl BottomPanel {
     }
 
     /// Where the collections' repositories stand: the branch, the commits to
-    /// pull and push, and the changes not committed. It opens the Git panel.
+    /// pull and push, and the changes not committed. It switches the sidebar
+    /// to the Git panel and back.
     fn git_status(&self, cx: &App) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let state = self.git.read(cx);
@@ -66,9 +67,9 @@ impl BottomPanel {
         let ahead: u32 = statuses.iter().map(|status| status.ahead).sum();
         let behind: u32 = statuses.iter().map(|status| status.behind).sum();
         let tracking = statuses.iter().any(|status| status.upstream.is_some());
-        let troubled = repositories.iter().any(|known| {
-            known.is_interrupted() || known.error.is_some() || matches!(known.status, Some(Err(_)))
-        });
+        let troubled = repositories
+            .iter()
+            .any(|known| known.is_interrupted() || matches!(known.status, Some(Err(_))));
 
         let label = match (state.running, repositories.as_slice()) {
             (Some(action), _) => Some(action.progress().to_owned()),
@@ -82,7 +83,7 @@ impl BottomPanel {
             (None, repositories) => Some(format!("{} repositories", repositories.len())),
         };
 
-        let trigger = Button::new("git-status")
+        Button::new("git-status")
             .debug_selector(|| "git-status".into())
             .ghost()
             .small()
@@ -95,8 +96,10 @@ impl BottomPanel {
             })
             .loading(state.running.is_some())
             .when_some(label, |button, label| button.label(label))
+            .selected(self.git_panel.read(cx).open)
             .accessibility_label("Git")
-            .tooltip_with_action("Git", &ToggleGitPanel, Some("Workspace"))
+            .tooltip_with_action("Git", &ToggleGitPanel, None)
+            .on_click(|_, window, cx| window.dispatch_action(ToggleGitPanel.boxed_clone(), cx))
             .when(tracking && (ahead > 0 || behind > 0), |button| {
                 button.child(sync_counts(behind, ahead, theme.muted_foreground))
             })
@@ -109,22 +112,7 @@ impl BottomPanel {
                         .child(div().size(rems(0.375)).rounded_full().bg(theme.warning))
                         .child(changes.to_string()),
                 )
-            });
-
-        let panel = self.git_panel.clone();
-        let open = panel.read(cx).open;
-        let focus = panel.read(cx).focus.clone();
-        let toggled = panel.downgrade();
-
-        Popover::new("git-panel")
-            .anchor(Anchor::BottomLeft)
-            .open(open)
-            .on_open_change(move |open, _, cx| {
-                let _ = toggled.update(cx, |panel, cx| panel.set_open(*open, cx));
             })
-            .track_focus(&focus)
-            .trigger(trigger)
-            .content(move |_, _, _| panel.clone())
     }
 }
 

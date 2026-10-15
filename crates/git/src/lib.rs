@@ -3,6 +3,8 @@ mod repository;
 mod status;
 
 #[cfg(test)]
+mod command_tests;
+#[cfg(test)]
 mod repository_tests;
 #[cfg(test)]
 mod status_tests;

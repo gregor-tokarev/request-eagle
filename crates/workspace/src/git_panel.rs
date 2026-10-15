@@ -1,7 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use git::{ChangeKind, Status};
-use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
@@ -9,17 +8,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::OpenCollectionFolder;
+use crate::actions::{OpenCollectionFolder, ToggleGitPanel};
 use crate::git_state::{GitAction, GitEvent, GitRepository, GitState};
 
-/// How many changes a repository lists before it only counts the rest.
-const LISTED_CHANGES: usize = 8;
-
-/// Opens above the status bar's Git item. It shows each repository that
-/// holds collections, its changes, and the actions that commit, pull, push
-/// and sync them.
+/// Takes the sidebar's place, as a code editor's source control view does.
+/// It shows each repository that holds collections, its changes, and the
+/// actions that commit, pull, push and sync them.
 pub(crate) struct GitPanel {
     state: Entity<GitState>,
+    /// Whether the sidebar shows it instead of the collections.
     pub(crate) open: bool,
     /// Each repository's commit message, by its folder. Enter commits.
     messages: HashMap<PathBuf, (Entity<InputState>, Subscription)>,
@@ -33,6 +30,7 @@ pub(crate) struct GitPanel {
 impl GitPanel {
     pub(crate) fn new(
         state: Entity<GitState>,
+        open: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -54,7 +52,7 @@ impl GitPanel {
 
         Self {
             state,
-            open: false,
+            open,
             messages: HashMap::new(),
             remote_urls: HashMap::new(),
             focus: cx.focus_handle(),
@@ -116,11 +114,8 @@ impl GitPanel {
         }
     }
 
-    /// Open the panel to type the commit message of the first repository
-    /// with changes.
+    /// Focus the commit message of the first repository with changes.
     pub(crate) fn begin_commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_open(true, cx);
-
         let state = self.state.read(cx);
         let Some(input) = state
             .repositories
@@ -137,7 +132,8 @@ impl GitPanel {
             return;
         };
 
-        // The panel takes focus as it opens, in the next frame.
+        // The sidebar shows the panel from the next frame drawn. Next-frame
+        // callbacks run before that frame is drawn, so focus one frame later.
         cx.on_next_frame(window, move |_, window, cx| {
             cx.on_next_frame(window, move |_, window, cx| {
                 input.update(cx, |input, cx| input.focus(window, cx));
@@ -177,7 +173,6 @@ impl GitPanel {
                 root.display()
             )))
             .debug_selector(move || format!("git-{}", label.to_lowercase()))
-            .label(label)
             .loading(running == Some(action))
             .disabled(busy || interrupted || !enabled)
             .on_click(cx.listener(move |this, _, _, cx| this.act(action, root.clone(), cx)))
@@ -196,92 +191,112 @@ impl GitPanel {
                             .text_color(muted),
                     )
                     .child(
-                        h_flex()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_1()
-                            .text_sm()
                             .child(
                                 div()
-                                    .flex_none()
+                                    .text_sm()
                                     .font_weight(FontWeight::MEDIUM)
+                                    .text_ellipsis()
                                     .child(known.repository.name()),
                             )
                             .when_some(status.and_then(branch), |this, branch| {
                                 this.child(
                                     div()
-                                        .min_w_0()
+                                        .text_xs()
                                         .text_ellipsis()
                                         .text_color(muted)
                                         .child(branch),
                                 )
                             }),
                     )
-                    .when_some(
-                        status.filter(|status| status.ahead > 0 || status.behind > 0),
-                        |this, status| this.child(sync_counts(status.behind, status.ahead, muted)),
-                    ),
+                    // The commits to pull and push, which pull and push them.
+                    .when_some(status.filter(|_| remote), |this, status| {
+                        this.child(
+                            h_flex()
+                                .flex_none()
+                                .child(
+                                    action_button("Pull", GitAction::Pull, upstream)
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::ArrowDown)
+                                        .when(status.behind > 0, |this| {
+                                            this.label(status.behind.to_string())
+                                        })
+                                        .accessibility_label("Pull")
+                                        .tooltip("Pull"),
+                                )
+                                .child(
+                                    action_button("Push", GitAction::Push, true)
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::ArrowUp)
+                                        .when(status.ahead > 0, |this| {
+                                            this.label(status.ahead.to_string())
+                                        })
+                                        .accessibility_label("Push")
+                                        .tooltip("Push"),
+                                ),
+                        )
+                    }),
             )
             .map(|this| match &known.status {
                 None => this.child(note("Reading the status…", muted)),
-                Some(Err(error)) => this.child(note(error.to_string(), theme.danger)),
+                Some(Err(error)) => this.child(warning(error.to_string(), cx)),
                 Some(Ok(status)) => this
                     .when(interrupted, |this| {
+                        this.child(warning(
+                            "Resolve the conflicts with Git, then sync again.",
+                            cx,
+                        ))
+                    })
+                    .when(!remote, |this| {
+                        let url = self.remote_urls.get(&root).map(|(input, _)| input.clone());
+                        this.child(note(
+                            "Add a remote to share these collections with your team.",
+                            muted,
+                        ))
+                        .when_some(url, |this, url| {
+                            let filled = !url.read(cx).value().trim().is_empty();
+                            this.child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(div().flex_1().min_w_0().child(Input::new(&url)))
+                                    .child(
+                                        action_button("Publish", GitAction::Publish, filled)
+                                            .label("Publish")
+                                            .primary(),
+                                    ),
+                            )
+                        })
+                    })
+                    .when(changes > 0 && !interrupted, |this| {
+                        this.when_some(self.messages.get(&root), |this, (message, _)| {
+                            this.child(Input::new(message))
+                        })
+                    })
+                    .when(remote || changes > 0, |this| {
                         this.child(
                             h_flex()
-                                .items_start()
                                 .gap_2()
-                                .text_xs()
-                                .text_color(theme.warning)
-                                .child(Icon::new(IconName::TriangleAlert).size_3p5().flex_none())
-                                .child(div().flex_1().min_w_0().child(
-                                    "A merge or rebase stopped on conflicting changes. Resolve \
-                                     them in your editor or terminal and finish it with Git, \
-                                     then sync again.",
-                                )),
+                                .child(
+                                    action_button("Commit", GitAction::Commit, changes > 0)
+                                        .label("Commit")
+                                        .flex_1(),
+                                )
+                                .when(remote, |this| {
+                                    this.child(
+                                        action_button("Sync", GitAction::Sync, true)
+                                            .label("Sync")
+                                            .primary()
+                                            .flex_1(),
+                                    )
+                                }),
                         )
                     })
                     .child(self.render_changes(known, status, cx)),
             })
-            .when(status.is_some() && !remote, |this| {
-                let url = self.remote_urls.get(&root).map(|(input, _)| input.clone());
-                this.child(note(
-                    "Add a remote to share these collections with your team.",
-                    muted,
-                ))
-                .when_some(url, |this, url| {
-                    let filled = !url.read(cx).value().trim().is_empty();
-                    this.child(
-                        h_flex()
-                            .gap_2()
-                            .child(div().flex_1().min_w_0().child(Input::new(&url)))
-                            .child(action_button("Publish", GitAction::Publish, filled).primary()),
-                    )
-                })
-            })
-            .when(changes > 0 && !interrupted, |this| {
-                this.when_some(self.messages.get(&root), |this, (message, _)| {
-                    this.child(Input::new(message))
-                })
-            })
-            .when(status.is_some() && (remote || changes > 0), |this| {
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .child(action_button("Commit", GitAction::Commit, changes > 0))
-                        .when(remote, |this| {
-                            this.child(action_button("Pull", GitAction::Pull, upstream))
-                                .child(action_button("Push", GitAction::Push, true))
-                                .child(div().flex_1())
-                                .child(action_button("Sync", GitAction::Sync, true).primary())
-                        }),
-                )
-            })
-            // The conflict explains itself above.
-            .when_some(
-                known.error.clone().filter(|_| !interrupted),
-                |this, error| this.child(note(error, theme.danger)),
-            )
             .into_any_element()
     }
 
@@ -291,10 +306,9 @@ impl GitPanel {
             return note("No changes to commit.", theme.muted_foreground).into_any_element();
         }
 
-        let hidden = status.changes.len().saturating_sub(LISTED_CHANGES);
         v_flex()
             .gap_1()
-            .children(status.changes.iter().take(LISTED_CHANGES).map(|change| {
+            .children(status.changes.iter().map(|change| {
                 let (letter, color) = match change.kind {
                     ChangeKind::Added => ("A", theme.success),
                     ChangeKind::Modified => ("M", theme.warning),
@@ -327,16 +341,10 @@ impl GitPanel {
                     )
                     .child(div().flex_1().min_w_0().text_ellipsis().child(path))
             }))
-            .when(hidden > 0, |this| {
-                this.child(note(format!("and {hidden} more"), theme.muted_foreground))
-            })
             .into_any_element()
     }
 
     fn render_empty(&self, cx: &Context<Self>) -> AnyElement {
-        let state = self.state.read(cx);
-        let muted = cx.theme().muted_foreground;
-
         v_flex()
             .gap_2()
             .child(
@@ -348,20 +356,22 @@ impl GitPanel {
             .child(note(
                 "Track them with Git to keep their history and sync them with your team. \
                  Collections opened from a folder in a repository are tracked by it too.",
-                muted,
+                cx.theme().muted_foreground,
             ))
             .child(
-                h_flex().pt_1().gap_2().child(self.track_button(cx)).child(
-                    Button::new("git-open-folder")
-                        .label("Open Folder…")
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(OpenCollectionFolder.boxed_clone(), cx)
-                        }),
-                ),
+                v_flex()
+                    .pt_1()
+                    .gap_2()
+                    .child(self.track_button(cx).w_full())
+                    .child(
+                        Button::new("git-open-folder")
+                            .label("Open Folder…")
+                            .w_full()
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(OpenCollectionFolder.boxed_clone(), cx)
+                            }),
+                    ),
             )
-            .when_some(state.init_error.clone(), |this, error| {
-                this.child(note(error, cx.theme().danger))
-            })
             .into_any_element()
     }
 
@@ -390,29 +400,30 @@ impl Focusable for GitPanel {
 impl Render for GitPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
-        let border = cx.theme().border;
+        let border = cx.theme().sidebar_border;
         let empty = state.repositories.is_empty();
         let untracked_directory = state.untracked_directory;
-        let init_error = state.init_error.clone();
         let sections: Vec<_> = (0..state.repositories.len()).collect();
 
         v_flex()
             .debug_selector(|| "git-panel".into())
             .key_context("GitPanel")
             .track_focus(&self.focus)
-            // Enter in a field, which commits or publishes, would close the
-            // popover too, before it shows how that went.
-            .on_action(|_: &Confirm, _, _| {})
-            .w(rems(26.))
-            .gap_3()
+            .size_full()
+            .pt_1()
             .child(
                 h_flex()
-                    .justify_between()
+                    .flex_none()
+                    .h_8()
+                    .pl_4()
+                    .pr_3()
+                    .gap_1()
                     .child(
                         div()
-                            .text_sm()
+                            .flex_1()
+                            .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Git"),
+                            .child("GIT"),
                     )
                     .child(
                         Button::new("git-refresh")
@@ -425,46 +436,58 @@ impl Render for GitPanel {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.state.update(cx, |state, cx| state.refresh_all(cx))
                             })),
+                    )
+                    .child(
+                        Button::new("git-close")
+                            .debug_selector(|| "git-close".into())
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .accessibility_label("Show collections")
+                            .tooltip_with_action("Show Collections", &ToggleGitPanel, None)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(ToggleGitPanel.boxed_clone(), cx)
+                            }),
                     ),
             )
-            .map(|this| {
-                if empty {
-                    return this.child(self.render_empty(cx));
-                }
+            .child(
+                div()
+                    .id("git-panel-repositories")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(
+                        v_flex()
+                            .px_4()
+                            .pt_1()
+                            .pb_4()
+                            .gap_4()
+                            .when(empty, |this| this.child(self.render_empty(cx)))
+                            .children(sections.into_iter().map(|index| {
+                                let known = &self.state.read(cx).repositories[index];
+                                let section = self.render_repository(known, cx);
 
-                this.child(
-                    div()
-                        .id("git-panel-repositories")
-                        .max_h(rems(28.))
-                        .overflow_y_scroll()
-                        .child(v_flex().gap_3().children(sections.into_iter().map(|index| {
-                            let known = &self.state.read(cx).repositories[index];
-                            let section = self.render_repository(known, cx);
-
-                            v_flex()
-                                .gap_3()
-                                .when(index > 0, |this| this.child(div().h(px(1.)).bg(border)))
-                                .child(section)
-                        }))),
-                )
-                // Other repositories can hold collections while those in the
-                // collections directory are in none.
-                .when(untracked_directory, |this| {
-                    this.child(div().h(px(1.)).bg(border)).child(
-                        h_flex()
-                            .gap_2()
-                            .child(div().flex_1().min_w_0().child(note(
-                                "The collections in your collections folder aren't in a \
-                                 repository.",
-                                cx.theme().muted_foreground,
-                            )))
-                            .child(self.track_button(cx)),
-                    )
-                })
-                .when_some(init_error, |this, error| {
-                    this.child(note(error, cx.theme().danger))
-                })
-            })
+                                v_flex()
+                                    .gap_4()
+                                    .when(index > 0, |this| this.child(div().h(px(1.)).bg(border)))
+                                    .child(section)
+                            }))
+                            // Other repositories can hold collections while
+                            // those in the collections directory are in none.
+                            .when(untracked_directory && !empty, |this| {
+                                this.child(div().h(px(1.)).bg(border)).child(
+                                    v_flex()
+                                        .gap_2()
+                                        .child(note(
+                                            "The collections in your collections folder aren't \
+                                             in a repository.",
+                                            cx.theme().muted_foreground,
+                                        ))
+                                        .child(self.track_button(cx).w_full()),
+                                )
+                            }),
+                    ),
+            )
     }
 }
 
@@ -493,4 +516,15 @@ pub(crate) fn sync_counts(behind: u32, ahead: u32, color: Hsla) -> Div {
 
 fn note(text: impl Into<SharedString>, color: Hsla) -> Div {
     div().text_xs().text_color(color).child(text.into())
+}
+
+/// A state that holds Git actions back until the user deals with it.
+fn warning(text: impl Into<SharedString>, cx: &App) -> Div {
+    h_flex()
+        .items_start()
+        .gap_2()
+        .text_xs()
+        .text_color(cx.theme().warning)
+        .child(Icon::new(IconName::TriangleAlert).size_3p5().flex_none())
+        .child(div().flex_1().min_w_0().child(text.into()))
 }

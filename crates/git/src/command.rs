@@ -12,24 +12,23 @@ use thiserror::Error;
 
 /// How long the output may take to close after Git is done.
 const OUTPUT_GRACE: Duration = Duration::from_secs(1);
+/// How many characters of what Git said a failure shows.
+const SUMMARY_LENGTH: usize = 100;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum GitError {
-    #[error("Git isn't installed, or Request Eagle can't run it.")]
+    #[error("Git isn't installed.")]
     NotInstalled,
-    /// What Git said when it failed.
-    #[error("{0}")]
+    /// What Git said when it failed. It reads as a short summary.
+    #[error("{}", summary(.0))]
     Failed(String),
-    #[error("Git took too long to answer and was stopped.")]
+    #[error("Git took too long and was stopped.")]
     TimedOut,
-    #[error("This repository has no remote to push to. Add one first.")]
+    #[error("Add a remote first.")]
     NoRemote,
-    #[error("This branch doesn't track a remote branch yet. Push it first.")]
+    #[error("Push this branch first.")]
     NoUpstream,
-    #[error(
-        "Your changes conflict with the remote's. Resolve the conflicts in your editor or \
-         terminal and finish with Git."
-    )]
+    #[error("Your changes conflict with the remote's. Resolve them with Git, then sync again.")]
     Conflicts,
     #[error("{0}")]
     Io(String),
@@ -210,4 +209,77 @@ fn message(stderr: &str, stdout: &str) -> String {
     } else {
         message
     }
+}
+
+/// What Git said, in a sentence: what the common failures mean, or the
+/// first line of others.
+pub(crate) fn summary(message: &str) -> String {
+    const MEANINGS: [(&[&str], &str); 5] = [
+        (
+            &[
+                "authentication failed",
+                "permission denied",
+                "could not read username",
+                "could not read password",
+                "terminal prompts disabled",
+            ],
+            "The remote refused access. Sign in to your Git host first.",
+        ),
+        (
+            &[
+                "could not resolve host",
+                "could not read from remote repository",
+                "does not appear to be a git repository",
+                "repository not found",
+                "unable to access",
+                "connection refused",
+                "connection timed out",
+                "network is unreachable",
+            ],
+            "Can't reach the remote.",
+        ),
+        (
+            &["[rejected]", "updates were rejected", "non-fast-forward"],
+            "The remote has new commits. Pull first.",
+        ),
+        (
+            &["please tell me who you are", "unable to auto-detect email"],
+            "Set your name and email in Git first.",
+        ),
+        (
+            &["index.lock", "another git process"],
+            "Another Git command is running. Try again shortly.",
+        ),
+    ];
+
+    let lowercase = message.to_lowercase();
+    if let Some((_, meaning)) = MEANINGS
+        .iter()
+        .find(|(signs, _)| signs.iter().any(|sign| lowercase.contains(sign)))
+    {
+        return (*meaning).to_owned();
+    }
+
+    let line = message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = ["fatal: ", "error: ", "remote: "]
+        .iter()
+        .fold(line, |line, prefix| {
+            line.strip_prefix(prefix).unwrap_or(line)
+        });
+
+    let mut characters = line.chars();
+    let mut summary: String = match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => return "Git failed without saying why.".to_owned(),
+    };
+    if summary.chars().count() > SUMMARY_LENGTH {
+        summary = summary.chars().take(SUMMARY_LENGTH - 1).collect();
+        summary.push('…');
+    }
+
+    summary
 }

@@ -437,14 +437,11 @@ pub enum CollectionEditError {
     InvalidMove,
     #[error("Collection and folder names can't start with a dot.")]
     HiddenName,
-    #[error("This folder is a collection already, or is inside or holds one.")]
+    #[error("It overlaps a collection you have already.")]
     AlreadyCollection,
-    #[error("This folder holds other files. Choose an empty folder or one with a collection.")]
+    #[error("It holds other files. Choose an empty folder or a collection.")]
     NotACollection,
-    #[error(
-        "This collection is a folder opened from elsewhere, which is never deleted. Unlink it \
-         instead; its files stay."
-    )]
+    #[error("This collection is opened from a folder. Unlink it instead; its files stay.")]
     LinkedCollection,
     #[error("{0}")]
     Io(#[from] io::Error),
