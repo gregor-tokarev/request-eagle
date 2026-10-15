@@ -6,7 +6,10 @@ use std::{
     collections::{BTreeMap, VecDeque},
     ffi::OsString,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -195,8 +198,10 @@ async fn run(
                 options: session.config_options.unwrap_or_default(),
             });
 
-            // The option changes not answered yet, which a prompt waits for.
+            // The option changes not answered yet, which a prompt waits for,
+            // and how many times the turn was stopped.
             let mut pending_options: Option<PendingOptions> = None;
+            let stops = Arc::new(AtomicU64::new(0));
             loop {
                 let next = select(commands.next(), Box::pin(connection.incoming_closed())).await;
                 let command = match next {
@@ -209,7 +214,14 @@ async fn run(
                     }
                 };
 
-                handle(command, &id, &connection, &events, &mut pending_options)?;
+                handle(
+                    command,
+                    &id,
+                    &connection,
+                    &events,
+                    &mut pending_options,
+                    &stops,
+                )?;
             }
         })
         .await;
@@ -229,18 +241,25 @@ fn handle(
     connection: &ConnectionTo<Agent>,
     events: &UnboundedSender<Event>,
     pending_options: &mut Option<PendingOptions>,
+    stops: &Arc<AtomicU64>,
 ) -> Result<(), agent_client_protocol::Error> {
     match command {
         // A prompt sent after a change of mode waits for it, so that it runs
-        // in that mode.
+        // in that mode. Stopping meanwhile drops it.
         Command::Prompt(blocks) => {
             let pending = pending_options.clone();
             let connection = connection.clone();
             let id = id.clone();
             let events = events.clone();
+            let stops = stops.clone();
+            let stopped_before = stops.load(Ordering::SeqCst);
             connection.clone().spawn(async move {
                 if let Some(pending) = pending {
                     let _ = pending.await;
+                    if stops.load(Ordering::SeqCst) != stopped_before {
+                        let _ = events.unbounded_send(Event::TurnEnded(Ok(StopReason::Cancelled)));
+                        return Ok(());
+                    }
                 }
                 let result = connection
                     .send_request(PromptRequest::new(id, blocks))
@@ -253,7 +272,10 @@ fn handle(
             })
         }
         // Goes out at once, also while an option change waits.
-        Command::Cancel => connection.send_notification(CancelNotification::new(id.clone())),
+        Command::Cancel => {
+            stops.fetch_add(1, Ordering::SeqCst);
+            connection.send_notification(CancelNotification::new(id.clone()))
+        }
         Command::SetOption { id: option, value } => {
             let request = connection.send_request(SetSessionConfigOptionRequest::new(
                 id.clone(),
