@@ -20,9 +20,12 @@ use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, LineDirection, Responder,
 };
 use futures::{
-    StreamExt as _,
-    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
-    future::{Either, select},
+    FutureExt as _, StreamExt as _,
+    channel::{
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+        oneshot,
+    },
+    future::{Either, Shared, select},
 };
 use gpui_kit::{App, Task};
 
@@ -192,6 +195,8 @@ async fn run(
                 options: session.config_options.unwrap_or_default(),
             });
 
+            // The option changes not answered yet, which a prompt waits for.
+            let mut pending_options: Option<PendingOptions> = None;
             loop {
                 let next = select(commands.next(), Box::pin(connection.incoming_closed())).await;
                 let command = match next {
@@ -204,7 +209,7 @@ async fn run(
                     }
                 };
 
-                handle(command, &id, &connection, &events).await?;
+                handle(command, &id, &connection, &events, &mut pending_options)?;
             }
         })
         .await;
@@ -215,18 +220,30 @@ async fn run(
     })
 }
 
-async fn handle(
+/// Completes once the option changes sent so far are answered.
+type PendingOptions = Shared<oneshot::Receiver<()>>;
+
+fn handle(
     command: Command,
     id: &SessionId,
     connection: &ConnectionTo<Agent>,
     events: &UnboundedSender<Event>,
+    pending_options: &mut Option<PendingOptions>,
 ) -> Result<(), agent_client_protocol::Error> {
     match command {
+        // A prompt sent after a change of mode waits for it, so that it runs
+        // in that mode.
         Command::Prompt(blocks) => {
-            let request = connection.send_request(PromptRequest::new(id.clone(), blocks));
+            let pending = pending_options.clone();
+            let connection = connection.clone();
+            let id = id.clone();
             let events = events.clone();
-            connection.spawn(async move {
-                let result = request
+            connection.clone().spawn(async move {
+                if let Some(pending) = pending {
+                    let _ = pending.await;
+                }
+                let result = connection
+                    .send_request(PromptRequest::new(id, blocks))
                     .block_task()
                     .await
                     .map(|response| response.stop_reason)
@@ -235,24 +252,30 @@ async fn handle(
                 Ok(())
             })
         }
+        // Goes out at once, also while an option change waits.
         Command::Cancel => connection.send_notification(CancelNotification::new(id.clone())),
-        // Answered before the next command goes out, so that a prompt sent
-        // after a change of mode runs in that mode.
         Command::SetOption { id: option, value } => {
-            let result = connection
-                .send_request(SetSessionConfigOptionRequest::new(
-                    id.clone(),
-                    option,
-                    value,
-                ))
-                .block_task()
-                .await;
-            let event = match result {
-                Ok(response) => Event::Options(response.config_options),
-                Err(error) => Event::OptionRejected(error.message),
-            };
-            let _ = events.unbounded_send(event);
-            Ok(())
+            let request = connection.send_request(SetSessionConfigOptionRequest::new(
+                id.clone(),
+                option,
+                value,
+            ));
+            let previous = pending_options.take();
+            let (answered, pending) = oneshot::channel();
+            *pending_options = Some(pending.shared());
+            let events = events.clone();
+            connection.spawn(async move {
+                let event = match request.block_task().await {
+                    Ok(response) => Event::Options(response.config_options),
+                    Err(error) => Event::OptionRejected(error.message),
+                };
+                let _ = events.unbounded_send(event);
+                if let Some(previous) = previous {
+                    let _ = previous.await;
+                }
+                let _ = answered.send(());
+                Ok(())
+            })
         }
     }
 }

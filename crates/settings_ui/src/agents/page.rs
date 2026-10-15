@@ -415,6 +415,8 @@ impl AgentSettings {
                 .justify_start()
                 .items_start()
                 .gap_3()
+                .pl_3()
+                .py_3()
                 .cursor_pointer()
                 .rounded(theme.radius_tokens().md)
                 .when(focus_visible, |this| this.focus_ring_style(window, cx))
@@ -474,36 +476,38 @@ impl AgentSettings {
                     .w_full()
                     .items_start()
                     .gap_3()
-                    .px_3()
-                    .py_3()
                     .border_b_1()
                     .border_color(theme.border)
                     .when(selected, |this| this.bg(theme.muted))
                     .hover(|this| this.bg(theme.muted.opacity(0.6)))
                     .child(select)
                     .child(
-                        Switch::new(SharedString::from(format!("agent-enabled-{}", agent.id)))
-                            .accessibility_label(format!("Turn on {}", agent.name))
-                            .checked(enabled)
-                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                let checked = *checked;
-                                this.error = preferences::update(cx, |preferences| {
-                                    preferences
-                                        .agents
-                                        .providers
-                                        .entry(agent.id.to_owned())
-                                        .or_default()
-                                        .enabled = checked;
-                                })
-                                .err()
-                                .map(|error| format!("Could not save the agent settings: {error}"));
-                                if checked {
-                                    this.check(agent, cx);
-                                } else {
-                                    this.checks.remove(agent.id);
-                                }
-                                cx.notify();
-                            })),
+                        div().flex_none().pt_3().pr_3().child(
+                            Switch::new(SharedString::from(format!("agent-enabled-{}", agent.id)))
+                                .accessibility_label(format!("Turn on {}", agent.name))
+                                .checked(enabled)
+                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                    let checked = *checked;
+                                    this.error = preferences::update(cx, |preferences| {
+                                        preferences
+                                            .agents
+                                            .providers
+                                            .entry(agent.id.to_owned())
+                                            .or_default()
+                                            .enabled = checked;
+                                    })
+                                    .err()
+                                    .map(|error| {
+                                        format!("Could not save the agent settings: {error}")
+                                    });
+                                    if checked {
+                                        this.check(agent, cx);
+                                    } else {
+                                        this.checks.remove(agent.id);
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
                     )
                     .into_any_element()
             })
