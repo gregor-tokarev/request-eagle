@@ -220,7 +220,8 @@ pub(crate) fn summary(message: &str) -> String {
         (
             &[
                 "authentication failed",
-                "permission denied (publickey",
+                // SSH names the methods it tried: `(publickey,password)`.
+                "permission denied (",
                 "could not read username",
                 "could not read password",
                 "terminal prompts disabled",

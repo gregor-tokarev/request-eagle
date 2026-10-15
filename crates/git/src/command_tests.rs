@@ -32,13 +32,15 @@ fn local_failures_are_not_taken_for_the_remote_s() {
         ),
         "Another Git command is running. Try again shortly."
     );
-    assert_eq!(
-        summary(
-            "git@github.com: Permission denied (publickey).\n\
-             fatal: Could not read from remote repository."
-        ),
-        "The remote refused access. Sign in to your Git host first."
-    );
+    for method in ["publickey", "password", "publickey,keyboard-interactive"] {
+        assert_eq!(
+            summary(&format!(
+                "git@example.com: Permission denied ({method}).\n\
+                 fatal: Could not read from remote repository."
+            )),
+            "The remote refused access. Sign in to your Git host first."
+        );
+    }
 }
 
 #[test]
