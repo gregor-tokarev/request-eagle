@@ -12,12 +12,13 @@ use toml_edit::{DocumentMut, Item, Value};
 use uuid::Uuid;
 
 use crate::location::directory_name;
+use crate::registry::is_hidden;
 use crate::toml_merge::merge_table;
 use crate::{CollectionEditError, DirEntry, Entry, FileEntry, SkippedPath};
 use request::{Auth, RequestScripts};
 
 /// Collection-wide settings. Like `environment.toml`, loading skips it as a request.
-const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
+pub(crate) const SETTINGS_FILE_NAME: &str = ".request-eagle-collection.toml";
 
 pub struct Collection {
     pub path: PathBuf,
@@ -25,6 +26,9 @@ pub struct Collection {
     pub(crate) local_env: Environment,
     pub(crate) scripts: RequestScripts,
     pub(crate) auth: Auth,
+    /// How many times its variables, scripts or authorization were read
+    /// again after they changed outside the app, as a request's file counts.
+    pub(crate) outside_changes: u64,
 }
 
 /// The settings a collection shares with its requests: scripts that run
@@ -67,6 +71,7 @@ impl Collection {
             local_env,
             scripts,
             auth,
+            outside_changes: 0,
         })
     }
 
@@ -171,10 +176,14 @@ impl Collection {
     pub(crate) fn reload_settings(&mut self) -> Result<(), CollectionEditError> {
         let SharedSettings { scripts, auth } = Self::load_settings(&self.path)?;
         let local_env = Environment::from_file(&self.local_env.path)?;
+        let changed = self.local_env.entries != local_env.entries
+            || self.scripts != scripts
+            || self.auth != auth;
 
         self.local_env = local_env;
         self.scripts = scripts;
         self.auth = auth;
+        self.outside_changes += u64::from(changed);
 
         Ok(())
     }
@@ -212,6 +221,20 @@ impl Collection {
 
     pub fn local_env(&self) -> &Environment {
         &self.local_env
+    }
+
+    /// A page opened from the collection keeps the count it opened with, and
+    /// a later count tells it that it edits older settings than these.
+    pub fn outside_changes(&self) -> u64 {
+        self.outside_changes
+    }
+
+    /// Whether `other`, the same collection read again, holds other
+    /// variables, scripts or authorization.
+    pub(crate) fn settings_differ(&self, other: &Collection) -> bool {
+        self.local_env.entries != other.local_env.entries
+            || self.scripts != other.scripts
+            || self.auth != other.auth
     }
 
     pub fn scripts(&self) -> &RequestScripts {
@@ -307,6 +330,11 @@ fn load_directory(
         };
 
         let entry = if file_type.is_dir() {
+            // Hidden folders, such as `.git`, are not the collection's.
+            if is_hidden(&child_path) {
+                continue;
+            }
+
             load_directory(&child_path, excluded, skipped).map(Entry::Directory)
         } else if file_type.is_file()
             && child_path

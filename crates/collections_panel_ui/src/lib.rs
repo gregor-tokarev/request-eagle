@@ -2,6 +2,7 @@ mod actions;
 mod dragging;
 mod editing;
 mod importing;
+mod linking;
 mod lookup;
 mod panel;
 mod rows;

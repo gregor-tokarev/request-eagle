@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -61,6 +61,9 @@ pub struct CollectionPanel {
     pub(super) focus: FocusHandle,
     pub(super) delete_focus: FocusHandle,
     pub(super) rows_task: Option<Task<()>>,
+    /// How many changes each collection in a Git repository has that are
+    /// not committed yet. Collections without any are left out.
+    pub(super) git_changes: HashMap<PathBuf, usize>,
     _search_subscription: Subscription,
     _focus_subscription: Subscription,
     _collections_subscription: Subscription,
@@ -126,6 +129,7 @@ impl CollectionPanel {
             focus,
             delete_focus: cx.focus_handle(),
             rows_task: None,
+            git_changes: HashMap::new(),
             _search_subscription: search_subscription,
             _focus_subscription: focus_subscription,
             _collections_subscription: collections_subscription,
@@ -173,7 +177,8 @@ impl CollectionPanel {
             }
             CollectionsEvent::RequestSaved(_)
             | CollectionsEvent::RequestRelocated { .. }
-            | CollectionsEvent::Deleted(_) => {
+            | CollectionsEvent::Deleted(_)
+            | CollectionsEvent::Reloaded => {
                 let selected = self
                     .selected
                     .map(|index| self.tree.items[index].path.clone());
@@ -195,6 +200,15 @@ impl CollectionPanel {
         self.rows_task = None;
         Arc::make_mut(&mut self.tree).update_request(file);
         self.refresh_rows(false, cx);
+    }
+
+    /// Show how many changes each collection has that are not committed to
+    /// its Git repository yet.
+    pub fn set_git_changes(&mut self, changes: HashMap<PathBuf, usize>, cx: &mut Context<Self>) {
+        if self.git_changes != changes {
+            self.git_changes = changes;
+            cx.notify();
+        }
     }
 
     pub fn collection_count(&self) -> usize {

@@ -1,27 +1,35 @@
 use anyhow::{Context as _, Result, bail};
-use collection::{CollectionRegistry, Entry, FileEntry, MovePlacement};
+use collection::{
+    CollectionRegistry, Entry, FileEntry, LINKS_FILE_NAME, LinkedFolder, MovePlacement,
+};
 use request::Request;
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
 use crate::commands::{Command, GrpcRequestInput, Placement, RequestInput, SavedRequest};
 
-/// The collections in `root`, after moving the flows that 0.1.22 saved in
-/// them, which they cannot load, to the flows directory, like the app.
+/// The collections in `root` and the folders linked as collections, after
+/// moving the flows that 0.1.22 saved in them, which they cannot load, to the
+/// flows directory, like the app.
 pub fn read(root: &Path, flows: &Path) -> CollectionRegistry {
-    let registry = CollectionRegistry::from_path(root);
+    // The data directory lists the linked folders beside the flows directory.
+    let links = flows.with_file_name(LINKS_FILE_NAME);
+    let registry = CollectionRegistry::open(root, &links);
+    // Only 0.1.22 saved flows in collections, and only in the collections
+    // directory; linked folders are left as they are.
     let moved = flow::move_flows_out_of_collections(
         registry
             .skipped()
             .iter()
-            .map(|skipped| skipped.path.as_path()),
+            .map(|skipped| skipped.path.as_path())
+            .filter(|path| path.starts_with(root)),
         flows,
     );
 
     if moved.is_empty() {
         registry
     } else {
-        CollectionRegistry::from_path(root)
+        CollectionRegistry::open(root, &links)
     }
 }
 
@@ -67,14 +75,30 @@ pub fn dispatch(root: &Path, flows: &Path, command: Command) -> Result<Value> {
         | Command::RequestsGet { .. } => None,
         _ => Some(lock_for_edit(root)?),
     };
+    // A linked folder that is gone cannot load, and unlinking it is how it
+    // stops being reported.
+    if let Command::CollectionsUnlink { path } = &command {
+        CollectionRegistry::open(root, flows.with_file_name(LINKS_FILE_NAME)).unlink(path)?;
+        return Ok(json!({"path": path}));
+    }
+
     let mut registry = load(root, flows)?;
 
     let path = match command {
-        Command::CollectionsList {} => return Ok(json!(registry.collections().iter().map(|collection| {
-            json!({"path": collection.path, "name": collection.path.file_name().unwrap_or_default().to_string_lossy()})
-        }).collect::<Vec<_>>())),
+        Command::CollectionsList {} => {
+            return Ok(json!(registry.collections().iter().map(|collection| {
+            json!({
+                "path": collection.path,
+                "name": collection.path.file_name().unwrap_or_default().to_string_lossy(),
+                "linked": registry.is_linked(&collection.path),
+            })
+        }).collect::<Vec<_>>()));
+        }
         Command::CollectionsGet { path } => {
-            let collection = registry.collections().iter().find(|entry| entry.path == path)
+            let collection = registry
+                .collections()
+                .iter()
+                .find(|entry| entry.path == path)
                 .context("Unknown collection path")?;
             let scripts = collection.scripts();
             return Ok(json!({
@@ -87,38 +111,84 @@ pub fn dispatch(root: &Path, flows: &Path, command: Command) -> Result<Value> {
         }
         Command::RequestsList { collection, query } => {
             if let Some(path) = &collection
-                && !registry.collections().iter().any(|entry| entry.path == *path) {
+                && !registry
+                    .collections()
+                    .iter()
+                    .any(|entry| entry.path == *path)
+            {
                 bail!("Unknown collection path");
             }
 
             let mut output = Vec::new();
-            for entry in registry.collections().iter().filter(|entry| collection.as_ref().is_none_or(|path| *path == entry.path)) {
-                list_requests(&entry.entries, &entry.path, &query.to_lowercase(), &mut output);
+            for entry in registry
+                .collections()
+                .iter()
+                .filter(|entry| collection.as_ref().is_none_or(|path| *path == entry.path))
+            {
+                list_requests(
+                    &entry.entries,
+                    &entry.path,
+                    &query.to_lowercase(),
+                    &mut output,
+                );
             }
             return Ok(json!(output));
         }
-        Command::RequestsGet { path } => return Ok(request_json(registry.file(&path).context("Unknown saved request path")?)),
-        Command::CollectionsCreate {} => registry.create_collection()?,
-        Command::FoldersCreate { parent } => registry.create_folder(&parent)?,
-        Command::RequestsCreate { parent, name, request } => {
-            let path = registry.create_request_with(&parent, &name, request.into())?;
-            return Ok(request_json(registry.file(&path).context("Created request was not found")?));
+        Command::RequestsGet { path } => {
+            return Ok(request_json(
+                registry.file(&path).context("Unknown saved request path")?,
+            ));
         }
-        Command::RequestsUpdate { path, expected_id, request } => {
+        Command::CollectionsCreate {} => registry.create_collection()?,
+        Command::CollectionsLink { path } => registry.link(LinkedFolder::read(&path)?)?,
+        Command::FoldersCreate { parent } => registry.create_folder(&parent)?,
+        Command::RequestsCreate {
+            parent,
+            name,
+            request,
+        } => {
+            let path = registry.create_request_with(&parent, &name, request.into())?;
+            return Ok(request_json(
+                registry
+                    .file(&path)
+                    .context("Created request was not found")?,
+            ));
+        }
+        Command::RequestsUpdate {
+            path,
+            expected_id,
+            request,
+        } => {
             if let Some(Request::WebSocket(_)) = registry.file(&path).map(|file| &file.request) {
-                bail!("requests.update edits HTTP and gRPC requests, and this is a WebSocket request");
+                bail!(
+                    "requests.update edits HTTP and gRPC requests, and this is a WebSocket request"
+                );
             }
             registry.update_request(&path, &expected_id, request.into())?;
-            return Ok(request_json(registry.file(&path).context("Updated request was not found")?));
+            return Ok(request_json(
+                registry
+                    .file(&path)
+                    .context("Updated request was not found")?,
+            ));
         }
         Command::EntriesRename { path, name } => registry.rename(&path, &name)?,
-        Command::EntriesMove { path, target, placement } => registry.move_entry(&path, &target, match placement {
-            Placement::Before => MovePlacement::Before,
-            Placement::After => MovePlacement::After,
-            Placement::Inside => MovePlacement::Inside,
-        })?,
+        Command::EntriesMove {
+            path,
+            target,
+            placement,
+        } => registry.move_entry(
+            &path,
+            &target,
+            match placement {
+                Placement::Before => MovePlacement::Before,
+                Placement::After => MovePlacement::After,
+                Placement::Inside => MovePlacement::Inside,
+            },
+        )?,
         Command::EntriesDelete { path, confirm } => {
-            if !confirm { bail!("Set confirm=true to permanently delete this saved entry"); }
+            if !confirm {
+                bail!("Set confirm=true to permanently delete this saved entry");
+            }
             registry.delete(&path)?;
             path
         }

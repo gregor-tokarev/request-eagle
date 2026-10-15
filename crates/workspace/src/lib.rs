@@ -6,6 +6,8 @@ mod command_palette;
 mod environment_panel;
 mod environment_picker;
 mod flow_panel;
+mod git_panel;
+mod git_state;
 mod history_panel;
 mod main_view;
 mod placeholder;

@@ -18,6 +18,8 @@ Events are sent without a person profile.
 | `flow_run_started` | A flow runs | `blocks` |
 | `import_finished` | Collections or environments were imported, or failed to | `collections`, `environments`, `skipped_requests`, `failed` |
 | `curl_imported` | A pasted cURL command opens as a request | |
+| `collection_folder_opened` | A folder from outside the collections directory opens as a collection | |
+| `git_action_finished` | A Git action finished, from the Git panel or the command palette | `action` (`init`, `commit`, `pull`, `push`, `sync` or `publish`), `succeeded` |
 
 Every event also carries `$app_version`, `$os` and `arch`, and `$lib` set to
 `request-eagle`.

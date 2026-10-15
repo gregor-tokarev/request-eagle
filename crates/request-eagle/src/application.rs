@@ -88,20 +88,27 @@ fn open_workspace(home: &std::path::Path, session: workspace::Session, cx: &mut 
     let collections_directory = std::env::var_os("REQUEST_EAGLE_COLLECTIONS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".request-eagle/collections"));
-    let mut collections = collection::CollectionRegistry::from_path(&collections_directory);
+    // Folders opened as collections from elsewhere, on this device.
+    let links_file = home
+        .join(".request-eagle")
+        .join(collection::LINKS_FILE_NAME);
+    let mut collections = collection::CollectionRegistry::open(&collections_directory, &links_file);
     let flows_directory = home.join(".request-eagle/flows");
+    // Only 0.1.22 saved flows in collections, and only in the collections
+    // directory; linked folders are left as they are.
     let moved = flow::move_flows_out_of_collections(
         collections
             .skipped()
             .iter()
-            .map(|skipped| skipped.path.as_path()),
+            .map(|skipped| skipped.path.as_path())
+            .filter(|path| path.starts_with(&collections_directory)),
         &flows_directory,
     );
     if !moved.is_empty() {
         for path in &moved {
             eprintln!("Moved a flow out of its collection to {}", path.display());
         }
-        collections = collection::CollectionRegistry::from_path(&collections_directory);
+        collections = collection::CollectionRegistry::open(&collections_directory, &links_file);
     }
     for skipped in collections.skipped() {
         eprintln!("Left out {}: {}", skipped.path.display(), skipped.error);

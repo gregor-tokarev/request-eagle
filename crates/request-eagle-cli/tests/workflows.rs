@@ -172,6 +172,50 @@ fn saved_collection_lifecycle_uses_the_backend_without_an_app() {
 }
 
 #[test]
+fn folders_link_as_collections_and_unlink_without_losing_files() {
+    let cli = Cli::new();
+    let project = tempdir().unwrap();
+    let folder = project.path().join("api");
+    fs::create_dir_all(&folder).unwrap();
+    let folder = folder.to_str().unwrap();
+
+    cli.call(json!({"command":"collections.link","path":folder}));
+    let created = cli.create(
+        &json!(folder),
+        json!({"method":"GET","url":"https://example.invalid"}),
+    );
+    assert_eq!(
+        cli.call(json!({"command":"collections.list"})),
+        json!([{"path":folder,"name":"api","linked":true}])
+    );
+
+    // The project's own code is not a collection, and neither is the
+    // project, which holds one.
+    let code_folder = project.path().join("src");
+    fs::create_dir_all(&code_folder).unwrap();
+    fs::write(code_folder.join("main.rs"), "fn main() {}\n").unwrap();
+    for path in [code_folder.as_path(), project.path()] {
+        let (code, refused) =
+            cli.raw(&json!({"command":"collections.link","path":path}).to_string());
+        assert_eq!(code, 1, "{refused}");
+    }
+
+    // A linked collection's folder is never deleted.
+    let (code, refused) =
+        cli.raw(&json!({"command":"entries.delete","path":folder,"confirm":true}).to_string());
+    assert_eq!(code, 1, "{refused}");
+
+    // A linked folder that is gone is left out until it is back or unlinked.
+    let moved = project.path().join("moved");
+    fs::rename(folder, &moved).unwrap();
+    assert_eq!(cli.call(json!({"command":"collections.list"})), json!([]));
+    cli.call(json!({"command":"collections.unlink","path":folder}));
+    fs::rename(&moved, folder).unwrap();
+    assert_eq!(cli.call(json!({"command":"collections.list"})), json!([]));
+    assert!(Path::new(created["path"].as_str().unwrap()).exists());
+}
+
+#[test]
 fn edits_reject_replaced_requests_and_paths_outside_the_collection_root() {
     let cli = Cli::new();
     let collection = cli.collection();

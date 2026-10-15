@@ -6,6 +6,8 @@ use crate::{
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
     flow_panel::{FlowPanel, FlowPanelEvent},
+    git_panel::GitPanel,
+    git_state::{GitAction, GitEvent, GitState},
     history_panel::{HistoryPanel, HistoryPanelEvent},
     main_view::{MainView, Page, TabEdited},
     session::{SavedSidebar, SavedWindow, Session, SessionWriter},
@@ -19,6 +21,7 @@ use gpui_kit::base::motion::{self, Transition};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
     button::{Button, ButtonVariants},
+    notification::Notification,
     resizable::{ResizableState, h_resizable, resizable_panel},
     *,
 };
@@ -56,6 +59,8 @@ pub(crate) struct Workspace {
     history_header: FocusHandle,
     pub(crate) main_view: Entity<MainView>,
     bottom_panel: Entity<BottomPanel>,
+    git: Entity<GitState>,
+    git_panel: Entity<GitPanel>,
 
     pub(crate) main_split: Entity<ResizableState>,
     pub(crate) sidebar_visible: Entity<bool>,
@@ -83,6 +88,7 @@ pub(crate) struct Workspace {
     _flow_panel_subscription: Subscription,
     _history_subscription: Subscription,
     _tabs_subscriptions: [Subscription; 2],
+    _git_subscriptions: [Subscription; 3],
     _settings_subscription: Option<Subscription>,
 }
 
@@ -107,10 +113,15 @@ impl Workspace {
             ..
         } = session;
         let sidebar_visible = cx.new(|_| sidebar_state.visible);
-        // The bottom panel is cached, so it observes the visibility itself.
-        let bottom_panel = cx.new(|cx| BottomPanel::new(sidebar_visible.clone(), cx));
-
         let collections = cx.new(|_| Collections::new(collections));
+
+        let git = cx.new(|cx| GitState::new(collections.clone(), cx));
+        let git_panel = cx.new(|cx| GitPanel::new(git.clone(), sidebar_state.git, window, cx));
+        // The bottom panel is cached, so it observes what it shows itself.
+        let bottom_panel = cx.new(|cx| {
+            BottomPanel::new(sidebar_visible.clone(), git.clone(), git_panel.clone(), cx)
+        });
+
         let sidebar = cx.new(|cx| {
             CollectionPanel::new(collections.clone(), sidebar_state.collapsed, window, cx)
         });
@@ -217,9 +228,27 @@ impl Workspace {
             }),
         ];
 
-        // Start in the collections tree, or in the tabs while it is hidden or
-        // folded.
-        if sidebar_state.visible && sidebar_state.collections {
+        let git_subscriptions = [
+            cx.subscribe_in(&git, window, |_, _, event: &GitEvent, window, cx| {
+                let GitEvent::Finished { action, errors } = event;
+                window.push_notification(git_notification(*action, errors), cx);
+            }),
+            // The sidebar counts each collection's changes.
+            cx.observe(&git, |this, git, cx| {
+                let changes = git.read(cx).changes_by_collection();
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.set_git_changes(changes, cx));
+            }),
+            cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.git.update(cx, |git, cx| git.refresh_on_return(cx));
+                }
+            }),
+        ];
+
+        // Start in the collections tree, or in the tabs while it is hidden,
+        // folded or in place of the Git panel.
+        if sidebar_state.visible && sidebar_state.collections && !sidebar_state.git {
             window.focus(&sidebar.focus_handle(cx), cx);
             main_view.update(cx, |view, cx| view.prepare_active_tab(window, cx));
         } else {
@@ -242,6 +271,8 @@ impl Workspace {
             history_header: cx.focus_handle(),
             main_view,
             bottom_panel,
+            git,
+            git_panel,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
             settings: None,
@@ -258,6 +289,7 @@ impl Workspace {
             _flow_panel_subscription: flow_panel_subscription,
             _history_subscription: history_subscription,
             _tabs_subscriptions: tabs_subscriptions,
+            _git_subscriptions: git_subscriptions,
             _settings_subscription: None,
         }
     }
@@ -311,6 +343,7 @@ impl Workspace {
                 environments: self.environments_open,
                 flows: self.flows_open,
                 history: self.history_open,
+                git: self.git_panel.read(cx).open,
                 // JSON holds only UTF-8 paths. Folders with other names
                 // expand again, rather than failing the whole save.
                 collapsed: self
@@ -440,14 +473,15 @@ impl Workspace {
     }
 
     fn sidebar_contains_focus(&self, window: &Window, cx: &App) -> bool {
-        [
-            &self.collections_header,
-            &self.environments_header,
-            &self.flows_header,
-            &self.history_header,
-        ]
-        .iter()
-        .any(|header| header.is_focused(window))
+        self.git_panel.read(cx).focus.contains_focused(window, cx)
+            || [
+                &self.collections_header,
+                &self.environments_header,
+                &self.flows_header,
+                &self.history_header,
+            ]
+            .iter()
+            .any(|header| header.is_focused(window))
             || self.sidebar.read(cx).contains_focus(window, cx)
             || self
                 .environment_panel
@@ -510,18 +544,62 @@ impl Workspace {
 
     /// Show the collections tree, even when a shortcut runs with the sidebar
     /// hidden.
-    fn reveal_collections(&mut self, cx: &mut Context<Self>) {
+    fn reveal_collections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible.update(cx, |visible, cx| {
             *visible = true;
             cx.notify();
         });
+        self.leave_git_panel(window, cx);
         self.collections_open = true;
+        cx.notify();
+    }
+
+    /// Show the sidebar's sections again in place of the Git panel, taking
+    /// focus out of it first, so that a dialog closing later does not give
+    /// focus back to a field no longer drawn.
+    fn leave_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git_panel.read(cx).open {
+            self.show_git_panel(false, window, cx);
+        }
+    }
+
+    pub(crate) fn toggle_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = *self.sidebar_visible.read(cx) && self.git_panel.read(cx).open;
+
+        self.show_git_panel(!shown, window, cx);
+    }
+
+    /// Show the Git panel in the sidebar, or the sidebar's sections again.
+    fn show_git_panel(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // Keys must not go to the rows of the view that leaves the sidebar.
+        let focused = self.sidebar_contains_focus(window, cx);
+
+        if open {
+            self.sidebar_visible.update(cx, |visible, cx| {
+                *visible = true;
+                cx.notify();
+            });
+        }
+        self.git_panel
+            .update(cx, |panel, cx| panel.set_open(open, cx));
+
+        if focused {
+            if open {
+                let focus = self.git_panel.read(cx).focus.clone();
+                window.focus(&focus, cx);
+            } else if self.collections_open {
+                window.focus(&self.sidebar.focus_handle(cx), cx);
+            } else {
+                self.main_view.update(cx, |view, cx| view.focus(window, cx));
+            }
+        }
+
         cx.notify();
     }
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The new collection is named in the tree, so it must be visible.
-        self.reveal_collections(cx);
+        self.reveal_collections(window, cx);
 
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
@@ -529,7 +607,7 @@ impl Workspace {
 
     fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The imported collection is revealed in the tree, so it must be visible.
-        self.reveal_collections(cx);
+        self.reveal_collections(window, cx);
 
         let environments = self
             .main_view
@@ -543,7 +621,28 @@ impl Workspace {
         });
     }
 
+    fn open_collection_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The opened collection is revealed in the tree, so it must be visible.
+        self.reveal_collections(window, cx);
+
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open_folder(window, cx));
+    }
+
+    /// Run a Git action in every repository that holds collections. Without
+    /// any, the Git panel opens to start one.
+    fn run_git(&mut self, action: GitAction, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git.read(cx).repositories.is_empty() {
+            self.show_git_panel(true, window, cx);
+            return;
+        }
+
+        self.git
+            .update(cx, |git, cx| git.run(action, None, None, cx));
+    }
+
     fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_git_panel(window, cx);
         self.environments_open = true;
         cx.notify();
 
@@ -557,6 +656,7 @@ impl Workspace {
             *visible = true;
             cx.notify();
         });
+        self.leave_git_panel(window, cx);
         self.flows_open = true;
         cx.notify();
 
@@ -581,6 +681,7 @@ impl Workspace {
 
     fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The confirmation shows in the section, so it must be visible.
+        self.leave_git_panel(window, cx);
         self.history_open = true;
         cx.notify();
 
@@ -693,7 +794,17 @@ impl Workspace {
         )
     }
 
-    fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let frame = v_flex()
+            .size_full()
+            .bg(cx.theme().sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .border_r_1()
+            .border_color(cx.theme().sidebar_border);
+        if self.git_panel.read(cx).open {
+            return frame.child(self.git_panel.clone()).into_any_element();
+        }
+
         let collection_count = self.sidebar.read(cx).collection_count();
         let environment_count = self.main_view.read(cx).environments.read(cx).names().len();
         let flow_count = self.flow_panel.read(cx).count();
@@ -715,6 +826,15 @@ impl Workspace {
             .icon(IconName::Plus)
             .tooltip_with_action("New Collection", &NewCollection, Some("Workspace"))
             .on_click(cx.listener(|this, _, window, cx| this.create_collection(window, cx)));
+        let open_collection_folder = Button::new("open-collection-folder")
+            .debug_selector(|| "open-collection-folder".into())
+            .icon(IconName::FolderOpen)
+            .tooltip_with_action(
+                "Open Folder as Collection",
+                &OpenCollectionFolder,
+                Some("Workspace"),
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.open_collection_folder(window, cx)));
         let import_collection = Button::new("import-collection")
             .debug_selector(|| "import-collection".into())
             .icon(Icon::default().path("icons/import.svg"))
@@ -754,18 +874,13 @@ impl Workspace {
                 .child(view.cached(StyleRefinement::default().size_full()))
         };
 
-        v_flex()
-            .size_full()
+        frame
             .pt_1()
-            .bg(cx.theme().sidebar)
-            .text_color(cx.theme().sidebar_foreground)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
             .child(self.section_header(
                 SidebarSection::Collections,
                 collections_progress,
                 collection_count,
-                vec![new_collection, import_collection],
+                vec![new_collection, open_collection_folder, import_collection],
                 window,
                 cx,
             ))
@@ -824,6 +939,7 @@ impl Workspace {
                     self.history.clone().into(),
                 ))
             })
+            .into_any_element()
     }
 
     fn update_tabs(
@@ -837,6 +953,31 @@ impl Workspace {
             view.focus(window, cx);
         });
     }
+}
+
+/// Tells how a Git action went.
+fn git_notification(action: GitAction, errors: &[String]) -> Notification {
+    if !errors.is_empty() {
+        let title = match action {
+            GitAction::Init => "Couldn't start a repository",
+            GitAction::Commit => "Couldn't commit",
+            GitAction::Pull => "Couldn't pull",
+            GitAction::Push => "Couldn't push",
+            GitAction::Sync => "Couldn't sync",
+            GitAction::Publish => "Couldn't publish",
+        };
+
+        return Notification::error(errors.join("\n")).title(title);
+    }
+
+    Notification::success(match action {
+        GitAction::Init => "Git tracks your collections now.",
+        GitAction::Commit => "Committed the collections' changes.",
+        GitAction::Pull => "Pulled the latest changes.",
+        GitAction::Push => "Pushed your commits.",
+        GitAction::Sync => "Your collections are in sync.",
+        GitAction::Publish => "Published your collections.",
+    })
 }
 
 /// Handled outside the workspace's focus, so the status bar's button opens
@@ -915,6 +1056,7 @@ pub(crate) fn on_toggle_sidebar(
     cx: &mut App,
 ) {
     let workspace = workspace.downgrade();
+    let git_workspace = workspace.clone();
 
     cx.on_action(move |_: &ToggleLeftSidebar, cx| {
         let workspace = workspace.clone();
@@ -922,6 +1064,17 @@ pub(crate) fn on_toggle_sidebar(
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| this.toggle_sidebar(window, cx));
+            });
+        });
+    });
+
+    // The status bar's Git item switches the sidebar wherever focus is.
+    cx.on_action(move |_: &ToggleGitPanel, cx| {
+        let workspace = git_workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| this.toggle_git_panel(window, cx));
             });
         });
     });
@@ -976,7 +1129,7 @@ impl Render for Workspace {
             .size_full()
             .key_context("Workspace")
             .on_action(cx.listener(|this, _: &FocusSidebarSearch, window, cx| {
-                this.reveal_collections(cx);
+                this.reveal_collections(window, cx);
 
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
@@ -989,6 +1142,23 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &NewFlow, window, cx| {
                 this.create_flow(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenCollectionFolder, window, cx| {
+                this.open_collection_folder(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GitCommit, window, cx| {
+                this.show_git_panel(true, window, cx);
+                this.git_panel
+                    .update(cx, |panel, cx| panel.begin_commit(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &GitPull, window, cx| {
+                this.run_git(GitAction::Pull, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GitPush, window, cx| {
+                this.run_git(GitAction::Push, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GitSync, window, cx| {
+                this.run_git(GitAction::Sync, window, cx);
             }))
             .on_action(
                 cx.listener(|this, _: &OpenEnvironmentSelector, window, cx| {

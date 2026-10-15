@@ -3,13 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui_kit::{Context, EventEmitter};
+use gpui_kit::{Context, EventEmitter, Task};
 use request::Request;
 
 use crate::location::directory_name;
 use crate::{
-    Collection, CollectionEditError, CollectionRegistry, Entry, FileEntry, MovePlacement,
-    SavedLocation, SharedSettings,
+    Collection, CollectionEditError, CollectionRegistry, Entry, FileEntry, LinkedFolder,
+    MovePlacement, SavedLocation, SharedSettings,
 };
 
 /// The saved collections, which the sidebar shows and tabs open. Every change
@@ -19,6 +19,11 @@ pub struct Collections {
     registry: CollectionRegistry,
     /// Counts the changes, so a view can tell whether it shows the latest.
     revision: u64,
+    /// Reading every collection again, in the background.
+    reload: Option<Task<()>>,
+    reloading: bool,
+    /// Whether another reload was asked for while one was reading.
+    reload_pending: bool,
 }
 
 /// A change to the saved collections, emitted after it is made.
@@ -44,8 +49,12 @@ pub enum CollectionsEvent {
         previous_path: PathBuf,
         location: SavedLocation,
     },
-    /// A collection, folder or request was deleted with everything in it.
+    /// A collection, folder or request was deleted with everything in it,
+    /// or a linked collection was removed from the app.
     Deleted(PathBuf),
+    /// Every collection was read from disk again, such as after Git changed
+    /// their files. Anything can have changed.
+    Reloaded,
 }
 
 /// A collection or folder that can hold a new request.
@@ -73,6 +82,9 @@ impl Collections {
         Self {
             registry,
             revision: 0,
+            reload: None,
+            reloading: false,
+            reload_pending: false,
         }
     }
 
@@ -211,6 +223,74 @@ impl Collections {
         }
     }
 
+    /// Show a folder from outside the collections directory as a collection.
+    pub fn link(
+        &mut self,
+        folder: LinkedFolder,
+        cx: &mut Context<Self>,
+    ) -> Result<PathBuf, CollectionEditError> {
+        let path = self.registry.link(folder)?;
+        self.created(&path, cx);
+
+        Ok(path)
+    }
+
+    /// Stop showing a linked collection, leaving its folder as it is.
+    pub fn unlink(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.unlink(path)?;
+        self.changed(cx);
+        cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
+
+        Ok(())
+    }
+
+    /// Read every collection from disk again, such as after Git changed
+    /// their files. Reading takes a while, so it runs in the background.
+    /// Reloads asked for while one is reading are done together after it.
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        if self.reloading {
+            self.reload_pending = true;
+            return;
+        }
+        let Some(loaded_from) = self.registry.loaded_from() else {
+            return;
+        };
+        let revision = self.revision;
+        self.reloading = true;
+
+        self.reload = Some(cx.spawn(async move |this, cx| {
+            let reloaded = cx
+                .background_executor()
+                .spawn(async move { loaded_from.load() })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.reloading = false;
+                // What was read can miss a change made meanwhile, and another
+                // reload was asked for after it started. One more serves both.
+                let pending = std::mem::take(&mut this.reload_pending);
+                if this.revision != revision || pending {
+                    this.reload(cx);
+                    return;
+                }
+
+                this.registry.take_reloaded(reloaded);
+                this.changed(cx);
+                cx.emit(CollectionsEvent::Reloaded);
+            });
+        }));
+    }
+
+    /// Whether a linked folder that was gone is back, so that reloading
+    /// shows it again.
+    pub fn linked_folder_returned(&self) -> bool {
+        self.registry.linked_folder_returned()
+    }
+
     /// Save a request's changes, unless its file now holds another request,
     /// or the request in it changed outside the app. `outside_changes` is
     /// the file's count when the edited request was opened from it: a
@@ -272,17 +352,29 @@ impl Collections {
     /// Save a collection page's edits, renaming the collection's directory
     /// when its name changed. Returns the collection's path after the save.
     /// Unless `overwrite` is set, settings changed outside the app stay.
+    /// `outside_changes` is the collection's count when the edited settings
+    /// were opened from it: they can be older than the ones read since, as
+    /// after a pull.
+    #[allow(clippy::too_many_arguments)]
     pub fn save_collection(
         &mut self,
         path: &Path,
         name: &str,
         variables: HashMap<String, String>,
         shared: SharedSettings,
+        outside_changes: u64,
         overwrite: bool,
         cx: &mut Context<Self>,
     ) -> Result<PathBuf, CollectionEditError> {
         // Asked before the rename, so declining the save leaves the name too.
         if !overwrite {
+            if self
+                .collection(path)
+                .is_some_and(|collection| collection.outside_changes() != outside_changes)
+            {
+                return Err(CollectionEditError::ChangedOnDisk);
+            }
+
             self.registry.check_collection(path, &variables, &shared)?;
         }
 
@@ -299,14 +391,22 @@ impl Collections {
         } else {
             self.registry.update_collection(&path, variables, shared)?;
         }
+        self.changed(cx);
 
         Ok(path)
     }
 
     /// Take the changes made to a collection's variables, scripts and
     /// authorization outside the app.
-    pub fn reload_collection(&mut self, path: &Path) -> Result<(), CollectionEditError> {
-        self.registry.reload_collection(path)
+    pub fn reload_collection(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
+        self.registry.reload_collection(path)?;
+        self.changed(cx);
+
+        Ok(())
     }
 
     /// Rename a collection, folder or request. Returns its path after the

@@ -18,6 +18,14 @@ pub enum Command {
     /// Create with the default name; entries.rename can change it.
     #[serde(rename = "collections.create")]
     CollectionsCreate {},
+    /// Show a folder outside the collections directory as a collection where
+    /// it is, such as in a project's Git repository. The folder must be empty
+    /// or be a collection itself. Each device keeps its own linked folders.
+    #[serde(rename = "collections.link")]
+    CollectionsLink { path: PathBuf },
+    /// Stop showing a linked collection. Its folder stays as it is.
+    #[serde(rename = "collections.unlink")]
+    CollectionsUnlink { path: PathBuf },
     #[serde(rename = "folders.create")]
     FoldersCreate { parent: PathBuf },
     #[serde(rename = "requests.list")]

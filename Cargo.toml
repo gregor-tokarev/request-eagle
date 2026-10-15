@@ -7,6 +7,7 @@ members = [
     "crates/environment",
     "crates/flow",
     "crates/fql",
+    "crates/git",
     "crates/history",
     "crates/import",
     "crates/keybindings_service",

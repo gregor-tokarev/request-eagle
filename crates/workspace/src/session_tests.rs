@@ -104,6 +104,7 @@ fn saved_session_loads_back_the_same() {
             environments: false,
             flows: false,
             history: true,
+            git: true,
             collapsed: vec![
                 PathBuf::from("/collections/api"),
                 PathBuf::from("/collections/billing/Invoices"),

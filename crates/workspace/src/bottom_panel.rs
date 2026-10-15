@@ -1,7 +1,11 @@
-use gpui_kit::component::{ActiveTheme as _, Icon, IconNamed, Sizable as _, button::*};
-use gpui_kit::*;
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, IconName, IconNamed, Selectable as _, Sizable as _, button::*, h_flex,
+};
+use gpui_kit::{prelude::FluentBuilder as _, *};
 
-use crate::actions::{OpenCookies, OpenSettings, ToggleLeftSidebar};
+use crate::actions::{OpenCookies, OpenSettings, ToggleGitPanel, ToggleLeftSidebar};
+use crate::git_panel::GitPanel;
+use crate::git_state::GitState;
 
 pub(crate) const TOGGLE_SIDEBAR_BUTTON: &str = "toggle-sidebar";
 
@@ -22,18 +26,106 @@ impl IconNamed for SidebarIcon {
 
 pub struct BottomPanel {
     sidebar_visible: Entity<bool>,
-    _sidebar_visibility_subscription: Subscription,
+    git: Entity<GitState>,
+    git_panel: Entity<GitPanel>,
+    _subscriptions: [Subscription; 3],
 }
 
 impl BottomPanel {
-    pub fn new(sidebar_visible: Entity<bool>, cx: &mut Context<Self>) -> Self {
-        let subscription = cx.observe(&sidebar_visible, |_, _, cx| cx.notify());
+    pub(crate) fn new(
+        sidebar_visible: Entity<bool>,
+        git: Entity<GitState>,
+        git_panel: Entity<GitPanel>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let subscriptions = [
+            cx.observe(&sidebar_visible, |_, _, cx| cx.notify()),
+            cx.observe(&git, |_, _, cx| cx.notify()),
+            cx.observe(&git_panel, |_, _, cx| cx.notify()),
+        ];
 
         Self {
             sidebar_visible,
-            _sidebar_visibility_subscription: subscription,
+            git,
+            git_panel,
+            _subscriptions: subscriptions,
         }
     }
+
+    /// Where the collections' repositories stand: the branch, the commits to
+    /// pull and push, and the changes not committed. It switches the sidebar
+    /// to the Git panel and back.
+    fn git_status(&self, cx: &App) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        let state = self.git.read(cx);
+        let repositories = &state.repositories;
+        let statuses: Vec<_> = repositories
+            .iter()
+            .filter_map(|known| known.status())
+            .collect();
+        let changes: usize = statuses.iter().map(|status| status.changes.len()).sum();
+        let ahead: u32 = statuses.iter().map(|status| status.ahead).sum();
+        let behind: u32 = statuses.iter().map(|status| status.behind).sum();
+        let tracking = statuses.iter().any(|status| status.upstream.is_some());
+        let troubled = repositories
+            .iter()
+            .any(|known| known.is_interrupted() || matches!(known.status, Some(Err(_))));
+
+        let label = match (state.running, repositories.as_slice()) {
+            (Some(action), _) => Some(action.progress().to_owned()),
+            (None, []) => None,
+            (None, [known]) => Some(
+                known
+                    .status()
+                    .and_then(|status| status.branch.clone())
+                    .unwrap_or_else(|| known.repository.name()),
+            ),
+            (None, repositories) => Some(format!("{} repositories", repositories.len())),
+        };
+
+        Button::new("git-status")
+            .debug_selector(|| "git-status".into())
+            .ghost()
+            .small()
+            .map(|button| {
+                if troubled {
+                    button.icon(Icon::new(IconName::TriangleAlert).text_color(theme.warning))
+                } else {
+                    button.icon(Icon::default().path("icons/git-branch.svg"))
+                }
+            })
+            .loading(state.running.is_some())
+            .when_some(label, |button, label| button.label(label))
+            .selected(self.git_panel.read(cx).open)
+            .accessibility_label("Git")
+            .tooltip_with_action("Git", &ToggleGitPanel, None)
+            .on_click(|_, window, cx| window.dispatch_action(ToggleGitPanel.boxed_clone(), cx))
+            // In the label's size, so that the counts share its baseline.
+            .when(tracking && (ahead > 0 || behind > 0), |button| {
+                button
+                    .child(count(IconName::ArrowDown, behind, theme.muted_foreground))
+                    .child(count(IconName::ArrowUp, ahead, theme.muted_foreground))
+            })
+            .when(changes > 0, |button| {
+                button.child(
+                    h_flex()
+                        .gap_1()
+                        .text_color(theme.muted_foreground)
+                        .child(div().size(rems(0.375)).rounded_full().bg(theme.warning))
+                        .child(changes.to_string()),
+                )
+            })
+    }
+}
+
+/// Commits to pull or to push, as an arrow with their count.
+fn count(arrow: IconName, count: u32, color: Hsla) -> impl IntoElement {
+    h_flex()
+        .flex_none()
+        .gap_0p5()
+        .text_color(color)
+        .child(Icon::new(arrow).size_3())
+        .child(count.to_string())
 }
 
 impl Render for BottomPanel {
@@ -70,6 +162,7 @@ impl Render for BottomPanel {
                             }),
                     ),
             )
+            .child(div().flex_none().child(self.git_status(cx)))
             .child(div().flex_1())
             .child(
                 Button::new("open-cookies")

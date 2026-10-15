@@ -4,6 +4,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::Input,
     menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -36,10 +37,18 @@ impl CollectionPanel {
             return self.empty_row(row, cx);
         }
 
+        // A linked collection is only removed from the app; its folder stays.
+        let linked = item.kind == ItemKind::Collection
+            && self.collections.read(cx).registry().is_linked(&item.path);
         let delete_label = match item.kind {
+            ItemKind::Collection if linked => "Remove collection",
             ItemKind::Collection => "Delete collection",
             ItemKind::Folder => "Delete folder",
             ItemKind::Request(_) | ItemKind::Empty => "Delete request",
+        };
+        let git_changes = match item.kind {
+            ItemKind::Collection => self.git_changes.get(&item.path).copied(),
+            _ => None,
         };
         let menu = self.row_menu(index, delete_label, cx);
         let branch = item.is_branch();
@@ -90,8 +99,12 @@ impl CollectionPanel {
                         .child(
                             Button::new("confirm-sidebar-delete")
                                 .debug_selector(|| "confirm-sidebar-delete".into())
-                                .label("Delete")
-                                .tooltip("Confirm deletion (Enter)")
+                                .label(if linked { "Remove" } else { "Delete" })
+                                .tooltip(if linked {
+                                    "Remove from Request Eagle, keeping the folder (Enter)"
+                                } else {
+                                    "Confirm deletion (Enter)"
+                                })
                                 .xsmall()
                                 .danger()
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -202,6 +215,41 @@ impl CollectionPanel {
                             })
                             .child(item.label.clone())
                             .into_any_element()
+                    })
+                    .when(rename.is_none() && linked, |this| {
+                        let folder: SharedString = item.path.to_string_lossy().into_owned().into();
+                        this.child(
+                            div()
+                                .id(("collection-linked", index))
+                                .flex_none()
+                                .text_color(theme.muted_foreground)
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(format!("Opened from {folder}")).build(window, cx)
+                                })
+                                .child(Icon::default().path("icons/link.svg").size_3()),
+                        )
+                    })
+                    .when_some(git_changes.filter(|_| rename.is_none()), |this, count| {
+                        this.child(
+                            div()
+                                .id(("collection-git-changes", index))
+                                .debug_selector(move || format!("collection-git-changes-{index}"))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .tooltip(move |window, cx| {
+                                    let text = match count {
+                                        1 => "1 change not committed".to_owned(),
+                                        count => format!("{count} changes not committed"),
+                                    };
+                                    Tooltip::new(text).build(window, cx)
+                                })
+                                .child(div().size(rems(0.375)).rounded_full().bg(theme.warning))
+                                .child(format!("{count}")),
+                        )
                     })
                     .when(rename.is_none(), |this| {
                         // Shown while the row is hovered, selected or its

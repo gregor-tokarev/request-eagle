@@ -86,6 +86,7 @@ fn write_collection(
         },
         scripts: RequestScripts::default(),
         auth: Auth::Inherit,
+        outside_changes: 0,
     };
     collection.save_settings(
         imported.variables,

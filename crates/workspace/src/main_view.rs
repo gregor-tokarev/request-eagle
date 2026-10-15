@@ -1,4 +1,7 @@
-use std::{mem, path::Path};
+use std::{
+    mem,
+    path::{Path, PathBuf},
+};
 
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
@@ -661,6 +664,14 @@ impl MainView {
                 .map_or(0, |saved| saved.outside_changes);
         }
 
+        if let Page::Collection(page) = page {
+            return self
+                .collections
+                .read(cx)
+                .collection(&page.read(cx).path)
+                .map_or(0, |collection| collection.outside_changes());
+        }
+
         page.location(cx)
             .and_then(|location| self.collections.read(cx).registry().file(&location.path))
             .map_or(0, |file| file.outside_changes())
@@ -735,6 +746,7 @@ impl MainView {
                 location,
             } => self.relocate_request(previous_path, location.clone(), cx),
             CollectionsEvent::Deleted(path) => self.close_deleted(path, cx),
+            CollectionsEvent::Reloaded => self.follow_reload(window, cx),
             CollectionsEvent::Created(_) | CollectionsEvent::RequestSaved(_) => {}
         }
     }
@@ -1420,6 +1432,7 @@ impl MainView {
                                     scripts: settings.scripts.clone(),
                                     auth: settings.auth.clone(),
                                 },
+                                outside_changes,
                                 overwrite,
                                 cx,
                             )
@@ -1431,6 +1444,9 @@ impl MainView {
                 match result {
                     Ok((path, settings)) => {
                         page.update(cx, |page, cx| page.mark_saved(path, settings, cx));
+                        // The saved settings are the ones the tab edits from now on.
+                        self.tabs[index].outside_changes =
+                            self.outside_changes(&self.tabs[index].page, cx);
                         self.close_saved_tab(index, window, cx);
                     }
                     Err(failure) => self.save_failed(id, "collection", failure),
@@ -1606,7 +1622,9 @@ impl MainView {
             Page::Collection(page) => {
                 let path = page.read(cx).path.clone();
                 self.collections
-                    .update(cx, |collections, _| collections.reload_collection(&path))
+                    .update(cx, |collections, cx| {
+                        collections.reload_collection(&path, cx)
+                    })
                     .map_err(|error| error.to_string())
             }
             // Its editor reads the environment's file when it opens. A file
@@ -1628,42 +1646,132 @@ impl MainView {
 
         // A tab that was being closed has nothing left to save. Otherwise
         // another tab opens in its place, from what is saved now.
-        self.remove_tab(index, cx);
-        if !closing {
-            let count = self.tabs.len();
-
-            match &page {
-                Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => {
-                    if let Some(location) = page.location(cx).cloned() {
-                        self.open_saved(&location.path, window, cx);
-                    }
-                }
-                Page::Collection(page) => {
-                    let path = page.read(cx).path.clone();
-                    self.open_saved(&path, window, cx);
-                }
-                Page::Flow(editor) => {
-                    let path = editor.read(cx).path.clone();
-                    if let Some(saved) = self.flows.read(cx).get(&path).cloned() {
-                        self.open_flow(saved, cx);
-                    }
-                }
-                Page::Environment(editor) => {
-                    let name = editor.read(cx).name.clone();
-                    self.open_environment_tab(name, window, cx);
-                }
-                Page::Runner(_) | Page::Cookies(_) => {}
-            }
-
-            if self.tabs.len() > count
-                && let Some(tab) = self.tabs.pop()
-            {
-                self.tabs.insert(index, tab);
-                self.select_tab(index, cx);
-            }
+        if closing {
+            self.remove_tab(index, cx);
+        } else if self.reopen_tab(index, window, cx).is_some() {
+            self.select_tab(index, cx);
         }
 
         self.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Replace a tab with a new one opened from what its page shows as it
+    /// is saved now, in the same place. Returns the new tab's ID, or `None`
+    /// when what it showed could not open again and the tab is gone.
+    fn reopen_tab(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let page = self.tabs[index].page.clone();
+        self.remove_tab(index, cx);
+        let count = self.tabs.len();
+
+        match &page {
+            Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => {
+                if let Some(location) = page.location(cx).cloned() {
+                    self.open_saved(&location.path, window, cx);
+                }
+            }
+            Page::Collection(page) => {
+                let path = page.read(cx).path.clone();
+                self.open_saved(&path, window, cx);
+            }
+            Page::Flow(editor) => {
+                let path = editor.read(cx).path.clone();
+                if let Some(saved) = self.flows.read(cx).get(&path).cloned() {
+                    self.open_flow(saved, cx);
+                }
+            }
+            Page::Environment(editor) => {
+                let name = editor.read(cx).name.clone();
+                self.open_environment_tab(name, window, cx);
+            }
+            Page::Runner(_) | Page::Cookies(_) => {}
+        }
+
+        if self.tabs.len() > count
+            && let Some(tab) = self.tabs.pop()
+        {
+            let id = tab.id;
+            self.tabs.insert(index, tab);
+            return Some(id);
+        }
+
+        None
+    }
+
+    /// Follow collections read from disk again, as after a Git pull. Tabs
+    /// of what is gone close like those of deleted items, and tabs without
+    /// unsaved changes show what is saved now. Tabs with unsaved changes
+    /// stay; saving them asks whose changes to keep.
+    fn follow_reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let collections = self.collections.read(cx);
+        let gone: Vec<PathBuf> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| match &tab.page {
+                // Edits to a collection's settings stay, as it can come back
+                // with the branch that holds it.
+                Page::Collection(page) => {
+                    let page = page.read(cx);
+                    (!page.is_dirty() && collections.collection(&page.path).is_none())
+                        .then(|| page.path.clone())
+                }
+                page => page
+                    .location(cx)
+                    .filter(|location| {
+                        collections
+                            .registry()
+                            .file(&location.path)
+                            .is_none_or(|file| file.id != location.id)
+                    })
+                    .map(|location| location.path.clone()),
+            })
+            .collect();
+        for path in gone {
+            self.close_deleted(&path, cx);
+        }
+
+        let mut selected = self.selected.map(|index| self.tabs[index].id);
+        let mut index = 0;
+        while index < self.tabs.len() {
+            let tab = &self.tabs[index];
+            if tab.page.is_dirty(cx) {
+                index += 1;
+                continue;
+            }
+
+            let collections = self.collections.read(cx);
+            let stale = match &tab.page {
+                Page::Request(_) | Page::Grpc(_) | Page::WebSocket(_) => tab
+                    .page
+                    .location(cx)
+                    .and_then(|location| collections.registry().file(&location.path))
+                    .is_some_and(|file| file.outside_changes() != tab.outside_changes),
+                Page::Collection(page) => collections
+                    .collection(&page.read(cx).path)
+                    .is_some_and(|collection| collection.outside_changes() != tab.outside_changes),
+                _ => false,
+            };
+
+            if stale {
+                let id = tab.id;
+                match self.reopen_tab(index, window, cx) {
+                    Some(reopened) if selected == Some(id) => selected = Some(reopened),
+                    Some(_) => {}
+                    // The next tab moved into its place.
+                    None => continue,
+                }
+            }
+
+            index += 1;
+        }
+
+        self.selected = selected.and_then(|id| self.tabs.iter().position(|tab| tab.id == id));
+        self.scroll_to_tab = self.selected;
         cx.notify();
     }
 

@@ -14,6 +14,12 @@ actions!(
         OpenEnvironmentSelector,
         NewCollection,
         ImportCollection,
+        OpenCollectionFolder,
+        ToggleGitPanel,
+        GitCommit,
+        GitPull,
+        GitPush,
+        GitSync,
         NewFlow,
         SaveRequest,
         FocusUrl,
@@ -304,6 +310,19 @@ pub(crate) fn init(cx: &mut App) {
     .expect("default import collection keybinding should be valid");
 
     keybindings_service::register(
+        OpenCollectionFolder,
+        "Open folder as collection",
+        "Show a folder as a collection where it is, such as in a project's Git repository.",
+        "Collections",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("open folder action should register");
+
+    register_git_actions(cx);
+
+    keybindings_service::register(
         NewFlow,
         "New flow",
         "Create a flow, open it and name it in the sidebar.",
@@ -328,6 +347,63 @@ pub(crate) fn init(cx: &mut App) {
     register_flow_actions(cx);
     collections_panel_ui::init(cx);
     settings_ui::init(cx);
+}
+
+fn register_git_actions(cx: &mut App) {
+    keybindings_service::register(
+        ToggleGitPanel,
+        "Toggle Git panel",
+        "Switch the sidebar between the collections and the Git repositories that hold them.",
+        "Git",
+        Some("secondary-shift-g"),
+        None,
+        cx,
+    )
+    .expect("default Git panel keybinding should be valid");
+
+    keybindings_service::register(
+        GitSync,
+        "Sync with Git",
+        "Commit the collections' changes, then pull and push, in every repository.",
+        "Git",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("Git sync action should register");
+
+    keybindings_service::register(
+        GitCommit,
+        "Commit changes",
+        "Open the Git panel to commit the collections' changes.",
+        "Git",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("Git commit action should register");
+
+    keybindings_service::register(
+        GitPull,
+        "Pull changes",
+        "Take the remote's new commits in every repository that holds collections.",
+        "Git",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("Git pull action should register");
+
+    keybindings_service::register(
+        GitPush,
+        "Push commits",
+        "Push the commits not pushed yet in every repository that holds collections.",
+        "Git",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("Git push action should register");
 }
 
 /// Flow canvas shortcuts apply while the canvas has focus, not while typing
