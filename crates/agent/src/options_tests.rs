@@ -1,9 +1,13 @@
 use agent_client_protocol::schema::v1::{
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionConfigSelectOptions,
 };
 use preferences::ModelPreference;
 
-use crate::options::{bypass_mode, merge_models, offered_models, prompting_mode};
+use crate::options::{
+    bypass_mode, exact_choice, is_unspecified, merge_models, model_name, offered_models,
+    prompting_mode,
+};
 
 fn menu(
     id: &str,
@@ -22,6 +26,32 @@ fn menu(
             .collect::<Vec<_>>(),
     )
     .category(category)
+}
+
+fn currently(mut option: SessionConfigOption, value: &str) -> SessionConfigOption {
+    if let SessionConfigKind::Select(select) = &mut option.kind {
+        select.current_value = value.to_owned().into();
+    }
+    option
+}
+
+/// Claude Code's model menu, whose default names the model it stands for.
+fn claude_models() -> SessionConfigOption {
+    let mut option = menu(
+        "model",
+        SessionConfigOptionCategory::Model,
+        &[
+            ("default", "Default (recommended)"),
+            ("opus", "Opus 5.5"),
+            ("sonnet", "Sonnet 5.5"),
+        ],
+    );
+    if let SessionConfigKind::Select(select) = &mut option.kind
+        && let SessionConfigSelectOptions::Ungrouped(choices) = &mut select.options
+    {
+        choices[0].description = Some("Opus 5.5".into());
+    }
+    option
 }
 
 fn model(id: &str, hidden: bool) -> ModelPreference {
@@ -146,4 +176,69 @@ fn finds_a_mode_that_asks_when_the_agent_starts_in_one_that_does_not() {
         Some(("mode".into(), "default".into()))
     );
     assert_eq!(starting_in("default"), None);
+}
+
+#[test]
+fn a_default_model_is_not_offered() {
+    let models = offered_models(&[claude_models()]);
+
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Opus 5.5", "Sonnet 5.5"]
+    );
+}
+
+#[test]
+fn finds_the_model_a_default_stands_for() {
+    let exact = |option| exact_choice(&option).map(|value| value.0.to_string());
+
+    assert_eq!(exact(claude_models()), Some("opus".into()));
+    assert_eq!(exact(currently(claude_models(), "sonnet")), None);
+}
+
+#[test]
+fn finds_an_exact_reasoning_level_for_a_default_one() {
+    let effort = |choices: &[(&str, &str)]| {
+        let option = menu("effort", SessionConfigOptionCategory::ThoughtLevel, choices);
+        exact_choice(&currently(option, "default")).map(|value| value.0.to_string())
+    };
+
+    assert_eq!(
+        effort(&[
+            ("default", "Default"),
+            ("low", "Low"),
+            ("medium", "Medium"),
+            ("high", "High"),
+        ]),
+        Some("medium".into())
+    );
+    assert_eq!(
+        effort(&[("max", "Max"), ("default", "Default")]),
+        Some("max".into())
+    );
+}
+
+#[test]
+fn a_default_mode_is_a_mode_of_its_own() {
+    let mode = menu(
+        "mode",
+        SessionConfigOptionCategory::Mode,
+        &[("default", "Manual"), ("plan", "Plan")],
+    );
+
+    assert!(!is_unspecified(&mode, "default"));
+    assert_eq!(exact_choice(&mode), None);
+}
+
+#[test]
+fn gpt_models_keep_gpt_in_their_names() {
+    assert_eq!(model_name("gpt-6.1-sol", "6.1 Sol"), "GPT-6.1 Sol");
+    assert_eq!(
+        model_name("opencode-go/gpt-6-luna", "OpenCode Go/GPT-6 Luna"),
+        "OpenCode Go/GPT-6 Luna"
+    );
+    assert_eq!(model_name("opus", "Opus 5.5"), "Opus 5.5");
 }

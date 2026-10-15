@@ -1,6 +1,4 @@
-use agent::acp::schema::v1::{
-    SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
-};
+use agent::acp::schema::v1::{SessionConfigKind, SessionConfigOptionCategory};
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{
@@ -20,8 +18,8 @@ use crate::actions::{OpenAgentSettings, ToggleAgentPanel};
 use crate::panel::AgentPanel;
 use agent::{AGENTS, Agent};
 
-/// How many of the agent's settings, such as its model and mode, the
-/// message box offers.
+/// How many of the agent's settings the message box offers: its model,
+/// reasoning level and mode.
 const SHOWN_OPTIONS: usize = 3;
 
 impl AgentPanel {
@@ -375,13 +373,15 @@ impl AgentPanel {
                         .addon(
                             InputGroupAddon::new("agent-composer-actions")
                                 .align(InputGroupAddonAlignment::BlockEnd)
-                                // The menus share what room the send button
-                                // leaves, and their names shorten to fit.
+                                .items_end()
+                                // The menus take what room the send button
+                                // leaves and wrap onto another line when
+                                // their names do not fit on one.
                                 .child(
                                     h_flex()
                                         .flex_1()
                                         .min_w_0()
-                                        .overflow_hidden()
+                                        .flex_wrap()
                                         .gap_0p5()
                                         .children(self.option_buttons(cx)),
                                 )
@@ -391,7 +391,8 @@ impl AgentPanel {
             )
     }
 
-    /// The agent's settings, such as its model and mode, as menus.
+    /// The agent's model, reasoning level and mode, as menus, in that order
+    /// for every agent.
     fn option_buttons(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let provider = self.provider(cx);
         let Some(ready) = self
@@ -402,60 +403,61 @@ impl AgentPanel {
             return Vec::new();
         };
 
-        ready
+        let mut options: Vec<_> = ready
             .options
             .iter()
-            .filter(|option| {
-                matches!(
-                    option.category,
-                    Some(
-                        SessionConfigOptionCategory::Mode
-                            | SessionConfigOptionCategory::Model
-                            | SessionConfigOptionCategory::ThoughtLevel
-                    )
-                )
-            })
             .filter_map(|option| {
+                let order = match option.category {
+                    Some(SessionConfigOptionCategory::Model) => 0,
+                    Some(SessionConfigOptionCategory::ThoughtLevel) => 1,
+                    Some(SessionConfigOptionCategory::Mode) => 2,
+                    _ => return None,
+                };
+                Some((order, option))
+            })
+            .collect();
+        options.sort_by_key(|(order, _)| *order);
+
+        options
+            .into_iter()
+            .filter_map(|(_, option)| {
                 let SessionConfigKind::Select(select) = &option.kind else {
                     return None;
                 };
-                let choices: Vec<(String, String, Option<String>)> = match &select.options {
-                    SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect(),
-                    SessionConfigSelectOptions::Grouped(groups) => groups
-                        .iter()
-                        .flat_map(|group| group.options.iter())
-                        .collect(),
-                    _ => Vec::new(),
-                }
-                .into_iter()
-                .map(
-                    |choice: &agent::acp::schema::v1::SessionConfigSelectOption| {
-                        (
-                            choice.value.0.to_string(),
-                            choice.name.clone(),
-                            choice.description.clone(),
-                        )
-                    },
-                )
-                .collect();
                 let current = select.current_value.0.to_string();
+                // A default that leaves the model or reasoning level to the
+                // agent does not say what runs, so the menus offer only exact
+                // ones.
+                let model = option.category == Some(SessionConfigOptionCategory::Model);
+                let choices: Vec<(String, String)> = agent::choices(option)
+                    .into_iter()
+                    .map(|choice| {
+                        let name = if model {
+                            agent::model_name(&choice.value.0, &choice.name)
+                        } else {
+                            choice.name.clone()
+                        };
+                        (choice.value.0.to_string(), name)
+                    })
+                    .filter(|(value, _)| *value == current || !agent::is_unspecified(option, value))
+                    .collect();
                 let label = choices
                     .iter()
-                    .find(|(value, _, _)| *value == current)
-                    .map_or_else(|| current.clone(), |(_, name, _)| name.clone());
+                    .find(|(value, _)| *value == current)
+                    .map_or_else(|| current.clone(), |(_, name)| name.clone());
                 // The model menu lists the models in the order the settings
                 // give them, without those hidden there.
-                let choices = if option.category == Some(SessionConfigOptionCategory::Model) {
+                let choices = if model {
                     let models = &provider.models;
                     let mut choices: Vec<_> = choices
                         .into_iter()
-                        .filter(|(value, _, _)| {
+                        .filter(|(value, _)| {
                             !models
                                 .iter()
                                 .any(|model| &model.id == value && model.hidden)
                         })
                         .collect();
-                    choices.sort_by_key(|(value, _, _)| {
+                    choices.sort_by_key(|(value, _)| {
                         models
                             .iter()
                             .position(|model| &model.id == value)
@@ -476,14 +478,13 @@ impl AgentPanel {
                         })
                         .ghost()
                         .xsmall()
-                        .min_w_0()
-                        .flex_shrink(1.)
+                        .max_w_full()
                         .label(label)
                         .dropdown_caret(true)
                         .accessibility_label(option.name.clone())
                         .tooltip(option.name.clone())
                         .dropdown_menu(move |menu, _, _| {
-                            choices.iter().fold(menu, |menu, (value, name, _)| {
+                            choices.iter().fold(menu, |menu, (value, name)| {
                                 let panel = panel.clone();
                                 let id = id.clone();
                                 let value = value.clone();

@@ -7,7 +7,7 @@ use std::{
 use agent::acp::Responder;
 use agent::acp::schema::v1::{
     ContentBlock, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOption,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
     SessionConfigOptionCategory, SessionUpdate, StopReason, ToolCallStatus, ToolKind,
 };
 use agent::{AGENTS, Agent, Command, Connection, Event, Failure};
@@ -101,6 +101,9 @@ pub(crate) struct Ready {
     pub(crate) options: Vec<SessionConfigOption>,
     /// The options as the agent last confirmed them.
     confirmed: Vec<SessionConfigOption>,
+    /// The options set to an exact choice, for each model, so an agent that
+    /// keeps its default is asked only once.
+    made_exact: HashSet<(String, String)>,
 }
 
 pub(crate) struct Permission {
@@ -358,6 +361,7 @@ impl AgentPanel {
                         embedded_context,
                         confirmed: options.clone(),
                         options,
+                        made_exact: HashSet::new(),
                     });
                 }
                 // Unless the settings say to ask, the agent runs tools
@@ -375,6 +379,7 @@ impl AgentPanel {
                 if let Some((option, value)) = mode {
                     self.set_option(option.0.to_string(), value.0.to_string(), cx);
                 }
+                self.make_exact(cx);
                 if let Some((content, cites)) = self.queued.take() {
                     self.prompt(content, cites);
                 }
@@ -382,6 +387,7 @@ impl AgentPanel {
             Event::Update(SessionUpdate::ConfigOptionUpdate(update)) => {
                 self.remember_models(&update.config_options, cx);
                 self.set_options(update.config_options);
+                self.make_exact(cx);
             }
             Event::Update(update) => {
                 let count = self.thread.entries.len();
@@ -466,7 +472,10 @@ impl AgentPanel {
                 }
                 cx.emit(AgentPanelEvent::FilesChanged);
             }
-            Event::Options(options) => self.set_options(options),
+            Event::Options(options) => {
+                self.set_options(options);
+                self.make_exact(cx);
+            }
             Event::OptionRejected(message) => {
                 if let Some(ready) = self
                     .session
@@ -528,6 +537,45 @@ impl AgentPanel {
         {
             ready.confirmed = options.clone();
             ready.options = options;
+        }
+    }
+
+    /// Set an exact model and reasoning level where the agent leaves them to
+    /// itself, so its menus say what runs.
+    fn make_exact(&mut self, cx: &mut Context<Self>) {
+        let Some(Ready {
+            options,
+            made_exact,
+            ..
+        }) = self
+            .session
+            .as_mut()
+            .and_then(|session| session.ready.as_mut())
+        else {
+            return;
+        };
+
+        let model = options
+            .iter()
+            .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
+            .and_then(|option| match &option.kind {
+                SessionConfigKind::Select(select) => Some(select.current_value.0.to_string()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let changes: Vec<(String, String)> = options
+            .iter()
+            .filter_map(|option| {
+                let value = agent::exact_choice(option)?;
+                let id = option.id.0.to_string();
+                made_exact
+                    .insert((model.clone(), id.clone()))
+                    .then(|| (id, value.0.to_string()))
+            })
+            .collect();
+
+        for (id, value) in changes {
+            self.set_option(id, value, cx);
         }
     }
 
@@ -763,7 +811,7 @@ impl AgentPanel {
                 .options
                 .iter_mut()
                 .find(|option| option.id.0.as_ref() == id)
-            && let agent::acp::schema::v1::SessionConfigKind::Select(select) = &mut option.kind
+            && let SessionConfigKind::Select(select) = &mut option.kind
         {
             select.current_value = value.clone().into();
 

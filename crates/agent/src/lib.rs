@@ -22,5 +22,8 @@ pub use agent_client_protocol as acp;
 pub use agents::{AGENTS, Agent, find_program};
 pub use check::{Check, Status, check};
 pub use connection::{Command, Connection, Event, Failure, Launch};
-pub use options::{bypass_mode, choices, is_bypass, merge_models, offered_models, prompting_mode};
+pub use options::{
+    bypass_mode, choices, exact_choice, is_bypass, is_unspecified, merge_models, model_name,
+    offered_models, prompting_mode,
+};
 pub use shell_path::agent_path;
