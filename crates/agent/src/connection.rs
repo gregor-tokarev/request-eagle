@@ -72,6 +72,8 @@ pub enum Event {
     },
     /// The agent finished answering a prompt.
     TurnEnded(Result<StopReason, String>),
+    /// A prompt was stopped before it reached the agent.
+    PromptDropped,
     Options(Vec<SessionConfigOption>),
     /// The agent turned down a change to its options, and says why.
     OptionRejected(String),
@@ -257,7 +259,7 @@ fn handle(
                 if let Some(pending) = pending {
                     let _ = pending.await;
                     if stops.load(Ordering::SeqCst) != stopped_before {
-                        let _ = events.unbounded_send(Event::TurnEnded(Ok(StopReason::Cancelled)));
+                        let _ = events.unbounded_send(Event::PromptDropped);
                         return Ok(());
                     }
                 }

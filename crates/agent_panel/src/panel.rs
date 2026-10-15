@@ -54,6 +54,8 @@ pub struct AgentPanel {
     queued: Option<(InputContent, Vec<(String, Cite)>)>,
     /// Whether the thread's first message, which briefs the agent, was sent.
     briefed: bool,
+    /// Whether the prompt on its way to the agent carries the briefing.
+    briefing_on_its_way: bool,
     /// Long cites saved for the agent to read, deleted with the thread.
     cite_files: Vec<TempPath>,
 
@@ -150,6 +152,7 @@ impl AgentPanel {
             running: false,
             queued: None,
             briefed: false,
+            briefing_on_its_way: false,
             cite_files: Vec::new(),
             thread: Thread::default(),
             scroller,
@@ -431,7 +434,15 @@ impl AgentPanel {
                 );
                 self.changed(index, count, cx);
             }
+            // The next message briefs the agent instead.
+            Event::PromptDropped => {
+                if std::mem::take(&mut self.briefing_on_its_way) {
+                    self.briefed = false;
+                }
+                self.handle(Event::TurnEnded(Ok(StopReason::Cancelled)), cx);
+            }
             Event::TurnEnded(result) => {
+                self.briefing_on_its_way = false;
                 self.running = false;
                 self.cancel_permissions(cx);
                 for index in self.thread.settle_tools() {
@@ -667,6 +678,7 @@ impl AgentPanel {
         };
 
         let briefing = (!self.briefed).then(|| self.briefing.text());
+        self.briefing_on_its_way = briefing.is_some();
         self.briefed = true;
         let blocks: Vec<ContentBlock> = prompt(
             &content,
@@ -782,6 +794,7 @@ impl AgentPanel {
         self.running = false;
         self.queued = None;
         self.briefed = false;
+        self.briefing_on_its_way = false;
         self.cite_files.clear();
         self.thread = Thread::default();
         self.messages.clear();
