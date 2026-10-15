@@ -544,20 +544,23 @@ impl Workspace {
 
     /// Show the collections tree, even when a shortcut runs with the sidebar
     /// hidden.
-    fn reveal_collections(&mut self, cx: &mut Context<Self>) {
+    fn reveal_collections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible.update(cx, |visible, cx| {
             *visible = true;
             cx.notify();
         });
-        self.leave_git_panel(cx);
+        self.leave_git_panel(window, cx);
         self.collections_open = true;
         cx.notify();
     }
 
-    /// Show the sidebar's sections again in place of the Git panel.
-    fn leave_git_panel(&mut self, cx: &mut Context<Self>) {
-        self.git_panel
-            .update(cx, |panel, cx| panel.set_open(false, cx));
+    /// Show the sidebar's sections again in place of the Git panel, taking
+    /// focus out of it first, so that a dialog closing later does not give
+    /// focus back to a field no longer drawn.
+    fn leave_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git_panel.read(cx).open {
+            self.show_git_panel(false, window, cx);
+        }
     }
 
     pub(crate) fn toggle_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -596,7 +599,7 @@ impl Workspace {
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The new collection is named in the tree, so it must be visible.
-        self.reveal_collections(cx);
+        self.reveal_collections(window, cx);
 
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.create_collection(window, cx));
@@ -604,7 +607,7 @@ impl Workspace {
 
     fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The imported collection is revealed in the tree, so it must be visible.
-        self.reveal_collections(cx);
+        self.reveal_collections(window, cx);
 
         let environments = self
             .main_view
@@ -620,7 +623,7 @@ impl Workspace {
 
     fn open_collection_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The opened collection is revealed in the tree, so it must be visible.
-        self.reveal_collections(cx);
+        self.reveal_collections(window, cx);
 
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.open_folder(window, cx));
@@ -639,7 +642,7 @@ impl Workspace {
     }
 
     fn create_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.leave_git_panel(cx);
+        self.leave_git_panel(window, cx);
         self.environments_open = true;
         cx.notify();
 
@@ -653,7 +656,7 @@ impl Workspace {
             *visible = true;
             cx.notify();
         });
-        self.leave_git_panel(cx);
+        self.leave_git_panel(window, cx);
         self.flows_open = true;
         cx.notify();
 
@@ -678,7 +681,7 @@ impl Workspace {
 
     fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The confirmation shows in the section, so it must be visible.
-        self.leave_git_panel(cx);
+        self.leave_git_panel(window, cx);
         self.history_open = true;
         cx.notify();
 
@@ -1126,7 +1129,7 @@ impl Render for Workspace {
             .size_full()
             .key_context("Workspace")
             .on_action(cx.listener(|this, _: &FocusSidebarSearch, window, cx| {
-                this.reveal_collections(cx);
+                this.reveal_collections(window, cx);
 
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.focus_search(window, cx));

@@ -11,6 +11,10 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use crate::actions::{OpenCollectionFolder, ToggleGitPanel};
 use crate::git_state::{GitAction, GitEvent, GitRepository, GitState};
 
+/// How many changes a repository lists before it only counts the rest, so
+/// that a bulk import does not make the panel draw thousands of rows.
+const LISTED_CHANGES: usize = 100;
+
 /// Takes the sidebar's place, as a code editor's source control view does.
 /// It shows each repository that holds collections, its changes, and the
 /// actions that commit, pull, push and sync them.
@@ -306,9 +310,10 @@ impl GitPanel {
             return note("No changes to commit.", theme.muted_foreground).into_any_element();
         }
 
+        let hidden = status.changes.len().saturating_sub(LISTED_CHANGES);
         v_flex()
             .gap_1()
-            .children(status.changes.iter().map(|change| {
+            .children(status.changes.iter().take(LISTED_CHANGES).map(|change| {
                 let (letter, color) = match change.kind {
                     ChangeKind::Added => ("A", theme.success),
                     ChangeKind::Modified => ("M", theme.warning),
@@ -341,6 +346,9 @@ impl GitPanel {
                     )
                     .child(div().flex_1().min_w_0().text_ellipsis().child(path))
             }))
+            .when(hidden > 0, |this| {
+                this.child(note(format!("and {hidden} more"), theme.muted_foreground))
+            })
             .into_any_element()
     }
 

@@ -20,6 +20,28 @@ fn common_failures_read_as_what_they_mean() {
 }
 
 #[test]
+fn local_failures_are_not_taken_for_the_remote_s() {
+    assert_eq!(
+        summary("fatal: Unable to create '/repo/.git/index.lock': Permission denied"),
+        "Git can't change the repository's files. Check their permissions."
+    );
+    assert_eq!(
+        summary(
+            "fatal: Unable to create '/repo/.git/index.lock': File exists.\n\n\
+             Another git process seems to be running in this repository"
+        ),
+        "Another Git command is running. Try again shortly."
+    );
+    assert_eq!(
+        summary(
+            "git@github.com: Permission denied (publickey).\n\
+             fatal: Could not read from remote repository."
+        ),
+        "The remote refused access. Sign in to your Git host first."
+    );
+}
+
+#[test]
 fn other_failures_show_their_first_line_without_its_prefix() {
     assert_eq!(
         summary("\nfatal: pathspec 'api' did not match any files\nmore"),

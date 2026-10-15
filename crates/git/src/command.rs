@@ -214,16 +214,32 @@ fn message(stderr: &str, stdout: &str) -> String {
 /// What Git said, in a sentence: what the common failures mean, or the
 /// first line of others.
 pub(crate) fn summary(message: &str) -> String {
-    const MEANINGS: [(&[&str], &str); 5] = [
+    // The first that matches is taken: a remote refusing a key also fails
+    // to be read from, and a lock file can fail on permissions too.
+    const MEANINGS: [(&[&str], &str); 6] = [
         (
             &[
                 "authentication failed",
-                "permission denied",
+                "permission denied (publickey",
                 "could not read username",
                 "could not read password",
                 "terminal prompts disabled",
+                "returned error: 401",
+                "returned error: 403",
             ],
             "The remote refused access. Sign in to your Git host first.",
+        ),
+        (
+            &[
+                "permission denied",
+                "operation not permitted",
+                "read-only file system",
+            ],
+            "Git can't change the repository's files. Check their permissions.",
+        ),
+        (
+            &[".lock': file exists", "another git process"],
+            "Another Git command is running. Try again shortly.",
         ),
         (
             &[
@@ -245,10 +261,6 @@ pub(crate) fn summary(message: &str) -> String {
         (
             &["please tell me who you are", "unable to auto-detect email"],
             "Set your name and email in Git first.",
-        ),
-        (
-            &["index.lock", "another git process"],
-            "Another Git command is running. Try again shortly.",
         ),
     ];
 
