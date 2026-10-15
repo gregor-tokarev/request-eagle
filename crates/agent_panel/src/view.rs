@@ -50,7 +50,7 @@ impl AgentPanel {
                     .icon(Icon::default().path(current.icon))
                     .label(current.name)
                     .dropdown_caret(true)
-                    .disabled(installed.len() < 2)
+                    .disabled(!installed.iter().any(|agent| *agent != current))
                     .accessibility_label("Agent")
                     .dropdown_menu(move |menu, _, _| {
                         installed.iter().fold(menu, |menu, agent| {

@@ -204,7 +204,7 @@ async fn run(
                     }
                 };
 
-                handle(command, &id, &connection, &events)?;
+                handle(command, &id, &connection, &events).await?;
             }
         })
         .await;
@@ -215,7 +215,7 @@ async fn run(
     })
 }
 
-fn handle(
+async fn handle(
     command: Command,
     id: &SessionId,
     connection: &ConnectionTo<Agent>,
@@ -236,21 +236,23 @@ fn handle(
             })
         }
         Command::Cancel => connection.send_notification(CancelNotification::new(id.clone())),
+        // Answered before the next command goes out, so that a prompt sent
+        // after a change of mode runs in that mode.
         Command::SetOption { id: option, value } => {
-            let request = connection.send_request(SetSessionConfigOptionRequest::new(
-                id.clone(),
-                option,
-                value,
-            ));
-            let events = events.clone();
-            connection.spawn(async move {
-                let event = match request.block_task().await {
-                    Ok(response) => Event::Options(response.config_options),
-                    Err(error) => Event::OptionRejected(error.message),
-                };
-                let _ = events.unbounded_send(event);
-                Ok(())
-            })
+            let result = connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    id.clone(),
+                    option,
+                    value,
+                ))
+                .block_task()
+                .await;
+            let event = match result {
+                Ok(response) => Event::Options(response.config_options),
+                Err(error) => Event::OptionRejected(error.message),
+            };
+            let _ = events.unbounded_send(event);
+            Ok(())
         }
     }
 }

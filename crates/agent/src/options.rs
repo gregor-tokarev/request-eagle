@@ -80,6 +80,33 @@ pub fn bypass_mode(
         })
 }
 
+/// The agent's mode option and a value of it that asks before tools run,
+/// when the mode it is in does not ask.
+pub fn prompting_mode(
+    options: &[SessionConfigOption],
+) -> Option<(SessionConfigId, SessionConfigValueId)> {
+    options
+        .iter()
+        .filter(|option| option.category == Some(SessionConfigOptionCategory::Mode))
+        .find_map(|option| {
+            let SessionConfigKind::Select(select) = &option.kind else {
+                return None;
+            };
+            let choices = choices(option);
+            let current = choices
+                .iter()
+                .find(|choice| choice.value == select.current_value)?;
+            if !is_bypass(&current.value.0, &current.name) {
+                return None;
+            }
+
+            choices
+                .iter()
+                .find(|choice| !is_bypass(&choice.value.0, &choice.name))
+                .map(|choice| (option.id.clone(), choice.value.clone()))
+        })
+}
+
 /// Whether a mode runs tools without asking.
 pub fn is_bypass(value: &str, name: &str) -> bool {
     let name = name.to_lowercase();

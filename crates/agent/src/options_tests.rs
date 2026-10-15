@@ -3,7 +3,7 @@ use agent_client_protocol::schema::v1::{
 };
 use preferences::ModelPreference;
 
-use crate::options::{bypass_mode, merge_models, offered_models};
+use crate::options::{bypass_mode, merge_models, offered_models, prompting_mode};
 
 fn menu(
     id: &str,
@@ -120,4 +120,30 @@ fn finds_the_mode_that_does_not_ask() {
         Some(("mode".into(), "agent-full-access".into()))
     );
     assert_eq!(value(&opencode), None);
+}
+
+#[test]
+fn finds_a_mode_that_asks_when_the_agent_starts_in_one_that_does_not() {
+    let starting_in = |current: &str| {
+        let mut option = menu(
+            "mode",
+            SessionConfigOptionCategory::Mode,
+            &[
+                ("default", "Manual"),
+                ("bypassPermissions", "Bypass permissions"),
+            ],
+        );
+        if let agent_client_protocol::schema::v1::SessionConfigKind::Select(select) =
+            &mut option.kind
+        {
+            select.current_value = current.to_owned().into();
+        }
+        prompting_mode(&[option]).map(|(option, value)| (option.0.to_string(), value.0.to_string()))
+    };
+
+    assert_eq!(
+        starting_in("bypassPermissions"),
+        Some(("mode".into(), "default".into()))
+    );
+    assert_eq!(starting_in("default"), None);
 }

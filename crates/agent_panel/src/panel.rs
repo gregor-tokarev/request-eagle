@@ -359,8 +359,17 @@ impl AgentPanel {
                 }
                 // Unless the settings say to ask, the agent runs tools
                 // without asking, as in its Bypass permissions or Full
-                // access mode.
-                if !ask && let Some((option, value)) = bypass {
+                // access mode. When they do, an agent set up to start in
+                // such a mode starts in one that asks.
+                let mode = if ask {
+                    self.session
+                        .as_ref()
+                        .and_then(|session| session.ready.as_ref())
+                        .and_then(|ready| agent::prompting_mode(&ready.options))
+                } else {
+                    bypass
+                };
+                if let Some((option, value)) = mode {
                     self.set_option(option.0.to_string(), value.0.to_string(), cx);
                 }
                 if let Some((content, cites)) = self.queued.take() {
@@ -746,17 +755,15 @@ impl AgentPanel {
         {
             select.current_value = value.clone().into();
 
-            // A mode that asks before tools run is answered here, unless the
-            // agent has no mode that does not ask.
+            // The panel allows tools by itself only while the agent is in
+            // a mode that does not ask either.
             if option.category == Some(SessionConfigOptionCategory::Mode) {
                 let name = agent::choices(option)
                     .into_iter()
                     .find(|choice| choice.value.0.as_ref() == value)
                     .map(|choice| choice.name.clone())
                     .unwrap_or_default();
-                session.auto_approve = !session.ask_before_tools
-                    && (agent::is_bypass(&value, &name)
-                        || agent::bypass_mode(&ready.options).is_none());
+                session.auto_approve = !session.ask_before_tools && agent::is_bypass(&value, &name);
             }
         }
         session.connection.send(Command::SetOption {
@@ -783,6 +790,14 @@ impl AgentPanel {
         self.scroller
             .update(cx, |scroller, cx| scroller.reset(0, cx));
 
+        // An agent turned off since the last thread gives way to one that
+        // is on.
+        if let Some((installed, _)) = &self.installed
+            && !installed.contains(&self.agent)
+            && let Some(agent) = installed.first().copied()
+        {
+            self.set_agent_name(agent, cx);
+        }
         if self.installed.is_some() {
             self.start(cx);
         } else {

@@ -21,6 +21,8 @@ const ENVIRONMENT_SAVE_DELAY: Duration = Duration::from_millis(600);
 /// starts, and which of its models the panel's model menu lists.
 pub(crate) struct AgentSettings {
     pub(super) selected: &'static Agent,
+    /// The focus of each agent's row, which selects it from the keyboard.
+    rows: BTreeMap<&'static str, FocusHandle>,
     /// What the last check of each agent found, by its ID.
     checks: BTreeMap<&'static str, CheckState>,
     command: Entity<InputState>,
@@ -79,6 +81,10 @@ impl AgentSettings {
 
         let mut settings = Self {
             selected: &AGENTS[0],
+            rows: AGENTS
+                .iter()
+                .map(|agent| (agent.id, cx.focus_handle()))
+                .collect(),
             checks: BTreeMap::new(),
             command,
             config_directory,
@@ -310,9 +316,22 @@ impl AgentSettings {
         let directory = std::env::home_dir().unwrap_or_else(std::env::temp_dir);
 
         let task = cx.spawn(async move |this, cx| {
-            let environment = environment.await.unwrap_or_default();
-            let check = cx.update(|cx| agent::check(agent, provider, environment, directory, cx));
-            let check = check.await;
+            // An agent whose variables cannot be read is not started
+            // without them, as the panel does not start it either.
+            let check = match environment.await {
+                Ok(environment) => {
+                    let check =
+                        cx.update(|cx| agent::check(agent, provider, environment, directory, cx));
+                    check.await
+                }
+                Err(error) => Check {
+                    version: None,
+                    status: Status::Failed(format!(
+                        "The agent's environment variables could not be read: {error:#}"
+                    )),
+                    models: Vec::new(),
+                },
+            };
 
             let _ = this.update(cx, |this, cx| {
                 if !check.models.is_empty() {
@@ -370,7 +389,7 @@ impl AgentSettings {
         }
     }
 
-    fn list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn list(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let rows: Vec<AnyElement> = AGENTS
             .iter()
@@ -379,6 +398,75 @@ impl AgentSettings {
                 let enabled = cx.global::<Preferences>().agents.provider(agent.id).enabled;
                 let (status, attention) = self.status(agent, cx);
                 let version = self.version(agent);
+                let focus = &self.rows[agent.id];
+                let focus_visible = focus.is_focused(window) && window.last_input_was_keyboard();
+
+                // The row selects the agent from the pointer or the keyboard;
+                // its switch turns the agent on and off.
+                let select = gpui_kit::base::Button::new(SharedString::from(format!(
+                    "agent-provider-select-{}",
+                    agent.id
+                )))
+                .track_focus(focus)
+                .accessibility_label(agent.name)
+                .selected(selected)
+                .flex_1()
+                .min_w_0()
+                .justify_start()
+                .items_start()
+                .gap_3()
+                .cursor_pointer()
+                .rounded(theme.radius_tokens().md)
+                .when(focus_visible, |this| this.focus_ring_style(window, cx))
+                .on_click(cx.listener(move |this, _, window, cx| this.select(agent, window, cx)))
+                .child(
+                    Icon::default()
+                        .path(agent.icon)
+                        .size_4()
+                        .mt_0p5()
+                        .flex_none()
+                        .text_color(if enabled {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        }),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_ellipsis()
+                                        .child(agent.name),
+                                )
+                                .when_some(version, |this, version| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .font_family(theme.mono_font_family.clone())
+                                            .text_color(theme.muted_foreground)
+                                            .child(version),
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if attention {
+                                    theme.warning
+                                } else {
+                                    theme.muted_foreground
+                                })
+                                .child(status),
+                        ),
+                );
 
                 h_flex()
                     .id(SharedString::from(format!("agent-provider-{}", agent.id)))
@@ -390,60 +478,9 @@ impl AgentSettings {
                     .py_3()
                     .border_b_1()
                     .border_color(theme.border)
-                    .cursor_pointer()
                     .when(selected, |this| this.bg(theme.muted))
                     .hover(|this| this.bg(theme.muted.opacity(0.6)))
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.select(agent, window, cx)),
-                    )
-                    .child(
-                        Icon::default()
-                            .path(agent.icon)
-                            .size_4()
-                            .mt_0p5()
-                            .flex_none()
-                            .text_color(if enabled {
-                                theme.foreground
-                            } else {
-                                theme.muted_foreground
-                            }),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_ellipsis()
-                                            .child(agent.name),
-                                    )
-                                    .when_some(version, |this, version| {
-                                        this.child(
-                                            div()
-                                                .text_xs()
-                                                .font_family(theme.mono_font_family.clone())
-                                                .text_color(theme.muted_foreground)
-                                                .child(version),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(if attention {
-                                        theme.warning
-                                    } else {
-                                        theme.muted_foreground
-                                    })
-                                    .child(status),
-                            ),
-                    )
+                    .child(select)
                     .child(
                         Switch::new(SharedString::from(format!("agent-enabled-{}", agent.id)))
                             .accessibility_label(format!("Turn on {}", agent.name))
@@ -742,7 +779,7 @@ impl Render for AgentSettings {
             .child(self.runtime(cx))
             .child(self.environment(cx))
             .child(self.models(cx));
-        let list = self.list(cx);
+        let list = self.list(window, cx);
         let theme = cx.theme();
 
         v_flex()
