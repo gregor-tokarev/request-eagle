@@ -3,7 +3,7 @@
 //! in a task the connection owns, and ending the connection ends the agent.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     ffi::OsString,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -30,17 +30,19 @@ use gpui_kit::{App, Task};
 const STDERR_LINES: usize = 12;
 
 /// How to start an agent, and where it works.
-pub(crate) struct Launch {
-    pub(crate) program: PathBuf,
-    pub(crate) args: Vec<String>,
+pub struct Launch {
+    pub program: PathBuf,
+    pub args: Vec<String>,
     /// The `PATH` the agent runs with, since the tools it starts need it.
-    pub(crate) path: OsString,
-    pub(crate) directory: PathBuf,
+    pub path: OsString,
+    /// Variables from the agent's preferences, such as an API key.
+    pub environment: BTreeMap<String, String>,
+    pub directory: PathBuf,
     /// Other folders the agent may work in, such as the app's data.
-    pub(crate) additional_directories: Vec<PathBuf>,
+    pub additional_directories: Vec<PathBuf>,
 }
 
-pub(crate) enum Command {
+pub enum Command {
     Prompt(Vec<ContentBlock>),
     Cancel,
     SetOption {
@@ -49,7 +51,7 @@ pub(crate) enum Command {
     },
 }
 
-pub(crate) enum Event {
+pub enum Event {
     /// The session started, and the agent takes prompts.
     Started {
         /// Whether prompts can carry cites as embedded resources.
@@ -72,13 +74,13 @@ pub(crate) enum Event {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Failure {
-    pub(crate) message: String,
+pub struct Failure {
+    pub message: String,
     /// Whether the agent asks to sign in first.
-    pub(crate) sign_in: bool,
+    pub sign_in: bool,
 }
 
-pub(crate) struct Connection {
+pub struct Connection {
     commands: UnboundedSender<Command>,
     _task: Task<()>,
 }
@@ -86,7 +88,7 @@ pub(crate) struct Connection {
 impl Connection {
     /// Start the agent and a session in `launch.directory`. Events arrive on
     /// the receiver until the agent stops or the connection is dropped.
-    pub(crate) fn start(launch: Launch, cx: &mut App) -> (Self, UnboundedReceiver<Event>) {
+    pub fn start(launch: Launch, cx: &mut App) -> (Self, UnboundedReceiver<Event>) {
         let (commands, command_stream) = unbounded();
         let (events, event_stream) = unbounded();
 
@@ -106,7 +108,7 @@ impl Connection {
         )
     }
 
-    pub(crate) fn send(&self, command: Command) {
+    pub fn send(&self, command: Command) {
         let _ = self.commands.unbounded_send(command);
     }
 }
@@ -120,7 +122,8 @@ async fn run(
     let agent = AcpAgent::new(
         AcpAgentConfig::new(launch.program)
             .args(launch.args)
-            .env("PATH", launch.path.to_string_lossy()),
+            .env("PATH", launch.path.to_string_lossy())
+            .envs(launch.environment),
     )
     .with_debug({
         let stderr = stderr.clone();

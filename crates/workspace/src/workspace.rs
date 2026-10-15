@@ -17,7 +17,7 @@ use crate::{
     session::{SavedSidebar, SavedWindow, Session, SessionWriter},
     top_panel::TopPanel,
 };
-use agent_panel::{AgentPanel, AgentPanelEvent, ToggleAgentPanel};
+use agent_panel::{AgentPanel, AgentPanelEvent, OpenAgentSettings, ToggleAgentPanel};
 use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
@@ -1175,6 +1175,21 @@ fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: 
                 });
 
                 window.activate_window();
+            });
+        });
+    });
+
+    let agent_workspace = workspace.clone();
+    cx.on_action(move |_: &OpenAgentSettings, cx| {
+        let workspace = agent_workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.open_settings(window, cx).update(cx, |settings, cx| {
+                        settings.select_page(SettingsPage::Agents, window, cx)
+                    });
+                });
             });
         });
     });

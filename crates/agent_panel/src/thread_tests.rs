@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::v1::{
+use agent::acp::schema::v1::{
     Content, ContentBlock, ContentChunk, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
     SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,

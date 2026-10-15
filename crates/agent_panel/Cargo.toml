@@ -5,8 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
-# Runs coding agents such as Claude Code, Codex and OpenCode, which speak it.
-agent-client-protocol = { version = "3.3", features = ["process"] }
+agent = { path = "../agent" }
 analytics = { path = "../analytics" }
 futures = "0.3"
 gpui-kit = { workspace = true, features = ["component"] }

@@ -9,8 +9,9 @@ tools.
 ## Open the panel
 
 Click **Agent** in the status bar, or press Ctrl+Shift+I (Command+Shift+I on
-macOS). The panel runs the first agent it finds on your computer; pick
-another from the menu at its top. Install one if none is found:
+macOS). The panel runs the first agent it finds on your computer that is
+turned on in **Settings > Agents**; pick another from the menu at its top.
+Install one if none is found:
 
 | Agent | Needs |
 | --- | --- |
@@ -44,9 +45,12 @@ folder. It sees your saved collections and flows either way. With the
 [Request Eagle CLI](cli.md) installed, it lists, edits and runs saved requests
 and flows through it; otherwise it edits their files.
 
-Before it runs a command or changes a file, the agent asks in the panel, as
-it does in a terminal. The menus under the message choose its mode, such as
-asking first or accepting edits, its model, and how hard it thinks.
+The agent runs commands and changes files without asking: it starts in its
+own mode for that, such as Claude Code's Bypass permissions or Codex's Full
+access, and the panel allows anything it asks about anyway. To approve each
+step instead, turn on **Ask before running tools** for the agent in
+**Settings > Agents**, or pick another mode from the menu under the message.
+The other menus there choose its model and how hard it thinks.
 
 After each of the agent's turns, Request Eagle reads collections and flows
 again. Requests and flows the agent added show in the sidebar, and open tabs
@@ -54,6 +58,23 @@ without unsaved changes show the agent's edits. Tabs with unsaved changes keep
 them, and saving asks whose changes to keep.
 
 **New Thread** at the top of the panel starts over with a fresh agent.
+
+## Agent settings
+
+**Settings > Agents**, or the gear at the top of the panel, lists each agent
+with its version and whether it is ready, signed out or not installed.
+**Check Again** starts each agent once to find out. For each agent you can:
+
+- Turn it off, so the panel does not offer it.
+- Ask before it runs tools, as above.
+- Replace the **Command** that starts it, such as with an adapter you
+  installed globally.
+- Move its **Config folder**, where it keeps its settings and sign-in, to
+  use another account.
+- Add **Variables** it runs with, such as an API key or a base URL. Their
+  values are saved in macOS Keychain, Windows Credential Manager or your
+  desktop keyring.
+- Choose which of its **Models** the model menu lists, and in which order.
 
 ## Things to know
 

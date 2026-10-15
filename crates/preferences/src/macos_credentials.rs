@@ -11,6 +11,7 @@ fn options(secret: Secret, id: &str) -> PasswordOptions {
     let account = match secret {
         Secret::ProxyCredentials => "proxy",
         Secret::CertificatePassphrase => "certificate",
+        Secret::AgentEnvironment => "agent-environment",
     };
 
     PasswordOptions {

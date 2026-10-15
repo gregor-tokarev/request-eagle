@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::v1::{
+use agent::acp::schema::v1::{
     SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
 };
 use gpui_kit::component::{
@@ -16,9 +16,9 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::{AddToAgent, SendRequest};
 
-use crate::actions::ToggleAgentPanel;
-use crate::agents::{AGENTS, Agent};
+use crate::actions::{OpenAgentSettings, ToggleAgentPanel};
 use crate::panel::AgentPanel;
+use agent::{AGENTS, Agent};
 
 /// How many of the agent's settings, such as its model and mode, the
 /// message box offers.
@@ -47,7 +47,7 @@ impl AgentPanel {
                     .debug_selector(|| "agent-picker".into())
                     .ghost()
                     .xsmall()
-                    .icon(Icon::default().path("icons/sparkles.svg"))
+                    .icon(Icon::default().path(current.icon))
                     .label(current.name)
                     .dropdown_caret(true)
                     .disabled(installed.len() < 2)
@@ -58,6 +58,7 @@ impl AgentPanel {
                             let panel = panel.clone();
                             menu.item(
                                 PopupMenuItem::new(agent.name)
+                                    .icon(Icon::default().path(agent.icon))
                                     .checked(agent == current)
                                     .on_click(move |_, window, cx| {
                                         let _ = panel.update(cx, |panel, cx| {
@@ -69,6 +70,18 @@ impl AgentPanel {
                     }),
             )
             .child(div().flex_1())
+            .child(
+                Button::new("agent-settings")
+                    .debug_selector(|| "agent-settings".into())
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Settings2)
+                    .accessibility_label("Agent settings")
+                    .tooltip("Agent Settings")
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(OpenAgentSettings.boxed_clone(), cx)
+                    }),
+            )
             .child(
                 Button::new("agent-new-thread")
                     .debug_selector(|| "agent-new-thread".into())
@@ -165,9 +178,16 @@ impl AgentPanel {
             .into_any_element()
     }
 
-    /// None of the agents is on this computer.
+    /// None of the agents is on this computer, or turned on in the settings.
     fn no_agents(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
+        let turned_off = cx
+            .try_global::<preferences::Preferences>()
+            .is_some_and(|preferences| {
+                AGENTS
+                    .iter()
+                    .any(|agent| !preferences.agents.provider(agent.id).enabled)
+            });
 
         v_flex()
             .debug_selector(|| "agent-none-installed".into())
@@ -183,8 +203,13 @@ impl AgentPanel {
                     .child("Install a coding agent"),
             )
             .child(div().text_sm().text_color(theme.muted_foreground).child(
-                "The panel runs the agent you already use, with its own sign-in and models. \
-                 Install one, then check again.",
+                if turned_off {
+                    "The panel runs the agent you already use, with its own sign-in and models. \
+                     Install one, or turn one on in the agent settings."
+                } else {
+                    "The panel runs the agent you already use, with its own sign-in and models. \
+                     Install one, then check again."
+                },
             ))
             .children(AGENTS.iter().map(|agent| {
                 let url = agent.install_url;
@@ -205,8 +230,18 @@ impl AgentPanel {
                     .label("Check Again")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.installed = None;
-                        this.look_for_agents(cx);
+                        this.look_for_agents(true, cx);
                     })),
+            )
+            .child(
+                Button::new("agent-open-settings")
+                    .ghost()
+                    .small()
+                    .w_full()
+                    .label("Agent Settings")
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(OpenAgentSettings.boxed_clone(), cx)
+                    }),
             )
             .into_any_element()
     }
@@ -284,10 +319,11 @@ impl AgentPanel {
             self.placeholder = Some(self.agent);
         }
 
-        let starting = self
-            .session
-            .as_ref()
-            .is_some_and(|session| session.ready.is_none());
+        let starting = self.starting.is_some()
+            || self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.ready.is_none());
         let send = if self.running {
             InputGroupButton::new("agent-stop")
                 .icon(Icon::default().path("icons/square.svg"))
@@ -339,8 +375,17 @@ impl AgentPanel {
                         .addon(
                             InputGroupAddon::new("agent-composer-actions")
                                 .align(InputGroupAddonAlignment::BlockEnd)
-                                .children(self.option_buttons(cx))
-                                .child(send.ml_auto()),
+                                // The menus share what room the send button
+                                // leaves, and their names shorten to fit.
+                                .child(
+                                    h_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .gap_0p5()
+                                        .children(self.option_buttons(cx)),
+                                )
+                                .child(send.flex_none()),
                         ),
                 ),
             )
@@ -348,6 +393,7 @@ impl AgentPanel {
 
     /// The agent's settings, such as its model and mode, as menus.
     fn option_buttons(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let provider = self.provider(cx);
         let Some(ready) = self
             .session
             .as_ref()
@@ -383,7 +429,7 @@ impl AgentPanel {
                 }
                 .into_iter()
                 .map(
-                    |choice: &agent_client_protocol::schema::v1::SessionConfigSelectOption| {
+                    |choice: &agent::acp::schema::v1::SessionConfigSelectOption| {
                         (
                             choice.value.0.to_string(),
                             choice.name.clone(),
@@ -397,6 +443,28 @@ impl AgentPanel {
                     .iter()
                     .find(|(value, _, _)| *value == current)
                     .map_or_else(|| current.clone(), |(_, name, _)| name.clone());
+                // The model menu lists the models in the order the settings
+                // give them, without those hidden there.
+                let choices = if option.category == Some(SessionConfigOptionCategory::Model) {
+                    let models = &provider.models;
+                    let mut choices: Vec<_> = choices
+                        .into_iter()
+                        .filter(|(value, _, _)| {
+                            !models
+                                .iter()
+                                .any(|model| &model.id == value && model.hidden)
+                        })
+                        .collect();
+                    choices.sort_by_key(|(value, _, _)| {
+                        models
+                            .iter()
+                            .position(|model| &model.id == value)
+                            .unwrap_or(usize::MAX)
+                    });
+                    choices
+                } else {
+                    choices
+                };
                 let id = option.id.0.to_string();
                 let panel = cx.entity().downgrade();
 
@@ -408,6 +476,8 @@ impl AgentPanel {
                         })
                         .ghost()
                         .xsmall()
+                        .min_w_0()
+                        .flex_shrink(1.)
                         .label(label)
                         .dropdown_caret(true)
                         .accessibility_label(option.name.clone())

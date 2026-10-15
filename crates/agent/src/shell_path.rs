@@ -17,7 +17,7 @@ const MARKER: &str = "__REQUEST_EAGLE_PATH__";
 /// The login shell's `PATH`, then the directories of the app's own that it
 /// leaves out. Read once, since starting a shell takes a while; call it off
 /// the UI thread.
-pub(crate) fn agent_path() -> OsString {
+pub fn agent_path() -> OsString {
     static PATH: OnceLock<OsString> = OnceLock::new();
 
     PATH.get_or_init(|| {

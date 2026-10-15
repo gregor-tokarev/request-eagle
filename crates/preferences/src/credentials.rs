@@ -17,6 +17,8 @@ pub(crate) struct ProxyCredentials {
 pub(crate) enum Secret {
     ProxyCredentials,
     CertificatePassphrase,
+    /// An agent's environment variables, such as API keys.
+    AgentEnvironment,
 }
 
 #[cfg(feature = "ui")]

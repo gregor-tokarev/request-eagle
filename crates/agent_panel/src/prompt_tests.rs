@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use agent_client_protocol::schema::v1::{ContentBlock, EmbeddedResourceResource};
+use agent::acp::schema::v1::{ContentBlock, EmbeddedResourceResource};
 use gpui_kit::EntityId;
 use gpui_kit::component::input::{InlineToken, InputContent};
 use tab_ui::{Cite, CiteOrigin, CiteSource};

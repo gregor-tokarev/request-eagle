@@ -51,6 +51,7 @@ fn label(secret: Secret) -> &'static str {
     match secret {
         Secret::ProxyCredentials => "Request Eagle proxy",
         Secret::CertificatePassphrase => "Request Eagle certificate passphrase",
+        Secret::AgentEnvironment => "Request Eagle agent environment",
     }
 }
 
@@ -58,6 +59,7 @@ fn attributes(secret: Secret, id: &str) -> [(&str, &str); 2] {
     let key = match secret {
         Secret::ProxyCredentials => "proxy-credentials-id",
         Secret::CertificatePassphrase => "certificate-passphrase-id",
+        Secret::AgentEnvironment => "agent-environment-id",
     };
 
     [("application", "request-eagle"), (key, id)]

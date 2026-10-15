@@ -1,6 +1,4 @@
-use agent_client_protocol::schema::v1::{
-    PermissionOptionKind, PlanEntryStatus, ToolCallStatus, ToolKind,
-};
+use agent::acp::schema::v1::{PermissionOptionKind, PlanEntryStatus, ToolCallStatus, ToolKind};
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{InlineTokenClickEvent, Textarea},

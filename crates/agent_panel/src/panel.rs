@@ -1,28 +1,27 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::OsString,
     path::PathBuf,
 };
 
-use agent_client_protocol::Responder;
-use agent_client_protocol::schema::v1::{
-    ContentBlock, PermissionOption, RequestPermissionOutcome, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionConfigOption, SessionUpdate, StopReason, ToolCallStatus,
-    ToolKind,
+use agent::acp::Responder;
+use agent::acp::schema::v1::{
+    ContentBlock, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOption,
+    SessionConfigOptionCategory, SessionUpdate, StopReason, ToolCallStatus, ToolKind,
 };
+use agent::{AGENTS, Agent, Command, Connection, Event, Failure};
 use futures::StreamExt as _;
 use gpui_kit::component::{
     input::{InlineToken, InputContent, RopeExt as _, TextareaState},
     message_scroller::MessageScrollerState,
 };
 use gpui_kit::*;
+use preferences::{Preferences, ProviderPreferences};
 use tab_ui::{Cite, CiteOrigin};
 use tempfile::TempPath;
 
-use crate::agents::{AGENTS, Agent};
-use crate::connection::{Command, Connection, Event, Failure, Launch};
 use crate::prompt::{Briefing, prompt};
-use crate::shell_path;
 use crate::thread::{Entry, Notice, Thread, UserMessage};
 
 pub enum AgentPanelEvent {
@@ -38,10 +37,12 @@ pub enum AgentPanelEvent {
 /// with the thread.
 pub struct AgentPanel {
     pub(crate) agent: &'static Agent,
-    /// The agents found on this computer, once looked for, and the `PATH`
-    /// they run with.
+    /// The agents found on this computer and turned on in the settings, once
+    /// looked for, and the `PATH` they run with.
     pub(crate) installed: Option<(Vec<&'static Agent>, OsString)>,
     looking: Option<Task<()>>,
+    /// Reading the agent's environment variables before it starts.
+    pub(crate) starting: Option<Task<()>>,
     pub(crate) briefing: Briefing,
     /// Where the next thread's agent works.
     pub(crate) directory: PathBuf,
@@ -81,6 +82,11 @@ pub(crate) struct Session {
     connection: Connection,
     /// Where the agent works.
     pub(crate) directory: PathBuf,
+    /// Whether the settings ask the agent to ask before running tools.
+    ask_before_tools: bool,
+    /// Whether the panel allows the tools the agent asks about, as it does
+    /// while the agent runs in its mode that does not ask.
+    auto_approve: bool,
     /// Set once the agent takes prompts.
     pub(crate) ready: Option<Ready>,
     _events: Task<()>,
@@ -107,8 +113,8 @@ impl AgentPanel {
     /// where the agent works unless told otherwise.
     pub fn new(data_directory: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let agent = cx
-            .try_global::<preferences::Preferences>()
-            .and_then(|preferences| preferences.agent.as_deref())
+            .try_global::<Preferences>()
+            .and_then(|preferences| preferences.agents.selected.as_deref())
             .and_then(Agent::find)
             .unwrap_or(&AGENTS[0]);
         let composer = cx.new(|cx| {
@@ -120,12 +126,20 @@ impl AgentPanel {
         let subscriptions = vec![
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.observe(&scroller, |_, _, cx| cx.notify()),
+            // Agents turned on or off, or set up differently, in the settings.
+            cx.observe_global::<Preferences>(|this, cx| {
+                if this.installed.is_some() {
+                    this.look_for_agents(false, cx);
+                }
+                cx.notify();
+            }),
         ];
 
         Self {
             agent,
             installed: None,
             looking: None,
+            starting: None,
             briefing: Briefing {
                 data_directory: data_directory.clone(),
                 cli: None,
@@ -156,7 +170,7 @@ impl AgentPanel {
     /// starts a login shell, so it waits until then.
     pub fn shown(&mut self, cx: &mut Context<Self>) {
         if self.installed.is_none() {
-            self.look_for_agents(cx);
+            self.look_for_agents(true, cx);
         } else if self.session.is_none() && self.failure.is_none() {
             self.start(cx);
         }
@@ -176,21 +190,37 @@ impl AgentPanel {
         }
     }
 
-    pub(crate) fn look_for_agents(&mut self, cx: &mut Context<Self>) {
-        if self.looking.is_some() {
+    /// The settings of the agent the panel runs.
+    pub(crate) fn provider(&self, cx: &App) -> ProviderPreferences {
+        cx.try_global::<Preferences>()
+            .map(|preferences| preferences.agents.provider(self.agent.id))
+            .unwrap_or_default()
+    }
+
+    /// Find the agents that are installed and turned on, then start one
+    /// when `start` is set.
+    pub(crate) fn look_for_agents(&mut self, start: bool, cx: &mut Context<Self>) {
+        if self.looking.is_some() && !start {
             return;
         }
 
+        let agents = cx
+            .try_global::<Preferences>()
+            .map(|preferences| preferences.agents.clone())
+            .unwrap_or_default();
         self.looking = Some(cx.spawn(async move |this, cx| {
             let (installed, cli, path) = cx
                 .background_executor()
-                .spawn(async {
-                    let path = shell_path::agent_path();
+                .spawn(async move {
+                    let path = agent::agent_path();
                     let installed: Vec<&'static Agent> = AGENTS
                         .iter()
-                        .filter(|agent| agent.launcher(&path).is_some())
+                        .filter(|agent| {
+                            let provider = agents.provider(agent.id);
+                            provider.enabled && agent.launcher(&provider, &path).is_some()
+                        })
                         .collect();
-                    let cli = crate::agents::find_program("request-eagle-cli", &path);
+                    let cli = agent::find_program("request-eagle-cli", &path);
 
                     (installed, cli, path)
                 })
@@ -198,50 +228,91 @@ impl AgentPanel {
 
             let _ = this.update(cx, |this, cx| {
                 this.looking = None;
-                // Run the agent chosen before, or else one that is here.
+                // Run the agent chosen before, or else one that is here,
+                // unless a thread with it is on.
                 if !installed.contains(&this.agent)
+                    && this.session.is_none()
                     && let Some(agent) = installed.first()
                 {
                     this.set_agent_name(agent, cx);
                 }
                 this.briefing.cli = cli;
                 this.installed = Some((installed, path));
-                this.start(cx);
+                if start {
+                    this.start(cx);
+                }
                 cx.notify();
             });
         }));
         cx.notify();
     }
 
-    /// Start the agent and a thread with it, unless one runs.
+    /// Start the agent and a thread with it, unless one runs. Its
+    /// environment variables come from the OS credential store first.
     fn start(&mut self, cx: &mut Context<Self>) {
-        if self.session.is_some() {
+        if self.session.is_some() || self.starting.is_some() {
             return;
         }
-        let Some((installed, path)) = &self.installed else {
+        let Some((installed, _)) = &self.installed else {
             return;
         };
         if !installed.contains(&self.agent) {
             return;
         }
-        let Some(program) = self.agent.launcher(path) else {
+
+        let provider = self.provider(cx);
+        let environment = if provider.environment.is_empty() {
+            Task::ready(Ok(BTreeMap::new()))
+        } else {
+            preferences::agent_environment(self.agent.id, cx)
+        };
+        self.failure = None;
+        self.starting = Some(cx.spawn(async move |this, cx| {
+            let environment = environment.await;
+            let _ = this.update(cx, |this, cx| {
+                this.starting = None;
+                match environment {
+                    Ok(environment) => this.connect(provider, environment, cx),
+                    Err(error) => {
+                        this.queued = None;
+                        this.running = false;
+                        this.failure = Some(Failure {
+                            message: format!(
+                                "The agent's environment variables could not be read: {error:#}"
+                            ),
+                            sign_in: false,
+                        });
+                        cx.notify();
+                    }
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    fn connect(
+        &mut self,
+        provider: ProviderPreferences,
+        environment: BTreeMap<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((_, path)) = &self.installed else {
             return;
         };
-
         let data = &self.briefing.data_directory;
-        let launch = Launch {
-            program,
-            args: self.agent.command[1..]
-                .iter()
-                .map(|arg| (*arg).to_owned())
-                .collect(),
-            path: path.clone(),
-            directory: self.directory.clone(),
-            additional_directories: if &self.directory == data {
-                Vec::new()
-            } else {
-                vec![data.clone()]
-            },
+        let additional_directories = if &self.directory == data {
+            Vec::new()
+        } else {
+            vec![data.clone()]
+        };
+        let Some(launch) = self.agent.launch(
+            &provider,
+            path.clone(),
+            environment,
+            self.directory.clone(),
+            additional_directories,
+        ) else {
+            return;
         };
 
         let (connection, mut events) = Connection::start(launch, cx);
@@ -253,10 +324,11 @@ impl AgentPanel {
             }
         });
 
-        self.failure = None;
         self.session = Some(Session {
             connection,
             directory: self.directory.clone(),
+            ask_before_tools: provider.ask_before_tools,
+            auto_approve: !provider.ask_before_tools,
             ready: None,
             _events: events,
         });
@@ -274,18 +346,29 @@ impl AgentPanel {
                 embedded_context,
                 options,
             } => {
+                self.remember_models(&options, cx);
+                let bypass = agent::bypass_mode(&options);
+                let mut ask = true;
                 if let Some(session) = &mut self.session {
+                    ask = session.ask_before_tools;
                     session.ready = Some(Ready {
                         embedded_context,
                         confirmed: options.clone(),
                         options,
                     });
                 }
+                // Unless the settings say to ask, the agent runs tools
+                // without asking, as in its Bypass permissions or Full
+                // access mode.
+                if !ask && let Some((option, value)) = bypass {
+                    self.set_option(option.0.to_string(), value.0.to_string(), cx);
+                }
                 if let Some((content, cites)) = self.queued.take() {
                     self.prompt(content, cites);
                 }
             }
             Event::Update(SessionUpdate::ConfigOptionUpdate(update)) => {
+                self.remember_models(&update.config_options, cx);
                 self.set_options(update.config_options);
             }
             Event::Update(update) => {
@@ -306,6 +389,30 @@ impl AgentPanel {
             Event::Permission { request, responder } => {
                 let count = self.thread.entries.len();
                 let index = self.thread.update_tool(&request.tool_call);
+                let auto_approve = self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.auto_approve);
+                let allow = request
+                    .options
+                    .iter()
+                    .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+                    .or_else(|| {
+                        request
+                            .options
+                            .iter()
+                            .find(|option| option.kind == PermissionOptionKind::AllowAlways)
+                    });
+                if auto_approve && let Some(allow) = allow {
+                    let _ = responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                            allow.option_id.clone(),
+                        )),
+                    ));
+                    self.changed(index, count, cx);
+                    cx.notify();
+                    return;
+                }
                 self.permissions.insert(
                     request.tool_call.tool_call_id.0.to_string(),
                     Permission {
@@ -368,6 +475,29 @@ impl AgentPanel {
         }
 
         cx.notify();
+    }
+
+    /// Keep the models the agent offers in its settings, where they can be
+    /// hidden from the model menu.
+    fn remember_models(&self, options: &[SessionConfigOption], cx: &mut Context<Self>) {
+        let offered = agent::offered_models(options);
+        if offered.is_empty() {
+            return;
+        }
+
+        let known = self.provider(cx).models;
+        let merged = agent::merge_models(&known, offered);
+        if merged != known {
+            let id = self.agent.id;
+            let _ = preferences::update(cx, |preferences| {
+                preferences
+                    .agents
+                    .providers
+                    .entry(id.to_owned())
+                    .or_default()
+                    .models = merged;
+            });
+        }
     }
 
     fn set_options(&mut self, options: Vec<SessionConfigOption>) {
@@ -612,10 +742,22 @@ impl AgentPanel {
                 .options
                 .iter_mut()
                 .find(|option| option.id.0.as_ref() == id)
-            && let agent_client_protocol::schema::v1::SessionConfigKind::Select(select) =
-                &mut option.kind
+            && let agent::acp::schema::v1::SessionConfigKind::Select(select) = &mut option.kind
         {
             select.current_value = value.clone().into();
+
+            // A mode that asks before tools run is answered here, unless the
+            // agent has no mode that does not ask.
+            if option.category == Some(SessionConfigOptionCategory::Mode) {
+                let name = agent::choices(option)
+                    .into_iter()
+                    .find(|choice| choice.value.0.as_ref() == value)
+                    .map(|choice| choice.name.clone())
+                    .unwrap_or_default();
+                session.auto_approve = !session.ask_before_tools
+                    && (agent::is_bypass(&value, &name)
+                        || agent::bypass_mode(&ready.options).is_none());
+            }
         }
         session.connection.send(Command::SetOption {
             id: id.into(),
@@ -628,6 +770,7 @@ impl AgentPanel {
     pub(crate) fn new_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_permissions(cx);
         self.session = None;
+        self.starting = None;
         self.failure = None;
         self.running = false;
         self.queued = None;
@@ -643,7 +786,7 @@ impl AgentPanel {
         if self.installed.is_some() {
             self.start(cx);
         } else {
-            self.look_for_agents(cx);
+            self.look_for_agents(true, cx);
         }
         self.focus_composer(window, cx);
         cx.notify();
@@ -661,7 +804,7 @@ impl AgentPanel {
 
         self.set_agent_name(agent, cx);
         if let Err(error) = preferences::update(cx, |preferences| {
-            preferences.agent = Some(agent.id.to_owned())
+            preferences.agents.selected = Some(agent.id.to_owned())
         }) {
             eprintln!("Failed to save the agent: {error:#}");
         }

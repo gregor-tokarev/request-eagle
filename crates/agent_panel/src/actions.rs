@@ -1,4 +1,4 @@
-gpui_kit::actions!(agent, [ToggleAgentPanel]);
+gpui_kit::actions!(agent, [ToggleAgentPanel, OpenAgentSettings]);
 
 /// Register the panel's shortcuts.
 pub fn init(cx: &mut gpui_kit::App) {
@@ -23,4 +23,15 @@ pub fn init(cx: &mut gpui_kit::App) {
         cx,
     )
     .expect("default add to agent keybinding should be valid");
+
+    keybindings_service::register(
+        OpenAgentSettings,
+        "Open agent settings",
+        "Choose the coding agents the agent panel runs, and how.",
+        "Agent",
+        None,
+        Some("Workspace"),
+        cx,
+    )
+    .expect("agent settings command should be valid");
 }

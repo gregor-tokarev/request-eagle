@@ -6,7 +6,7 @@ use std::{io::Write as _, path::PathBuf};
 
 use tempfile::TempPath;
 
-use agent_client_protocol::schema::v1::{
+use agent::acp::schema::v1::{
     ContentBlock, EmbeddedResource, EmbeddedResourceResource, TextContent, TextResourceContents,
 };
 use gpui_kit::component::input::InputContent;

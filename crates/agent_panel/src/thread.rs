@@ -1,7 +1,7 @@
 //! The conversation the panel shows: the messages sent, and what the agent
 //! answered, thought and did, as its updates arrive.
 
-use agent_client_protocol::schema::v1::{
+use agent::acp::schema::v1::{
     ContentBlock, PlanEntryStatus, SessionUpdate, ToolCallContent, ToolCallId, ToolCallStatus,
     ToolCallUpdate, ToolKind,
 };
