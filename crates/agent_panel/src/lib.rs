@@ -3,6 +3,7 @@
 //! Client Protocol. Messages can cite what is selected in a request or its
 //! response.
 
+mod actions;
 mod agents;
 mod connection;
 mod entries;
@@ -23,30 +24,5 @@ mod shell_path_tests;
 #[cfg(test)]
 mod thread_tests;
 
+pub use actions::{ToggleAgentPanel, init};
 pub use panel::{AgentPanel, AgentPanelEvent};
-
-gpui_kit::actions!(agent, [ToggleAgentPanel]);
-
-pub fn init(cx: &mut gpui_kit::App) {
-    keybindings_service::register(
-        ToggleAgentPanel,
-        "Toggle agent panel",
-        "Show or hide the agent panel.",
-        "Agent",
-        Some("secondary-shift-i"),
-        Some("Workspace"),
-        cx,
-    )
-    .expect("default agent panel keybinding should be valid");
-
-    keybindings_service::register(
-        tab_ui::AddToAgent,
-        "Add to agent",
-        "Cite the selection, or the field with focus, in the agent's message.",
-        "Agent",
-        Some("secondary-i"),
-        Some("Workspace"),
-        cx,
-    )
-    .expect("default add to agent keybinding should be valid");
-}

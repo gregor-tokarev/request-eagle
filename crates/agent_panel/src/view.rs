@@ -16,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::{AddToAgent, SendRequest};
 
-use crate::ToggleAgentPanel;
+use crate::actions::ToggleAgentPanel;
 use crate::agents::{AGENTS, Agent};
 use crate::panel::AgentPanel;
 

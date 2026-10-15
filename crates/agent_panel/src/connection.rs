@@ -65,6 +65,8 @@ pub(crate) enum Event {
     /// The agent finished answering a prompt.
     TurnEnded(Result<StopReason, String>),
     Options(Vec<SessionConfigOption>),
+    /// The agent turned down a change to its options, and says why.
+    OptionRejected(String),
     /// The agent could not start, or it stopped.
     Failed(Failure),
 }
@@ -239,10 +241,11 @@ fn handle(
             ));
             let events = events.clone();
             connection.spawn(async move {
-                // A value the agent turned down leaves the options as they were.
-                if let Ok(response) = request.block_task().await {
-                    let _ = events.unbounded_send(Event::Options(response.config_options));
-                }
+                let event = match request.block_task().await {
+                    Ok(response) => Event::Options(response.config_options),
+                    Err(error) => Event::OptionRejected(error.message),
+                };
+                let _ = events.unbounded_send(event);
                 Ok(())
             })
         }

@@ -376,7 +376,7 @@ fn refreshing_takes_the_flows_changed_outside_the_app() {
     outside.update(&kept, &id, greeting()).unwrap();
     outside.delete(&removed).unwrap();
 
-    library.refresh();
+    library.take_reloaded(FlowLibrary::load(&fixture.0));
 
     let names: Vec<&str> = library
         .flows()
@@ -389,6 +389,6 @@ fn refreshing_takes_the_flows_changed_outside_the_app() {
     assert_eq!(library.get(&added).unwrap().outside_changes, 0);
 
     // Reading the same files again changes nothing.
-    library.refresh();
+    library.take_reloaded(FlowLibrary::load(&fixture.0));
     assert_eq!(library.get(&kept).unwrap().outside_changes, 1);
 }

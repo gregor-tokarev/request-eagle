@@ -16,7 +16,8 @@ use gpui_kit::component::{
     message_scroller::MessageScrollerState,
 };
 use gpui_kit::*;
-use tab_ui::Cite;
+use tab_ui::{Cite, CiteOrigin};
+use tempfile::TempPath;
 
 use crate::agents::{AGENTS, Agent};
 use crate::connection::{Command, Connection, Event, Failure, Launch};
@@ -28,8 +29,8 @@ pub enum AgentPanelEvent {
     /// The agent may have changed saved requests or flows, so the app reads
     /// them again.
     FilesChanged,
-    /// Show the tab a cite comes from.
-    ShowTab(EntityId),
+    /// Show the tab a cite comes from, or its saved request.
+    ShowCite(CiteOrigin),
 }
 
 /// The agent the panel talks to, and the thread with it. The agent runs as
@@ -52,6 +53,8 @@ pub struct AgentPanel {
     queued: Option<(InputContent, Vec<(String, Cite)>)>,
     /// Whether the thread's first message, which briefs the agent, was sent.
     briefed: bool,
+    /// Long cites saved for the agent to read, deleted with the thread.
+    cite_files: Vec<TempPath>,
 
     pub(crate) thread: Thread,
     pub(crate) scroller: Entity<MessageScrollerState>,
@@ -59,6 +62,8 @@ pub struct AgentPanel {
     pub(crate) messages: HashMap<usize, Entity<TextareaState>>,
     /// The thoughts and tool calls opened to show their text, by entry.
     pub(crate) expanded: HashSet<usize>,
+    /// The focus of the rows that open them, by entry.
+    pub(crate) disclosures: HashMap<usize, FocusHandle>,
     /// The tool calls the agent asks to run, by their ID.
     pub(crate) permissions: HashMap<String, Permission>,
 
@@ -83,7 +88,11 @@ pub(crate) struct Session {
 
 pub(crate) struct Ready {
     embedded_context: bool,
+    /// The agent's options as shown, with a change made here before the
+    /// agent confirms it.
     pub(crate) options: Vec<SessionConfigOption>,
+    /// The options as the agent last confirmed them.
+    confirmed: Vec<SessionConfigOption>,
 }
 
 pub(crate) struct Permission {
@@ -127,10 +136,12 @@ impl AgentPanel {
             running: false,
             queued: None,
             briefed: false,
+            cite_files: Vec::new(),
             thread: Thread::default(),
             scroller,
             messages: HashMap::new(),
             expanded: HashSet::new(),
+            disclosures: HashMap::new(),
             permissions: HashMap::new(),
             composer,
             placeholder: None,
@@ -266,6 +277,7 @@ impl AgentPanel {
                 if let Some(session) = &mut self.session {
                     session.ready = Some(Ready {
                         embedded_context,
+                        confirmed: options.clone(),
                         options,
                     });
                 }
@@ -328,6 +340,17 @@ impl AgentPanel {
                 cx.emit(AgentPanelEvent::FilesChanged);
             }
             Event::Options(options) => self.set_options(options),
+            Event::OptionRejected(message) => {
+                if let Some(ready) = self
+                    .session
+                    .as_mut()
+                    .and_then(|session| session.ready.as_mut())
+                {
+                    ready.options = ready.confirmed.clone();
+                }
+                let text = format!("{} kept its setting: {message}", self.agent.name);
+                self.push(Entry::Notice(Notice { text, error: true }), cx);
+            }
             Event::Failed(failure) => {
                 let answering = self.running;
                 self.session = None;
@@ -353,6 +376,7 @@ impl AgentPanel {
             .as_mut()
             .and_then(|session| session.ready.as_mut())
         {
+            ready.confirmed = options.clone();
             ready.options = options;
         }
     }
@@ -505,13 +529,36 @@ impl AgentPanel {
 
         let briefing = (!self.briefed).then(|| self.briefing.text());
         self.briefed = true;
-        let blocks: Vec<ContentBlock> = prompt(&content, &cites, briefing, ready.embedded_context);
+        let blocks: Vec<ContentBlock> = prompt(
+            &content,
+            &cites,
+            briefing,
+            ready.embedded_context,
+            &mut self.cite_files,
+        );
         session.connection.send(Command::Prompt(blocks));
     }
 
     pub(crate) fn stop(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = &self.session {
-            session.connection.send(Command::Cancel);
+        match &self.session {
+            Some(Session {
+                connection,
+                ready: Some(_),
+                ..
+            }) => connection.send(Command::Cancel),
+            // A message waiting for the agent to start is not sent.
+            _ => {
+                if self.queued.take().is_some() {
+                    self.running = false;
+                    self.push(
+                        Entry::Notice(Notice {
+                            text: "Stopped.".to_owned(),
+                            error: false,
+                        }),
+                        cx,
+                    );
+                }
+            }
         }
         self.cancel_permissions(cx);
         cx.notify();
@@ -585,9 +632,11 @@ impl AgentPanel {
         self.running = false;
         self.queued = None;
         self.briefed = false;
+        self.cite_files.clear();
         self.thread = Thread::default();
         self.messages.clear();
         self.expanded.clear();
+        self.disclosures.clear();
         self.scroller
             .update(cx, |scroller, cx| scroller.reset(0, cx));
 
@@ -633,7 +682,7 @@ impl AgentPanel {
     }
 
     pub(crate) fn show_cite(&mut self, id: &str, cx: &mut Context<Self>) {
-        let page = self
+        let origin = self
             .cites
             .iter()
             .chain(self.thread.entries.iter().flat_map(|entry| match entry {
@@ -641,10 +690,10 @@ impl AgentPanel {
                 _ => [].iter(),
             }))
             .find(|(cite, _)| cite == id)
-            .map(|(_, cite)| cite.origin.page);
+            .map(|(_, cite)| cite.origin.clone());
 
-        if let Some(page) = page {
-            cx.emit(AgentPanelEvent::ShowTab(page));
+        if let Some(origin) = origin {
+            cx.emit(AgentPanelEvent::ShowCite(origin));
         }
     }
 }

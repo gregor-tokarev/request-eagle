@@ -24,6 +24,15 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Thoughts and tool calls open from the keyboard too.
+        if matches!(
+            self.thread.entries.get(index),
+            Some(Entry::Thought(_) | Entry::Tool(_))
+        ) {
+            self.disclosures
+                .entry(index)
+                .or_insert_with(|| cx.focus_handle());
+        }
         let Some(entry) = self.thread.entries.get(index) else {
             return div().into_any_element();
         };
@@ -38,7 +47,7 @@ impl AgentPanel {
                     TextView::markdown(("agent-answer-text", index), text.clone()).selectable(true),
                 )
                 .into_any_element(),
-            Entry::Thought(text) => self.thought(index, text, cx),
+            Entry::Thought(text) => self.thought(index, text, window, cx),
             Entry::Tool(tool) => self.tool(index, tool, window, cx),
             Entry::Plan(steps) => plan(steps, cx),
             Entry::Notice(notice) => notice_line(notice, cx),
@@ -71,8 +80,49 @@ impl AgentPanel {
             .into_any_element()
     }
 
-    fn thought(&self, index: usize, text: &str, cx: &mut Context<Self>) -> AnyElement {
+    /// A row that shows and hides what is under it, from the pointer or the
+    /// keyboard.
+    fn disclosure(
+        &self,
+        id: impl Into<ElementId>,
+        index: usize,
+        label: impl Into<SharedString>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::base::Button {
         let expanded = self.expanded.contains(&index);
+        let focus = self.disclosures.get(&index).cloned();
+        let focus_visible = focus
+            .as_ref()
+            .is_some_and(|focus| focus.is_focused(window) && window.last_input_was_keyboard());
+
+        gpui_kit::base::Button::new(id)
+            .when_some(focus.as_ref(), |this, focus| this.track_focus(focus))
+            .accessibility_label(label)
+            .aria_expanded(expanded)
+            .justify_start()
+            .rounded(cx.theme().radius_tokens().md)
+            .when(focus_visible, |this| this.focus_ring_style(window, cx))
+            // Clicking keeps focus where it is, such as in the message box.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(index, cx)))
+    }
+
+    fn thought(
+        &self,
+        index: usize,
+        text: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let expanded = self.expanded.contains(&index);
+        let toggle = self.disclosure(
+            ("agent-thought-toggle", index),
+            index,
+            "Thinking",
+            window,
+            cx,
+        );
         let theme = cx.theme();
 
         v_flex()
@@ -82,12 +132,10 @@ impl AgentPanel {
             .text_xs()
             .text_color(theme.muted_foreground)
             .child(
-                h_flex()
-                    .id(("agent-thought-toggle", index))
+                toggle
                     .gap_1p5()
                     .cursor_pointer()
                     .hover(|this| this.text_color(theme.foreground))
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(index, cx)))
                     .child(Icon::default().path("icons/brain.svg").size_3p5())
                     .child("Thinking")
                     .child(
@@ -114,9 +162,15 @@ impl AgentPanel {
         &self,
         index: usize,
         tool: &ToolCall,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let title = if tool.title.is_empty() {
+            "Tool".to_owned()
+        } else {
+            tool.title.clone()
+        };
+        let toggle = self.disclosure(("agent-tool-row", index), index, title.clone(), window, cx);
         let theme = cx.theme();
         let expanded = self.expanded.contains(&index);
         let has_output = !tool.output.trim().is_empty();
@@ -139,57 +193,70 @@ impl AgentPanel {
                 .text_color(theme.warning)
                 .into_any_element(),
         };
-        let title = if tool.title.is_empty() {
-            "Tool".to_owned()
+        let contents: Vec<AnyElement> = [
+            Some(div().flex_none().child(status).into_any_element()),
+            Some(
+                tool_icon(tool.kind)
+                    .size_3p5()
+                    .flex_none()
+                    .into_any_element(),
+            ),
+            Some(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .when(tool.kind == ToolKind::Execute, |this| {
+                        this.font_family(theme.mono_font_family.clone())
+                    })
+                    .child(title)
+                    .into_any_element(),
+            ),
+            has_output.then(|| {
+                Icon::new(if expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
+                .size_3()
+                .flex_none()
+                .into_any_element()
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // Only a call with output opens.
+        let row = if has_output {
+            toggle
+                .w_full()
+                .h_6()
+                .px_2()
+                .gap_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .cursor_pointer()
+                .hover(|this| this.bg(theme.sidebar_accent))
+                .children(contents)
+                .into_any_element()
         } else {
-            tool.title.clone()
+            h_flex()
+                .w_full()
+                .h_6()
+                .px_2()
+                .gap_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .children(contents)
+                .into_any_element()
         };
 
         v_flex()
             .id(("agent-tool", index))
             .w_full()
             .gap_1()
-            .child(
-                h_flex()
-                    .id(("agent-tool-row", index))
-                    .w_full()
-                    .h_6()
-                    .px_2()
-                    .gap_2()
-                    .rounded(theme.radius_tokens().md)
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .when(has_output, |this| {
-                        this.cursor_pointer()
-                            .hover(|this| this.bg(theme.sidebar_accent))
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.toggle_expanded(index, cx)),
-                            )
-                    })
-                    .child(div().flex_none().child(status))
-                    .child(tool_icon(tool.kind).size_3p5().flex_none())
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .when(tool.kind == ToolKind::Execute, |this| {
-                                this.font_family(theme.mono_font_family.clone())
-                            })
-                            .child(title.clone()),
-                    )
-                    .when(has_output, |this| {
-                        this.child(
-                            Icon::new(if expanded {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size_3()
-                            .flex_none(),
-                        )
-                    }),
-            )
+            .child(row)
             .when(expanded && has_output, |this| {
                 let lines: Vec<&str> = tool.output.lines().collect();
                 let hidden = lines.len().saturating_sub(OUTPUT_LINES);

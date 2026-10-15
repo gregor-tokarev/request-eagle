@@ -149,10 +149,10 @@ impl Workspace {
             &agent_panel,
             window,
             |this, _, event: &AgentPanelEvent, window, cx| match event {
-                AgentPanelEvent::FilesChanged => this.reload_saved(window, cx),
-                AgentPanelEvent::ShowTab(page) => this
+                AgentPanelEvent::FilesChanged => this.reload_saved(cx),
+                AgentPanelEvent::ShowCite(origin) => this
                     .main_view
-                    .update(cx, |view, cx| view.show_page(*page, window, cx)),
+                    .update(cx, |view, cx| view.show_cite(origin, window, cx)),
             },
         );
 
@@ -220,6 +220,10 @@ impl Workspace {
                 FlowPanelEvent::Deleted { path } => {
                     this.main_view
                         .update(cx, |view, cx| view.close_flow(path, cx));
+                }
+                FlowPanelEvent::Refreshed => {
+                    this.main_view
+                        .update(cx, |view, cx| view.follow_flows(window, cx));
                 }
             },
         );
@@ -747,12 +751,10 @@ impl Workspace {
 
     /// Read saved requests and flows again, which the agent may have
     /// changed. Tabs without unsaved changes follow.
-    fn reload_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn reload_saved(&mut self, cx: &mut Context<Self>) {
         self.collections
             .update(cx, |collections, cx| collections.reload(cx));
         self.flow_panel.update(cx, |flows, cx| flows.refresh(cx));
-        self.main_view
-            .update(cx, |view, cx| view.follow_flows(window, cx));
     }
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {

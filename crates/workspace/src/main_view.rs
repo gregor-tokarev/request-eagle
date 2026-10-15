@@ -25,7 +25,7 @@ use collection::{
 use flow::FlowLibraryError;
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
-    CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
+    CiteOrigin, CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
     EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
     SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
 };
@@ -857,21 +857,34 @@ impl MainView {
         }
     }
 
-    /// Select the tab that shows `page`, such as the one a cite comes from.
-    pub(crate) fn show_page(
+    /// Show the tab a cite comes from. When that tab was replaced, as after
+    /// the agent changed its saved request, the request's tab is found by its
+    /// file; a closed one opens again.
+    pub(crate) fn show_cite(
         &mut self,
-        page: EntityId,
+        origin: &CiteOrigin,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self
+        let index = self
             .tabs
             .iter()
-            .position(|tab| tab.page.entity_id() == page)
-        {
-            self.select_tab(index, cx);
-            self.prepare_active_tab(window, cx);
+            .position(|tab| tab.page.entity_id() == origin.page)
+            .or_else(|| {
+                let file = origin.file.as_ref()?;
+                self.tabs.iter().position(|tab| {
+                    tab.page
+                        .location(cx)
+                        .is_some_and(|location| &location.path == file)
+                })
+            });
+
+        match (index, &origin.file) {
+            (Some(index), _) => self.select_tab(index, cx),
+            (None, Some(file)) => self.open_saved(file, window, cx),
+            (None, None) => return,
         }
+        self.prepare_active_tab(window, cx);
     }
 
     /// Follow flows read from disk again, as after an agent changed them.

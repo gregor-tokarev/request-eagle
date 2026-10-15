@@ -52,7 +52,7 @@ fn cites_go_where_they_are_in_the_message() {
         cite(CiteSource::ResponseBody, "\"code\": \"INVALID_ID\""),
     )];
 
-    let blocks = prompt(&message(), &cites, None, true);
+    let blocks = prompt(&message(), &cites, None, true, &mut Vec::new());
 
     assert_eq!(blocks.len(), 3);
     assert_eq!(text_of(&blocks[0]), "why ");
@@ -65,7 +65,7 @@ fn cites_go_where_they_are_in_the_message() {
 fn agents_without_embedded_context_read_cites_in_the_text() {
     let cites = vec![("cite:1".to_owned(), cite(CiteSource::ResponseBody, "{}"))];
 
-    let blocks = prompt(&message(), &cites, None, false);
+    let blocks = prompt(&message(), &cites, None, false, &mut Vec::new());
 
     assert!(matches!(&blocks[1], ContentBlock::Text(_)));
     assert!(text_of(&blocks[1]).starts_with("\n<cite ref=\"request-eagle:cite/1\">"));
@@ -78,7 +78,13 @@ fn a_thread_starts_with_the_briefing() {
         cli: Some(PathBuf::from("/usr/local/bin/request-eagle-cli")),
     };
 
-    let blocks = prompt(&message(), &[], Some(briefing.text()), true);
+    let blocks = prompt(
+        &message(),
+        &[],
+        Some(briefing.text()),
+        true,
+        &mut Vec::new(),
+    );
 
     let first = text_of(&blocks[0]);
     assert!(
@@ -96,7 +102,10 @@ fn a_thread_starts_with_the_briefing() {
 
 #[test]
 fn a_cite_says_what_it_quotes_and_from_where() {
-    let quoted = quote(&cite(CiteSource::ResponseBody, "\"code\": \"INVALID_ID\""));
+    let quoted = quote(
+        &cite(CiteSource::ResponseBody, "\"code\": \"INVALID_ID\""),
+        &mut Vec::new(),
+    );
 
     assert_eq!(
         quoted,
@@ -110,22 +119,30 @@ fn a_cite_says_what_it_quotes_and_from_where() {
 
 #[test]
 fn a_fence_outlasts_the_backticks_in_a_cite() {
-    let quoted = quote(&cite(CiteSource::Script, "const md = ```js```;"));
+    let quoted = quote(
+        &cite(CiteSource::Script, "const md = ```js```;"),
+        &mut Vec::new(),
+    );
 
     assert!(quoted.contains("\n````json\n"), "{quoted}");
 }
 
 #[test]
-fn a_long_cite_is_cut_and_saved_whole() {
+fn a_long_cite_is_cut_and_saved_whole_until_the_thread_ends() {
     let long = "x".repeat(50_000);
-    let quoted = quote(&cite(CiteSource::ResponseBody, &long));
+    let mut files = Vec::new();
+    let quoted = quote(&cite(CiteSource::ResponseBody, &long), &mut files);
 
     let path = quoted
         .split("All of it is in ")
         .nth(1)
         .and_then(|rest| rest.split(".\n").next())
-        .expect("the cite names its file");
-    assert_eq!(std::fs::read_to_string(path).unwrap(), long);
+        .expect("the cite names its file")
+        .to_owned();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), long);
     assert!(quoted.len() < long.len());
-    std::fs::remove_file(path).unwrap();
+    assert_eq!(files.len(), 1);
+
+    drop(files);
+    assert!(!std::path::Path::new(&path).exists());
 }

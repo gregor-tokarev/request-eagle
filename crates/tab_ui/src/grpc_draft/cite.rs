@@ -25,7 +25,7 @@ impl GrpcDraft {
                 .name()
                 .unwrap_or_else(|| "Unsaved request".into()),
             request: format!("gRPC {} {}", self.request.url, self.request.method),
-            status: None,
+            status: self.response.read(cx).final_status(),
             file: self
                 .storage
                 .location()
@@ -64,6 +64,10 @@ impl GrpcDraft {
             .as_ref()
             .and_then(|scripts| scripts.read(cx).quote(window, cx))
         {
+            return Some(quote);
+        }
+
+        if let Some(quote) = self.response.read(cx).quote(window, cx) {
             return Some(quote);
         }
 

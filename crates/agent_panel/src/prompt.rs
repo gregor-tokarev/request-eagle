@@ -4,6 +4,8 @@
 
 use std::{io::Write as _, path::PathBuf};
 
+use tempfile::TempPath;
+
 use agent_client_protocol::schema::v1::{
     ContentBlock, EmbeddedResource, EmbeddedResourceResource, TextContent, TextResourceContents,
 };
@@ -52,12 +54,14 @@ impl Briefing {
 
 /// The prompt for a message, with `briefing` first when the thread starts.
 /// `embedded` is whether the agent reads cites as embedded resources;
-/// otherwise they go in the text.
+/// otherwise they go in the text. Long cites are saved to `files`, which the
+/// thread keeps until it ends.
 pub(crate) fn prompt(
     content: &InputContent,
     cites: &[(String, Cite)],
     briefing: Option<String>,
     embedded: bool,
+    files: &mut Vec<TempPath>,
 ) -> Vec<ContentBlock> {
     let mut blocks: Vec<ContentBlock> = briefing
         .map(|briefing| ContentBlock::Text(TextContent::new(briefing)))
@@ -79,7 +83,7 @@ pub(crate) fn prompt(
             continue;
         };
         let uri = format!("request-eagle:cite/{}", number + 1);
-        let quoted = quote(cite);
+        let quoted = quote(cite, files);
         blocks.push(if embedded {
             ContentBlock::Resource(EmbeddedResource::new(
                 EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
@@ -105,8 +109,8 @@ fn push_text(blocks: &mut Vec<ContentBlock>, text: &str) {
 }
 
 /// A cite as the agent reads it: what it quotes and from where, then the
-/// text.
-pub(crate) fn quote(cite: &Cite) -> String {
+/// text. A long cite is saved whole to one of `files`.
+pub(crate) fn quote(cite: &Cite, files: &mut Vec<TempPath>) -> String {
     let origin = &cite.origin;
     let mut about = format!(
         "{} of \"{}\" ({})",
@@ -140,10 +144,13 @@ pub(crate) fn quote(cite: &Cite) -> String {
             end -= 1;
         }
         match save(&cite.text) {
-            Some(path) => about.push_str(&format!(
-                "\nIt is long, so this is its start. All of it is in {}.",
-                path.display()
-            )),
+            Some(file) => {
+                about.push_str(&format!(
+                    "\nIt is long, so this is its start. All of it is in {}.",
+                    file.display()
+                ));
+                files.push(file);
+            }
             None => about.push_str("\nIt is long, so this is its start."),
         }
         text = &text[..end];
@@ -156,8 +163,9 @@ pub(crate) fn quote(cite: &Cite) -> String {
     )
 }
 
-/// Keep a long cite where the agent can read all of it.
-fn save(text: &str) -> Option<PathBuf> {
+/// Keep a long cite where the agent can read all of it. Dropping the path
+/// deletes the file.
+fn save(text: &str) -> Option<TempPath> {
     let mut file = tempfile::Builder::new()
         .prefix("request-eagle-cite-")
         .suffix(".txt")
@@ -165,7 +173,7 @@ fn save(text: &str) -> Option<PathBuf> {
         .ok()?;
     file.write_all(text.as_bytes()).ok()?;
 
-    file.keep().ok().map(|(_, path)| path)
+    Some(file.into_temp_path())
 }
 
 fn longest_backtick_run(text: &str) -> usize {

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write as _},
     path::{Path, PathBuf},
@@ -203,16 +204,20 @@ impl FlowLibrary {
         self.save(path, expected_id, flow, true)
     }
 
-    /// Reads the directory again, taking the flows added, changed and
-    /// removed outside the app, as by an agent. A flow that is still in its
-    /// file counts the changes made to it there.
-    pub fn refresh(&mut self) {
-        let mut latest = Self::load(self.directory.clone());
+    /// Takes the flows that [`load`](Self::load) read again from the same
+    /// directory, with those added, changed and removed outside the app, as
+    /// by an agent. A flow that is still in its file counts the changes made
+    /// to it there.
+    pub fn take_reloaded(&mut self, mut latest: FlowLibrary) {
+        let known: HashMap<&Path, &SavedFlow> = self
+            .flows
+            .iter()
+            .map(|saved| (saved.path.as_path(), saved))
+            .collect();
         for flow in &mut latest.flows {
-            if let Some(known) = self
-                .flows
-                .iter()
-                .find(|known| known.path == flow.path && known.id == flow.id)
+            if let Some(known) = known
+                .get(flow.path.as_path())
+                .filter(|known| known.id == flow.id)
             {
                 flow.outside_changes = known.outside_changes + u64::from(flow_changed(known, flow));
             }
