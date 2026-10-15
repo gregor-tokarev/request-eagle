@@ -509,19 +509,6 @@ fn branch(status: &Status) -> Option<String> {
     })
 }
 
-/// Commits to pull and to push, as arrows with counts.
-pub(crate) fn sync_counts(behind: u32, ahead: u32, color: Hsla) -> Div {
-    h_flex()
-        .flex_none()
-        .gap_1()
-        .text_xs()
-        .text_color(color)
-        .child(Icon::new(IconName::ArrowDown).size_3())
-        .child(behind.to_string())
-        .child(Icon::new(IconName::ArrowUp).size_3())
-        .child(ahead.to_string())
-}
-
 fn note(text: impl Into<SharedString>, color: Hsla) -> Div {
     div().text_xs().text_color(color).child(text.into())
 }

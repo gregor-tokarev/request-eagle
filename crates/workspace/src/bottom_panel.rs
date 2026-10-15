@@ -4,7 +4,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{OpenCookies, OpenSettings, ToggleGitPanel, ToggleLeftSidebar};
-use crate::git_panel::{GitPanel, sync_counts};
+use crate::git_panel::GitPanel;
 use crate::git_state::GitState;
 
 pub(crate) const TOGGLE_SIDEBAR_BUTTON: &str = "toggle-sidebar";
@@ -100,20 +100,32 @@ impl BottomPanel {
             .accessibility_label("Git")
             .tooltip_with_action("Git", &ToggleGitPanel, None)
             .on_click(|_, window, cx| window.dispatch_action(ToggleGitPanel.boxed_clone(), cx))
+            // In the label's size, so that the counts share its baseline.
             .when(tracking && (ahead > 0 || behind > 0), |button| {
-                button.child(sync_counts(behind, ahead, theme.muted_foreground))
+                button
+                    .child(count(IconName::ArrowDown, behind, theme.muted_foreground))
+                    .child(count(IconName::ArrowUp, ahead, theme.muted_foreground))
             })
             .when(changes > 0, |button| {
                 button.child(
                     h_flex()
                         .gap_1()
-                        .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(div().size(rems(0.375)).rounded_full().bg(theme.warning))
                         .child(changes.to_string()),
                 )
             })
     }
+}
+
+/// Commits to pull or to push, as an arrow with their count.
+fn count(arrow: IconName, count: u32, color: Hsla) -> impl IntoElement {
+    h_flex()
+        .flex_none()
+        .gap_0p5()
+        .text_color(color)
+        .child(Icon::new(arrow).size_3())
+        .child(count.to_string())
 }
 
 impl Render for BottomPanel {
