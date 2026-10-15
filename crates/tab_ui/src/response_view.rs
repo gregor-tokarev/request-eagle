@@ -1,4 +1,5 @@
 mod body;
+mod cite;
 mod content;
 mod events;
 mod headers;

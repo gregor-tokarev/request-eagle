@@ -1,3 +1,4 @@
+mod cite;
 mod draft;
 mod message_log;
 mod settings;

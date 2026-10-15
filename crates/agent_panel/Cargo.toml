@@ -1,0 +1,17 @@
+[package]
+name = "agent_panel"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+# Runs coding agents such as Claude Code, Codex and OpenCode, which speak it.
+agent-client-protocol = { version = "3.3", features = ["process"] }
+analytics = { path = "../analytics" }
+futures = "0.3"
+gpui-kit = { workspace = true, features = ["component"] }
+keybindings_service = { path = "../keybindings_service" }
+preferences = { path = "../preferences" }
+serde_json = "1"
+tab_ui = { path = "../tab_ui" }
+tempfile = "3"

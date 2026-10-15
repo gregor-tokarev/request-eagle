@@ -124,6 +124,28 @@ impl FlowPanel {
         self.library.overwrite(path, expected_id, flow)
     }
 
+    /// Read the flows directory again, as after an agent changed it.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.library.refresh();
+
+        let library = &self.library;
+        let gone = |path: &PathBuf| library.get(path).is_none();
+        if self.selected.as_ref().is_some_and(gone) {
+            self.selected = None;
+        }
+        if self.pending_delete.as_ref().is_some_and(gone) {
+            self.pending_delete = None;
+        }
+        if self
+            .rename
+            .as_ref()
+            .is_some_and(|rename| gone(&rename.path))
+        {
+            self.rename = None;
+        }
+        cx.notify();
+    }
+
     /// Take the changes made to a flow's file outside the app.
     pub(crate) fn reload(
         &mut self,

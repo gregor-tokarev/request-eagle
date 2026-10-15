@@ -361,3 +361,34 @@ fn a_flow_moved_by_another_start_meanwhile_keeps_its_one_copy() {
         source
     );
 }
+
+#[test]
+fn refreshing_takes_the_flows_changed_outside_the_app() {
+    let fixture = Fixture::new();
+    let mut library = FlowLibrary::load(&fixture.0);
+    let kept = library.create("Checkout", Flow::starter()).unwrap();
+    let removed = library.create("Login", Flow::starter()).unwrap();
+
+    // Another program adds one flow, changes one and removes one.
+    let mut outside = FlowLibrary::load(&fixture.0);
+    let added = outside.create("Signup", Flow::starter()).unwrap();
+    let id = outside.get(&kept).unwrap().id.clone();
+    outside.update(&kept, &id, greeting()).unwrap();
+    outside.delete(&removed).unwrap();
+
+    library.refresh();
+
+    let names: Vec<&str> = library
+        .flows()
+        .iter()
+        .map(|saved| saved.name.as_str())
+        .collect();
+    assert_eq!(names, ["Checkout", "Signup"]);
+    assert_eq!(library.get(&kept).unwrap().flow, greeting());
+    assert_eq!(library.get(&kept).unwrap().outside_changes, 1);
+    assert_eq!(library.get(&added).unwrap().outside_changes, 0);
+
+    // Reading the same files again changes nothing.
+    library.refresh();
+    assert_eq!(library.get(&kept).unwrap().outside_changes, 1);
+}

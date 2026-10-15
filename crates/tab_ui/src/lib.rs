@@ -10,6 +10,7 @@
 
 mod actions;
 mod auth_editor;
+mod cite;
 mod code_snippet;
 mod collection_page;
 mod collection_runner;
@@ -34,9 +35,12 @@ mod vim;
 mod websocket_draft;
 
 #[cfg(test)]
+mod cite_tests;
+#[cfg(test)]
 mod variable_input_tests;
 
 pub use actions::SendRequest;
+pub use cite::{AddToAgent, Cite, CiteOrigin, CiteSource, CiteToAgent};
 pub use collection_page::{CollectionPage, CollectionSettings, RunCollection, SaveCollection};
 pub use collection_runner::CollectionRunner;
 pub use cookie_page::CookiePage;

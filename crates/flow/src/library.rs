@@ -203,6 +203,24 @@ impl FlowLibrary {
         self.save(path, expected_id, flow, true)
     }
 
+    /// Reads the directory again, taking the flows added, changed and
+    /// removed outside the app, as by an agent. A flow that is still in its
+    /// file counts the changes made to it there.
+    pub fn refresh(&mut self) {
+        let mut latest = Self::load(self.directory.clone());
+        for flow in &mut latest.flows {
+            if let Some(known) = self
+                .flows
+                .iter()
+                .find(|known| known.path == flow.path && known.id == flow.id)
+            {
+                flow.outside_changes = known.outside_changes + u64::from(flow_changed(known, flow));
+            }
+        }
+
+        *self = latest;
+    }
+
     /// Reads a flow's file again, taking the changes made to it outside the
     /// app.
     pub fn reload(&mut self, path: &Path, expected_id: &str) -> Result<(), FlowLibraryError> {

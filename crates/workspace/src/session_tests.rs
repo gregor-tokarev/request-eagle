@@ -147,6 +147,7 @@ fn saved_session_loads_back_the_same() {
             SavedTab::Cookies,
         ],
         selected_tab: Some(1),
+        agent_panel: true,
     };
 
     SessionWriter::default().save(1, &session);

@@ -1,0 +1,285 @@
+//! The agent's process, and the conversation with it over the Agent Client
+//! Protocol. The panel sends commands and reads events; the protocol runs
+//! in a task the connection owns, and ending the connection ends the agent.
+
+use std::{
+    collections::VecDeque,
+    ffi::OsString,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{
+    CancelNotification, ContentBlock, ErrorCode, InitializeRequest, NewSessionRequest,
+    PromptRequest, RequestPermissionRequest, RequestPermissionResponse, SessionConfigId,
+    SessionConfigOption, SessionConfigValueId, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, StopReason,
+};
+use agent_client_protocol::{
+    AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, LineDirection, Responder,
+};
+use futures::{
+    StreamExt as _,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+    future::{Either, select},
+};
+use gpui_kit::{App, Task};
+
+/// How many lines of what the agent wrote to stderr a failure shows.
+const STDERR_LINES: usize = 12;
+
+/// How to start an agent, and where it works.
+pub(crate) struct Launch {
+    pub(crate) program: PathBuf,
+    pub(crate) args: Vec<String>,
+    /// The `PATH` the agent runs with, since the tools it starts need it.
+    pub(crate) path: OsString,
+    pub(crate) directory: PathBuf,
+    /// Other folders the agent may work in, such as the app's data.
+    pub(crate) additional_directories: Vec<PathBuf>,
+}
+
+pub(crate) enum Command {
+    Prompt(Vec<ContentBlock>),
+    Cancel,
+    SetOption {
+        id: SessionConfigId,
+        value: SessionConfigValueId,
+    },
+}
+
+pub(crate) enum Event {
+    /// The session started, and the agent takes prompts.
+    Started {
+        /// Whether prompts can carry cites as embedded resources.
+        embedded_context: bool,
+        options: Vec<SessionConfigOption>,
+    },
+    Update(SessionUpdate),
+    /// The agent asks before running a tool. It waits for the answer.
+    Permission {
+        request: RequestPermissionRequest,
+        responder: Responder<RequestPermissionResponse>,
+    },
+    /// The agent finished answering a prompt.
+    TurnEnded(Result<StopReason, String>),
+    Options(Vec<SessionConfigOption>),
+    /// The agent could not start, or it stopped.
+    Failed(Failure),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Failure {
+    pub(crate) message: String,
+    /// Whether the agent asks to sign in first.
+    pub(crate) sign_in: bool,
+}
+
+pub(crate) struct Connection {
+    commands: UnboundedSender<Command>,
+    _task: Task<()>,
+}
+
+impl Connection {
+    /// Start the agent and a session in `launch.directory`. Events arrive on
+    /// the receiver until the agent stops or the connection is dropped.
+    pub(crate) fn start(launch: Launch, cx: &mut App) -> (Self, UnboundedReceiver<Event>) {
+        let (commands, command_stream) = unbounded();
+        let (events, event_stream) = unbounded();
+
+        let task = cx.spawn(async move |_| {
+            let failed = events.clone();
+            if let Err(failure) = run(launch, command_stream, events).await {
+                let _ = failed.unbounded_send(Event::Failed(failure));
+            }
+        });
+
+        (
+            Self {
+                commands,
+                _task: task,
+            },
+            event_stream,
+        )
+    }
+
+    pub(crate) fn send(&self, command: Command) {
+        let _ = self.commands.unbounded_send(command);
+    }
+}
+
+async fn run(
+    launch: Launch,
+    mut commands: UnboundedReceiver<Command>,
+    events: UnboundedSender<Event>,
+) -> Result<(), Failure> {
+    let stderr = Arc::new(Mutex::new(VecDeque::new()));
+    let agent = AcpAgent::new(
+        AcpAgentConfig::new(launch.program)
+            .args(launch.args)
+            .env("PATH", launch.path.to_string_lossy()),
+    )
+    .with_debug({
+        let stderr = stderr.clone();
+        move |line, direction| {
+            if direction == LineDirection::Stderr {
+                let mut lines = stderr.lock().unwrap();
+                if lines.len() == STDERR_LINES {
+                    lines.pop_front();
+                }
+                lines.push_back(line.to_owned());
+            }
+        }
+    });
+
+    let updates = events.clone();
+    let permissions = events.clone();
+    let directory = launch.directory;
+    let additional_directories = launch.additional_directories;
+
+    let result = Client
+        .builder()
+        .name("request-eagle")
+        .on_receive_notification(
+            async move |notification: SessionNotification, _| {
+                let _ = updates.unbounded_send(Event::Update(notification.update));
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        // Answered later, from the panel, so the agent's other messages
+        // keep arriving meanwhile.
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, responder, _| {
+                let _ = permissions.unbounded_send(Event::Permission { request, responder });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1).client_info(
+                        agent_client_protocol::schema::v1::Implementation::new(
+                            "request-eagle",
+                            env!("CARGO_PKG_VERSION"),
+                        )
+                        .title("Request Eagle".to_owned()),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let session = connection
+                .send_request(
+                    NewSessionRequest::new(directory)
+                        .additional_directories(additional_directories),
+                )
+                .block_task()
+                .await?;
+            let id = session.session_id;
+
+            let _ = events.unbounded_send(Event::Started {
+                embedded_context: initialized
+                    .agent_capabilities
+                    .prompt_capabilities
+                    .embedded_context,
+                options: session.config_options.unwrap_or_default(),
+            });
+
+            loop {
+                let next = select(commands.next(), Box::pin(connection.incoming_closed())).await;
+                let command = match next {
+                    Either::Left((Some(command), _)) => command,
+                    // The panel ended the session.
+                    Either::Left((None, _)) => return Ok(()),
+                    Either::Right(_) => {
+                        return Err(agent_client_protocol::Error::internal_error()
+                            .data(serde_json::json!("The agent stopped.")));
+                    }
+                };
+
+                handle(command, &id, &connection, &events)?;
+            }
+        })
+        .await;
+
+    result.map_err(|error| {
+        let lines: Vec<String> = stderr.lock().unwrap().iter().cloned().collect();
+        failure(error, &lines)
+    })
+}
+
+fn handle(
+    command: Command,
+    id: &SessionId,
+    connection: &ConnectionTo<Agent>,
+    events: &UnboundedSender<Event>,
+) -> Result<(), agent_client_protocol::Error> {
+    match command {
+        Command::Prompt(blocks) => {
+            let request = connection.send_request(PromptRequest::new(id.clone(), blocks));
+            let events = events.clone();
+            connection.spawn(async move {
+                let result = request
+                    .block_task()
+                    .await
+                    .map(|response| response.stop_reason)
+                    .map_err(|error| error.message);
+                let _ = events.unbounded_send(Event::TurnEnded(result));
+                Ok(())
+            })
+        }
+        Command::Cancel => connection.send_notification(CancelNotification::new(id.clone())),
+        Command::SetOption { id: option, value } => {
+            let request = connection.send_request(SetSessionConfigOptionRequest::new(
+                id.clone(),
+                option,
+                value,
+            ));
+            let events = events.clone();
+            connection.spawn(async move {
+                // A value the agent turned down leaves the options as they were.
+                if let Ok(response) = request.block_task().await {
+                    let _ = events.unbounded_send(Event::Options(response.config_options));
+                }
+                Ok(())
+            })
+        }
+    }
+}
+
+/// Why the agent could not start or stopped, from its error and the last
+/// lines it wrote to stderr.
+pub(crate) fn failure(error: agent_client_protocol::Error, stderr: &[String]) -> Failure {
+    if error.code == ErrorCode::AuthRequired {
+        return Failure {
+            message: error.message,
+            sign_in: true,
+        };
+    }
+
+    let detail = error
+        .data
+        .as_ref()
+        .and_then(|data| data.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default();
+    let mut message = match (error.message.as_str(), detail.as_str()) {
+        (message, "") => message.to_owned(),
+        (_, detail) => detail.to_owned(),
+    };
+    let stderr: Vec<&str> = stderr
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if !stderr.is_empty() {
+        message.push_str("\n\n");
+        message.push_str(&stderr.join("\n"));
+    }
+
+    Failure {
+        message,
+        sign_in: false,
+    }
+}

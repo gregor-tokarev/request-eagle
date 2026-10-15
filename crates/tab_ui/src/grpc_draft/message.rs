@@ -49,6 +49,7 @@ impl GrpcDraft {
                         with_variables(
                             self.message_completion.as_ref().unwrap(),
                             Editor::new(&message)
+                                .context_menu(crate::cite::editable_field_menu)
                                 .h_full()
                                 .appearance(false)
                                 .bordered(false)

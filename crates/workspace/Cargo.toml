@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+agent_panel = { path = "../agent_panel" }
 analytics = { path = "../analytics" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 environment = { path = "../environment" }

@@ -50,7 +50,9 @@ script results.
 ## Things to know
 
 - Quit the desktop app before editing its data and reopen it to load the
-  changes. There is no live synchronization.
+  changes. There is no live synchronization, except for agents in the app's
+  [agent panel](agent.md): the app reloads collections and flows after each
+  of their turns.
 - `requests.update` replaces the complete request. Read it first and preserve
   the fields you do not intend to change.
 - When a collection or flow file can't be read, such as one with a merge
