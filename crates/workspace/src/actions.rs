@@ -94,7 +94,7 @@ pub(crate) fn init(cx: &mut App) {
         "Focus URL bar",
         "Select the URL of the request in the active tab.",
         "Requests",
-        Some("secondary-l"),
+        Some("secondary-shift-l"),
         Some("Workspace"),
         cx,
     )

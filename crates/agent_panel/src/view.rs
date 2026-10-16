@@ -15,7 +15,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::{AddToAgent, SendRequest};
 
-use crate::actions::{OpenAgentSettings, ToggleAgentPanel};
+use crate::actions::{ChangeModel, NewThread, OpenAgentSettings, ToggleAgentPanel};
 use crate::option_menu::{OptionChoice, OptionMenu};
 use crate::panel::AgentPanel;
 use agent::{AGENTS, Agent};
@@ -89,7 +89,7 @@ impl AgentPanel {
                     .xsmall()
                     .icon(IconName::Plus)
                     .accessibility_label("New thread")
-                    .tooltip("New Thread")
+                    .tooltip_with_action("New Thread", &NewThread, Some("AgentComposer"))
                     .disabled(self.thread.is_empty() && self.failure.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.new_thread(window, cx))),
             )
@@ -366,32 +366,35 @@ impl AgentPanel {
                 )
             })
             .child(
-                div().debug_selector(|| "agent-composer".into()).child(
-                    InputGroup::new("agent-composer")
-                        .input(
-                            InputGroupTextarea::new(&self.composer)
-                                .aria_label("Message")
-                                .token(|token, _, _| cite_token(token))
-                                .on_token_click(open),
-                        )
-                        .addon(
-                            InputGroupAddon::new("agent-composer-actions")
-                                .align(InputGroupAddonAlignment::BlockEnd)
-                                .items_end()
-                                // The menus take what room the send button
-                                // leaves and wrap onto another line when
-                                // their names do not fit on one.
-                                .child(
-                                    h_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex_wrap()
-                                        .gap_0p5()
-                                        .children(self.option_menus(window, cx)),
-                                )
-                                .child(send.flex_none()),
-                        ),
-                ),
+                div()
+                    .debug_selector(|| "agent-composer".into())
+                    .key_context("AgentComposer")
+                    .child(
+                        InputGroup::new("agent-composer")
+                            .input(
+                                InputGroupTextarea::new(&self.composer)
+                                    .aria_label("Message")
+                                    .token(|token, _, _| cite_token(token))
+                                    .on_token_click(open),
+                            )
+                            .addon(
+                                InputGroupAddon::new("agent-composer-actions")
+                                    .align(InputGroupAddonAlignment::BlockEnd)
+                                    .items_end()
+                                    // The menus take what room the send button
+                                    // leaves and wrap onto another line when
+                                    // their names do not fit on one.
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex_wrap()
+                                            .gap_0p5()
+                                            .children(self.option_menus(window, cx)),
+                                    )
+                                    .child(send.flex_none()),
+                            ),
+                    ),
             )
     }
 
@@ -612,6 +615,16 @@ impl Render for AgentPanel {
             .key_context("AgentPanel")
             // The shortcut that sends a request sends the message here.
             .on_action(cx.listener(|this, _: &SendRequest, window, cx| this.send(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ChangeModel, window, cx| this.change_model(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &NewThread, window, cx| {
+                // As the header's New Thread button, which has nothing to
+                // clear before the first message.
+                if !this.thread.is_empty() || this.failure.is_some() {
+                    this.new_thread(window, cx)
+                }
+            }))
             .track_focus(&self.focus)
             .size_full()
             .bg(cx.theme().sidebar)

@@ -11,7 +11,9 @@ tools.
 Click **Agent** in the status bar, or press Ctrl+Shift+I (Command+Shift+I on
 macOS). The panel runs the first agent it finds on your computer that is
 turned on in **Settings > Agents**; pick another from the menu at its top.
-Install one if none is found:
+In the panel, Ctrl+/ (Command+/ on macOS) opens the model menu, and Ctrl+N in
+the message box starts a new thread. Change any of these in
+**Settings > Keybindings**. Install an agent if none is found:
 
 | Agent | Needs |
 | --- | --- |
@@ -25,7 +27,7 @@ agent asks to sign in, the panel says how.
 ## Cite what you mean
 
 Select text in the URL, the request body, a script or the response, and press
-Ctrl+I (Command+I on macOS), or right-click it and choose **Add to Agent**.
+Ctrl+L (Command+L on macOS), or right-click it and choose **Add to Agent**.
 The selection appears as a cite in your message, where the caret is, named
 after what it quotes, such as **Response body · L3–4**. Without a selection,
 the field with focus is cited whole; the button with sparkles in the response

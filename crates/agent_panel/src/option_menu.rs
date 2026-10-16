@@ -1,3 +1,4 @@
+use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::{
     searchable_list::SearchableListItem,
     select::{SearchableVec, SelectEvent, SelectState},
@@ -68,6 +69,12 @@ impl OptionMenu {
             choices: Vec::new(),
             _subscription: subscription,
         }
+    }
+
+    /// Open the menu the way Enter opens it on the focused select.
+    pub(crate) fn open(&self, window: &mut Window, cx: &mut App) {
+        self.state.update(cx, |state, cx| state.focus(window, cx));
+        window.dispatch_action(Confirm { secondary: false }.boxed_clone(), cx);
     }
 
     /// Show `choices`, with `current` chosen when it is among them, changing

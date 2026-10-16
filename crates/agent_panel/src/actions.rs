@@ -1,4 +1,7 @@
-gpui_kit::actions!(agent, [ToggleAgentPanel, OpenAgentSettings]);
+gpui_kit::actions!(
+    agent,
+    [ToggleAgentPanel, OpenAgentSettings, ChangeModel, NewThread]
+);
 
 /// Register the panel's shortcuts.
 pub fn init(cx: &mut gpui_kit::App) {
@@ -18,7 +21,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         "Add to agent",
         "Cite the selection, or the field with focus, in the agent's message.",
         "Agent",
-        Some("secondary-i"),
+        Some("secondary-l"),
         Some("Workspace"),
         cx,
     )
@@ -34,4 +37,26 @@ pub fn init(cx: &mut gpui_kit::App) {
         cx,
     )
     .expect("agent settings command should be valid");
+
+    keybindings_service::register(
+        ChangeModel,
+        "Change model",
+        "Open the agent's model menu.",
+        "Agent",
+        Some("secondary-/"),
+        Some("AgentPanel"),
+        cx,
+    )
+    .expect("default change model keybinding should be valid");
+
+    keybindings_service::register(
+        NewThread,
+        "New thread",
+        "Start a new thread with the agent from its message box.",
+        "Agent",
+        Some("ctrl-n"),
+        Some("AgentComposer"),
+        cx,
+    )
+    .expect("default new thread keybinding should be valid");
 }

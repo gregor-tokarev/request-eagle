@@ -838,6 +838,25 @@ impl AgentPanel {
     }
 
     /// Start again with an empty thread, ending the agent of the last one.
+    /// Open the model menu, once the agent offers its models.
+    pub(crate) fn change_model(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let menu = self
+            .session
+            .as_ref()
+            .and_then(|session| session.ready.as_ref())
+            .and_then(|ready| {
+                ready
+                    .options
+                    .iter()
+                    .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
+            })
+            .and_then(|option| self.option_menus.get(option.id.0.as_ref()));
+
+        if let Some(menu) = menu {
+            menu.open(window, cx);
+        }
+    }
+
     pub(crate) fn new_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_permissions(cx);
         self.session = None;
