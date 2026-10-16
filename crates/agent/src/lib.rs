@@ -24,6 +24,6 @@ pub use check::{Check, Status, check};
 pub use connection::{Command, Connection, Event, Failure, Launch};
 pub use options::{
     bypass_mode, choices, exact_choice, is_bypass, is_unspecified, merge_models, model_name,
-    offered_models, prompting_mode,
+    offered_models, prompting_mode, without_provider,
 };
 pub use shell_path::agent_path;

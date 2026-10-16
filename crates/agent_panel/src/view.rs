@@ -441,10 +441,18 @@ impl AgentPanel {
                     })
                     .filter(|(value, _)| *value == current || !agent::is_unspecified(option, value))
                     .collect();
+                // The model button leaves out the provider OpenCode names
+                // the model with, which its menu still shows.
                 let label = choices
                     .iter()
                     .find(|(value, _)| *value == current)
-                    .map_or_else(|| current.clone(), |(_, name)| name.clone());
+                    .map_or(current.as_str(), |(_, name)| name.as_str());
+                let label = if model {
+                    agent::without_provider(label)
+                } else {
+                    label
+                }
+                .to_owned();
                 // The model menu lists the models in the order the settings
                 // give them, without those hidden there.
                 let choices = if model {

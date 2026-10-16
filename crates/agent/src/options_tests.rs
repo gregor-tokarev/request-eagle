@@ -6,7 +6,7 @@ use preferences::ModelPreference;
 
 use crate::options::{
     bypass_mode, exact_choice, is_unspecified, merge_models, model_name, offered_models,
-    prompting_mode,
+    prompting_mode, without_provider,
 };
 
 fn menu(
@@ -241,4 +241,13 @@ fn gpt_models_keep_gpt_in_their_names() {
         "OpenCode Go/GPT-6 Luna"
     );
     assert_eq!(model_name("opus", "Opus 5.5"), "Opus 5.5");
+}
+
+#[test]
+fn a_model_name_drops_the_provider_before_it() {
+    assert_eq!(
+        without_provider("OpenCode Go/GLM-5.3-Flash"),
+        "GLM-5.3-Flash"
+    );
+    assert_eq!(without_provider("Opus 5.5"), "Opus 5.5");
 }

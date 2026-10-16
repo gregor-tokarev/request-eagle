@@ -57,6 +57,12 @@ pub fn model_name(id: &str, name: &str) -> String {
     }
 }
 
+/// A model's name without the provider OpenCode puts before it, such as
+/// GLM-5.3-Flash for OpenCode Go/GLM-5.3-Flash.
+pub fn without_provider(name: &str) -> &str {
+    name.split_once('/').map_or(name, |(_, model)| model)
+}
+
 /// Whether a model or reasoning level choice leaves it to the agent, so it
 /// does not say what runs, like Claude Code's Default (recommended) model
 /// and Default effort.
