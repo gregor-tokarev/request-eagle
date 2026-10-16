@@ -70,7 +70,8 @@ impl OptionMenu {
         }
     }
 
-    /// Show `choices`, with `current` chosen, changing only what differs.
+    /// Show `choices`, with `current` chosen when it is among them, changing
+    /// only what differs.
     pub(crate) fn show(
         &mut self,
         choices: Vec<OptionChoice>,
@@ -78,16 +79,27 @@ impl OptionMenu {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let selected = choices
+            .iter()
+            .any(|choice| choice.value == *current)
+            .then_some(current);
+        let select = |state: &mut SelectState<OptionChoices>,
+                      window: &mut Window,
+                      cx: &mut Context<SelectState<OptionChoices>>| {
+            match selected {
+                Some(value) => state.set_selected_value(value, window, cx),
+                None => state.set_selected_index(None, window, cx),
+            }
+        };
+
         if self.choices != choices {
             self.state.update(cx, |state, cx| {
                 state.set_items(SearchableVec::new(choices.clone()), window, cx);
-                state.set_selected_value(current, window, cx);
+                select(state, window, cx);
             });
             self.choices = choices;
-        } else if self.state.read(cx).selected_value() != Some(current) {
-            self.state.update(cx, |state, cx| {
-                state.set_selected_value(current, window, cx)
-            });
+        } else if self.state.read(cx).selected_value() != selected {
+            self.state.update(cx, |state, cx| select(state, window, cx));
         }
     }
 }

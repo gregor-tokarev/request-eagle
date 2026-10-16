@@ -466,15 +466,23 @@ impl AgentPanel {
                         }
                     })
                     .collect();
+                // The button names the current choice even when the settings
+                // hide it from the menu.
+                let label: SharedString = choices
+                    .iter()
+                    .find(|choice| choice.value == current)
+                    .map_or_else(
+                        || current.clone().into(),
+                        |choice| choice.short_name.clone().unwrap_or(choice.name.clone()),
+                    );
                 // The model menu lists the models in the order the settings
                 // give them, without those hidden there.
                 if model {
                     let models = &provider.models;
                     choices.retain(|choice| {
-                        choice.value == current
-                            || !models
-                                .iter()
-                                .any(|model| model.id == choice.value && model.hidden)
+                        !models
+                            .iter()
+                            .any(|model| model.id == choice.value && model.hidden)
                     });
                     choices.sort_by_key(|choice| {
                         models
@@ -490,6 +498,7 @@ impl AgentPanel {
                     model,
                     choices,
                     current,
+                    label,
                 )
             })
             .collect();
@@ -499,7 +508,7 @@ impl AgentPanel {
 
         shown
             .into_iter()
-            .map(|(id, name, model, choices, current)| {
+            .map(|(id, name, model, choices, current, label)| {
                 let menu = self
                     .option_menus
                     .entry(id.clone())
@@ -507,23 +516,31 @@ impl AgentPanel {
                 menu.show(choices, &current, window, cx);
 
                 let state = menu.state.clone();
-                let open = state.read(cx).focus_handle(cx).contains_focused(window, cx);
+                // Focused, or open, as the select shows it with its own
+                // border.
+                let active = state.read(cx).focus_handle(cx).contains_focused(window, cx);
 
                 div()
                     .debug_selector(move || format!("agent-option-{id}"))
                     .max_w_full()
                     .rounded(cx.theme().radius)
-                    .when(open, |this| this.bg(cx.theme().secondary_hover))
+                    .border_1()
+                    .border_color(cx.theme().transparent)
                     .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .when(active, |this| this.focus_ring_style(window, cx))
                     .child(
                         Select::new(&state)
                             .xsmall()
                             .appearance(false)
                             .accessibility_label(name)
+                            .placeholder(label)
                             // Wide enough for a model with its provider, and
                             // short enough to stay clear of the panel's top.
                             .menu_width(rems(if model { 20. } else { 12. }))
                             .menu_max_h(rems(18.))
+                            // It opens above the message box, so its search
+                            // field would move as a search shortens it.
+                            .keep_menu_height(true)
                             .search_placeholder("Search"),
                     )
                     .into_any_element()
