@@ -33,6 +33,10 @@ pub struct Agent {
     /// The name of the agent's mode that runs tools without asking, which
     /// the panel starts it in unless told to ask.
     pub bypass_mode: Option<&'static str>,
+    /// Whether the agent puts the provider before its models' names, such
+    /// as OpenCode Go/GLM-5.3-Flash. Other agents' names may have a slash
+    /// of their own, such as qwen/qwen3-coder.
+    pub provider_in_model_names: bool,
     /// What to do when the agent asks to sign in.
     pub sign_in: &'static str,
     pub install_url: &'static str,
@@ -48,6 +52,7 @@ pub const AGENTS: [Agent; 3] = [
         config_variable: "CLAUDE_CONFIG_DIR",
         default_config_directory: "~/.claude",
         bypass_mode: Some("Bypass permissions"),
+        provider_in_model_names: false,
         sign_in: "Run `claude` in a terminal and sign in, then start a new thread.",
         install_url: "https://docs.anthropic.com/en/docs/claude-code/setup",
         icon: "icons/claude.svg",
@@ -60,6 +65,7 @@ pub const AGENTS: [Agent; 3] = [
         config_variable: "CODEX_HOME",
         default_config_directory: "~/.codex",
         bypass_mode: Some("Full access"),
+        provider_in_model_names: false,
         sign_in: "Run `codex login` in a terminal, then start a new thread.",
         install_url: "https://developers.openai.com/codex/cli",
         icon: "icons/square-terminal.svg",
@@ -72,6 +78,7 @@ pub const AGENTS: [Agent; 3] = [
         config_variable: "OPENCODE_CONFIG_DIR",
         default_config_directory: "~/.config/opencode",
         bypass_mode: None,
+        provider_in_model_names: true,
         sign_in: "Run `opencode auth login` in a terminal, then start a new thread.",
         install_url: "https://opencode.ai/docs/",
         icon: "icons/opencode.svg",

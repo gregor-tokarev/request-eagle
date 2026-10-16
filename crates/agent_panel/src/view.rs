@@ -447,7 +447,7 @@ impl AgentPanel {
                     .iter()
                     .find(|(value, _)| *value == current)
                     .map_or(current.as_str(), |(_, name)| name.as_str());
-                let label = if model {
+                let label = if model && self.agent.provider_in_model_names {
                     agent::without_provider(label)
                 } else {
                     label

@@ -57,8 +57,8 @@ pub fn model_name(id: &str, name: &str) -> String {
     }
 }
 
-/// A model's name without the provider OpenCode puts before it, such as
-/// GLM-5.3-Flash for OpenCode Go/GLM-5.3-Flash.
+/// A model's name without the provider an agent like OpenCode puts before
+/// it, such as GLM-5.3-Flash for OpenCode Go/GLM-5.3-Flash.
 pub fn without_provider(name: &str) -> &str {
     name.split_once('/').map_or(name, |(_, model)| model)
 }
