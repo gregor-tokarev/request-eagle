@@ -162,10 +162,17 @@ impl AgentPanel {
             .when(self.briefing.cli.is_none() && self.installed.is_some(), |this| {
                 this.child(
                     h_flex()
-                        .gap_2()
+                        .flex_wrap()
+                        .gap_x_2()
+                        .gap_y_0p5()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child("Install the Request Eagle CLI to let the agent run requests.")
+                        // Wraps, before the link, when the panel is narrow.
+                        .child(
+                            div()
+                                .min_w_0()
+                                .child("Install the Request Eagle CLI to let the agent run requests."),
+                        )
                         .child(
                             Button::new("agent-install-cli")
                                 .link()
