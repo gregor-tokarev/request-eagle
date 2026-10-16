@@ -17,7 +17,7 @@ use super::scripts::script_results;
 use crate::actions::SendRequest;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Section {
+pub(super) enum Section {
     Body,
     Cookies,
     Headers,
@@ -48,7 +48,7 @@ pub struct ResponseView {
     pub(super) state: ResponseState,
     pub(super) mode: BodyMode,
     pub(super) scripts: Vec<request::ScriptReport>,
-    section: Section,
+    pub(super) section: Section,
     pub(super) wrap: bool,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
@@ -62,6 +62,8 @@ pub struct ResponseView {
     pub(super) save_task: Option<Task<()>>,
     /// Whether a section shows the request as it went out.
     request_section: bool,
+    /// Whether the tab quotes the response to the agent.
+    pub(super) citable: bool,
 }
 
 impl ResponseView {
@@ -81,7 +83,15 @@ impl ResponseView {
             responses: 0,
             save_task: None,
             request_section: false,
+            citable: false,
         }
+    }
+
+    /// Offer to quote the response to the agent. The tab handles
+    /// [`AddToAgent`](crate::AddToAgent), since it knows the request.
+    pub(crate) fn citable(mut self) -> Self {
+        self.citable = true;
+        self
     }
 
     /// Add a section that shows the request as it went out, as the

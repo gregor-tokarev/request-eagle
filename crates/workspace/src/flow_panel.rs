@@ -17,8 +17,15 @@ type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) ->
 
 pub(crate) enum FlowPanelEvent {
     Open(SavedFlow),
-    Renamed { path: PathBuf, name: SharedString },
-    Deleted { path: PathBuf },
+    Renamed {
+        path: PathBuf,
+        name: SharedString,
+    },
+    Deleted {
+        path: PathBuf,
+    },
+    /// The flows were read from disk again.
+    Refreshed,
 }
 
 /// A flow whose name is being edited in its row.
@@ -40,6 +47,12 @@ pub(crate) struct FlowPanel {
     error: Option<String>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    /// Counts the changes made to the flows here, so that reading them from
+    /// disk in the background does not undo one made meanwhile.
+    revision: u64,
+    refreshing: Option<Task<()>>,
+    /// Whether another refresh was asked for while one was reading.
+    refresh_pending: bool,
 }
 
 impl EventEmitter<FlowPanelEvent> for FlowPanel {}
@@ -55,6 +68,9 @@ impl FlowPanel {
             error: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle().tab_stop(true),
+            revision: 0,
+            refreshing: None,
+            refresh_pending: false,
         }
     }
 
@@ -79,6 +95,7 @@ impl FlowPanel {
         self.rename = None;
         self.pending_delete = None;
 
+        self.revision += 1;
         match self.library.create("New Flow", Flow::starter()) {
             Ok(path) => {
                 self.error = None;
@@ -110,6 +127,7 @@ impl FlowPanel {
             return Err(FlowLibraryError::ChangedOnDisk);
         }
 
+        self.revision += 1;
         self.library.update(path, expected_id, flow)
     }
 
@@ -121,7 +139,56 @@ impl FlowPanel {
         expected_id: &str,
         flow: Flow,
     ) -> Result<(), FlowLibraryError> {
+        self.revision += 1;
         self.library.overwrite(path, expected_id, flow)
+    }
+
+    /// Read the flows directory again in the background, as after an agent
+    /// changed it. Reports [`FlowPanelEvent::Refreshed`] once it is read.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.refreshing.is_some() {
+            self.refresh_pending = true;
+            return;
+        }
+
+        let directory = self.library.directory().to_path_buf();
+        let revision = self.revision;
+        self.refreshing = Some(cx.spawn(async move |this, cx| {
+            let latest = cx
+                .background_executor()
+                .spawn(async move { FlowLibrary::load(directory) })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.refreshing = None;
+                // What was read can miss a change made here meanwhile, and
+                // another refresh was asked for after it started. One more
+                // serves both.
+                if this.revision != revision || std::mem::take(&mut this.refresh_pending) {
+                    this.refresh(cx);
+                    return;
+                }
+
+                this.library.take_reloaded(latest);
+                let library = &this.library;
+                let gone = |path: &PathBuf| library.get(path).is_none();
+                if this.selected.as_ref().is_some_and(gone) {
+                    this.selected = None;
+                }
+                if this.pending_delete.as_ref().is_some_and(gone) {
+                    this.pending_delete = None;
+                }
+                if this
+                    .rename
+                    .as_ref()
+                    .is_some_and(|rename| gone(&rename.path))
+                {
+                    this.rename = None;
+                }
+                cx.emit(FlowPanelEvent::Refreshed);
+                cx.notify();
+            });
+        }));
     }
 
     /// Take the changes made to a flow's file outside the app.
@@ -131,6 +198,7 @@ impl FlowPanel {
         expected_id: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), FlowLibraryError> {
+        self.revision += 1;
         self.library.reload(path, expected_id)?;
 
         // The file can hold another name too.
@@ -154,6 +222,7 @@ impl FlowPanel {
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), FlowLibraryError> {
+        self.revision += 1;
         self.library.rename(path, expected_id, name)?;
 
         if let Some(saved) = self.library.get(path) {
@@ -254,6 +323,7 @@ impl FlowPanel {
     }
 
     fn duplicate(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.revision += 1;
         match self.library.duplicate(&path) {
             Ok(copy) => {
                 self.error = None;
@@ -268,6 +338,7 @@ impl FlowPanel {
 
     fn confirm_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = self.pending_delete.take() {
+            self.revision += 1;
             match self.library.delete(&path) {
                 Ok(()) => {
                     self.error = None;

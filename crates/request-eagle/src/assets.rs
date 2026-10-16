@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// GPUI Kit.
 pub struct Assets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 56] = [
+const LOCAL_ICONS: [(&str, &[u8]); 64] = [
     // The app's mark, shown while no tab is open.
     ("icons/logo.svg", include_bytes!("../assets/icons/logo.svg")),
     (
@@ -213,6 +213,40 @@ const LOCAL_ICONS: [(&str, &[u8]); 56] = [
     ),
     ("icons/scan.svg", include_bytes!("../assets/icons/scan.svg")),
     ("icons/link.svg", include_bytes!("../assets/icons/link.svg")),
+    // The agent panel's mark, its cites and the steps it shows.
+    (
+        "icons/sparkles.svg",
+        include_bytes!("../assets/icons/sparkles.svg"),
+    ),
+    (
+        "icons/text-quote.svg",
+        include_bytes!("../assets/icons/text-quote.svg"),
+    ),
+    (
+        "icons/brain.svg",
+        include_bytes!("../assets/icons/brain.svg"),
+    ),
+    (
+        "icons/pencil.svg",
+        include_bytes!("../assets/icons/pencil.svg"),
+    ),
+    (
+        "icons/terminal.svg",
+        include_bytes!("../assets/icons/terminal.svg"),
+    ),
+    (
+        "icons/list-todo.svg",
+        include_bytes!("../assets/icons/list-todo.svg"),
+    ),
+    // Marks of the coding agents, from Simple Icons (CC0).
+    (
+        "icons/claude.svg",
+        include_bytes!("../assets/icons/claude.svg"),
+    ),
+    (
+        "icons/opencode.svg",
+        include_bytes!("../assets/icons/opencode.svg"),
+    ),
 ];
 
 impl AssetSource for Assets {

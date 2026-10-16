@@ -63,7 +63,11 @@ impl GrpcDraft {
                     .child(with_variables(
                         self.url_completion.as_ref().unwrap(),
                         InputGroup::new("grpc-url-group")
-                            .input(Input::new(&url).aria_label("Server URL"))
+                            .input(
+                                Input::new(&url)
+                                    .aria_label("Server URL")
+                                    .context_menu(crate::cite::editable_field_menu),
+                            )
                             .addon(
                                 InputGroupAddon::new("grpc-tls-addon").p_1().child(
                                     Button::new("grpc-tls")

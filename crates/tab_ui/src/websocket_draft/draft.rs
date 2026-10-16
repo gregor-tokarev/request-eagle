@@ -103,7 +103,7 @@ pub struct WebSocketDraft {
     /// inherits it. Read again when the tab is shown.
     inherited: Option<Inherited>,
     pub(crate) message: Option<Entity<EditorState>>,
-    message_vim: Option<Entity<crate::vim::Vim>>,
+    pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
     message_completion: Option<Entity<VariableInput>>,
     message_json_valid: bool,
     message_task: Option<Task<()>>,
@@ -614,7 +614,9 @@ impl WebSocketDraft {
                     .min_w_0()
                     .child(with_variables(
                         self.url_completion.as_ref().unwrap(),
-                        Input::new(&url).aria_label("WebSocket URL"),
+                        Input::new(&url)
+                            .aria_label("WebSocket URL")
+                            .context_menu(crate::cite::editable_field_menu),
                     )),
             )
             .child(
@@ -719,6 +721,7 @@ impl WebSocketDraft {
                         with_variables(
                             self.message_completion.as_ref().unwrap(),
                             Editor::new(&message)
+                                .context_menu(crate::cite::editable_field_menu)
                                 .h_full()
                                 .appearance(false)
                                 .bordered(false)
@@ -769,9 +772,10 @@ impl WebSocketDraft {
 }
 
 impl Render for WebSocketDraft {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .debug_selector(|| "websocket-draft".into())
+            .on_action(cx.listener(Self::add_to_agent))
             .size_full()
             .min_w_0()
             .px_4()

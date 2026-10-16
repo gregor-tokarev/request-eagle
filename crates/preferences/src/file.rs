@@ -1,6 +1,7 @@
 use crate::credentials::Secret;
 use crate::{
-    AppearancePreferences, ClientCertificate, ProxyPreferences, RequestPreferences, UpdateTrack,
+    AgentPreferences, AppearancePreferences, ClientCertificate, ProxyPreferences,
+    RequestPreferences, UpdateTrack,
 };
 use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,8 @@ pub struct Preferences {
     /// The global environment selected in the workspace, by name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_environment: Option<String>,
+    /// The coding agents the agent panel runs.
+    pub agents: AgentPreferences,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) proxy_credentials_id: Option<String>,
 }
@@ -36,6 +39,7 @@ impl Default for Preferences {
             update_track: UpdateTrack::default(),
             share_usage_data: true,
             active_environment: None,
+            agents: AgentPreferences::default(),
             proxy_credentials_id: None,
         }
     }

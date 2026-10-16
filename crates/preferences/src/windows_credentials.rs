@@ -17,6 +17,7 @@ fn target(secret: Secret, id: &str) -> Vec<u16> {
     let account = match secret {
         Secret::ProxyCredentials => "proxy",
         Secret::CertificatePassphrase => "certificate",
+        Secret::AgentEnvironment => "agent-environment",
     };
 
     format!("request-eagle.{account}/{id}")

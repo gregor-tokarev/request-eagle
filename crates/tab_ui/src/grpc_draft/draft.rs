@@ -569,6 +569,7 @@ impl Render for GrpcDraft {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let request = v_flex()
             .debug_selector(|| "grpc-draft".into())
+            .on_action(cx.listener(Self::add_to_agent))
             .size_full()
             .min_w_0()
             .px_4()

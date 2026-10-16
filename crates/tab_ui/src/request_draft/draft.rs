@@ -156,7 +156,7 @@ impl RequestDraft {
         // Unlike the editors, these views do not install window listeners or
         // notify while they are created, so unvisited tabs can own them.
         let owner = cx.weak_entity();
-        let response = cx.new(|cx| ResponseView::new(cx));
+        let response = cx.new(|cx| ResponseView::new(cx).citable());
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
@@ -740,6 +740,7 @@ impl Render for RequestDraft {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let request = v_flex()
             .debug_selector(|| "request-draft".into())
+            .on_action(cx.listener(Self::add_to_agent))
             .size_full()
             .min_w_0()
             .px_4()

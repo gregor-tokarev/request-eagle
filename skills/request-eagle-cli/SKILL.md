@@ -13,6 +13,8 @@ If the binary is missing, see [installation instructions](../../docs/cli.md#inst
 
 - Work with saved data. Close the desktop app before edits and reopen it to
   reload changes; unsaved drafts and open tabs are outside this interface.
+  In the app's agent panel, the app stays open and reloads collections and
+  flows after each turn.
 - Use paths and IDs returned by the CLI. Read a request before updating it:
   updates replace the complete request, so preserve fields outside the task.
 - Pass JSON through stdin with `call -`, especially when it contains secrets.

@@ -8,8 +8,9 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use updater::Updater;
 
 use crate::{
-    actions::CloseSettings, appearance::AppearanceSettings, certificates::CertificateSettings,
-    general::GeneralSettings, keybindings::KeybindingsPage, layout, proxy::ProxySettings,
+    actions::CloseSettings, agents::AgentSettings, appearance::AppearanceSettings,
+    certificates::CertificateSettings, general::GeneralSettings, keybindings::KeybindingsPage,
+    layout, proxy::ProxySettings,
 };
 
 const SIDEBAR_MIN: Rems = rems(14.);
@@ -22,6 +23,7 @@ pub enum SettingsEvent {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SettingsPage {
     General,
+    Agents,
     Proxy,
     Certificates,
     Appearance,
@@ -32,6 +34,7 @@ impl SettingsPage {
     fn title(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Agents => "Agents",
             Self::Proxy => "Proxy",
             Self::Certificates => "Certificates",
             Self::Appearance => "Appearance",
@@ -42,6 +45,7 @@ impl SettingsPage {
     fn icon(self) -> Icon {
         match self {
             Self::General => Icon::new(IconName::Settings2),
+            Self::Agents => Icon::default().path("icons/sparkles.svg"),
             Self::Proxy => Icon::default().path("icons/network.svg"),
             Self::Certificates => Icon::default().path("icons/shield-check.svg"),
             Self::Appearance => Icon::new(IconName::Palette),
@@ -53,6 +57,7 @@ impl SettingsPage {
 pub struct Settings {
     page: SettingsPage,
     general: Entity<GeneralSettings>,
+    agents: Entity<AgentSettings>,
     proxy: Entity<ProxySettings>,
     certificates: Entity<CertificateSettings>,
     appearance: Entity<AppearanceSettings>,
@@ -67,6 +72,7 @@ impl Settings {
         Self {
             page: SettingsPage::General,
             general: cx.new(|cx| GeneralSettings::new(updater, window, cx)),
+            agents: cx.new(|cx| AgentSettings::new(window, cx)),
             proxy: cx.new(|cx| ProxySettings::new(window, cx)),
             certificates: cx.new(|cx| CertificateSettings::new(window, cx)),
             appearance: cx.new(|cx| AppearanceSettings::new(window, cx)),
@@ -78,6 +84,7 @@ impl Settings {
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.page {
             SettingsPage::General
+            | SettingsPage::Agents
             | SettingsPage::Proxy
             | SettingsPage::Certificates
             | SettingsPage::Appearance => window.focus(&self.focus_handle, cx),
@@ -90,6 +97,10 @@ impl Settings {
     pub fn select_page(&mut self, page: SettingsPage, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
         self.focus(window, cx);
+        if page == SettingsPage::Agents {
+            self.agents
+                .update(cx, |agents, cx| agents.shown(window, cx));
+        }
 
         cx.notify();
     }
@@ -97,6 +108,7 @@ impl Settings {
     fn page_buttons(&self, cx: &mut Context<Self>) -> Vec<Button> {
         [
             SettingsPage::General,
+            SettingsPage::Agents,
             SettingsPage::Proxy,
             SettingsPage::Certificates,
             SettingsPage::Appearance,
@@ -214,7 +226,10 @@ impl Render for Settings {
                     .py(layout::page_inset(window))
                     .child(self.keybindings.clone())
                     .into_any_element(),
-                SettingsPage::General | SettingsPage::Proxy | SettingsPage::Certificates => div()
+                SettingsPage::General
+                | SettingsPage::Agents
+                | SettingsPage::Proxy
+                | SettingsPage::Certificates => div()
                     .id("settings-scroll")
                     .flex_1()
                     .min_h_0()
@@ -225,6 +240,7 @@ impl Render for Settings {
                             .px(layout::page_inset(window))
                             .py(layout::page_inset(window))
                             .child(match self.page {
+                                SettingsPage::Agents => self.agents.clone().into_any_element(),
                                 SettingsPage::Proxy => self.proxy.clone().into_any_element(),
                                 SettingsPage::Certificates => {
                                     self.certificates.clone().into_any_element()

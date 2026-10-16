@@ -1,3 +1,4 @@
+mod cite;
 mod controls;
 mod definition;
 mod draft;

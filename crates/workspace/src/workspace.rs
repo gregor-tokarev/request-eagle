@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use crate::actions::*;
 use crate::{
@@ -13,6 +17,7 @@ use crate::{
     session::{SavedSidebar, SavedWindow, Session, SessionWriter},
     top_panel::TopPanel,
 };
+use agent_panel::{AgentPanel, AgentPanelEvent, OpenAgentSettings, ToggleAgentPanel};
 use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
@@ -28,7 +33,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_history::History;
 use settings_ui::{Settings, SettingsEvent, SettingsPage};
-use tab_ui::Environments;
+use tab_ui::{AddToAgent, Cite, CiteToAgent, Environments};
 use updater::Updater;
 
 /// How long after a tab changes its session is saved. Changes that follow
@@ -61,6 +66,9 @@ pub(crate) struct Workspace {
     bottom_panel: Entity<BottomPanel>,
     git: Entity<GitState>,
     git_panel: Entity<GitPanel>,
+    collections: Entity<Collections>,
+    agent_panel: Entity<AgentPanel>,
+    agent_panel_visible: Entity<bool>,
 
     pub(crate) main_split: Entity<ResizableState>,
     pub(crate) sidebar_visible: Entity<bool>,
@@ -89,6 +97,7 @@ pub(crate) struct Workspace {
     _history_subscription: Subscription,
     _tabs_subscriptions: [Subscription; 2],
     _git_subscriptions: [Subscription; 3],
+    _agent_panel_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
@@ -110,6 +119,7 @@ impl Workspace {
             sidebar: sidebar_state,
             tabs,
             selected_tab,
+            agent_panel: agent_panel_open,
             ..
         } = session;
         let sidebar_visible = cx.new(|_| sidebar_state.visible);
@@ -117,10 +127,34 @@ impl Workspace {
 
         let git = cx.new(|cx| GitState::new(collections.clone(), cx));
         let git_panel = cx.new(|cx| GitPanel::new(git.clone(), sidebar_state.git, window, cx));
+        let agent_panel_visible = cx.new(|_| agent_panel_open);
         // The bottom panel is cached, so it observes what it shows itself.
         let bottom_panel = cx.new(|cx| {
-            BottomPanel::new(sidebar_visible.clone(), git.clone(), git_panel.clone(), cx)
+            BottomPanel::new(
+                sidebar_visible.clone(),
+                agent_panel_visible.clone(),
+                git.clone(),
+                git_panel.clone(),
+                cx,
+            )
         });
+
+        // The session file is in the app's data directory.
+        let data_directory = session_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let agent_panel = cx.new(|cx| AgentPanel::new(data_directory, window, cx));
+        let agent_panel_subscription = cx.subscribe_in(
+            &agent_panel,
+            window,
+            |this, _, event: &AgentPanelEvent, window, cx| match event {
+                AgentPanelEvent::FilesChanged => this.reload_saved(cx),
+                AgentPanelEvent::ShowCite(origin) => this
+                    .main_view
+                    .update(cx, |view, cx| view.show_cite(origin, window, cx)),
+            },
+        );
 
         let sidebar = cx.new(|cx| {
             CollectionPanel::new(collections.clone(), sidebar_state.collapsed, window, cx)
@@ -187,6 +221,10 @@ impl Workspace {
                     this.main_view
                         .update(cx, |view, cx| view.close_flow(path, cx));
                 }
+                FlowPanelEvent::Refreshed => {
+                    this.main_view
+                        .update(cx, |view, cx| view.follow_flows(window, cx));
+                }
             },
         );
 
@@ -207,7 +245,7 @@ impl Workspace {
         let main_view = cx.new(|cx| {
             MainView::new(
                 environments,
-                collections,
+                collections.clone(),
                 flow_panel.clone(),
                 history.clone(),
                 tabs,
@@ -221,7 +259,12 @@ impl Workspace {
         // inside a tab are reported apart, so they do not redraw it.
         let tabs_subscriptions = [
             cx.observe_in(&main_view, window, |this, _, window, cx| {
-                this.checkpoint_session(window, cx)
+                this.checkpoint_session(window, cx);
+
+                // The next thread works where the active tab's collection is.
+                let directory = this.agent_directory(cx);
+                this.agent_panel
+                    .update(cx, |panel, cx| panel.set_directory(directory, cx));
             }),
             cx.subscribe_in(&main_view, window, |this, _, _: &TabEdited, window, cx| {
                 this.checkpoint_session(window, cx)
@@ -255,7 +298,7 @@ impl Workspace {
             main_view.update(cx, |view, cx| view.focus(window, cx));
         }
 
-        Self {
+        let mut workspace = Self {
             top_panel: cx.new(|_| TopPanel),
             sidebar,
             environment_panel,
@@ -273,6 +316,9 @@ impl Workspace {
             bottom_panel,
             git,
             git_panel,
+            collections,
+            agent_panel,
+            agent_panel_visible,
             main_split: cx.new(|_| ResizableState::default()),
             sidebar_visible,
             settings: None,
@@ -290,8 +336,15 @@ impl Workspace {
             _history_subscription: history_subscription,
             _tabs_subscriptions: tabs_subscriptions,
             _git_subscriptions: git_subscriptions,
+            _agent_panel_subscription: agent_panel_subscription,
             _settings_subscription: None,
+        };
+
+        if agent_panel_open {
+            workspace.prepare_agent(cx);
         }
+
+        workspace
     }
 
     /// Save the window, sidebar and tabs for the next launch.
@@ -356,6 +409,7 @@ impl Workspace {
             },
             tabs: self.main_view.read(cx).saved_tabs(cx),
             selected_tab: self.main_view.read(cx).selected,
+            agent_panel: *self.agent_panel_visible.read(cx),
         };
 
         (self.sessions_captured, session)
@@ -595,6 +649,112 @@ impl Workspace {
         }
 
         cx.notify();
+    }
+
+    pub(crate) fn toggle_agent_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if *self.agent_panel_visible.read(cx) {
+            // A hidden panel is not drawn, so keys sent to it would miss the
+            // workspace's shortcuts.
+            if self
+                .agent_panel
+                .focus_handle(cx)
+                .contains_focused(window, cx)
+            {
+                self.main_view.update(cx, |view, cx| view.focus(window, cx));
+            }
+            self.agent_panel_visible.update(cx, |visible, cx| {
+                *visible = false;
+                cx.notify();
+            });
+            cx.notify();
+            return;
+        }
+
+        self.show_agent_panel(window, cx);
+    }
+
+    /// Show the agent panel with its message box focused.
+    fn show_agent_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = *self.agent_panel_visible.read(cx);
+        self.agent_panel_visible.update(cx, |visible, cx| {
+            *visible = true;
+            cx.notify();
+        });
+        self.prepare_agent(cx);
+
+        let panel = self.agent_panel.clone();
+        if shown {
+            panel.update(cx, |panel, cx| panel.focus_composer(window, cx));
+        } else {
+            // The panel is drawn from the next frame. Next-frame callbacks
+            // run before that frame is drawn, so focus one frame later.
+            cx.on_next_frame(window, move |_, window, cx| {
+                cx.on_next_frame(window, move |_, window, cx| {
+                    panel.update(cx, |panel, cx| panel.focus_composer(window, cx));
+                });
+            });
+        }
+        cx.notify();
+    }
+
+    /// Start the agent where it should work, unless it runs.
+    fn prepare_agent(&mut self, cx: &mut Context<Self>) {
+        let directory = self.agent_directory(cx);
+        self.agent_panel.update(cx, |panel, cx| {
+            panel.set_directory(directory, cx);
+            panel.shown(cx);
+        });
+    }
+
+    fn cite_to_agent(&mut self, cite: &Cite, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_agent_panel(window, cx);
+        self.agent_panel
+            .update(cx, |panel, cx| panel.add_cite(cite.clone(), window, cx));
+    }
+
+    /// Where the agent works: the Git repository of the collection in the
+    /// active tab, so it can read the code its requests call, or the folder
+    /// of a collection opened from elsewhere. Otherwise the app's data.
+    fn agent_directory(&self, cx: &App) -> PathBuf {
+        let collection = self
+            .main_view
+            .read(cx)
+            .active_page()
+            .and_then(|page| page.location(cx))
+            .map(|location| location.collection.clone());
+        let data = self
+            .session_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+
+        let Some(collection) = collection else {
+            return data;
+        };
+        if let Some(root) = self
+            .git
+            .read(cx)
+            .repositories
+            .iter()
+            .map(|known| known.repository.root())
+            .filter(|root| collection.starts_with(root))
+            .max_by_key(|root| root.components().count())
+        {
+            return root.to_path_buf();
+        }
+        if collection.starts_with(&data) {
+            data
+        } else {
+            collection
+        }
+    }
+
+    /// Read saved requests and flows again, which the agent may have
+    /// changed. Tabs without unsaved changes follow.
+    fn reload_saved(&mut self, cx: &mut Context<Self>) {
+        self.collections
+            .update(cx, |collections, cx| collections.reload(cx));
+        self.flow_panel.update(cx, |flows, cx| flows.refresh(cx));
     }
 
     fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1019,6 +1179,21 @@ fn on_open_settings(workspace: &Entity<Workspace>, window: AnyWindowHandle, cx: 
         });
     });
 
+    let agent_workspace = workspace.clone();
+    cx.on_action(move |_: &OpenAgentSettings, cx| {
+        let workspace = agent_workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.open_settings(window, cx).update(cx, |settings, cx| {
+                        settings.select_page(SettingsPage::Agents, window, cx)
+                    });
+                });
+            });
+        });
+    });
+
     cx.on_action(move |_: &OpenSettings, cx| {
         let workspace = workspace.clone();
 
@@ -1064,6 +1239,18 @@ pub(crate) fn on_toggle_sidebar(
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| this.toggle_sidebar(window, cx));
+            });
+        });
+    });
+
+    // The status bar's agent button works wherever focus is.
+    let agent_workspace = git_workspace.clone();
+    cx.on_action(move |_: &ToggleAgentPanel, cx| {
+        let workspace = agent_workspace.clone();
+
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| this.toggle_agent_panel(window, cx));
             });
         });
     });
@@ -1121,6 +1308,7 @@ impl Render for Workspace {
         // Commands that only apply to some tabs stay out of the palette for
         // the others. They are handled here, so they also work while the
         // sidebar has focus.
+        let agent_visible = *self.agent_panel_visible.read(cx);
         let active_page = self.main_view.read(cx).active_page();
         let has_url = active_page.is_some_and(Page::is_request);
         let copyable = active_page.is_some_and(Page::can_copy_as_command);
@@ -1128,6 +1316,14 @@ impl Render for Workspace {
         let workspace = v_flex()
             .size_full()
             .key_context("Workspace")
+            .on_action(cx.listener(|this, cite: &CiteToAgent, window, cx| {
+                this.cite_to_agent(&cite.0, window, cx);
+            }))
+            // A tab quotes what has focus in it. Elsewhere there is nothing
+            // to cite, so the agent is shown.
+            .on_action(cx.listener(|this, _: &AddToAgent, window, cx| {
+                this.show_agent_panel(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &FocusSidebarSearch, window, cx| {
                 this.reveal_collections(window, cx);
 
@@ -1253,7 +1449,18 @@ impl Render for Workspace {
                                 )
                                 .child(self.sidebar(window, cx)),
                         )
-                        .child(self.main_view.clone().into_any_element()),
+                        .child(self.main_view.clone().into_any_element())
+                        .child(
+                            resizable_panel()
+                                .visible(agent_visible)
+                                .flex_none()
+                                .size(rems(24.).to_pixels(window.rem_size()))
+                                .size_range(
+                                    rems(18.).to_pixels(window.rem_size())
+                                        ..rems(48.).to_pixels(window.rem_size()),
+                                )
+                                .child(self.agent_panel.clone()),
+                        ),
                 ),
             )
             .child(
@@ -1313,6 +1520,7 @@ pub fn init(
     cx: &mut App,
 ) -> AnyView {
     crate::actions::init(cx);
+    agent_panel::init(cx);
     tab_ui::Cookies::init(cookies, cx);
 
     let workspace = cx.new(|cx| {

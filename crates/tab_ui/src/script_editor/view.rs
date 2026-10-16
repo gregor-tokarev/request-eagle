@@ -334,6 +334,27 @@ impl<S: Scripts> ScriptEditor<S> {
         cx.notify();
     }
 
+    /// The selection in the script with focus, or the whole script.
+    pub(crate) fn quote(&self, window: &Window, cx: &App) -> Option<crate::cite::Quote> {
+        let editor = self
+            .editors
+            .iter()
+            .zip(&self.vim)
+            .find_map(|(editor, vim)| {
+                editor
+                    .as_ref()
+                    .filter(|editor| crate::cite::editor_focused(editor, vim.as_ref(), window, cx))
+            })?
+            .read(cx);
+
+        crate::cite::Quote::of(
+            crate::cite::CiteSource::Script,
+            &editor.value(),
+            editor.selected_range(),
+            Some("javascript"),
+        )
+    }
+
     /// The selected phase's editor.
     pub(crate) fn editor(
         &mut self,

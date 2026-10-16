@@ -6,6 +6,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use crate::actions::{OpenCookies, OpenSettings, ToggleGitPanel, ToggleLeftSidebar};
 use crate::git_panel::GitPanel;
 use crate::git_state::GitState;
+use agent_panel::ToggleAgentPanel;
 
 pub(crate) const TOGGLE_SIDEBAR_BUTTON: &str = "toggle-sidebar";
 
@@ -26,26 +27,30 @@ impl IconNamed for SidebarIcon {
 
 pub struct BottomPanel {
     sidebar_visible: Entity<bool>,
+    agent_panel_visible: Entity<bool>,
     git: Entity<GitState>,
     git_panel: Entity<GitPanel>,
-    _subscriptions: [Subscription; 3],
+    _subscriptions: [Subscription; 4],
 }
 
 impl BottomPanel {
     pub(crate) fn new(
         sidebar_visible: Entity<bool>,
+        agent_panel_visible: Entity<bool>,
         git: Entity<GitState>,
         git_panel: Entity<GitPanel>,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscriptions = [
             cx.observe(&sidebar_visible, |_, _, cx| cx.notify()),
+            cx.observe(&agent_panel_visible, |_, _, cx| cx.notify()),
             cx.observe(&git, |_, _, cx| cx.notify()),
             cx.observe(&git_panel, |_, _, cx| cx.notify()),
         ];
 
         Self {
             sidebar_visible,
+            agent_panel_visible,
             git,
             git_panel,
             _subscriptions: subscriptions,
@@ -164,6 +169,20 @@ impl Render for BottomPanel {
             )
             .child(div().flex_none().child(self.git_status(cx)))
             .child(div().flex_1())
+            .child(
+                Button::new("toggle-agent-panel")
+                    .debug_selector(|| "toggle-agent-panel".into())
+                    .ghost()
+                    .small()
+                    .icon(Icon::default().path("icons/sparkles.svg"))
+                    .label("Agent")
+                    .selected(*self.agent_panel_visible.read(cx))
+                    .accessibility_label("Agent")
+                    .tooltip_with_action("Agent", &ToggleAgentPanel, None)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(ToggleAgentPanel.boxed_clone(), cx);
+                    }),
+            )
             .child(
                 Button::new("open-cookies")
                     .debug_selector(|| "open-cookies".into())

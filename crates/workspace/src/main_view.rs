@@ -25,7 +25,7 @@ use collection::{
 use flow::FlowLibraryError;
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
-    CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
+    CiteOrigin, CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
     EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
     SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
 };
@@ -88,6 +88,20 @@ impl Page {
             | Page::Runner(_)
             | Page::Environment(_)
             | Page::Cookies(_) => None,
+        }
+    }
+
+    /// The page's entity, which cites name it by.
+    fn entity_id(&self) -> EntityId {
+        match self {
+            Page::Request(draft) => draft.entity_id(),
+            Page::Grpc(draft) => draft.entity_id(),
+            Page::WebSocket(draft) => draft.entity_id(),
+            Page::Flow(editor) => editor.entity_id(),
+            Page::Collection(page) => page.entity_id(),
+            Page::Runner(runner) => runner.entity_id(),
+            Page::Environment(editor) => editor.entity_id(),
+            Page::Cookies(page) => page.entity_id(),
         }
     }
 
@@ -841,6 +855,85 @@ impl MainView {
                 editor.update(cx, |editor, cx| editor.set_name(name.clone(), cx));
             }
         }
+    }
+
+    /// Show the tab a cite comes from. When that tab was replaced, as after
+    /// the agent changed its saved request, the request's tab is found by its
+    /// file; a closed one opens again.
+    pub(crate) fn show_cite(
+        &mut self,
+        origin: &CiteOrigin,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let index = self
+            .tabs
+            .iter()
+            .position(|tab| tab.page.entity_id() == origin.page)
+            .or_else(|| {
+                let file = origin.file.as_ref()?;
+                self.tabs.iter().position(|tab| {
+                    tab.page
+                        .location(cx)
+                        .is_some_and(|location| &location.path == file)
+                })
+            });
+
+        match (index, &origin.file) {
+            (Some(index), _) => self.select_tab(index, cx),
+            (None, Some(file)) => self.open_saved(file, window, cx),
+            (None, None) => return,
+        }
+        self.prepare_active_tab(window, cx);
+    }
+
+    /// Follow flows read from disk again, as after an agent changed them.
+    /// Tabs of flows that are gone close, and tabs without unsaved changes
+    /// show the flow as it is saved now. Tabs with unsaved changes stay;
+    /// saving them asks whose changes to keep.
+    pub(crate) fn follow_flows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut selected = self.selected.map(|index| self.tabs[index].id);
+        let mut index = 0;
+        while index < self.tabs.len() {
+            let tab = &self.tabs[index];
+            let Page::Flow(editor) = &tab.page else {
+                index += 1;
+                continue;
+            };
+            if tab.page.is_dirty(cx) {
+                index += 1;
+                continue;
+            }
+
+            let editor = editor.read(cx);
+            let outside_changes = self
+                .flows
+                .read(cx)
+                .get(&editor.path)
+                .filter(|saved| saved.id == editor.id.as_ref())
+                .map(|saved| saved.outside_changes);
+            match outside_changes {
+                None => {
+                    self.remove_tab(index, cx);
+                    continue;
+                }
+                Some(changes) if changes != tab.outside_changes => {
+                    let id = tab.id;
+                    match self.reopen_tab(index, window, cx) {
+                        Some(reopened) if selected == Some(id) => selected = Some(reopened),
+                        Some(_) => {}
+                        None => continue,
+                    }
+                }
+                Some(_) => {}
+            }
+
+            index += 1;
+        }
+
+        self.selected = selected.and_then(|id| self.tabs.iter().position(|tab| tab.id == id));
+        self.scroll_to_tab = self.selected;
+        cx.notify();
     }
 
     /// Close the tab of a flow deleted in the sidebar.

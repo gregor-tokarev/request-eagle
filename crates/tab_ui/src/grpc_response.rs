@@ -1,3 +1,4 @@
+mod cite;
 mod timeline;
 mod view;
 

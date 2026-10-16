@@ -22,6 +22,9 @@ pub struct Session {
     pub(crate) tabs: Vec<SavedTab>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selected_tab: Option<usize>,
+    /// Whether the agent panel is shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) agent_panel: bool,
 }
 
 impl Session {

@@ -12,6 +12,7 @@ use request_eagle_theme::{method_color, protocol_icon};
 use super::draft::{RequestDraft, RequestSection};
 use super::execution::{Exchange, Stream};
 use crate::actions::SendRequest;
+use crate::cite::editable_field_menu;
 use crate::storage::Storage;
 use crate::variable_input::with_variables;
 use collection::SavedLocation;
@@ -209,6 +210,7 @@ impl RequestDraft {
                                     .input(
                                         Input::new(&url)
                                             .aria_label("Request URL")
+                                            .context_menu(editable_field_menu)
                                             // A pasted cURL command fills in
                                             // the whole request, as in Postman.
                                             .on_paste(move |clipboard, window, cx| {

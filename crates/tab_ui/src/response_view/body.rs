@@ -144,6 +144,7 @@ pub(crate) struct ResponseBodyEditor(pub(crate) Entity<EditorState>);
 impl Render for ResponseBodyEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         Editor::new(&self.0)
+            .context_menu(|menu, _, _| crate::cite::field_menu(menu, false, true))
             .h_full()
             .readonly(true)
             .appearance(false)
@@ -353,6 +354,24 @@ impl ResponseView {
                                         ));
                                     }
                                 })),
+                        )
+                    })
+                    .when(self.citable && (text || content.preview.is_some()), |row| {
+                        row.child(
+                            Button::new("response-add-to-agent")
+                                .debug_selector(|| "response-add-to-agent".into())
+                                .ghost()
+                                .small()
+                                .icon(Icon::default().path("icons/sparkles.svg"))
+                                .accessibility_label("Add to Agent")
+                                .tooltip_with_action(
+                                    "Add to Agent",
+                                    &crate::AddToAgent,
+                                    Some("Workspace"),
+                                )
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(crate::AddToAgent.boxed_clone(), cx)
+                                }),
                         )
                     })
                     .child(

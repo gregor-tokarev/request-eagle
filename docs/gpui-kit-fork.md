@@ -2,12 +2,12 @@
 
 The workspace builds GPUI Kit **0.7.0** from a fork with fixes that are not
 upstream yet. The same fork carries patched copies of GPUI's Linux and macOS
-platform crates. GPUI Kit's own changes touch nine files:
+platform crates. GPUI Kit's own changes touch ten files:
 
 - Upstream tag: `v0.7.0`, commit `0c830f4d257e69fdd17200650533ab4ca9a40cc0`.
 - Fork branch: [`request-eagle/patches-0.7.0`](https://github.com/gregor-tokarev/gpui-kit/tree/request-eagle/patches-0.7.0),
-  pinned at [`60435d31`](https://github.com/gregor-tokarev/gpui-kit/commit/60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
-- All changes: [`0c830f4d...60435d31`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
+  pinned at [`328e0ed7`](https://github.com/gregor-tokarev/gpui-kit/commit/328e0ed782024133c0e1cb23b00807cd2e0da2df).
+- All changes: [`0c830f4d...328e0ed7`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...328e0ed782024133c0e1cb23b00807cd2e0da2df).
 - Completion changes: [`4eb43a09`](https://github.com/gregor-tokarev/gpui-kit/commit/4eb43a09ed12cedb409a826d055678164a28bae8), [`9b588e02`](https://github.com/gregor-tokarev/gpui-kit/commit/9b588e027112fadcc00ccd979e01437402e8a2e0) and [`6aa23423`](https://github.com/gregor-tokarev/gpui-kit/commit/6aa2342323f92d4af2b026b294da7422e8d98389).
 - Query reuse: [`55ed1bb5`](https://github.com/gregor-tokarev/gpui-kit/commit/55ed1bb5b4afa407ca6fb195003820ae0327c309).
 - Vim cursor support: [`cc673b8f`](https://github.com/gregor-tokarev/gpui-kit/commit/cc673b8f9c51aba0cd912078f52699032c44245c) and [`e9affedd`](https://github.com/gregor-tokarev/gpui-kit/commit/e9affedd20e6bc04f7a9412f0e6491fd10672ce3).
@@ -19,6 +19,7 @@ platform crates. GPUI Kit's own changes touch nine files:
   and [`7398d394`](https://github.com/gregor-tokarev/gpui-kit/commit/7398d394d83ea91c75390bc297795d762c377fba)
   patch them.
 - macOS windows without the opening animation: [`60435d31`](https://github.com/gregor-tokarev/gpui-kit/commit/60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
+- Select menus that keep their height while filtering: [`328e0ed7`](https://github.com/gregor-tokarev/gpui-kit/commit/328e0ed782024133c0e1cb23b00807cd2e0da2df).
 
 The fork branch must stay on GitHub: Cargo fetches the pinned commit from it.
 
@@ -67,6 +68,11 @@ of the Visual selection. `range_to_bounds` now returns `None` for offsets above
 or below the laid-out lines instead of resolving them to the first visible line,
 so the block disappears with its line. Base tests cover all three; Request
 Eagle's Vim tests check the block in Normal, Visual, and Visual Line mode.
+
+The select height option lets a searchable select keep its menu as tall as
+it opened while a search filters it. The agent panel's model, reasoning and
+mode menus open above the message box, so a shorter list moved their search
+field down. Other selects keep shrinking with their results.
 
 The idle caret fix stops the caret from redrawing an idle window. Every blink
 redraws the whole window, so a focused input kept an otherwise idle window

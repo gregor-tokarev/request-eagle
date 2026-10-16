@@ -5,6 +5,7 @@ use crate::{ClientCertificate, Preferences, ProxyPreferences};
 use anyhow::{Context as _, Result, anyhow, bail};
 use gpui_kit::{App, Global, Task};
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -464,6 +465,63 @@ pub fn remove_client_certificate(id: &str, cx: &mut App) -> Result<()> {
 
     cx.set_global(preferences);
     Ok(())
+}
+
+/// The values of an agent's environment variables, by name, from the OS
+/// credential store.
+pub fn agent_environment(provider: &str, cx: &App) -> Task<Result<BTreeMap<String, String>>> {
+    let Some(storage) = cx.try_global::<Storage>() else {
+        return Task::ready(Ok(BTreeMap::new()));
+    };
+    let read = storage
+        .credentials
+        .read(Secret::AgentEnvironment, provider, cx);
+
+    cx.background_executor().spawn(async move {
+        match read.await? {
+            Some(secret) => serde_json::from_slice(&secret)
+                .context("The agent's saved environment variables could not be decoded"),
+            None => Ok(BTreeMap::new()),
+        }
+    })
+}
+
+/// Save an agent's environment variables: their values in the OS credential
+/// store, then their names in the preferences.
+pub fn update_agent_environment(
+    provider: &str,
+    variables: BTreeMap<String, String>,
+    cx: &mut App,
+) -> Task<Result<()>> {
+    init(cx);
+    if let Err(error) = check_writable(cx) {
+        return Task::ready(Err(error));
+    }
+
+    let credentials = cx.global::<Storage>().credentials.clone();
+    let write = if variables.is_empty() {
+        credentials.delete(Secret::AgentEnvironment, provider, cx)
+    } else {
+        match serde_json::to_vec(&variables) {
+            Ok(secret) => credentials.write(Secret::AgentEnvironment, provider, &secret, cx),
+            Err(error) => return Task::ready(Err(error.into())),
+        }
+    };
+    let provider = provider.to_owned();
+
+    cx.spawn(async move |cx| {
+        write.await?;
+        cx.update(|cx| {
+            update(cx, |preferences| {
+                preferences
+                    .agents
+                    .providers
+                    .entry(provider)
+                    .or_default()
+                    .environment = variables.into_keys().collect();
+            })
+        })
+    })
 }
 
 /// Whether preferences can be saved now. Legacy proxy credentials must reach

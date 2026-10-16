@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+agent = { path = "../agent" }
 gpui-kit = { workspace = true, features = ["component"] }
 keybindings_service = { path = "../keybindings_service" }
 preferences = { path = "../preferences" }

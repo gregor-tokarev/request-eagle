@@ -522,6 +522,7 @@ impl RequestDraft {
                 with_variables(
                     self.body_completion.as_ref().unwrap(),
                     Editor::new(&body)
+                        .context_menu(crate::cite::editable_field_menu)
                         .h_full()
                         .appearance(false)
                         .bordered(false)

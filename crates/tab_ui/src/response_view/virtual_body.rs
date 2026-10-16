@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use gpui_kit::base::input;
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::{ActiveTheme, native_menu::NativeMenu};
 use gpui_kit::*;
 
 const FONT_SIZE: Rems = rems(0.875);
@@ -429,6 +429,15 @@ impl Render for VirtualBody {
                 cx.stop_propagation();
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus, cx);
+                    crate::cite::field_menu(NativeMenu::new(), false, !this.selection.is_empty())
+                        .show(event.position, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(
                 MouseButton::Left,
