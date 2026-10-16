@@ -53,7 +53,8 @@ step instead, turn on **Ask before running tools** for the agent in
 The other menus there show the exact model and reasoning level the agent
 runs with, and change them. When an agent leaves either to itself, the panel
 picks the model its default stands for and medium reasoning, or the first
-level the model offers without medium.
+level the model offers without medium. Type in an open menu to filter it, and
+use the arrow keys and Enter to choose.
 
 After each of the agent's turns, Request Eagle reads collections and flows
 again. Requests and flows the agent added show in the sidebar, and open tabs

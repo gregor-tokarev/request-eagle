@@ -4,6 +4,7 @@
 
 mod actions;
 mod entries;
+mod option_menu;
 mod panel;
 mod prompt;
 mod thread;

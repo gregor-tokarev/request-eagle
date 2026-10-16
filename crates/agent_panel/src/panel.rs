@@ -21,6 +21,7 @@ use preferences::{Preferences, ProviderPreferences};
 use tab_ui::{Cite, CiteOrigin};
 use tempfile::TempPath;
 
+use crate::option_menu::OptionMenu;
 use crate::prompt::{Briefing, prompt};
 use crate::thread::{Entry, Notice, Thread, UserMessage};
 
@@ -69,6 +70,8 @@ pub struct AgentPanel {
     pub(crate) disclosures: HashMap<usize, FocusHandle>,
     /// The tool calls the agent asks to run, by their ID.
     pub(crate) permissions: HashMap<String, Permission>,
+    /// The menus of the agent's options in the message box, by option ID.
+    pub(crate) option_menus: HashMap<String, OptionMenu>,
 
     pub(crate) composer: Entity<TextareaState>,
     /// The agent the message box's placeholder names.
@@ -163,6 +166,7 @@ impl AgentPanel {
             expanded: HashSet::new(),
             disclosures: HashMap::new(),
             permissions: HashMap::new(),
+            option_menus: HashMap::new(),
             composer,
             placeholder: None,
             cites: Vec::new(),

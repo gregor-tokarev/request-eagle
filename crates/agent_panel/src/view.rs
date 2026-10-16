@@ -8,6 +8,7 @@ use gpui_kit::component::{
     kbd::Kbd,
     menu::{DropdownMenu as _, PopupMenuItem},
     message_scroller::MessageScroller,
+    select::Select,
     spinner::Spinner,
     *,
 };
@@ -15,6 +16,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use tab_ui::{AddToAgent, SendRequest};
 
 use crate::actions::{OpenAgentSettings, ToggleAgentPanel};
+use crate::option_menu::{OptionChoice, OptionMenu};
 use crate::panel::AgentPanel;
 use agent::{AGENTS, Agent};
 
@@ -136,7 +138,9 @@ impl AgentPanel {
                     .gap_y_0p5()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .child("Cite what you select in a request or response with")
+                    // A line of its own that wraps, before the shortcut,
+                    // when the panel is narrow.
+                    .child(div().min_w_0().child("Cite what you select in a request or response with"))
                     .when_some(shortcut, |this, shortcut| this.child(shortcut)),
             )
             .child(div().text_sm().text_color(theme.muted_foreground).child(
@@ -383,7 +387,7 @@ impl AgentPanel {
                                         .min_w_0()
                                         .flex_wrap()
                                         .gap_0p5()
-                                        .children(self.option_buttons(cx)),
+                                        .children(self.option_menus(window, cx)),
                                 )
                                 .child(send.flex_none()),
                         ),
@@ -393,13 +397,14 @@ impl AgentPanel {
 
     /// The agent's model, reasoning level and mode, as menus, in that order
     /// for every agent.
-    fn option_buttons(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn option_menus(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let provider = self.provider(cx);
         let Some(ready) = self
             .session
             .as_ref()
             .and_then(|session| session.ready.as_ref())
         else {
+            self.option_menus.clear();
             return Vec::new();
         };
 
@@ -413,104 +418,116 @@ impl AgentPanel {
                     Some(SessionConfigOptionCategory::Mode) => 2,
                     _ => return None,
                 };
-                Some((order, option))
-            })
-            .collect();
-        options.sort_by_key(|(order, _)| *order);
-
-        options
-            .into_iter()
-            .filter_map(|(_, option)| {
                 let SessionConfigKind::Select(select) = &option.kind else {
                     return None;
                 };
-                let current = select.current_value.0.to_string();
+                Some((order, option, select.current_value.0.to_string()))
+            })
+            .collect();
+        options.sort_by_key(|(order, ..)| *order);
+        options.truncate(SHOWN_OPTIONS);
+
+        let shown: Vec<_> = options
+            .into_iter()
+            .map(|(_, option, current)| {
+                let model = option.category == Some(SessionConfigOptionCategory::Model);
                 // A default that leaves the model or reasoning level to the
                 // agent does not say what runs, so the menus offer only exact
                 // ones.
-                let model = option.category == Some(SessionConfigOptionCategory::Model);
-                let choices: Vec<(String, String)> = agent::choices(option)
+                let mut choices: Vec<OptionChoice> = agent::choices(option)
                     .into_iter()
-                    .map(|choice| {
-                        let name = if model {
-                            agent::model_name(&choice.value.0, &choice.name)
-                        } else {
-                            choice.name.clone()
-                        };
-                        (choice.value.0.to_string(), name)
+                    .filter(|choice| {
+                        *choice.value.0 == *current
+                            || !agent::is_unspecified(option, &choice.value.0)
                     })
-                    .filter(|(value, _)| *value == current || !agent::is_unspecified(option, value))
+                    .map(|choice| {
+                        let value = choice.value.0.to_string();
+                        if !model {
+                            return OptionChoice {
+                                value,
+                                name: choice.name.clone().into(),
+                                short_name: None,
+                            };
+                        }
+
+                        let name = agent::model_name(&value, &choice.name);
+                        // The button leaves out the provider OpenCode names
+                        // the model with, which the menu still shows.
+                        let short_name = self
+                            .agent
+                            .provider_in_model_names
+                            .then(|| agent::without_provider(&name))
+                            .filter(|short_name| *short_name != name)
+                            .map(|short_name| SharedString::from(short_name.to_owned()));
+                        OptionChoice {
+                            value,
+                            name: name.into(),
+                            short_name,
+                        }
+                    })
                     .collect();
-                // The model button leaves out the provider OpenCode names
-                // the model with, which its menu still shows.
-                let label = choices
-                    .iter()
-                    .find(|(value, _)| *value == current)
-                    .map_or(current.as_str(), |(_, name)| name.as_str());
-                let label = if model && self.agent.provider_in_model_names {
-                    agent::without_provider(label)
-                } else {
-                    label
-                }
-                .to_owned();
                 // The model menu lists the models in the order the settings
                 // give them, without those hidden there.
-                let choices = if model {
+                if model {
                     let models = &provider.models;
-                    let mut choices: Vec<_> = choices
-                        .into_iter()
-                        .filter(|(value, _)| {
-                            !models
+                    choices.retain(|choice| {
+                        choice.value == current
+                            || !models
                                 .iter()
-                                .any(|model| &model.id == value && model.hidden)
-                        })
-                        .collect();
-                    choices.sort_by_key(|(value, _)| {
+                                .any(|model| model.id == choice.value && model.hidden)
+                    });
+                    choices.sort_by_key(|choice| {
                         models
                             .iter()
-                            .position(|model| &model.id == value)
+                            .position(|model| model.id == choice.value)
                             .unwrap_or(usize::MAX)
                     });
-                    choices
-                } else {
-                    choices
-                };
-                let id = option.id.0.to_string();
-                let panel = cx.entity().downgrade();
+                }
 
-                Some(
-                    Button::new(SharedString::from(format!("agent-option-{id}")))
-                        .debug_selector({
-                            let id = id.clone();
-                            move || format!("agent-option-{id}")
-                        })
-                        .ghost()
-                        .xsmall()
-                        .max_w_full()
-                        .label(label)
-                        .dropdown_caret(true)
-                        .accessibility_label(option.name.clone())
-                        .tooltip(option.name.clone())
-                        .dropdown_menu(move |menu, _, _| {
-                            choices.iter().fold(menu, |menu, (value, name)| {
-                                let panel = panel.clone();
-                                let id = id.clone();
-                                let value = value.clone();
-                                menu.item(
-                                    PopupMenuItem::new(name.clone())
-                                        .checked(value == current)
-                                        .on_click(move |_, _, cx| {
-                                            let _ = panel.update(cx, |panel, cx| {
-                                                panel.set_option(id.clone(), value.clone(), cx)
-                                            });
-                                        }),
-                                )
-                            })
-                        })
-                        .into_any_element(),
+                (
+                    option.id.0.to_string(),
+                    option.name.clone(),
+                    model,
+                    choices,
+                    current,
                 )
             })
-            .take(SHOWN_OPTIONS)
+            .collect();
+
+        self.option_menus
+            .retain(|id, _| shown.iter().any(|(shown, ..)| shown == id));
+
+        shown
+            .into_iter()
+            .map(|(id, name, model, choices, current)| {
+                let menu = self
+                    .option_menus
+                    .entry(id.clone())
+                    .or_insert_with(|| OptionMenu::new(id.clone(), window, cx));
+                menu.show(choices, &current, window, cx);
+
+                let state = menu.state.clone();
+                let open = state.read(cx).focus_handle(cx).contains_focused(window, cx);
+
+                div()
+                    .debug_selector(move || format!("agent-option-{id}"))
+                    .max_w_full()
+                    .rounded(cx.theme().radius)
+                    .when(open, |this| this.bg(cx.theme().secondary_hover))
+                    .hover(|this| this.bg(cx.theme().secondary_hover))
+                    .child(
+                        Select::new(&state)
+                            .xsmall()
+                            .appearance(false)
+                            .accessibility_label(name)
+                            // Wide enough for a model with its provider, and
+                            // short enough to stay clear of the panel's top.
+                            .menu_width(rems(if model { 20. } else { 12. }))
+                            .menu_max_h(rems(18.))
+                            .search_placeholder("Search"),
+                    )
+                    .into_any_element()
+            })
             .collect()
     }
 }
