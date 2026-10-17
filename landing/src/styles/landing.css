@@ -310,6 +310,9 @@ code {
   translate: 0 calc((var(--p, 0.5) - 0.5) * -80px);
 }
 
+/* A narrow capture, such as a sidebar panel, in front of a code sample. */
+.stack__front--side { width: 46%; }
+
 pre {
   margin: 0;
   padding: 30px 32px;
@@ -479,6 +482,7 @@ html:not(.js) .picker { display: none; }
 @media (max-width: 560px) {
   .band__row--outline { -webkit-text-stroke-width: 1.5px; }
   .shot--clip img { height: 300px; }
+  .stack__front--side { width: 72%; }
   pre { padding: 22px 20px; font-size: 12.5px; }
   .lane__track { height: 16px; }
   .race__foot { grid-template-columns: minmax(0, 1fr); padding-left: 6px; }
