@@ -140,12 +140,18 @@ impl AgentPanel {
                     .text_color(theme.muted_foreground)
                     // A line of its own that wraps, before the shortcut,
                     // when the panel is narrow.
-                    .child(div().min_w_0().child("Cite what you select in a request or response with"))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .child("Cite what you select in a request or response with"),
+                    )
                     .when_some(shortcut, |this, shortcut| this.child(shortcut)),
             )
-            .child(div().text_sm().text_color(theme.muted_foreground).child(
-                "The agent can read your code, and run and edit saved requests and flows.",
-            ))
+            .child(
+                div().text_sm().text_color(theme.muted_foreground).child(
+                    "The agent can read your code, and run and edit saved requests and flows.",
+                ),
+            )
             .child(
                 div()
                     .text_xs()
@@ -159,31 +165,34 @@ impl AgentPanel {
                         )
                     )),
             )
-            .when(self.briefing.cli.is_none() && self.installed.is_some(), |this| {
-                this.child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_x_2()
-                        .gap_y_0p5()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        // Wraps, before the link, when the panel is narrow.
-                        .child(
-                            div()
-                                .min_w_0()
-                                .child("Install the Request Eagle CLI to let the agent run requests."),
-                        )
-                        .child(
-                            Button::new("agent-install-cli")
-                                .link()
-                                .xsmall()
-                                .label("How")
-                                .on_click(|_, _, cx| {
-                                    cx.open_url("https://requesteagle.tokarev.work/docs/cli/#install")
-                                }),
-                        ),
-                )
-            })
+            .when(
+                self.briefing.cli.is_none() && self.installed.is_some(),
+                |this| {
+                    this.child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_x_2()
+                            .gap_y_0p5()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            // Wraps, before the link, when the panel is narrow.
+                            .child(div().min_w_0().child(
+                                "Install the Request Eagle CLI to let the agent run requests.",
+                            ))
+                            .child(
+                                Button::new("agent-install-cli")
+                                    .link()
+                                    .xsmall()
+                                    .label("How")
+                                    .on_click(|_, _, cx| {
+                                        cx.open_url(
+                                            "https://requesteagle.tokarev.work/docs/cli/#install",
+                                        )
+                                    }),
+                            ),
+                    )
+                },
+            )
             .into_any_element()
     }
 
