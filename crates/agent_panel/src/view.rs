@@ -2,8 +2,9 @@ use agent::acp::schema::v1::{SessionConfigKind, SessionConfigOptionCategory};
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     input::{
-        InlineTokenClickEvent, InlineTokenContext, InputGroup, InputGroupAddon,
-        InputGroupAddonAlignment, InputGroupButton, InputGroupTextarea, InputToken,
+        Enter, Escape, IndentInline, InlineTokenClickEvent, InlineTokenContext, InputGroup,
+        InputGroupAddon, InputGroupAddonAlignment, InputGroupButton, InputGroupTextarea,
+        InputToken, MoveDown, MoveUp,
     },
     kbd::Kbd,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -13,11 +14,15 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request_eagle_theme::protocol_icon;
 use tab_ui::{AddToAgent, SendRequest};
 
 use crate::actions::{ChangeModel, NewThread, OpenAgentSettings, ToggleAgentPanel};
+use crate::mention::MentionKind;
+use crate::mention_menu::MenuKey;
 use crate::option_menu::{OptionChoice, OptionMenu};
 use crate::panel::AgentPanel;
+use crate::thread::Reference;
 use agent::{AGENTS, Agent};
 
 /// How many of the agent's settings the message box offers: its model,
@@ -107,7 +112,8 @@ impl AgentPanel {
             )
     }
 
-    /// Before the first message: what the panel is for, and how to cite.
+    /// Before the first message: what the panel is for, and how to cite
+    /// and mention.
     fn intro(&self, window: &Window, cx: &App) -> AnyElement {
         let theme = cx.theme();
         let shortcut = Kbd::binding_for_action(&AddToAgent, Some("Workspace"), window);
@@ -142,6 +148,12 @@ impl AgentPanel {
                     // when the panel is narrow.
                     .child(div().min_w_0().child("Cite what you select in a request or response with"))
                     .when_some(shortcut, |this, shortcut| this.child(shortcut)),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child("Type @ to mention a saved request, flow or collection."),
             )
             .child(div().text_sm().text_color(theme.muted_foreground).child(
                 "The agent can read your code, and run and edit saved requests and flows.",
@@ -354,8 +366,9 @@ impl AgentPanel {
         };
 
         let open = cx.listener(|this, event: &InlineTokenClickEvent, _, cx| {
-            this.show_cite(event.token().id(), cx)
+            this.show_reference(event.token().id(), cx)
         });
+        let icons = reference_icons(&self.references, cx);
 
         v_flex()
             .flex_none()
@@ -376,12 +389,32 @@ impl AgentPanel {
                 div()
                     .debug_selector(|| "agent-composer".into())
                     .key_context("AgentComposer")
+                    .relative()
+                    // The keys that move through the mention menu while it
+                    // is open, before the message box takes them.
+                    .capture_action(cx.listener(|this, action: &Enter, window, cx| {
+                        if !action.secondary && !action.shift {
+                            this.mention_menu_key(MenuKey::Pick, window, cx)
+                        }
+                    }))
+                    .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
+                        this.mention_menu_key(MenuKey::Pick, window, cx)
+                    }))
+                    .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
+                        this.mention_menu_key(MenuKey::Up, window, cx)
+                    }))
+                    .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                        this.mention_menu_key(MenuKey::Down, window, cx)
+                    }))
+                    .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                        this.mention_menu_key(MenuKey::Close, window, cx)
+                    }))
                     .child(
                         InputGroup::new("agent-composer")
                             .input(
                                 InputGroupTextarea::new(&self.composer)
                                     .aria_label("Message")
-                                    .token(|token, _, _| cite_token(token))
+                                    .token(move |token, _, _| reference_token(token, &icons))
                                     .on_token_click(open),
                             )
                             .addon(
@@ -401,7 +434,8 @@ impl AgentPanel {
                                     )
                                     .child(send.flex_none()),
                             ),
-                    ),
+                    )
+                    .children(self.render_mention_menu(window, cx)),
             )
     }
 
@@ -559,9 +593,43 @@ impl AgentPanel {
     }
 }
 
-/// A cite in a message, named after what it quotes.
-pub(crate) fn cite_token(token: &InlineTokenContext) -> InputToken {
-    InputToken::new(token).icon(Icon::default().path("icons/text-quote.svg"))
+/// The icon of each cite and mention, by the ID of its token.
+pub(crate) fn reference_icons(references: &[(String, Reference)], cx: &App) -> Vec<(String, Icon)> {
+    references
+        .iter()
+        .map(|(id, reference)| {
+            let icon = match reference {
+                Reference::Cite(_) => Icon::default().path("icons/text-quote.svg"),
+                Reference::Mention(mention) => match &mention.kind {
+                    MentionKind::Request { method, .. } => match *method {
+                        "gRPC" | "WS" => protocol_icon(method, cx),
+                        _ => protocol_icon("HTTP", cx),
+                    },
+                    // In the color the sidebar shows flows in.
+                    MentionKind::Flow => Icon::default()
+                        .path("icons/workflow.svg")
+                        .text_color(cx.theme().chart_4),
+                    MentionKind::Collection => Icon::default().path("icons/package.svg"),
+                },
+            };
+
+            (id.clone(), icon)
+        })
+        .collect()
+}
+
+/// A cite in a message, named after what it quotes, or a mention, named
+/// after the request, flow or collection, with the icon in `icons`.
+pub(crate) fn reference_token(token: &InlineTokenContext, icons: &[(String, Icon)]) -> InputToken {
+    let icon = icons
+        .iter()
+        .find(|(id, _)| id == token.token().id().as_ref())
+        .map_or_else(
+            || Icon::default().path("icons/text-quote.svg"),
+            |(_, icon)| icon.clone(),
+        );
+
+    InputToken::new(token).icon(icon)
 }
 
 /// A folder as people read it, from their home folder.

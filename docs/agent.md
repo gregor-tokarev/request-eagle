@@ -2,9 +2,9 @@
 
 The agent panel brings the coding agent you already use into Request Eagle:
 Claude Code, Codex or OpenCode. Point at what you mean in a request or its
-response, ask about it, and let the agent read your code and run, fix or
-create saved requests and flows. The agent keeps its own sign-in, models and
-tools.
+response, or mention a saved request or flow, ask about it, and let the agent
+read your code and run, fix or create saved requests and flows. The agent
+keeps its own sign-in, models and tools.
 
 ## Open the panel
 
@@ -38,6 +38,19 @@ response status, the lines, and the file the request is saved in. Variables
 such as `{{token}}` are cited as written, not filled in. A tab's changes that
 are not saved yet are in its cites, and the agent is told they are not in the
 file.
+
+## Mention requests and flows
+
+Type @ in your message to mention a saved request, flow or collection. Keep
+typing to narrow the list by name, or by a request's method, URL or folder.
+Pick one with the arrow keys and Enter or Tab, or click it; Escape closes the
+list and keeps what you typed. The mention appears in your message named after
+what it mentions, such as **Get user**. Click it to open it.
+
+The agent reads each mention with what it is, its collection and folder, and
+the file it is saved in, so it can read, run or edit it. A mention is of what
+is saved: changes in a tab that are not saved yet are not in the file. Cite
+them to show them to the agent.
 
 ## What the agent can do
 

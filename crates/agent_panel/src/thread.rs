@@ -7,6 +7,8 @@ use agent::acp::schema::v1::{
 };
 use tab_ui::Cite;
 
+use crate::mention::Mention;
+
 pub(crate) enum Entry {
     User(UserMessage),
     /// What the agent answered, in Markdown.
@@ -18,10 +20,18 @@ pub(crate) enum Entry {
     Notice(Notice),
 }
 
-/// A message sent. The panel keeps its text, with a token for each cite.
+/// A message sent. The panel keeps its text, with a token for each cite
+/// and mention.
 pub(crate) struct UserMessage {
-    /// The cites, by the ID of their token.
-    pub(crate) cites: Vec<(String, Cite)>,
+    /// The cites and mentions, by the ID of their token.
+    pub(crate) references: Vec<(String, Reference)>,
+}
+
+/// What a token in a message stands for.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Reference {
+    Cite(Cite),
+    Mention(Mention),
 }
 
 pub(crate) struct ToolCall {

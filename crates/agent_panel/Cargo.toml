@@ -11,6 +11,7 @@ futures = "0.3"
 gpui-kit = { workspace = true, features = ["component"] }
 keybindings_service = { path = "../keybindings_service" }
 preferences = { path = "../preferences" }
+request_eagle_theme = { package = "theme", path = "../theme" }
 serde_json = "1"
 tab_ui = { path = "../tab_ui" }
 tempfile = "3"

@@ -21,9 +21,11 @@ use preferences::{Preferences, ProviderPreferences};
 use tab_ui::{Cite, CiteOrigin};
 use tempfile::TempPath;
 
+use crate::mention::Mention;
+use crate::mention_menu::MentionMenu;
 use crate::option_menu::OptionMenu;
 use crate::prompt::{Briefing, prompt};
-use crate::thread::{Entry, Notice, Thread, UserMessage};
+use crate::thread::{Entry, Notice, Reference, Thread, UserMessage};
 
 pub enum AgentPanelEvent {
     /// The agent may have changed saved requests or flows, so the app reads
@@ -31,6 +33,8 @@ pub enum AgentPanelEvent {
     FilesChanged,
     /// Show the tab a cite comes from, or its saved request.
     ShowCite(CiteOrigin),
+    /// Open the saved request, flow or collection a mention names.
+    OpenMention(Mention),
 }
 
 /// The agent the panel talks to, and the thread with it. The agent runs as
@@ -52,7 +56,7 @@ pub struct AgentPanel {
     /// Whether the agent is answering a message.
     pub(crate) running: bool,
     /// A message sent while the agent was starting.
-    queued: Option<(InputContent, Vec<(String, Cite)>)>,
+    queued: Option<(InputContent, Vec<(String, Reference)>)>,
     /// Whether the thread's first message, which briefs the agent, was sent.
     briefed: bool,
     /// Whether the prompt on its way to the agent carries the briefing.
@@ -62,7 +66,7 @@ pub struct AgentPanel {
 
     pub(crate) thread: Thread,
     pub(crate) scroller: Entity<MessageScrollerState>,
-    /// Sent messages, shown with their cites, by entry.
+    /// Sent messages, shown with their cites and mentions, by entry.
     pub(crate) messages: HashMap<usize, Entity<TextareaState>>,
     /// The thoughts and tool calls opened to show their text, by entry.
     pub(crate) expanded: HashSet<usize>,
@@ -76,9 +80,12 @@ pub struct AgentPanel {
     pub(crate) composer: Entity<TextareaState>,
     /// The agent the message box's placeholder names.
     pub(crate) placeholder: Option<&'static Agent>,
-    /// The cites in the message being written, by the ID of their token.
-    pub(crate) cites: Vec<(String, Cite)>,
-    next_cite: usize,
+    /// The cites and mentions in the message being written, by the ID of
+    /// their token.
+    pub(crate) references: Vec<(String, Reference)>,
+    next_reference: usize,
+    /// The menu that `@` opens in the message box.
+    pub(crate) mention_menu: MentionMenu,
     pub(crate) focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -118,8 +125,14 @@ impl EventEmitter<AgentPanelEvent> for AgentPanel {}
 
 impl AgentPanel {
     /// `data_directory` is where the app keeps collections and flows, and
-    /// where the agent works unless told otherwise.
-    pub fn new(data_directory: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// where the agent works unless told otherwise. `mentionable` lists the
+    /// saved requests, flows and collections a message can mention.
+    pub fn new(
+        data_directory: PathBuf,
+        mentionable: impl Fn(&App) -> Vec<Mention> + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let agent = cx
             .try_global::<Preferences>()
             .and_then(|preferences| preferences.agents.selected.as_deref())
@@ -133,6 +146,11 @@ impl AgentPanel {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let subscriptions = vec![
             cx.subscribe_in(&composer, window, Self::on_composer_event),
+            // A typed `@` opens the mention menu, and the caret leaving it
+            // closes the menu.
+            cx.observe_in(&composer, window, |this, _, window, cx| {
+                this.follow_composer(window, cx)
+            }),
             cx.observe(&scroller, |_, _, cx| cx.notify()),
             // Agents turned on or off, or set up differently, in the settings.
             cx.observe_global::<Preferences>(|this, cx| {
@@ -169,8 +187,9 @@ impl AgentPanel {
             option_menus: HashMap::new(),
             composer,
             placeholder: None,
-            cites: Vec::new(),
-            next_cite: 1,
+            references: Vec::new(),
+            next_reference: 1,
+            mention_menu: MentionMenu::new(mentionable),
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -384,8 +403,8 @@ impl AgentPanel {
                     self.set_option(option.0.to_string(), value.0.to_string(), cx);
                 }
                 self.make_exact(cx);
-                if let Some((content, cites)) = self.queued.take() {
-                    self.prompt(content, cites);
+                if let Some((content, references)) = self.queued.take() {
+                    self.prompt(content, references);
                 }
             }
             Event::Update(SessionUpdate::ConfigOptionUpdate(update)) => {
@@ -610,8 +629,7 @@ impl AgentPanel {
 
     /// Quote `cite` in the message being written, where its caret is.
     pub fn add_cite(&mut self, cite: Cite, window: &mut Window, cx: &mut Context<Self>) {
-        let id = format!("cite:{}", self.next_cite);
-        self.next_cite += 1;
+        let id = self.reference_id("cite");
         let label = cite.label();
         let token = InlineToken::new(id.clone(), format!("[{label}]")).with_label(label);
 
@@ -634,9 +652,17 @@ impl AgentPanel {
         });
 
         if inserted.is_ok() {
-            self.cites.push((id, cite));
+            self.references.push((id, Reference::Cite(cite)));
         }
         cx.notify();
+    }
+
+    /// The ID of the token for the next cite or mention.
+    pub(crate) fn reference_id(&mut self, kind: &str) -> String {
+        let id = format!("{kind}:{}", self.next_reference);
+        self.next_reference += 1;
+
+        id
     }
 
     fn on_composer_event(
@@ -671,8 +697,8 @@ impl AgentPanel {
         }
 
         let content = self.composer.read(cx).content();
-        let cites: Vec<(String, Cite)> = self
-            .cites
+        let references: Vec<(String, Reference)> = self
+            .references
             .drain(..)
             .filter(|(id, _)| {
                 content
@@ -689,7 +715,7 @@ impl AgentPanel {
         });
         let index = self.push(
             Entry::User(UserMessage {
-                cites: cites.clone(),
+                references: references.clone(),
             }),
             cx,
         );
@@ -699,29 +725,37 @@ impl AgentPanel {
         self.composer
             .update(cx, |composer, cx| composer.set_value("", window, cx));
 
+        let sources: Vec<&str> = references
+            .iter()
+            .filter_map(|(_, reference)| match reference {
+                Reference::Cite(cite) => Some(cite.source.label()),
+                Reference::Mention(_) => None,
+            })
+            .collect();
         analytics::capture(
             "agent_message_sent",
             serde_json::json!({
                 "agent": self.agent.id,
-                "cites": cites.len(),
-                "sources": cites.iter().map(|(_, cite)| cite.source.label()).collect::<Vec<_>>(),
+                "cites": sources.len(),
+                "sources": sources,
+                "mentions": references.len() - sources.len(),
             }),
             cx,
         );
 
         self.running = true;
         match self.session.as_ref().map(|session| session.ready.is_some()) {
-            Some(true) => self.prompt(content, cites),
-            Some(false) => self.queued = Some((content, cites)),
+            Some(true) => self.prompt(content, references),
+            Some(false) => self.queued = Some((content, references)),
             None => {
-                self.queued = Some((content, cites));
+                self.queued = Some((content, references));
                 self.start(cx);
             }
         }
         cx.notify();
     }
 
-    fn prompt(&mut self, content: InputContent, cites: Vec<(String, Cite)>) {
+    fn prompt(&mut self, content: InputContent, references: Vec<(String, Reference)>) {
         let Some(session) = &self.session else {
             return;
         };
@@ -734,7 +768,7 @@ impl AgentPanel {
         self.briefed = true;
         let blocks: Vec<ContentBlock> = prompt(
             &content,
-            &cites,
+            &references,
             briefing,
             ready.embedded_context,
             &mut self.cite_files,
@@ -923,19 +957,22 @@ impl AgentPanel {
         cx.notify();
     }
 
-    pub(crate) fn show_cite(&mut self, id: &str, cx: &mut Context<Self>) {
-        let origin = self
-            .cites
+    /// Go back to the tab a cite comes from, or open what a mention names.
+    pub(crate) fn show_reference(&mut self, id: &str, cx: &mut Context<Self>) {
+        let reference = self
+            .references
             .iter()
             .chain(self.thread.entries.iter().flat_map(|entry| match entry {
-                Entry::User(message) => message.cites.iter(),
+                Entry::User(message) => message.references.iter(),
                 _ => [].iter(),
             }))
-            .find(|(cite, _)| cite == id)
-            .map(|(_, cite)| cite.origin.clone());
+            .find(|(reference, _)| reference == id)
+            .map(|(_, reference)| reference.clone());
 
-        if let Some(origin) = origin {
-            cx.emit(AgentPanelEvent::ShowCite(origin));
+        match reference {
+            Some(Reference::Cite(cite)) => cx.emit(AgentPanelEvent::ShowCite(cite.origin)),
+            Some(Reference::Mention(mention)) => cx.emit(AgentPanelEvent::OpenMention(mention)),
+            None => {}
         }
     }
 }

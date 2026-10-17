@@ -10,7 +10,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::panel::AgentPanel;
 use crate::thread::{Entry, Notice, PlanStep, ToolCall};
-use crate::view::cite_token;
+use crate::view::{reference_icons, reference_token};
 
 /// How many lines of a tool's output show while it is open.
 const OUTPUT_LINES: usize = 200;
@@ -53,12 +53,15 @@ impl AgentPanel {
     }
 
     fn user_message(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(message) = self.messages.get(&index) else {
+        let (Some(message), Some(Entry::User(sent))) =
+            (self.messages.get(&index), self.thread.entries.get(index))
+        else {
             return div().into_any_element();
         };
         let open = cx.listener(|this, event: &InlineTokenClickEvent, _, cx| {
-            this.show_cite(event.token().id(), cx)
+            this.show_reference(event.token().id(), cx)
         });
+        let icons = reference_icons(&sent.references, cx);
 
         div()
             .id(("agent-message", index))
@@ -72,7 +75,7 @@ impl AgentPanel {
                 Textarea::new(message)
                     .appearance(false)
                     .readonly(true)
-                    .token(|token, _, _| cite_token(token))
+                    .token(move |token, _, _| reference_token(token, &icons))
                     .on_token_click(open),
             )
             .into_any_element()

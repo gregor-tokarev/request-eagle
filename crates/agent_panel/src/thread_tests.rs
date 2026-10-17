@@ -96,7 +96,9 @@ fn a_turn_keeps_one_plan_and_a_new_turn_starts_another() {
     let step = |text: &str, status| PlanEntry::new(text, PlanEntryPriority::Medium, status);
     let mut thread = Thread::default();
 
-    thread.push(Entry::User(UserMessage { cites: Vec::new() }));
+    thread.push(Entry::User(UserMessage {
+        references: Vec::new(),
+    }));
     let first = thread.apply(SessionUpdate::Plan(Plan::new(vec![step(
         "Read the request",
         PlanEntryStatus::InProgress,
@@ -113,7 +115,9 @@ fn a_turn_keeps_one_plan_and_a_new_turn_starts_another() {
         Entry::Plan(steps) if steps[0].status == PlanEntryStatus::Completed
     ));
 
-    thread.push(Entry::User(UserMessage { cites: Vec::new() }));
+    thread.push(Entry::User(UserMessage {
+        references: Vec::new(),
+    }));
     let next = thread.apply(SessionUpdate::Plan(Plan::new(vec![step(
         "Run it",
         PlanEntryStatus::Pending,
