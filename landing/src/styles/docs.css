@@ -35,10 +35,11 @@
 
 /* Guide */
 
+/* Clipping, not hiding: `overflow: hidden` would make this the sticky section list's scroll container. */
 .guide {
   position: relative;
   padding: var(--hero-top) 0 calc(var(--slant) + 150px);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .guide .wrap { position: relative; }
