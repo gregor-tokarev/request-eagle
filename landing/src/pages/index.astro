@@ -6,6 +6,9 @@ import Page from "../layouts/Page.astro";
 import "../styles/landing.css";
 
 import icon from "../assets/icon.png";
+import cropAgent from "../assets/shots/crop-agent.webp";
+import cropGit from "../assets/shots/crop-git.webp";
+import cropMention from "../assets/shots/crop-mention.webp";
 import cropScripts from "../assets/shots/crop-scripts.webp";
 import cropVariables from "../assets/shots/crop-variables.webp";
 import cropVim from "../assets/shots/crop-vim.webp";
@@ -21,6 +24,7 @@ import themeSolarized from "../assets/shots/theme-solarized.webp";
 const pageWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 1296px) calc(100vw - 56px), 1240px";
 const mediaWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 960px) calc(100vw - 56px), (max-width: 1296px) 55vw, 690px";
 const frontWide = "(max-width: 960px) 70vw, (max-width: 1296px) 39vw, 480px";
+const sideWide = "(max-width: 560px) calc((100vw - 36px) * 0.72), (max-width: 960px) calc((100vw - 56px) * 0.46), (max-width: 1296px) 26vw, 320px";
 
 // The picker swaps these in from the script, so each theme is a plain WebP source set rather than a <picture>.
 const themeCaptures = [
@@ -43,7 +47,7 @@ const themes = await Promise.all(
 
 <Page
   title="Request Eagle — the fast, native API client"
-  description="Request Eagle is a native API client written in Rust and rendered on the GPU. Requests live as TOML files on your disk, with scripts, Vim mode and a CLI for agents."
+  description="Request Eagle is a native API client written in Rust and rendered on the GPU. Requests live as TOML files on your disk and in Git, with scripts, Vim mode and your coding agent built in."
   socialTitle="Request Eagle — fast is a feature"
   socialDescription="A native API client written in Rust and rendered on the GPU."
   home
@@ -157,17 +161,18 @@ const themes = await Promise.all(
           <div class="feature__text" data-reveal="left">
             <h2 class="display">Your disk.<br>Your git.</h2>
             <p>
-              Every request is a TOML file in a folder you control. There is no account, no sync
-              service and no export step.
+              Every request is a TOML file in a folder you control. There is no account and no
+              export step. Commit, pull, push and sync from the Git panel,
+              with the <code>git</code> you already use.
             </p>
             <ul>
-              <li>Collections and nested folders</li>
-              <li>Environments in <code>environment.toml</code></li>
-              <li>Search by name, method or URL</li>
+              <li>Keep a collection inside your project's repository</li>
+              <li>Changes, branch and remote at a glance</li>
+              <li>Collections, folders and variables as plain files</li>
             </ul>
           </div>
 
-          <div class="feature__media" data-reveal="right">
+          <div class="feature__media stack" data-reveal="right" data-parallax>
 <pre data-tilt><span class="c"># Flight API / Flights / List flights.toml</span>
 <span class="k">id</span> = <span class="s">"3f1c9a52-7e4b-4d1a-9c55-0b6e2a8d41f7"</span>
 <span class="k">name</span> = <span class="s">"List flights"</span>
@@ -179,6 +184,11 @@ const themes = await Promise.all(
 <span class="k">path</span> = <span class="s">"&#123;&#123;base_url&#125;&#125;/v1/flights"</span>
 <span class="k">headers</span> = [[<span class="s">"Authorization"</span>, <span class="s">"Bearer &#123;&#123;token&#125;&#125;"</span>]]
 <span class="k">query</span> = [[<span class="s">"status"</span>, <span class="s">"airborne"</span>], [<span class="s">"limit"</span>, <span class="s">"25"</span>]]</pre>
+
+            <figure class="shot stack__front stack__front--side">
+              <Picture src={cropGit} formats={["avif"]} fallbackFormat="webp" widths={[320, 480, 608]} sizes={sideWide}
+                       alt="Git panel with a commit message, Commit and Sync buttons, one commit to pull and two changed requests." />
+            </figure>
           </div>
         </article>
 
@@ -232,16 +242,44 @@ const themes = await Promise.all(
           </div>
         </article>
 
-        <article class="feature feature--flip">
+        <article class="feature feature--flip" id="agent">
           <div class="feature__text" data-reveal="right">
+            <h2 class="display">Ask your<br>agent.</h2>
+            <p>
+              Claude Code, Codex or OpenCode in a panel next to your requests. Point at what you
+              mean and ask: the agent reads the code behind your API and fixes or creates saved
+              requests.
+            </p>
+            <ul>
+              <li>Cite a selection with ⌘L, mention a saved request with <code>@</code></li>
+              <li>The exact model, reasoning level and mode</li>
+              <li>Your agent's own sign-in, models and tools</li>
+            </ul>
+          </div>
+
+          <div class="feature__media stack" data-reveal="left" data-parallax>
+            <figure class="shot">
+              <Picture src={cropAgent} formats={["avif"]} fallbackFormat="webp" widths={[480, 720, 1080, 1520]} sizes={mediaWide}
+                       alt="Agent panel with a cited response, the agent's commands and its explanation of the fix it made to the saved request." />
+            </figure>
+
+            <figure class="shot stack__front">
+              <Picture src={cropMention} formats={["avif"]} fallbackFormat="webp" widths={[360, 540, 752]} sizes={frontWide}
+                       alt="Message box listing saved requests and the collection to mention after typing @." />
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div class="feature__text" data-reveal="left">
             <h2 class="display">Agents<br>welcome.</h2>
             <p>
-              An optional CLI gives AI agents the same collections. It speaks JSON, describes its
-              own schema and runs without the app.
+              The same collections work for any agent, in the panel or in your terminal. An
+              optional CLI speaks JSON, describes its own schema and runs without the app.
             </p>
           </div>
 
-          <div class="feature__media" data-reveal="left">
+          <div class="feature__media" data-reveal="right">
 <pre data-tilt><span class="k">$</span> request-eagle-cli schema
 
 <span class="k">$</span> request-eagle-cli call \
@@ -254,8 +292,8 @@ const themes = await Promise.all(
           </div>
         </article>
 
-        <article class="feature feature--last" id="themes">
-          <div class="feature__text" data-reveal="left">
+        <article class="feature feature--flip feature--last" id="themes">
+          <div class="feature__text" data-reveal="right">
             <h2 class="display">Make it<br>yours.</h2>
             <p>
               Eleven theme families, each in light and dark. Pick your editor font and scale the
@@ -269,7 +307,7 @@ const themes = await Promise.all(
             </div>
           </div>
 
-          <div class="feature__media" data-reveal="right">
+          <div class="feature__media" data-reveal="left">
             <figure class="window window--flat" data-theme-stage>
               <div class="window__lights" aria-hidden="true"><i></i><i></i><i></i></div>
               <img src={themes[0].shot.src} srcset={themes[0].shot.srcSet.attribute} sizes={mediaWide} width="2400" height="1500" loading="lazy" decoding="async"
