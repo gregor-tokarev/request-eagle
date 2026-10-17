@@ -24,8 +24,8 @@ xcrun notarytool submit "$NOTARY_ZIP" \
   --password "$APPLE_APP_SPECIFIC_PASSWORD" \
   --team-id "$APPLE_TEAM_ID" \
   --wait
-xcrun stapler staple "$APP"
-xcrun stapler validate "$APP"
+"$ROOT/scripts/stapler.sh" staple "$APP"
+"$ROOT/scripts/stapler.sh" validate "$APP"
 
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
@@ -46,7 +46,7 @@ xcrun notarytool submit "$DMG" \
   --password "$APPLE_APP_SPECIFIC_PASSWORD" \
   --team-id "$APPLE_TEAM_ID" \
   --wait
-xcrun stapler staple "$DMG"
-xcrun stapler validate "$DMG"
+"$ROOT/scripts/stapler.sh" staple "$DMG"
+"$ROOT/scripts/stapler.sh" validate "$DMG"
 
 echo "Packaged $ZIP and $DMG"

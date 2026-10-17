@@ -210,8 +210,8 @@ jobs:
           spctl --assess --type execute --verbose=2 "dist/Request Eagle.app"
           spctl --assess --type open --context context:primary-signature --verbose=2 \
             "dist/RequestEagle-$VERSION-arm64.dmg"
-          xcrun stapler validate "dist/Request Eagle.app"
-          xcrun stapler validate "dist/RequestEagle-$VERSION-arm64.dmg"
+          ./scripts/stapler.sh validate "dist/Request Eagle.app"
+          ./scripts/stapler.sh validate "dist/RequestEagle-$VERSION-arm64.dmg"
 
       # macOS keeps the manifest name that installs before update tracks read.
       - name: Create update manifest
