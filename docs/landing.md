@@ -42,7 +42,7 @@ for a year. Without the 404 page, Cloudflare would answer every unknown address
 with the landing.
 
 Cloudflare deploys by itself when a push to `main` changes a file under
-`landing/`. Other branches and pull requests are not deployed.
+`landing/` or `docs/`. Other branches and pull requests are not deployed.
 
 To deploy `main` again without a change, with the [Cloudflare CLI](https://www.npmjs.com/package/cf):
 
@@ -78,10 +78,8 @@ index lists them in the order `src/guides.ts` gives. Links between guides,
 such as `cli.md#install`, are rewritten to their pages by the Markdown plugin in
 `astro.config.mjs`.
 
-Cloudflare watches `landing/` alone, so a change to a guide by itself goes
-live with the next change under `landing/`, or when `main` is deployed again
-as above. To publish guides on their own, add `docs/*` to the project's build
-watch paths.
+Cloudflare watches `docs/` as well as `landing/`, so a change to a guide
+deploys on its own.
 
 ## Search engines
 
