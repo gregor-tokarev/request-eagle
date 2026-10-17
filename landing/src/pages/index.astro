@@ -43,15 +43,42 @@ const themes = await Promise.all(
     shot: await getImage({ src: capture, format: "webp", width: 1440, widths: [720, 1080, 1440] }),
   })),
 );
+
+// The sentence the README, the GitHub repository and llms.txt use, word for word.
+const summary =
+  "Request Eagle is a native, open-source API client for macOS, Windows and Linux: a Postman alternative written in Rust that keeps requests as Git-friendly TOML files on your disk, with scripts, Vim mode, an agent panel for Claude Code, Codex or OpenCode, and a CLI for agents.";
+
+// Structured data, which search engines read as a description of the app.
+const software = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Request Eagle",
+  description: summary,
+  url: "https://requesteagle.tokarev.work/",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "macOS, Windows, Linux",
+  downloadUrl: "https://requesteagle.tokarev.work/downloads/",
+  softwareHelp: "https://requesteagle.tokarev.work/docs/",
+  image: "https://requesteagle.tokarev.work/assets/social-preview.png",
+  license: ["https://opensource.org/license/mit", "https://www.apache.org/licenses/LICENSE-2.0"],
+  isAccessibleForFree: true,
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  author: { "@type": "Person", name: "Gregor Tokarev", url: "https://github.com/gregor-tokarev" },
+  sameAs: ["https://github.com/gregor-tokarev/request-eagle"],
+};
 ---
 
 <Page
   title="Request Eagle — the fast, native API client"
-  description="Request Eagle is a native API client written in Rust and rendered on the GPU. Requests live as TOML files on your disk and in Git, with scripts, Vim mode and your coding agent built in."
+  description={summary}
   socialTitle="Request Eagle — fast is a feature"
   socialDescription="A native API client written in Rust and rendered on the GPU."
   home
 >
+  <Fragment slot="head">
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(software)}></script>
+  </Fragment>
+
   <main id="top">
 
     <div class="hero">

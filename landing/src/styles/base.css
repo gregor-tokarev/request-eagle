@@ -272,17 +272,17 @@ h1 {
   white-space: nowrap;
 }
 
-/* Lines rise out of a mask; the padding keeps italic overhang from being clipped. */
-.line {
+/* Headline lines rise out of a mask; the padding keeps italic overhang from being clipped. */
+h1 .line {
   display: block;
   margin: -0.08em -0.14em -0.08em -0.06em;
   padding: 0.08em 0.14em 0.08em 0.06em;
   overflow: hidden;
 }
 
-.line > span { display: block; animation: rise 1s var(--ease) both; }
+h1 .line > span { display: block; animation: rise 1s var(--ease) both; }
 
-.line:nth-child(2) > span { animation-delay: 0.12s; }
+h1 .line:nth-child(2) > span { animation-delay: 0.12s; }
 
 @keyframes rise {
   from { transform: translateY(112%) skewY(5deg); }

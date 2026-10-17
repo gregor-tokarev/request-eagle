@@ -1,16 +1,19 @@
 # Request Eagle
 
-> Request Eagle is a native API client for macOS, Windows and Linux, written in Rust and rendered on the GPU. It is a Postman alternative that keeps requests as TOML files on disk and in Git, with scripts, Vim mode, an agent panel for Claude Code, Codex or OpenCode, and a CLI for agents.
+> Request Eagle is a native, open-source API client for macOS, Windows and Linux: a Postman alternative written in Rust that keeps requests as Git-friendly TOML files on your disk, with scripts, Vim mode, an agent panel for Claude Code, Codex or OpenCode, and a CLI for agents.
 
 ## Pages
 
 - [Landing](https://requesteagle.tokarev.work/): What Request Eagle is and what it can do
 - [Download](https://requesteagle.tokarev.work/downloads/): The latest stable release for Apple Silicon Macs, Windows, and Debian or Ubuntu
+- [Docs](https://requesteagle.tokarev.work/docs/): The guides below
 
 ## Guides
 
-- [Scripting guide](https://github.com/gregor-tokarev/request-eagle/blob/main/docs/scripting.md): Pre-request and post-response JavaScript
-- [Agent guide](https://github.com/gregor-tokarev/request-eagle/blob/main/docs/agent.md): The agent panel for Claude Code, Codex and OpenCode
-- [Git guide](https://github.com/gregor-tokarev/request-eagle/blob/main/docs/git.md): Commit, pull, push and sync collections
-- [CLI guide](https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md): The command-line interface for agents
+- [Request scripts](https://requesteagle.tokarev.work/docs/scripting/): Pre-request and post-response JavaScript with the `pm` API
+- [Collection Runner](https://requesteagle.tokarev.work/docs/collection-runner/): Run a collection's requests in order, with iterations and data files
+- [Flows](https://requesteagle.tokarev.work/docs/flows/): Chain saved requests on a canvas, with branches and loops
+- [Git](https://requesteagle.tokarev.work/docs/git/): Track, commit, pull and push collections from the app
+- [Agent](https://requesteagle.tokarev.work/docs/agent/): The agent panel for Claude Code, Codex and OpenCode
+- [CLI](https://requesteagle.tokarev.work/docs/cli/): The command-line interface for agents, without the desktop app
 - [Source code](https://github.com/gregor-tokarev/request-eagle): The repository on GitHub

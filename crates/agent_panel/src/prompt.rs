@@ -37,7 +37,7 @@ impl Briefing {
             ),
             None => "The Request Eagle CLI isn't installed, so edit the collections' TOML files \
                      directly, following the files already there. The user can install the CLI \
-                     from https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md#install."
+                     from https://requesteagle.tokarev.work/docs/cli/#install."
                 .to_owned(),
         };
 

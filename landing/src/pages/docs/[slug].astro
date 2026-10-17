@@ -1,0 +1,55 @@
+---
+import { getCollection, render } from "astro:content";
+import Page from "../../layouts/Page.astro";
+import { summary, title } from "../../guides";
+
+import "../../styles/docs.css";
+
+export async function getStaticPaths() {
+  const guides = await getCollection("docs");
+
+  return guides.map((guide) => ({ params: { slug: guide.id }, props: { guide } }));
+}
+
+const { guide } = Astro.props;
+const { Content, headings } = await render(guide);
+
+const name = title(guide.body);
+const sections = headings.filter((heading) => heading.depth === 2);
+const source = `https://github.com/gregor-tokarev/request-eagle/blob/main/docs/${guide.id}.md`;
+---
+
+<Page title={`${name} — Request Eagle`} description={summary(guide.body)}>
+  <main>
+
+    <div class="guide">
+      <div class="streaks" aria-hidden="true"><i></i></div>
+
+      <div class="wrap">
+        <p class="guide__crumb"><a href="/docs/">Docs</a></p>
+
+        <div class="guide__layout">
+          <article class="prose">
+            <Content />
+          </article>
+
+          <aside class="guide__aside">
+            {sections.length > 0 && (
+              <nav aria-label="On this page">
+                <h2>On this page</h2>
+                <ol>
+                  {sections.map((section) => (
+                    <li><a href={`#${section.slug}`}>{section.text}</a></li>
+                  ))}
+                </ol>
+              </nav>
+            )}
+
+            <a class="guide__source" href={source}>Edit on GitHub</a>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</Page>
