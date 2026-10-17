@@ -217,6 +217,7 @@ dependencies = [
  "tab_ui",
  "tempfile",
  "theme",
+ "unicode-segmentation",
 ]
 
 [[package]]

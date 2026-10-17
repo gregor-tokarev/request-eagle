@@ -47,6 +47,12 @@ fn with_the_caret_inside_a_mention_it_is_the_whole_word() {
 }
 
 #[test]
+fn a_mention_ends_between_whole_characters() {
+    // U+0600 and the space after it are one character as people see it.
+    assert_eq!(typed_mention("@get\u{0600} now", 3, &[]), Some(0..4));
+}
+
+#[test]
 fn a_space_after_the_mention_ends_it() {
     assert_eq!(typed_mention("run @get user", 13, &[]), None);
     assert_eq!(typed_mention("run @get ", 9, &[]), None);

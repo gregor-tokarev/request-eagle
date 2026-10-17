@@ -4,6 +4,7 @@
 use std::{ops::Range, path::PathBuf};
 
 use gpui_kit::SharedString;
+use unicode_segmentation::UnicodeSegmentation as _;
 
 /// A saved request, flow or collection named in a message.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,13 +85,18 @@ pub(crate) fn typed_mention(
         return None;
     }
 
-    let after = &text[cursor..];
-    let word_end = cursor + after.find(char::is_whitespace).unwrap_or(after.len());
+    // The word ends between characters as people see them: a space can
+    // belong to the character before it, such as after U+0600.
+    let word: usize = text[cursor..]
+        .graphemes(true)
+        .take_while(|grapheme| !grapheme.contains(char::is_whitespace))
+        .map(str::len)
+        .sum();
     let end = tokens
         .iter()
         .map(|token| token.start)
         .filter(|token_start| *token_start >= cursor)
-        .fold(word_end, usize::min);
+        .fold(cursor + word, usize::min);
 
     Some(start..end)
 }
