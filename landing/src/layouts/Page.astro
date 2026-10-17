@@ -39,6 +39,8 @@ const landing = home ? "" : "/";
   data-website-id="a63371ff-c920-47be-9cd4-85a31e8397f2"
   data-domains="requesteagle.tokarev.work"
 ></script>
+
+<slot name="head" />
 </head>
 
 <body>
@@ -54,6 +56,7 @@ const landing = home ? "" : "/";
       <a href={`${landing}#speed`}>Speed</a>
       <a href={`${landing}#features`}>Features</a>
       <a href={`${landing}#themes`}>Themes</a>
+      <a href="/docs/">Docs</a>
       <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
     </nav>
 
@@ -72,8 +75,9 @@ const landing = home ? "" : "/";
 
       <nav aria-label="Footer">
         <a href="https://github.com/gregor-tokarev/request-eagle">GitHub</a>
-        <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/scripting.md">Scripting guide</a>
-        <a href="https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md">CLI guide</a>
+        <a href="/docs/">Docs</a>
+        <a href="/docs/scripting/">Scripting guide</a>
+        <a href="/docs/cli/">CLI guide</a>
         <a href="https://github.com/gregor-tokarev/request-eagle/issues">Feedback</a>
       </nav>
     </div>

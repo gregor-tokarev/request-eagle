@@ -179,7 +179,7 @@ impl AgentPanel {
                                 .xsmall()
                                 .label("How")
                                 .on_click(|_, _, cx| {
-                                    cx.open_url("https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md#install")
+                                    cx.open_url("https://requesteagle.tokarev.work/docs/cli/#install")
                                 }),
                         ),
                 )

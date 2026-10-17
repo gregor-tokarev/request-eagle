@@ -3,7 +3,9 @@
 The site at <https://requesteagle.tokarev.work> is the [Astro](https://astro.build)
 project in `landing/`. It builds to static files in `landing/dist/`:
 
-- `src/pages/` holds the landing, the downloads page and the 404 page.
+- `src/pages/` holds the landing, the downloads page, the docs and the 404 page.
+- `src/content.config.ts` lists the guides the docs publish, and `src/guides.ts`
+  reads their titles and summaries.
 - `src/layouts/Page.astro` is the shared head, navigation and footer.
 - `src/styles/base.css` styles what the pages share. `landing.css` builds on
   it for the landing's own sections.
@@ -64,6 +66,48 @@ executables are not offered, because the CLI is installed from the app.
 Without scripts, or when GitHub cannot be reached, the buttons lead to the
 latest release on GitHub instead. So does a button whose file the latest
 release does not have.
+
+## Docs
+
+`src/pages/docs/` publishes six of the user guides from the repository's
+`docs/` folder at `/docs/<name>/`: scripting, collection-runner, flows, git,
+agent and cli. `src/content.config.ts` lists them. The Markdown stays in
+`docs/`, so contributors edit one copy and GitHub keeps showing it. A guide's
+first heading is its page title and its first paragraph its description; the
+index lists them in the order `src/guides.ts` gives. Links between guides,
+such as `cli.md#install`, are rewritten to their pages by the Markdown plugin in
+`astro.config.mjs`.
+
+Cloudflare watches `landing/` alone, so a change to a guide by itself goes
+live with the next change under `landing/`, or when `main` is deployed again
+as above. To publish guides on their own, add `docs/*` to the project's build
+watch paths.
+
+## Search engines
+
+`@astrojs/sitemap` writes `/sitemap-index.xml` on every build, and
+`public/robots.txt` points to it. The landing carries JSON-LD describing the
+app as a `SoftwareApplication`, in `src/pages/index.astro`. The one-sentence
+description there is the one the README, the GitHub repository and
+`public/llms.txt` use, word for word, so keep them together when it changes.
+
+Bing and the other engines behind [IndexNow](https://www.indexnow.org) learn
+about new and changed pages without an account: `public/6b649271ff1671fca2da3fe1b2a6e780.txt`
+holds the site's IndexNow key. After a deploy that adds or changes pages,
+submit them:
+
+```sh
+curl -X POST https://api.indexnow.org/indexnow -H "Content-Type: application/json" -d '{
+  "host": "requesteagle.tokarev.work",
+  "key": "6b649271ff1671fca2da3fe1b2a6e780",
+  "keyLocation": "https://requesteagle.tokarev.work/6b649271ff1671fca2da3fe1b2a6e780.txt",
+  "urlList": ["https://requesteagle.tokarev.work/", "https://requesteagle.tokarev.work/docs/"]
+}'
+```
+
+Google Search Console and Bing Webmaster Tools are not set up. Both verify the
+site with a DNS record or a meta tag in `src/layouts/Page.astro`, and then
+accept the sitemap address.
 
 ## Analytics
 
@@ -136,8 +180,8 @@ npx lighthouse http://localhost:3000/
 
 ## Claims to keep current
 
-- The startup figures in the race: 0.22 s for Request Eagle, 3.86 s for
-  Postman, and "18 times". They come from [the startup benchmark](startup-benchmark.md).
+- The startup figures in the race: 0.36 s for Request Eagle, 4.3 s for
+  Postman, and "12 times". They come from [the startup benchmark](startup-benchmark.md).
 - Eleven theme families, and the seven themes offered by the picker.
 - Interface sizes from 12 to 24 px.
 - The macOS build targets Apple Silicon; Windows and Debian builds target x64.
