@@ -5,7 +5,9 @@ use gpui_kit::EntityId;
 use gpui_kit::component::input::{InlineToken, InputContent};
 use tab_ui::{Cite, CiteOrigin, CiteSource};
 
-use crate::prompt::{Briefing, prompt, quote};
+use crate::mention::{Mention, MentionKind};
+use crate::prompt::{Briefing, describe, prompt, quote};
+use crate::thread::Reference;
 
 fn cite(source: CiteSource, text: &str) -> Cite {
     Cite {
@@ -49,7 +51,7 @@ fn text_of(block: &ContentBlock) -> &str {
 fn cites_go_where_they_are_in_the_message() {
     let cites = vec![(
         "cite:1".to_owned(),
-        cite(CiteSource::ResponseBody, "\"code\": \"INVALID_ID\""),
+        Reference::Cite(cite(CiteSource::ResponseBody, "\"code\": \"INVALID_ID\"")),
     )];
 
     let blocks = prompt(&message(), &cites, None, true, &mut Vec::new());
@@ -63,7 +65,10 @@ fn cites_go_where_they_are_in_the_message() {
 
 #[test]
 fn agents_without_embedded_context_read_cites_in_the_text() {
-    let cites = vec![("cite:1".to_owned(), cite(CiteSource::ResponseBody, "{}"))];
+    let cites = vec![(
+        "cite:1".to_owned(),
+        Reference::Cite(cite(CiteSource::ResponseBody, "{}")),
+    )];
 
     let blocks = prompt(&message(), &cites, None, false, &mut Vec::new());
 
@@ -96,6 +101,7 @@ fn a_thread_starts_with_the_briefing() {
         "{first}"
     );
     assert!(first.contains("{{token}}"), "{first}");
+    assert!(first.contains("Mentions name a saved request"), "{first}");
     // A token whose cite is gone is sent as its text.
     assert_eq!(text_of(&blocks[2]), "[Response body]");
 }
@@ -145,4 +151,120 @@ fn a_long_cite_is_cut_and_saved_whole_until_the_thread_ends() {
 
     drop(files);
     assert!(!std::path::Path::new(&path).exists());
+}
+
+fn get_user() -> Mention {
+    Mention {
+        kind: MentionKind::Request {
+            method: "GET",
+            url: "{{base_url}}/users/42".to_owned(),
+            collection: "Users API".to_owned(),
+            folders: vec!["Admin".to_owned(), "Legacy".to_owned()],
+        },
+        name: "Get user".into(),
+        path: PathBuf::from("/data/collections/Users API/Admin/Legacy/Get user.toml"),
+    }
+}
+
+/// "run <mention> and <cite>" with both as tokens.
+fn message_with_a_mention() -> InputContent {
+    let text = "run @Get user and [Response body]";
+    let mention = text.find('@').unwrap()..text.find(" and").unwrap();
+    let cite = text.find('[').unwrap()..text.len();
+    InputContent::new(text)
+        .with_token(mention, InlineToken::new("mention:1", "@Get user"))
+        .unwrap()
+        .with_token(cite, InlineToken::new("cite:2", "[Response body]"))
+        .unwrap()
+}
+
+#[test]
+fn mentions_go_where_they_are_in_the_message() {
+    let references = vec![
+        ("mention:1".to_owned(), Reference::Mention(get_user())),
+        (
+            "cite:2".to_owned(),
+            Reference::Cite(cite(CiteSource::ResponseBody, "{}")),
+        ),
+    ];
+
+    let blocks = prompt(
+        &message_with_a_mention(),
+        &references,
+        None,
+        true,
+        &mut Vec::new(),
+    );
+
+    assert_eq!(blocks.len(), 4);
+    assert_eq!(text_of(&blocks[0]), "run ");
+    let ContentBlock::Resource(resource) = &blocks[1] else {
+        panic!("the mention is a resource");
+    };
+    let EmbeddedResourceResource::TextResourceContents(contents) = &resource.resource else {
+        panic!("the mention is text");
+    };
+    assert_eq!(contents.uri, "request-eagle:mention/1");
+    assert_eq!(contents.text, describe(&get_user()));
+    assert_eq!(text_of(&blocks[2]), " and ");
+    assert!(text_of(&blocks[3]).starts_with("Response body of"));
+
+    let blocks = prompt(
+        &message_with_a_mention(),
+        &references,
+        None,
+        false,
+        &mut Vec::new(),
+    );
+    assert!(
+        text_of(&blocks[1]).starts_with("\n<mention ref=\"request-eagle:mention/1\">\nRequest"),
+        "{}",
+        text_of(&blocks[1])
+    );
+}
+
+#[test]
+fn a_mention_says_what_it_names_and_where_it_is_saved() {
+    assert_eq!(
+        describe(&get_user()),
+        "Request \"Get user\" (GET {{base_url}}/users/42) in the collection \"Users API\", \
+         folder \"Admin/Legacy\".\n\
+         Saved in /data/collections/Users API/Admin/Legacy/Get user.toml."
+    );
+
+    let at_the_top = Mention {
+        kind: MentionKind::Request {
+            method: "WS",
+            url: "wss://echo.example.com".to_owned(),
+            collection: "Chat".to_owned(),
+            folders: Vec::new(),
+        },
+        name: "Echo".into(),
+        path: PathBuf::from("/data/collections/Chat/Echo.toml"),
+    };
+    assert_eq!(
+        describe(&at_the_top),
+        "Request \"Echo\" (WS wss://echo.example.com) in the collection \"Chat\".\n\
+         Saved in /data/collections/Chat/Echo.toml."
+    );
+
+    let flow = Mention {
+        kind: MentionKind::Flow,
+        name: "Sign up".into(),
+        path: PathBuf::from("/data/flows/Sign up.toml"),
+    };
+    assert_eq!(
+        describe(&flow),
+        "Flow \"Sign up\".\nSaved in /data/flows/Sign up.toml."
+    );
+
+    let collection = Mention {
+        kind: MentionKind::Collection,
+        name: "Users API".into(),
+        path: PathBuf::from("/data/collections/Users API"),
+    };
+    assert_eq!(
+        describe(&collection),
+        "Collection \"Users API\", the folder /data/collections/Users API."
+    );
 }

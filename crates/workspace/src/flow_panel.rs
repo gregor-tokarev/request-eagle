@@ -78,6 +78,10 @@ impl FlowPanel {
         self.library.flows().len()
     }
 
+    pub(crate) fn flows(&self) -> &[SavedFlow] {
+        self.library.flows()
+    }
+
     pub(crate) fn get(&self, path: &Path) -> Option<&SavedFlow> {
         self.library.get(path)
     }
