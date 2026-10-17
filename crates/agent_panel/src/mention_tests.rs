@@ -35,11 +35,15 @@ fn an_at_sign_starts_a_mention_at_a_word_start() {
     assert_eq!(typed_mention("@", 1, &[]), Some(0..1));
     assert_eq!(typed_mention("run @get", 8, &[]), Some(4..8));
     assert_eq!(typed_mention("run\n@get", 8, &[]), Some(4..8));
-    // The caret can be inside what is typed.
-    assert_eq!(typed_mention("run @get", 6, &[]), Some(4..6));
     // An address is not a mention.
     assert_eq!(typed_mention("mail me@home", 12, &[]), None);
     assert_eq!(typed_mention("no at sign", 10, &[]), None);
+}
+
+#[test]
+fn with_the_caret_inside_a_mention_it_is_the_whole_word() {
+    assert_eq!(typed_mention("run @get now", 6, &[]), Some(4..8));
+    assert_eq!(typed_mention("run @get", 5, &[]), Some(4..8));
 }
 
 #[test]
@@ -57,6 +61,24 @@ fn a_mention_already_in_the_message_is_not_typed_again() {
 
     assert_eq!(typed_mention(text, 11, std::slice::from_ref(&token)), None);
     assert_eq!(typed_mention(text, 11, &[]), Some(4..11));
+}
+
+#[test]
+fn a_mention_being_typed_ends_where_another_starts() {
+    let text = "@ge@Health now";
+    let token = 3..10;
+
+    assert_eq!(
+        typed_mention(text, 3, std::slice::from_ref(&token)),
+        Some(0..3)
+    );
+}
+
+#[test]
+fn a_name_with_line_breaks_shows_on_one_line() {
+    assert_eq!(flow("Unicode\u{2028}Flow").label(), "Unicode Flow");
+    assert_eq!(flow("Sign\nup\u{2029}now").label(), "Sign up now");
+    assert_eq!(flow("Checkout").label(), "Checkout");
 }
 
 #[test]

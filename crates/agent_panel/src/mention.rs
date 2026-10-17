@@ -47,11 +47,25 @@ impl Mention {
             MentionKind::Collection => "Collection".to_owned(),
         }
     }
+
+    /// The name on one line, as the menu and the mention's chip show it. A
+    /// name can have line or paragraph separators, which a chip cannot.
+    pub(crate) fn label(&self) -> SharedString {
+        let line_break = |character: char| {
+            character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+        };
+        if !self.name.contains(line_break) {
+            return self.name.clone();
+        }
+
+        self.name.replace(line_break, " ").into()
+    }
 }
 
-/// The `@` before `cursor` and what is typed after it, while that is a
-/// mention being written: the `@` starts the text or follows a space, no
-/// space is between it and the cursor, and it is not in one of `tokens`.
+/// The `@` before `cursor` and the word it starts, while that is a mention
+/// being written: the `@` starts the text or follows a space, no space is
+/// between it and the cursor, and it is not in one of `tokens`. The word
+/// ends at a space or a token.
 pub(crate) fn typed_mention(
     text: &str,
     cursor: usize,
@@ -66,8 +80,19 @@ pub(crate) fn typed_mention(
         .is_none_or(char::is_whitespace);
     let one_word = !before[start..].contains(char::is_whitespace);
     let in_token = tokens.iter().any(|token| token.contains(&start));
+    if !starts_word || !one_word || in_token {
+        return None;
+    }
 
-    (starts_word && one_word && !in_token).then_some(start..cursor)
+    let after = &text[cursor..];
+    let word_end = cursor + after.find(char::is_whitespace).unwrap_or(after.len());
+    let end = tokens
+        .iter()
+        .map(|token| token.start)
+        .filter(|token_start| *token_start >= cursor)
+        .fold(word_end, usize::min);
+
+    Some(start..end)
 }
 
 /// The mentions that match `query`, by their index, best first: names that

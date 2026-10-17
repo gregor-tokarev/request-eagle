@@ -30,7 +30,7 @@ pub(crate) struct MentionMenu {
 }
 
 struct OpenMenu {
-    /// The `@` and what is typed after it, in the message's text.
+    /// The `@` and the word it starts, in the message's text.
     range: Range<usize>,
     /// What the message can mention, listed when the menu opened.
     mentions: Vec<Mention>,
@@ -74,18 +74,19 @@ impl AgentPanel {
 
         let menu = &mut self.mention_menu;
         menu.followed = followed;
-        let typed = menu
-            .followed
-            .as_ref()
-            .and_then(|(text, cursor)| Some((text, typed_mention(text, *cursor, &tokens)?)));
+        let typed = menu.followed.as_ref().and_then(|(text, cursor)| {
+            let range = typed_mention(text, *cursor, &tokens)?;
+            // Matches are for what is typed before the caret, and picking
+            // one replaces the whole word.
+            Some((&text[range.start + 1..*cursor], range))
+        });
         match typed {
             None => {
                 menu.dismissed = None;
                 menu.open = None;
             }
             Some((_, range)) if menu.dismissed == Some(range.start) => menu.open = None,
-            Some((text, range)) => {
-                let query = &text[range.start + 1..range.end];
+            Some((query, range)) => {
                 let open = menu.open.get_or_insert_with(|| OpenMenu {
                     range: range.clone(),
                     mentions: (menu.list)(cx),
@@ -158,8 +159,8 @@ impl AgentPanel {
         };
 
         let id = self.reference_id("mention");
-        let token = InlineToken::new(id.clone(), format!("@{}", mention.name))
-            .with_label(mention.name.clone());
+        let label = mention.label();
+        let token = InlineToken::new(id.clone(), format!("@{label}")).with_label(label);
         let inserted = self.composer.update(cx, |composer, cx| {
             let inserted = composer.replace_range_with_token(open.range, token, window, cx);
             if inserted.is_ok() {
@@ -258,6 +259,7 @@ impl AgentPanel {
         };
         let mention = &open.mentions[open.matches[row]];
         let selected = row == open.selected;
+        let name = mention.label();
         let location = mention.location();
         let theme = cx.theme();
         let badge = match &mention.kind {
@@ -277,7 +279,7 @@ impl AgentPanel {
         h_flex()
             .id(("agent-mention", row))
             .role(Role::ListBoxOption)
-            .aria_label(format!("{}, {location}", mention.name))
+            .aria_label(format!("{name}, {location}"))
             .aria_selected(selected)
             .aria_position_in_set(row + 1)
             .aria_size_of_set(open.matches.len())
@@ -292,17 +294,19 @@ impl AgentPanel {
             })
             .hover(|this| this.bg(theme.muted))
             .child(div().flex_none().w(rems(2.5)).child(badge))
+            // In a narrow panel, where it is gives way before its name,
+            // which tells it apart from the others.
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(rems(6.))
                     .text_sm()
                     .text_ellipsis()
-                    .child(mention.name.clone()),
+                    .child(name),
             )
             .child(
                 div()
-                    .flex_none()
+                    .min_w_0()
                     .max_w(rems(12.))
                     .text_xs()
                     .text_ellipsis()
