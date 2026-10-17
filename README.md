@@ -4,7 +4,7 @@
 
 <h1 align="center">Request Eagle</h1>
 
-<p align="center">A native, open-source API client for macOS, Windows and Linux: a Postman alternative written in Rust that keeps requests as Git-friendly TOML files on your disk, with scripts, Vim mode and a CLI for agents.</p>
+<p align="center">A native, open-source API client for macOS, Windows and Linux: a Postman alternative written in Rust that keeps requests as Git-friendly TOML files on your disk, with scripts, Vim mode, an agent panel for Claude Code, Codex or OpenCode, and a CLI for agents.</p>
 
 <p align="center">
   <a href="https://requesteagle.tokarev.work/downloads/">Download</a>

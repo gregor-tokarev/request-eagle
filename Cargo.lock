@@ -7373,7 +7373,7 @@ dependencies = [
 
 [[package]]
 name = "request-eagle"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "analytics",
  "chrono",
