@@ -17,7 +17,9 @@ use crate::{
     session::{SavedSidebar, SavedWindow, Session, SessionWriter},
     top_panel::TopPanel,
 };
-use agent_panel::{AgentPanel, AgentPanelEvent, OpenAgentSettings, ToggleAgentPanel};
+use agent_panel::{
+    AgentPanel, AgentPanelEvent, Mention, MentionKind, OpenAgentSettings, ToggleAgentPanel,
+};
 use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
@@ -139,23 +141,6 @@ impl Workspace {
             )
         });
 
-        // The session file is in the app's data directory.
-        let data_directory = session_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        let agent_panel = cx.new(|cx| AgentPanel::new(data_directory, window, cx));
-        let agent_panel_subscription = cx.subscribe_in(
-            &agent_panel,
-            window,
-            |this, _, event: &AgentPanelEvent, window, cx| match event {
-                AgentPanelEvent::FilesChanged => this.reload_saved(cx),
-                AgentPanelEvent::ShowCite(origin) => this
-                    .main_view
-                    .update(cx, |view, cx| view.show_cite(origin, window, cx)),
-            },
-        );
-
         let sidebar = cx.new(|cx| {
             CollectionPanel::new(collections.clone(), sidebar_state.collapsed, window, cx)
         });
@@ -225,6 +210,33 @@ impl Workspace {
                     this.main_view
                         .update(cx, |view, cx| view.follow_flows(window, cx));
                 }
+            },
+        );
+
+        // The session file is in the app's data directory.
+        let data_directory = session_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let agent_panel = cx.new(|cx| {
+            let collections = collections.clone();
+            let flows = flow_panel.clone();
+            AgentPanel::new(
+                data_directory,
+                move |cx| mentionable(collections.read(cx), flows.read(cx).flows()),
+                window,
+                cx,
+            )
+        });
+        let agent_panel_subscription = cx.subscribe_in(
+            &agent_panel,
+            window,
+            |this, _, event: &AgentPanelEvent, window, cx| match event {
+                AgentPanelEvent::FilesChanged => this.reload_saved(cx),
+                AgentPanelEvent::ShowCite(origin) => this
+                    .main_view
+                    .update(cx, |view, cx| view.show_cite(origin, window, cx)),
+                AgentPanelEvent::OpenMention(mention) => this.open_mention(mention, window, cx),
             },
         );
 
@@ -749,6 +761,25 @@ impl Workspace {
         }
     }
 
+    /// Open the saved request, flow or collection a mention in the agent
+    /// panel names, unless it is gone.
+    fn open_mention(&mut self, mention: &Mention, window: &mut Window, cx: &mut Context<Self>) {
+        match mention.kind {
+            MentionKind::Flow => {
+                let saved = self.flow_panel.read(cx).get(&mention.path).cloned();
+                if let Some(saved) = saved {
+                    self.open_flow(&saved, window, cx);
+                }
+            }
+            MentionKind::Request { .. } | MentionKind::Collection => {
+                self.main_view.update(cx, |view, cx| {
+                    view.open_saved(&mention.path, window, cx);
+                    view.prepare_active_tab(window, cx);
+                });
+            }
+        }
+    }
+
     /// Read saved requests and flows again, which the agent may have
     /// changed. Tabs without unsaved changes follow.
     fn reload_saved(&mut self, cx: &mut Context<Self>) {
@@ -1113,6 +1144,41 @@ impl Workspace {
             view.focus(window, cx);
         });
     }
+}
+
+/// What a message to the agent can mention: every saved request, in the
+/// order the sidebar shows them, then the flows and the collections.
+fn mentionable(collections: &Collections, flows: &[SavedFlow]) -> Vec<Mention> {
+    let all = collections.registry().collections();
+    let requests = all
+        .iter()
+        .flat_map(|collection| {
+            collections
+                .requests_in(&collection.path)
+                .unwrap_or_default()
+        })
+        .map(|(location, file)| Mention {
+            kind: MentionKind::Request {
+                method: file.request.label(),
+                url: file.request.url().to_owned(),
+                collection: location.collection_name(),
+                folders: location.folders(),
+            },
+            name: file.name.clone().into(),
+            path: location.path,
+        });
+    let flows = flows.iter().map(|saved| Mention {
+        kind: MentionKind::Flow,
+        name: saved.name.clone().into(),
+        path: saved.path.clone(),
+    });
+    let collections = all.iter().map(|collection| Mention {
+        kind: MentionKind::Collection,
+        name: collection::directory_name(&collection.path).into(),
+        path: collection.path.clone(),
+    });
+
+    requests.chain(flows).chain(collections).collect()
 }
 
 /// Tells how a Git action went.

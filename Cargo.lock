@@ -216,6 +216,8 @@ dependencies = [
  "serde_json",
  "tab_ui",
  "tempfile",
+ "theme",
+ "unicode-segmentation",
 ]
 
 [[package]]

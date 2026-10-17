@@ -1,6 +1,6 @@
-//! What a message sends the agent: its text, each cite as context the agent
-//! reads where the cite is, and, at the start of a thread, what the agent
-//! should know about Request Eagle.
+//! What a message sends the agent: its text, each cite and mention as
+//! context the agent reads where it is in the message, and, at the start of a
+//! thread, what the agent should know about Request Eagle.
 
 use std::{io::Write as _, path::PathBuf};
 
@@ -11,6 +11,9 @@ use agent::acp::schema::v1::{
 };
 use gpui_kit::component::input::InputContent;
 use tab_ui::Cite;
+
+use crate::mention::{Mention, MentionKind};
+use crate::thread::Reference;
 
 /// How much of a cite goes into the prompt. A longer one is saved to a
 /// file the agent can read, such as a large response body.
@@ -47,18 +50,21 @@ impl Briefing {
              your changes at once. The app does not need to be closed first.\n\
              - Cites quote what the user selected in a request or its response, as the tab shows \
              it. Variables such as {{{{token}}}} are as written, not resolved. A tab can have \
-             changes that are not saved to its file yet; its cites say so."
+             changes that are not saved to its file yet; its cites say so.\n\
+             - Mentions name a saved request, flow or collection and the file or folder it is \
+             saved in. They refer to it as saved: changes in a tab that are not saved yet are \
+             not in the file."
         )
     }
 }
 
 /// The prompt for a message, with `briefing` first when the thread starts.
-/// `embedded` is whether the agent reads cites as embedded resources;
-/// otherwise they go in the text. Long cites are saved to `files`, which the
-/// thread keeps until it ends.
+/// `embedded` is whether the agent reads cites and mentions as embedded
+/// resources; otherwise they go in the text. Long cites are saved to `files`,
+/// which the thread keeps until it ends.
 pub(crate) fn prompt(
     content: &InputContent,
-    cites: &[(String, Cite)],
+    references: &[(String, Reference)],
     briefing: Option<String>,
     embedded: bool,
     files: &mut Vec<TempPath>,
@@ -75,24 +81,27 @@ pub(crate) fn prompt(
         push_text(&mut blocks, &text[written..range.start]);
         written = range.end;
 
-        let Some((_, cite)) = cites
+        let Some((_, reference)) = references
             .iter()
             .find(|(id, _)| id == span.token().id().as_ref())
         else {
             push_text(&mut blocks, &text[range]);
             continue;
         };
-        let uri = format!("request-eagle:cite/{}", number + 1);
-        let quoted = quote(cite, files);
+        let (kind, context) = match reference {
+            Reference::Cite(cite) => ("cite", quote(cite, files)),
+            Reference::Mention(mention) => ("mention", describe(mention)),
+        };
+        let uri = format!("request-eagle:{kind}/{}", number + 1);
         blocks.push(if embedded {
             ContentBlock::Resource(EmbeddedResource::new(
                 EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
-                    quoted, uri,
+                    context, uri,
                 )),
             ))
         } else {
             ContentBlock::Text(TextContent::new(format!(
-                "\n<cite ref=\"{uri}\">\n{quoted}\n</cite>\n"
+                "\n<{kind} ref=\"{uri}\">\n{context}\n</{kind}>\n"
             )))
         });
     }
@@ -161,6 +170,32 @@ pub(crate) fn quote(cite: &Cite, files: &mut Vec<TempPath>) -> String {
         "{about}\n\n{fence}{}\n{text}\n{fence}",
         cite.language.unwrap_or("")
     )
+}
+
+/// A mention as the agent reads it: what it names, where it is, and the file
+/// or folder it is saved in.
+pub(crate) fn describe(mention: &Mention) -> String {
+    let name = &mention.name;
+    let path = mention.path.display();
+
+    match &mention.kind {
+        MentionKind::Request {
+            method,
+            url,
+            collection,
+            folders,
+        } => {
+            let mut text =
+                format!("Request \"{name}\" ({method} {url}) in the collection \"{collection}\"");
+            if !folders.is_empty() {
+                text.push_str(&format!(", folder \"{}\"", folders.join("/")));
+            }
+            text.push_str(&format!(".\nSaved in {path}."));
+            text
+        }
+        MentionKind::Flow => format!("Flow \"{name}\".\nSaved in {path}."),
+        MentionKind::Collection => format!("Collection \"{name}\", the folder {path}."),
+    }
 }
 
 /// Keep a long cite where the agent can read all of it. Dropping the path

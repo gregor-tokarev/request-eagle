@@ -21,7 +21,7 @@ Events are sent without a person profile.
 | `collection_folder_opened` | A folder from outside the collections directory opens as a collection | |
 | `git_action_finished` | A Git action finished, from the Git panel or the command palette | `action` (`init`, `commit`, `pull`, `push`, `sync` or `publish`), `succeeded` |
 | `agent_thread_started` | The agent panel starts an agent for a new thread | `agent` (`claude`, `codex` or `opencode`) |
-| `agent_message_sent` | A message is sent to the agent | `agent`, `cites`, `sources` (what each cite quotes, such as `Response body`) |
+| `agent_message_sent` | A message is sent to the agent | `agent`, `cites`, `sources` (what each cite quotes, such as `Response body`), `mentions` (how many saved requests, flows and collections it mentions) |
 
 Every event also carries `$app_version`, `$os` and `arch`, and `$lib` set to
 `request-eagle`.
