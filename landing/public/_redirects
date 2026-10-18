@@ -1,0 +1,4 @@
+/docs https://github.com/gregor-tokarev/request-eagle#guides 302
+/docs/ https://github.com/gregor-tokarev/request-eagle#guides 302
+/docs/:guide https://github.com/gregor-tokarev/request-eagle/blob/main/docs/:guide.md 302
+/docs/:guide/ https://github.com/gregor-tokarev/request-eagle/blob/main/docs/:guide.md 302
