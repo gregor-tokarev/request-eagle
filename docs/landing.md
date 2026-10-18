@@ -3,9 +3,7 @@
 The site at <https://requesteagle.tokarev.work> is the [Astro](https://astro.build)
 project in `landing/`. It builds to static files in `landing/dist/`:
 
-- `src/pages/` holds the landing, the downloads page, the docs and the 404 page.
-- `src/content.config.ts` lists the guides the docs publish, and `src/guides.ts`
-  reads their titles and summaries.
+- `src/pages/` holds the landing, the downloads page and the 404 page.
 - `src/layouts/Page.astro` is the shared head, navigation and footer.
 - `src/styles/base.css` styles what the pages share. `landing.css` builds on
   it for the landing's own sections.
@@ -42,7 +40,7 @@ for a year. Without the 404 page, Cloudflare would answer every unknown address
 with the landing.
 
 Cloudflare deploys by itself when a push to `main` changes a file under
-`landing/` or `docs/`. Other branches and pull requests are not deployed.
+`landing/`. Other branches and pull requests are not deployed.
 
 To deploy `main` again without a change, with the [Cloudflare CLI](https://www.npmjs.com/package/cf):
 
@@ -67,20 +65,6 @@ Without scripts, or when GitHub cannot be reached, the buttons lead to the
 latest release on GitHub instead. So does a button whose file the latest
 release does not have.
 
-## Docs
-
-`src/pages/docs/` publishes six of the user guides from the repository's
-`docs/` folder at `/docs/<name>/`: scripting, collection-runner, flows, git,
-agent and cli. `src/content.config.ts` lists them. The Markdown stays in
-`docs/`, so contributors edit one copy and GitHub keeps showing it. A guide's
-first heading is its page title and its first paragraph its description; the
-index lists them in the order `src/guides.ts` gives. Links between guides,
-such as `cli.md#install`, are rewritten to their pages by the Markdown plugin in
-`astro.config.mjs`.
-
-Cloudflare watches `docs/` as well as `landing/`, so a change to a guide
-deploys on its own.
-
 ## Search engines
 
 `@astrojs/sitemap` writes `/sitemap-index.xml` on every build, and
@@ -99,7 +83,7 @@ curl -X POST https://api.indexnow.org/indexnow -H "Content-Type: application/jso
   "host": "requesteagle.tokarev.work",
   "key": "6b649271ff1671fca2da3fe1b2a6e780",
   "keyLocation": "https://requesteagle.tokarev.work/6b649271ff1671fca2da3fe1b2a6e780.txt",
-  "urlList": ["https://requesteagle.tokarev.work/", "https://requesteagle.tokarev.work/docs/"]
+  "urlList": ["https://requesteagle.tokarev.work/", "https://requesteagle.tokarev.work/downloads/"]
 }'
 ```
 

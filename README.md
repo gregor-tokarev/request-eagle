@@ -11,8 +11,6 @@
   ·
   <a href="https://requesteagle.tokarev.work">Website</a>
   ·
-  <a href="https://requesteagle.tokarev.work/docs/">Docs</a>
-  ·
   <a href="https://github.com/gregor-tokarev/request-eagle/issues">Feedback &amp; ideas</a>
 </p>
 
@@ -43,6 +41,15 @@
 | Price | Free | Free for one user; teams from $19 per user per month | Free; Pro from $6 per user per month | Free for personal use; $79 per year for work |
 
 Prices checked in October 2026.
+
+## Guides
+
+- [Request scripts](docs/scripting.md)
+- [Collection Runner](docs/collection-runner.md)
+- [Flows](docs/flows.md)
+- [Git](docs/git.md)
+- [Agent panel](docs/agent.md)
+- [CLI for agents](docs/cli.md)
 
 ## Install
 

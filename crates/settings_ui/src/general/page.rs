@@ -350,7 +350,7 @@ impl Render for GeneralSettings {
                                             .ghost()
                                             .label("Installation instructions")
                                             .icon(IconName::ExternalLink)
-                                            .on_click(|_, _, cx| cx.open_url("https://requesteagle.tokarev.work/docs/cli/#install")),
+                                            .on_click(|_, _, cx| cx.open_url("https://github.com/gregor-tokarev/request-eagle/blob/main/docs/cli.md#install")),
                                     ),
                             ),
                     ),
