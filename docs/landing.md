@@ -39,6 +39,11 @@ this repository with these build settings:
 for a year. Without the 404 page, Cloudflare would answer every unknown address
 with the landing.
 
+The site published the guides under `/docs/` for a day in October 2026.
+`public/_redirects` sends those addresses to the guides on GitHub. Cloudflare
+keeps serving a removed page from its cache for up to a week, and only a
+redirect overrides that.
+
 Cloudflare deploys by itself when a push to `main` changes a file under
 `landing/`. Other branches and pull requests are not deployed.
 
