@@ -1,4 +1,5 @@
 use std::{
+    ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -24,12 +25,15 @@ use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
 use flow::{FlowLibrary, SavedFlow};
-use gpui_kit::base::motion::{self, Transition};
+use gpui_kit::base::{
+    PANEL_MIN_SIZE,
+    motion::{self, Transition},
+};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
     button::{Button, ButtonVariants},
     notification::Notification,
-    resizable::{ResizableState, h_resizable, resizable_panel},
+    resizable::{ResizablePanelEvent, ResizableState, h_resizable, resizable_panel},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -73,6 +77,9 @@ pub(crate) struct Workspace {
     agent_panel_visible: Entity<bool>,
 
     pub(crate) main_split: Entity<ResizableState>,
+    /// Whether a divider of the main split has been dragged. Until then, a
+    /// panel that has not been drawn holds a placeholder size.
+    split_resized: bool,
     pub(crate) sidebar_visible: Entity<bool>,
 
     /// Built when first opened.
@@ -100,6 +107,7 @@ pub(crate) struct Workspace {
     _tabs_subscriptions: [Subscription; 2],
     _git_subscriptions: [Subscription; 3],
     _agent_panel_subscription: Subscription,
+    _main_split_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
@@ -301,6 +309,12 @@ impl Workspace {
             }),
         ];
 
+        let main_split = cx.new(|_| ResizableState::default());
+        let main_split_subscription =
+            cx.subscribe(&main_split, |this, _, _: &ResizablePanelEvent, _| {
+                this.split_resized = true;
+            });
+
         // Start in the collections tree, or in the tabs while it is hidden,
         // folded or in place of the Git panel.
         if sidebar_state.visible && sidebar_state.collections && !sidebar_state.git {
@@ -331,7 +345,8 @@ impl Workspace {
             collections,
             agent_panel,
             agent_panel_visible,
-            main_split: cx.new(|_| ResizableState::default()),
+            main_split,
+            split_resized: false,
             sidebar_visible,
             settings: None,
             settings_visible: false,
@@ -349,6 +364,7 @@ impl Workspace {
             _tabs_subscriptions: tabs_subscriptions,
             _git_subscriptions: git_subscriptions,
             _agent_panel_subscription: agent_panel_subscription,
+            _main_split_subscription: main_split_subscription,
             _settings_subscription: None,
         };
 
@@ -898,6 +914,24 @@ impl Workspace {
         )
     }
 
+    /// How far the panel at `ix` of the main split slides out. It is also
+    /// the panel's initial size, which a panel without a size of its own is
+    /// drawn at, so the panel always slides by the width it is drawn at.
+    fn side_panel_width(
+        &self,
+        ix: usize,
+        default: Pixels,
+        range: Range<Pixels>,
+        cx: &App,
+    ) -> Pixels {
+        let size = match self.main_split.read(cx).sizes().get(ix).copied() {
+            Some(size) if self.split_resized || size != PANEL_MIN_SIZE => size,
+            _ => default,
+        };
+
+        size.clamp(range.start, range.end)
+    }
+
     fn section_header(
         &self,
         section: SidebarSection,
@@ -1359,22 +1393,27 @@ impl Render for Workspace {
             cx,
         );
 
-        let sidebar_width = self
-            .main_split
-            .read(cx)
-            .sizes()
-            .first()
-            .copied()
-            .unwrap_or(rems(19.).to_pixels(window.rem_size()))
-            .clamp(
-                rems(14.).to_pixels(window.rem_size()),
-                rems(30.).to_pixels(window.rem_size()),
-            );
+        let agent_visible = *self.agent_panel_visible.read(cx);
+        let agent_progress = motion::transition(
+            "agent-panel-visibility",
+            if agent_visible { 1.0 } else { 0.0 },
+            Transition::new(Duration::from_millis(150)).ease(ease_in_out_cubic),
+            window,
+            cx,
+        );
+
+        let rem_size = window.rem_size();
+        let sidebar_range = rems(14.).to_pixels(rem_size)..rems(30.).to_pixels(rem_size);
+        let sidebar_width =
+            self.side_panel_width(0, rems(19.).to_pixels(rem_size), sidebar_range.clone(), cx);
+
+        let agent_range = rems(18.).to_pixels(rem_size)..rems(48.).to_pixels(rem_size);
+        let agent_width =
+            self.side_panel_width(2, rems(24.).to_pixels(rem_size), agent_range.clone(), cx);
 
         // Commands that only apply to some tabs stay out of the palette for
         // the others. They are handled here, so they also work while the
         // sidebar has focus.
-        let agent_visible = *self.agent_panel_visible.read(cx);
         let active_page = self.main_view.read(cx).active_page();
         let has_url = active_page.is_some_and(Page::is_request);
         let copyable = active_page.is_some_and(Page::can_copy_as_command);
@@ -1508,23 +1547,20 @@ impl Render for Workspace {
                                 .visible(sidebar_progress > 0.0)
                                 .flex_none()
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
-                                .size(rems(19.).to_pixels(window.rem_size()))
-                                .size_range(
-                                    rems(14.).to_pixels(window.rem_size())
-                                        ..rems(30.).to_pixels(window.rem_size()),
-                                )
+                                .size(sidebar_width)
+                                .size_range(sidebar_range)
                                 .child(self.sidebar(window, cx)),
                         )
                         .child(self.main_view.clone().into_any_element())
                         .child(
                             resizable_panel()
-                                .visible(agent_visible)
+                                // Drawn from the frame it is shown, out of
+                                // sight, so its message box can take focus.
+                                .visible(agent_visible || agent_progress > 0.0)
                                 .flex_none()
-                                .size(rems(24.).to_pixels(window.rem_size()))
-                                .size_range(
-                                    rems(18.).to_pixels(window.rem_size())
-                                        ..rems(48.).to_pixels(window.rem_size()),
-                                )
+                                .mr(agent_width * (agent_progress - 1.0))
+                                .size(agent_width)
+                                .size_range(agent_range)
                                 .child(self.agent_panel.clone()),
                         ),
                 ),
