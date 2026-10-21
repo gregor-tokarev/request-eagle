@@ -426,15 +426,16 @@ impl WebSocketDraft {
         }
     }
 
-    /// How history keeps the connection if its tab closes now. Dropping the
-    /// connection closes it normally.
+    /// How history keeps the connection if its tab closes now: closed by
+    /// Request Eagle. The server's answer is no longer read, so its status
+    /// is unknown.
     pub fn stopped(&self) -> Option<RequestEnded> {
         match self.connection {
             Connection::Connected { history, .. } | Connection::Closing { history, .. } => {
                 Some(RequestEnded {
                     id: history,
                     outcome: Outcome::Closed {
-                        code: Some(1000),
+                        code: None,
                         reason: String::new(),
                         by_client: true,
                     },
