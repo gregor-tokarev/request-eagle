@@ -28,6 +28,18 @@ pub(super) enum Section {
     Console,
 }
 
+/// The width the section tabs keep beside a long status, about two tabs.
+const TABS_MIN_WIDTH: Rems = rems(8.);
+
+const SECTIONS: [Section; 6] = [
+    Section::Body,
+    Section::Cookies,
+    Section::Headers,
+    Section::Request,
+    Section::Tests,
+    Section::Console,
+];
+
 /// What the view shows: the response, or why there is none.
 // Each view has one, so boxing the response would not save memory.
 #[allow(clippy::large_enum_variant)]
@@ -51,6 +63,13 @@ pub struct ResponseView {
     pub(super) mode: BodyMode,
     pub(super) scripts: Vec<request::ScriptReport>,
     pub(super) section: Section,
+    /// Scrolls the section tabs when they do not fit beside the metadata.
+    tabs_scroll: ScrollHandle,
+    /// The section and the width of the tabs when its tab was last scrolled
+    /// into view.
+    revealed: Option<(Section, Pixels)>,
+    /// The toolbar's width in the last frame.
+    toolbar_width: Option<Pixels>,
     pub(super) wrap: bool,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
@@ -77,6 +96,9 @@ impl ResponseView {
             mode: BodyMode::Raw,
             scripts: Vec::new(),
             section: Section::Body,
+            tabs_scroll: ScrollHandle::new(),
+            revealed: None,
+            toolbar_width: None,
             wrap: true,
             headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
@@ -207,7 +229,7 @@ impl ResponseView {
                 if self.scripts.iter().any(|report| {
                     report.error.is_some() || report.tests.iter().any(|test| test.error.is_some())
                 }) {
-                    self.section = Section::Tests;
+                    self.select(Section::Tests);
                 }
 
                 // An event stream keeps showing its events.
@@ -227,8 +249,8 @@ impl ResponseView {
                 let message: SharedString = failure.error.to_string().into();
                 let skipped = matches!(failure.error, ExecutionError::Skipped { .. });
                 match failure.error {
-                    ExecutionError::Skipped { .. } => self.section = Section::Body,
-                    ExecutionError::Script { .. } => self.section = Section::Tests,
+                    ExecutionError::Skipped { .. } => self.select(Section::Body),
+                    ExecutionError::Script { .. } => self.select(Section::Tests),
                     _ => {}
                 }
                 self.scripts = failure.scripts;
@@ -267,93 +289,110 @@ impl ResponseView {
         };
     }
 
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// The sections that have a tab, in tab order.
+    fn sections(&self) -> impl Iterator<Item = Section> + use<> {
+        let request_section = self.request_section;
+
+        SECTIONS
+            .into_iter()
+            .filter(move |section| *section != Section::Request || request_section)
+    }
+
+    /// Show `section`, scrolling its tab into view.
+    fn select(&mut self, section: Section) {
+        self.section = section;
+        self.revealed = None;
+    }
+
+    /// Keep the selected tab in view when it changes or the tabs' width does,
+    /// as when a panel opens or a new status is wider, and remeasure the
+    /// toolbar when its width changes. Returns whether to draw again.
+    fn toolbar_laid_out(&mut self, width: Pixels) -> bool {
+        let mut changed = self.toolbar_width.replace(width) != Some(width);
+
+        let tabs_width = self.tabs_scroll.bounds().size.width;
+        if self.revealed != Some((self.section, tabs_width)) {
+            self.revealed = Some((self.section, tabs_width));
+
+            if let Some(index) = self.sections().position(|section| section == self.section) {
+                // Applied in the next frame, against the width the tabs have now.
+                self.tabs_scroll.scroll_to_item(index);
+                changed = true;
+            }
+        }
+
+        changed
+    }
+
+    fn toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let (headers, cookies) = match &self.state {
             ResponseState::Received { content, .. } => {
                 (content.headers.len(), content.cookies.len())
             }
             _ => (0, 0),
         };
+        let events = matches!(
+            self.state,
+            ResponseState::Received {
+                events: Some(_),
+                ..
+            }
+        );
 
-        // In a narrow pane the tabs wrap rather than clip, and the metadata
-        // goes to its own line, starting where the tabs do.
+        // One row at every width. The tabs keep their spacing and scroll when
+        // they do not fit, and the metadata takes the space they leave.
         h_flex()
             .flex_none()
             .min_w_0()
             .min_h_11()
-            .gap_x_3()
-            .gap_y_1()
-            .flex_wrap()
-            .justify_between()
+            .gap_3()
             .child(
                 Tabs::new("response-sections")
                     .flex()
-                    .flex_row()
-                    .flex_wrap()
                     .min_w_0()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.tabs_scroll)
                     .gap_1()
-                    .children(
-                        [
-                            (
-                                Section::Body,
-                                if matches!(
-                                    self.state,
-                                    ResponseState::Received {
-                                        events: Some(_),
-                                        ..
-                                    }
-                                ) {
-                                    "Events"
-                                } else {
-                                    "Body"
-                                },
-                                0,
-                            ),
-                            (Section::Cookies, "Cookies", cookies),
-                            (Section::Headers, "Headers", headers),
-                            (Section::Request, "Request", 0),
-                            (
-                                Section::Tests,
+                    .children(self.sections().map(|section| {
+                        let (label, count) = match section {
+                            Section::Body if events => ("Events", 0),
+                            Section::Body => ("Body", 0),
+                            Section::Cookies => ("Cookies", cookies),
+                            Section::Headers => ("Headers", headers),
+                            Section::Request => ("Request", 0),
+                            Section::Tests => (
                                 "Test Results",
                                 self.scripts.iter().map(|report| report.tests.len()).sum(),
                             ),
-                            (
-                                Section::Console,
+                            Section::Console => (
                                 "Console",
                                 self.scripts.iter().map(|report| report.logs.len()).sum(),
                             ),
-                        ]
-                        .into_iter()
-                        .filter(|(section, _, _)| {
-                            *section != Section::Request || self.request_section
-                        })
-                        .map(|(section, label, count)| {
-                            let selected = self.section == section;
+                        };
+                        let selected = self.section == section;
 
-                            Tab::new(label)
-                                .debug_selector(move || format!("response-section-{label}"))
-                                .selected(selected)
-                                .h_8()
-                                .px_2()
-                                .gap_1()
-                                .rounded(cx.theme().radius_tokens().md)
-                                .text_color(cx.theme().muted_foreground)
-                                .when(selected, |tab| {
-                                    tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                                })
-                                .hover(|tab| tab.bg(cx.theme().muted))
-                                .child(label)
-                                .when(count > 0, |tab| {
-                                    tab.child(crate::section_count::section_count(
-                                        count, selected, cx,
-                                    ))
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.section = section;
-                                    cx.notify();
-                                }))
-                        }),
-                    ),
+                        Tab::new(label)
+                            .debug_selector(move || format!("response-section-{label}"))
+                            .selected(selected)
+                            .flex_none()
+                            .h_8()
+                            .px_2()
+                            .gap_1()
+                            .rounded(cx.theme().radius_tokens().md)
+                            .text_color(cx.theme().muted_foreground)
+                            .when(selected, |tab| {
+                                tab.bg(cx.theme().muted).text_color(cx.theme().foreground)
+                            })
+                            .hover(|tab| tab.bg(cx.theme().muted))
+                            .child(label)
+                            .when(count > 0, |tab| {
+                                tab.child(crate::section_count::section_count(count, selected, cx))
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.select(section);
+                                cx.notify();
+                            }))
+                    })),
             )
             .map(|row| {
                 let ResponseState::Received {
@@ -363,15 +402,42 @@ impl ResponseView {
                     return row;
                 };
 
-                match events.as_ref().map(|events| events.read(cx)) {
+                // The metadata leaves the tabs room for a couple of tabs. A
+                // status too long for the rest of the row is shortened.
+                let max_width = self.toolbar_width.map(|width| {
+                    let rem = window.rem_size();
+                    (width - (TABS_MIN_WIDTH + rems(0.75)).to_pixels(rem))
+                        .max(rems(3.).to_pixels(rem))
+                });
+                let metadata = match events.as_ref().map(|events| events.read(cx)) {
                     Some(events) if events.is_open() => {
-                        row.child(self.stream_status(content, true, cx))
+                        self.stream_status(content, true, max_width, cx)
                     }
                     // A broken stream has its head, but no complete measurements.
                     Some(events) if events.failed() => {
-                        row.child(self.stream_status(content, false, cx))
+                        self.stream_status(content, false, max_width, cx)
                     }
-                    _ => row.child(self.metadata(content, cx)),
+                    _ => self.metadata(content, max_width, cx),
+                };
+
+                // The metadata takes the width the tabs leave, but no less
+                // than its own minimum, so the status always shows.
+                row.child(h_flex().flex_1().justify_end().child(metadata))
+            })
+            .on_prepaint({
+                let view = cx.entity().downgrade();
+                move |bounds, window, cx| {
+                    let changed = view
+                        .update(cx, |this, _| this.toolbar_laid_out(bounds.size.width))
+                        .unwrap_or(false);
+
+                    // GPUI ignores notifications while it draws, so ask for
+                    // the frame that applies the change.
+                    if changed {
+                        window.on_next_frame(move |_, cx| {
+                            let _ = view.update(cx, |_, cx| cx.notify());
+                        });
+                    }
                 }
             })
     }
@@ -504,7 +570,7 @@ impl Render for ResponseView {
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().border)
-            .when(has_results, |view| view.child(self.toolbar(cx)))
+            .when(has_results, |view| view.child(self.toolbar(window, cx)))
             .when_some(failure, |view, message| {
                 view.child(div().px_2().text_color(cx.theme().danger).child(message))
             })
