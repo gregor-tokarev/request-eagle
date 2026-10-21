@@ -114,7 +114,8 @@ impl Field {
     pub(super) fn secret(self) -> bool {
         matches!(
             self,
-            Self::Password
+            Self::Token
+                | Self::Password
                 | Self::ConsumerSecret
                 | Self::TokenSecret
                 | Self::ClientSecret
