@@ -10,12 +10,14 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, PopupMenuItem},
     scroll::Scrollbar,
+    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use request::{GrpcStatus, StatusCode, WebSocketClose};
 use request_eagle_theme::method_label;
-use request_history::{Change, Entry, History, Record};
-use tab_ui::RequestSent;
+use request_history::{Change, Entry, History, Outcome, Record};
+use tab_ui::{RequestEnded, RequestSent, status_color};
 
 /// Work on history's files, run off the UI thread.
 type Job = Box<dyn FnOnce() + Send>;
@@ -123,9 +125,19 @@ impl HistoryPanel {
     }
 
     pub(crate) fn record(&mut self, sent: &RequestSent, cx: &mut Context<Self>) {
-        let change = self.history.add(sent.record.clone(), sent.sent_at);
+        let change = self.history.add(sent.id, sent.record.clone(), sent.sent_at);
         self.save(change, cx);
         self.refresh(cx);
+    }
+
+    pub(crate) fn end(&mut self, ended: &RequestEnded, cx: &mut Context<Self>) {
+        if let Some(change) = self
+            .history
+            .end(&ended.id.to_string(), ended.outcome.clone())
+        {
+            self.save(change, cx);
+            cx.notify();
+        }
     }
 
     /// Run `job` once the jobs before it are done.
@@ -489,6 +501,9 @@ impl HistoryPanel {
                     })
                     .child(div().flex_none().child(method_label(label, cx)))
                     .child(div().flex_1().min_w_0().text_ellipsis().child(address))
+                    .when_some(entry.outcome.as_ref(), |this, outcome| {
+                        this.child(outcome_badge(outcome, cx))
+                    })
                     .child(
                         div()
                             .flex_none()
@@ -532,6 +547,96 @@ impl HistoryPanel {
                     )
             })
             .into_any_element()
+    }
+}
+
+/// How a request ended, in little room: the status code in the color its
+/// response shows it in, or an icon for a WebSocket connection that closed
+/// or a request that failed. The tooltip has the details.
+fn outcome_badge(outcome: &Outcome, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let details: SharedString = outcome_details(outcome).into();
+    let tooltip = details.clone();
+    let badge = div()
+        .id("history-outcome")
+        .flex_none()
+        .flex()
+        .items_center()
+        .tooltip(move |window, cx| {
+            let tooltip = tooltip.clone();
+            Tooltip::element(move |_, _| div().max_w(rems(20.)).child(tooltip.clone()))
+                .build(window, cx)
+        });
+
+    let code = |badge: Stateful<Div>, code: String, color: Hsla| {
+        badge
+            .role(Role::Label)
+            .aria_label(details.clone())
+            .px_1()
+            .rounded(theme.radius_tokens().sm)
+            .bg(color.opacity(0.15))
+            .text_color(color)
+            .text_xs()
+            .font_family(theme.mono_font_family.clone())
+            .child(code)
+    };
+    let icon = |badge: Stateful<Div>, name: IconName, color: Hsla, label: SharedString| {
+        badge
+            .role(Role::Image)
+            .aria_label(label)
+            .child(Icon::new(name).size(rems(0.875)).text_color(color))
+    };
+
+    match outcome {
+        Outcome::Status(status) => code(
+            badge,
+            status.to_string(),
+            StatusCode::from_u16(*status).map_or(theme.danger, |status| status_color(status, cx)),
+        ),
+        Outcome::Grpc { code: 0, .. } => code(badge, "0".into(), theme.success),
+        Outcome::Grpc { code: status, .. } => code(badge, status.to_string(), theme.danger),
+        Outcome::Closed { .. } => icon(
+            badge,
+            IconName::CircleX,
+            theme.muted_foreground,
+            details.clone(),
+        ),
+        Outcome::Failed(_) => icon(
+            badge,
+            IconName::TriangleAlert,
+            theme.danger,
+            format!("Failed: {details}").into(),
+        ),
+    }
+}
+
+/// How a request ended, in full: `404 Not Found`, a gRPC status with its
+/// message, who closed a WebSocket connection, or why the request failed.
+fn outcome_details(outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Status(code) => match StatusCode::from_u16(*code)
+            .ok()
+            .and_then(|status| status.canonical_reason())
+        {
+            Some(reason) => format!("{code} {reason}"),
+            None => code.to_string(),
+        },
+        Outcome::Grpc { code, message } => GrpcStatus {
+            code: *code,
+            message: message.clone(),
+        }
+        .to_string(),
+        Outcome::Closed {
+            code,
+            reason,
+            by_client,
+        } => WebSocketClose {
+            code: *code,
+            reason: reason.clone(),
+            by_client: *by_client,
+        }
+        .details(),
+        Outcome::Failed(message) => message.clone(),
     }
 }
 
