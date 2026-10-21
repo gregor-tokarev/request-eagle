@@ -1,7 +1,7 @@
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::{Input, InputGroup, InputGroupAddon},
+    input::{Input, InputGroup, InputGroupAddon, InputGroupAddonAlignment},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -108,6 +108,7 @@ impl RequestDraft {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let url = self.url_state(window, cx);
+        let url_missing = self.url_missing;
         let method = self.request.method;
         let draft = cx.entity().downgrade();
         let paste_target = draft.clone();
@@ -207,6 +208,7 @@ impl RequestDraft {
                             .child(with_variables(
                                 self.url_completion.as_ref().unwrap(),
                                 InputGroup::new("request-url-group")
+                                    .invalid(url_missing)
                                     .input(
                                         Input::new(&url)
                                             .aria_label("Request URL")
@@ -234,7 +236,28 @@ impl RequestDraft {
                                             .border_r_1()
                                             .border_color(cx.theme().input)
                                             .child(method_button),
-                                    ),
+                                    )
+                                    .when(url_missing, |group| {
+                                        group.addon(
+                                            InputGroupAddon::new("request-url-missing")
+                                                .align(InputGroupAddonAlignment::InlineEnd)
+                                                // Shares the empty URL's room, so both
+                                                // shrink in narrow windows.
+                                                .flex_1()
+                                                .min_w_0()
+                                                .justify_end()
+                                                .pr_3()
+                                                .text_color(cx.theme().danger)
+                                                .child(
+                                                    div()
+                                                        .debug_selector(|| {
+                                                            "request-url-missing".into()
+                                                        })
+                                                        .truncate()
+                                                        .child("Enter a request URL"),
+                                                ),
+                                        )
+                                    }),
                             )),
                     ),
             )
