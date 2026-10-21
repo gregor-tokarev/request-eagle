@@ -337,6 +337,7 @@ impl OutputBudget {
             report.error = (!std::mem::replace(&mut self.exceeded, true)).then(|| {
                 "On message scripts exceeded the limit of 500 tests and 500 console entries per call; later results are not shown".into()
             });
+            report.error_line = None;
         }
 
         self.results += report.tests.len() + usize::from(report.error.is_some());
