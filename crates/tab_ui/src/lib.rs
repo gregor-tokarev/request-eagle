@@ -53,6 +53,7 @@ pub use flow_editor::{
 };
 pub use grpc_draft::GrpcDraft;
 pub use request_draft::RequestDraft;
-pub use request_sent::RequestSent;
+pub use request_sent::{RequestEnded, RequestSent};
+pub use response_view::status_color;
 pub use storage::Storage;
 pub use websocket_draft::WebSocketDraft;

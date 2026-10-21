@@ -8788,6 +8788,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-xml",
  "unicode-segmentation",
+ "uuid",
 ]
 
 [[package]]

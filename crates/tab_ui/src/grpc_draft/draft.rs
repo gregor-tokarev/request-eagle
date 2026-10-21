@@ -23,7 +23,7 @@ use crate::request_draft::{FieldsChanged, RequestFields};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::storage::Storage;
 use crate::{
-    Environments, RequestSent,
+    Environments, RequestEnded, RequestSent,
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -78,6 +78,7 @@ pub struct GrpcDraft {
 }
 
 impl EventEmitter<RequestSent> for GrpcDraft {}
+impl EventEmitter<RequestEnded> for GrpcDraft {}
 
 impl SnippetDraft for GrpcDraft {
     type Request = GrpcRequest;

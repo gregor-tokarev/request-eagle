@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use collection::SavedLocation;
 use environment::EnvironmentSessions;
@@ -16,6 +16,8 @@ use preferences::Preferences;
 use request::{
     Auth, Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest,
 };
+use request_history::Outcome;
+use uuid::Uuid;
 
 use super::message_log::MessageLog;
 use crate::actions::SendRequest;
@@ -24,7 +26,7 @@ use crate::request_draft::{FieldsChanged, RequestFields, request_header};
 use crate::storage::Storage;
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
-use crate::{Environments, RequestSent};
+use crate::{Environments, RequestEnded, RequestSent};
 
 /// The most events shown per update. A fast stream is drawn in batches
 /// instead of once for every message.
@@ -50,10 +52,13 @@ pub(super) enum Connection {
     Connected {
         socket: WebSocketConnection,
         task: Task<()>,
+        /// The id history keeps the connection under, which its end refers to.
+        history: Uuid,
     },
     /// Closing was requested; waiting for the server to acknowledge.
     Closing {
         _task: Task<()>,
+        history: Uuid,
     },
 }
 
@@ -118,6 +123,7 @@ pub struct WebSocketDraft {
 }
 
 impl EventEmitter<RequestSent> for WebSocketDraft {}
+impl EventEmitter<RequestEnded> for WebSocketDraft {}
 
 impl WebSocketDraft {
     /// Variables resolve from the request's collection environment, its
@@ -330,11 +336,10 @@ impl WebSocketDraft {
         let (socket, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
 
-        let sent = RequestSent {
-            record: request_history::Record::sent(recorded),
-            sent_at: SystemTime::now(),
-            saved: self.storage.location().is_some(),
-        };
+        let sent = RequestSent::new(
+            request_history::Record::sent(recorded),
+            self.storage.location().is_some(),
+        );
 
         let task = cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
@@ -362,7 +367,10 @@ impl WebSocketDraft {
         self.connection = match std::mem::replace(&mut self.connection, Connection::Disconnected) {
             Connection::Connecting { .. } => Connection::Disconnected,
             // Dropping the connection starts a normal closure.
-            Connection::Connected { task, .. } => Connection::Closing { _task: task },
+            Connection::Connected { task, history, .. } => Connection::Closing {
+                _task: task,
+                history,
+            },
             connection @ (Connection::Disconnected | Connection::Closing { .. }) => connection,
         };
         self.notify_controls(cx);
@@ -381,19 +389,31 @@ impl WebSocketDraft {
         let state = self.connection.state();
 
         for event in &events {
-            match event.kind {
+            match &event.kind {
                 WebSocketEventKind::Connected(_)
                     if matches!(self.connection, Connection::Connecting { .. }) =>
                 {
                     if let Connection::Connecting { socket, sent, task } =
                         std::mem::replace(&mut self.connection, Connection::Disconnected)
                     {
-                        self.connection = Connection::Connected { socket, task };
+                        self.connection = Connection::Connected {
+                            socket,
+                            task,
+                            history: sent.id,
+                        };
                         cx.emit(sent);
                     }
                 }
-                WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
-                    self.connection = Connection::Disconnected;
+                WebSocketEventKind::Closed(close) => self.end(
+                    Outcome::Closed {
+                        code: close.code,
+                        reason: close.reason.clone(),
+                        by_client: close.by_client,
+                    },
+                    cx,
+                ),
+                WebSocketEventKind::Failed(error) => {
+                    self.end(Outcome::Failed(error.to_string()), cx)
                 }
                 _ => {}
             }
@@ -403,6 +423,18 @@ impl WebSocketDraft {
 
         if self.connection.state() != state {
             self.notify_controls(cx);
+        }
+    }
+
+    /// The connection ended. History keeps how, once it had connected.
+    fn end(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
+        if let Connection::Connected { history, .. } | Connection::Closing { history, .. } =
+            std::mem::replace(&mut self.connection, Connection::Disconnected)
+        {
+            cx.emit(RequestEnded {
+                id: history,
+                outcome,
+            });
         }
     }
 

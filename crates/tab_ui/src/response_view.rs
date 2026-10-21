@@ -23,7 +23,7 @@ pub(crate) use body::{ResponseBodyEditor, register_xml};
 pub use content::ResponseContent;
 pub(crate) use content::exceeds_editor_limit;
 pub(crate) use hex::hex_dump;
-pub(crate) use metadata::status_color;
+pub use metadata::status_color;
 pub(crate) use request::sent_url;
 pub(crate) use scripts::{badge, log_line, script_results};
 pub use view::ResponseView;

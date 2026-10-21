@@ -26,8 +26,8 @@ use flow::FlowLibraryError;
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
     CiteOrigin, CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
-    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestSent, RunCollection,
-    SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
+    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestEnded, RequestSent,
+    RunCollection, SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -284,7 +284,7 @@ impl Page {
         &self,
         history: Entity<HistoryPanel>,
         cx: &mut Context<MainView>,
-    ) -> Option<Subscription> {
+    ) -> Vec<Subscription> {
         fn record<T: EventEmitter<RequestSent>>(
             page: &Entity<T>,
             history: Entity<HistoryPanel>,
@@ -306,15 +306,29 @@ impl Page {
             })
         }
 
+        /// gRPC calls and WebSocket connections are kept when they start,
+        /// and how they ended when they end.
+        fn end<T: EventEmitter<RequestEnded>>(
+            page: &Entity<T>,
+            history: Entity<HistoryPanel>,
+            cx: &mut Context<MainView>,
+        ) -> Subscription {
+            cx.subscribe(page, move |_, _, ended: &RequestEnded, cx| {
+                history.update(cx, |history, cx| history.end(ended, cx));
+            })
+        }
+
         match self {
-            Page::Request(draft) => Some(record(draft, history, cx)),
-            Page::Grpc(draft) => Some(record(draft, history, cx)),
-            Page::WebSocket(draft) => Some(record(draft, history, cx)),
+            Page::Request(draft) => vec![record(draft, history, cx)],
+            Page::Grpc(draft) => vec![record(draft, history.clone(), cx), end(draft, history, cx)],
+            Page::WebSocket(draft) => {
+                vec![record(draft, history.clone(), cx), end(draft, history, cx)]
+            }
             Page::Flow(_)
             | Page::Collection(_)
             | Page::Runner(_)
             | Page::Environment(_)
-            | Page::Cookies(_) => None,
+            | Page::Cookies(_) => Vec::new(),
         }
     }
 

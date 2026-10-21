@@ -1,7 +1,4 @@
-use std::{
-    convert::Infallible,
-    time::{Duration, SystemTime},
-};
+use std::{convert::Infallible, time::Duration};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::*;
@@ -265,11 +262,10 @@ impl RequestDraft {
         let cookies = Cookies::jar(cx);
         let (events, mut updates, stop) = EventStream::new();
         let dispatch = events.dispatch();
-        let sent = RequestSent {
-            record: request_history::Record::sent(recorded),
-            sent_at: SystemTime::now(),
-            saved: self.storage.location().is_some(),
-        };
+        let sent = RequestSent::new(
+            request_history::Record::sent(recorded),
+            self.storage.location().is_some(),
+        );
         let went_out = dispatch.clone();
         let task = cx.background_executor().spawn(async move {
             let executor = match cached.map(Ok).unwrap_or_else(|| {

@@ -5,6 +5,8 @@ use request::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::Outcome;
+
 /// The largest response body history keeps. Larger bodies are left out, so
 /// history stays small on disk.
 pub const BODY_LIMIT: usize = 1024 * 1024;
@@ -36,6 +38,16 @@ impl Record {
     /// The method or protocol shown before the address.
     pub fn label(&self) -> &'static str {
         self.request.label()
+    }
+
+    /// How the request ended, as far as the record keeps it: the HTTP
+    /// response's status, or why the request failed.
+    pub(crate) fn outcome(&self) -> Option<Outcome> {
+        match (&self.response, &self.error) {
+            (Some(response), _) => Some(Outcome::Status(response.status)),
+            (None, Some(error)) => Some(Outcome::Failed(error.clone())),
+            (None, None) => None,
+        }
     }
 
     /// Where the request went, as written. A gRPC call adds its method.
