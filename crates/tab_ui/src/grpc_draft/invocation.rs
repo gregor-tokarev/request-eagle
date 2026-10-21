@@ -89,6 +89,11 @@ impl GrpcDraft {
             self.redraw(cx);
             return;
         }
+        // A script added since then sets the URL.
+        if self.url_missing {
+            self.url_missing = false;
+            self.redraw(cx);
+        }
 
         let missing = if self.request.method.trim().is_empty() {
             Some("Select a method to invoke")

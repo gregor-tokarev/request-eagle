@@ -242,6 +242,11 @@ impl RequestDraft {
             self.notify_address(cx);
             return;
         }
+        // A script added since then sets the URL.
+        if self.url_missing {
+            self.url_missing = false;
+            self.notify_address(cx);
+        }
 
         self.prepare(window, cx);
         let response = self.response.clone();
