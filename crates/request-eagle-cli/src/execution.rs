@@ -219,6 +219,7 @@ fn script_json(report: &ScriptReport) -> Value {
         "collection": report.collection,
         "message": report.message,
         "error": report.error,
+        "error_line": report.error_line,
         "tests": report.tests.iter().map(|test| json!({"name": test.name, "passed": test.error.is_none(), "error": test.error})).collect::<Vec<_>>(),
         "logs": report.logs.iter().map(|log| json!({"level": log.level, "message": log.message})).collect::<Vec<_>>(),
     })

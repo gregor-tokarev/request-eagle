@@ -35,6 +35,7 @@ fn report(next_request: Option<NextRequest>) -> ScriptReport {
             message: "hello".into(),
         }],
         error: None,
+        error_line: None,
         next_request,
     }
 }

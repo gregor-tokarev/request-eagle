@@ -23,7 +23,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Auth, Field, HttpRequest, Method};
+use request::{Auth, Field, HttpRequest, Method, ScriptPhase};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {
@@ -158,7 +158,16 @@ impl RequestDraft {
         // Unlike the editors, these views do not install window listeners or
         // notify while they are created, so unvisited tabs can own them.
         let owner = cx.weak_entity();
-        let response = cx.new(|cx| ResponseView::new(cx).citable());
+        let script_owner = owner.clone();
+        let response = cx.new(|cx| {
+            ResponseView::new(cx)
+                .citable()
+                .on_show_script_line(move |phase, line, window, cx| {
+                    let _ = script_owner.update(cx, |draft, cx| {
+                        draft.show_script_line(phase, line, window, cx)
+                    });
+                })
+        });
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
@@ -508,6 +517,21 @@ impl RequestDraft {
                 scripts
             })
             .clone()
+    }
+
+    /// Open the Scripts section at a line of a phase's script, counting from 1.
+    fn show_script_line(
+        &mut self,
+        phase: ScriptPhase,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.section = RequestSection::Scripts;
+        self.prepare(window, cx);
+        self.script_editor(cx)
+            .update(cx, |scripts, cx| scripts.show_line(phase, line, window, cx));
+        cx.notify();
     }
 
     /// The editor of the selected script phase.

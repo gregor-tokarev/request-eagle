@@ -11,7 +11,9 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use request::{Auth, Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
+use request::{
+    Auth, Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences, ScriptPhase,
+};
 
 use super::definition::DefinitionState;
 use super::invocation::Call;
@@ -145,7 +147,14 @@ impl GrpcDraft {
         // Like the HTTP draft, create views that install window listeners
         // only once the tab is visible.
         let owner = cx.weak_entity();
-        let response = cx.new(GrpcResponse::new);
+        let script_owner = owner.clone();
+        let response = cx.new(|cx| {
+            GrpcResponse::new(cx).on_show_script_line(move |phase, line, window, cx| {
+                let _ = script_owner.update(cx, |draft, cx| {
+                    draft.show_script_line(phase, line, window, cx)
+                });
+            })
+        });
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| GrpcAddress(owner.clone()));
         let configuration = cx.new(|_| GrpcConfiguration(owner));
@@ -523,6 +532,21 @@ impl GrpcDraft {
         self.metadata = Some(metadata.clone());
 
         metadata
+    }
+
+    /// Open the Scripts section at a line of a phase's script, counting from 1.
+    fn show_script_line(
+        &mut self,
+        phase: ScriptPhase,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.section = GrpcSection::Scripts;
+        self.prepare(window, cx);
+        self.script_editor(cx)
+            .update(cx, |scripts, cx| scripts.show_line(phase, line, window, cx));
+        self.redraw(cx);
     }
 
     pub(crate) fn script_editor(

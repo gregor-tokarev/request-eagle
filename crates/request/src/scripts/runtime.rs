@@ -106,6 +106,7 @@ pub(crate) async fn pre_request(
                 tests: Vec::new(),
                 logs: Vec::new(),
                 error: Some(message.clone()),
+                error_line: None,
                 next_request: None,
             };
             return Err(ExecutionFailure {
@@ -176,6 +177,7 @@ pub(crate) async fn pre_request(
             }
             if cancelled.load(Ordering::Relaxed) {
                 report.error = Some("Script cancelled".into());
+                report.error_line = None;
             }
 
             if let Some(message) = report.error.clone() {
@@ -386,6 +388,7 @@ pub(crate) async fn post_response(
             report.collection = collection;
             if cancelled.load(Ordering::Relaxed) {
                 report.error = Some("Script cancelled".into());
+                report.error_line = None;
             }
             if report.error.is_none()
                 && let Some(mut output) = output

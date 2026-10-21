@@ -131,6 +131,8 @@ pub struct ScriptReport {
     pub tests: Vec<ScriptTest>,
     pub logs: Vec<ScriptLog>,
     pub error: Option<String>,
+    /// The line of the script its error was thrown at, counting from 1.
+    pub error_line: Option<usize>,
     /// What the script chose with `pm.execution.setNextRequest`. Only the
     /// Collection Runner follows it.
     pub next_request: Option<NextRequest>,
