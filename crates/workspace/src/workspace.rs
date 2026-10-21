@@ -1,4 +1,5 @@
 use std::{
+    ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -24,7 +25,10 @@ use collection::{CollectionRegistry, Collections};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
 use flow::{FlowLibrary, SavedFlow};
-use gpui_kit::base::motion::{self, Transition};
+use gpui_kit::base::{
+    PANEL_MIN_SIZE,
+    motion::{self, Transition},
+};
 use gpui_kit::component::{
     animation::ease_in_out_cubic,
     button::{Button, ButtonVariants},
@@ -898,6 +902,27 @@ impl Workspace {
         )
     }
 
+    /// How wide the panel at `ix` of the main split is drawn, so that it can
+    /// slide out by exactly its width.
+    fn side_panel_width(
+        &self,
+        ix: usize,
+        initial: Pixels,
+        range: Range<Pixels>,
+        cx: &App,
+    ) -> Pixels {
+        self.main_split
+            .read(cx)
+            .sizes()
+            .get(ix)
+            .copied()
+            // A panel that has not been drawn yet holds a placeholder size,
+            // but is drawn at its initial size.
+            .filter(|size| *size != PANEL_MIN_SIZE)
+            .unwrap_or(initial)
+            .clamp(range.start, range.end)
+    }
+
     fn section_header(
         &self,
         section: SidebarSection,
@@ -1359,22 +1384,27 @@ impl Render for Workspace {
             cx,
         );
 
-        let sidebar_width = self
-            .main_split
-            .read(cx)
-            .sizes()
-            .first()
-            .copied()
-            .unwrap_or(rems(19.).to_pixels(window.rem_size()))
-            .clamp(
-                rems(14.).to_pixels(window.rem_size()),
-                rems(30.).to_pixels(window.rem_size()),
-            );
+        let agent_visible = *self.agent_panel_visible.read(cx);
+        let agent_progress = motion::transition(
+            "agent-panel-visibility",
+            if agent_visible { 1.0 } else { 0.0 },
+            Transition::new(Duration::from_millis(150)).ease(ease_in_out_cubic),
+            window,
+            cx,
+        );
+
+        let rem_size = window.rem_size();
+        let sidebar_size = rems(19.).to_pixels(rem_size);
+        let sidebar_range = rems(14.).to_pixels(rem_size)..rems(30.).to_pixels(rem_size);
+        let sidebar_width = self.side_panel_width(0, sidebar_size, sidebar_range.clone(), cx);
+
+        let agent_size = rems(24.).to_pixels(rem_size);
+        let agent_range = rems(18.).to_pixels(rem_size)..rems(48.).to_pixels(rem_size);
+        let agent_width = self.side_panel_width(2, agent_size, agent_range.clone(), cx);
 
         // Commands that only apply to some tabs stay out of the palette for
         // the others. They are handled here, so they also work while the
         // sidebar has focus.
-        let agent_visible = *self.agent_panel_visible.read(cx);
         let active_page = self.main_view.read(cx).active_page();
         let has_url = active_page.is_some_and(Page::is_request);
         let copyable = active_page.is_some_and(Page::can_copy_as_command);
@@ -1508,23 +1538,20 @@ impl Render for Workspace {
                                 .visible(sidebar_progress > 0.0)
                                 .flex_none()
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
-                                .size(rems(19.).to_pixels(window.rem_size()))
-                                .size_range(
-                                    rems(14.).to_pixels(window.rem_size())
-                                        ..rems(30.).to_pixels(window.rem_size()),
-                                )
+                                .size(sidebar_size)
+                                .size_range(sidebar_range)
                                 .child(self.sidebar(window, cx)),
                         )
                         .child(self.main_view.clone().into_any_element())
                         .child(
                             resizable_panel()
-                                .visible(agent_visible)
+                                // Drawn from the frame it is shown, out of
+                                // sight, so its message box can take focus.
+                                .visible(agent_visible || agent_progress > 0.0)
                                 .flex_none()
-                                .size(rems(24.).to_pixels(window.rem_size()))
-                                .size_range(
-                                    rems(18.).to_pixels(window.rem_size())
-                                        ..rems(48.).to_pixels(window.rem_size()),
-                                )
+                                .mr(agent_width * (agent_progress - 1.0))
+                                .size(agent_size)
+                                .size_range(agent_range)
                                 .child(self.agent_panel.clone()),
                         ),
                 ),
