@@ -12,11 +12,7 @@ use super::{
 };
 
 impl ResponseView {
-    pub(super) fn metadata(
-        &self,
-        content: &ResponseContent,
-        cx: &Context<Self>,
-    ) -> impl IntoElement + use<> {
+    pub(super) fn metadata(&self, content: &ResponseContent, cx: &Context<Self>) -> Div {
         let response = content.http();
         let status = response.status;
         let metrics = response.metrics;
@@ -42,12 +38,20 @@ impl ResponseView {
         let size_focus = focus.clone();
         let owner = cx.entity_id();
 
+        // Details that do not fit wrap onto a second line, which is clipped,
+        // so they hide whole, from the last. Each part fills the line's
+        // height, so none of the second line shows. The status stays: the
+        // line is at least as wide as its widest part.
         h_flex()
             .debug_selector(|| "response-metadata".into())
-            .gap_2()
+            .h_8()
+            .flex_wrap()
+            .justify_end()
+            .gap_x_2()
+            .overflow_hidden()
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(
+            .child(h_flex().h_8().child(
                 HoverCard::new("response-status-details")
                     .on_open_change(cx.listener(|this, open, _, cx| {
                         this.detail_open[0] = *open;
@@ -60,7 +64,7 @@ impl ResponseView {
                         .debug_selector(|| "response-status".into())
                         .px_2().py_1().rounded(cx.theme().radius_tokens().md)
                         .bg(color.opacity(0.15)).text_color(color)
-                        .font_weight(FontWeight::SEMIBOLD).cursor_text()
+                        .font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().cursor_text()
                         .child(SelectableText::new("response-status-text", status.to_string())))
                     .content(move |_, _, cx| {
                         panel("response-status-overlay", focus.clone(), owner, cx)
@@ -70,9 +74,8 @@ impl ResponseView {
                             .child(SelectableText::new("status-description", status_description(status)).document_order(1))
                             .text_selection_scope(TextSelectionScopeId::default())
                     }),
-            )
-            .child("•")
-            .child(
+            ))
+            .child(detail(
                 HoverCard::new("response-time-details")
                     .on_open_change(cx.listener(|this, open, _, cx| {
                         this.detail_open[1] = *open;
@@ -81,7 +84,7 @@ impl ResponseView {
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
                     .p_2()
-                    .trigger(div().debug_selector(|| "response-time".into()).cursor_text()
+                    .trigger(div().debug_selector(|| "response-time".into()).whitespace_nowrap().cursor_text()
                         .child(SelectableText::new("response-time-text", duration_label(elapsed)).document_order(1)))
                     .content(move |_, _, cx| {
                         panel("response-time-overlay", time_focus.clone(), owner, cx)
@@ -89,9 +92,8 @@ impl ResponseView {
                             .child(timing_details(metrics, processing, elapsed, cx))
                             .text_selection_scope(TextSelectionScopeId::default())
                     }),
-            )
-            .child("•")
-            .child(
+            ))
+            .child(detail(
                 HoverCard::new("response-size-details")
                     .on_open_change(cx.listener(|this, open, _, cx| {
                         this.detail_open[2] = *open;
@@ -100,7 +102,7 @@ impl ResponseView {
                     .anchor(Anchor::TopRight)
                     .open_delay(Duration::from_millis(250))
                     .p_2()
-                    .trigger(div().debug_selector(|| "response-size".into()).cursor_text()
+                    .trigger(div().debug_selector(|| "response-size".into()).whitespace_nowrap().cursor_text()
                         .child(SelectableText::new("response-size-text", size_label(downloaded_body_bytes + metrics.response_header_bytes)).document_order(2)))
                     .content(move |_, _, cx| {
                         panel("response-size-overlay", size_focus.clone(), owner, cx)
@@ -117,9 +119,8 @@ impl ResponseView {
                                 .child(SelectableText::new("size-note", "Header sizes estimate prepared name: value text, excluding transport framing, HTTP/2 pseudo-headers and header compression.").document_order(14)))
                             .text_selection_scope(TextSelectionScopeId::default())
                     }),
-            )
-            .child("•")
-            .child(div().cursor_text().child(SelectableText::new("response-version", format!("{:?}", response.version)).document_order(3)))
+            ))
+            .child(detail(div().whitespace_nowrap().cursor_text().child(SelectableText::new("response-version", format!("{:?}", response.version)).document_order(3))))
     }
 }
 
@@ -131,7 +132,7 @@ impl ResponseView {
         content: &ResponseContent,
         streaming: bool,
         cx: &Context<Self>,
-    ) -> impl IntoElement + use<> {
+    ) -> Div {
         let status = content.http().status;
         let color = status_color(status, cx);
 
@@ -140,6 +141,7 @@ impl ResponseView {
             .gap_2()
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
+            .whitespace_nowrap()
             .child(
                 div()
                     .debug_selector(|| "response-status".into())
@@ -194,6 +196,11 @@ fn panel(id: &'static str, focus: FocusHandle, owner: EntityId, cx: &App) -> Div
                 cx.notify(owner);
             }
         })
+}
+
+/// A detail after the status, with the dot that separates it.
+fn detail(value: impl IntoElement) -> Div {
+    h_flex().h_8().gap_2().child("•").child(value)
 }
 
 fn detail_row(id: &'static str, order: u64, label: &'static str, value: String) -> Div {
