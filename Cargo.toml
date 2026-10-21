@@ -54,8 +54,8 @@ thiserror = "2"
 [patch.crates-io]
 # GPUI Kit 0.7.0 with editor fixes, and GPUI's Linux and macOS platforms with
 # idle frame loops; see docs/gpui-kit-fork.md.
-gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "328e0ed782024133c0e1cb23b00807cd2e0da2df" }
-gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "328e0ed782024133c0e1cb23b00807cd2e0da2df" }
-gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "328e0ed782024133c0e1cb23b00807cd2e0da2df" }
-gpui-pre-linux = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "328e0ed782024133c0e1cb23b00807cd2e0da2df" }
-gpui-pre-macos = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "328e0ed782024133c0e1cb23b00807cd2e0da2df" }
+gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
+gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
+gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
+gpui-pre-linux = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
+gpui-pre-macos = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }

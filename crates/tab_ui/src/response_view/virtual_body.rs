@@ -4,6 +4,8 @@ use gpui_kit::base::input;
 use gpui_kit::component::{ActiveTheme, native_menu::NativeMenu};
 use gpui_kit::*;
 
+use super::search::Matches;
+
 const FONT_SIZE: Rems = rems(0.875);
 const ROW_HEIGHT: Rems = rems(1.25);
 const GUTTER: Rems = rems(4.);
@@ -31,6 +33,7 @@ pub(crate) struct VirtualBody {
     reveal: Option<usize>,
     pub(super) painted: Vec<PaintedRow>,
     max_line_bytes: usize,
+    pub(super) matches: Matches,
 }
 
 pub(super) struct PaintedRow {
@@ -66,6 +69,7 @@ impl VirtualBody {
             reveal: None,
             painted: Vec::new(),
             max_line_bytes,
+            matches: Matches::default(),
         }
     }
 
@@ -77,14 +81,25 @@ impl VirtualBody {
         cx.notify();
     }
 
-    pub(super) fn select_match(&mut self, range: Option<Range<usize>>, cx: &mut Context<Self>) {
-        if let Some(range) = range {
+    pub(super) fn search(&mut self, query: &str, case_sensitive: bool, cx: &mut Context<Self>) {
+        self.matches.update(&self.source, query, case_sensitive);
+        self.reveal_match(cx);
+    }
+
+    pub(super) fn step_match(&mut self, previous: bool, cx: &mut Context<Self>) {
+        self.matches.step(previous);
+        self.reveal_match(cx);
+    }
+
+    fn reveal_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(range) = self.matches.current() {
             self.reveal = Some(range.start);
-            self.anchor = range.start;
-            self.selection = range;
-        } else {
-            self.selection = self.selection.end..self.selection.end;
         }
+        cx.notify();
+    }
+
+    pub(super) fn clear_search(&mut self, cx: &mut Context<Self>) {
+        self.matches = Matches::default();
         cx.notify();
     }
 
@@ -287,19 +302,31 @@ impl VirtualBody {
             }),
             |window| {
                 for row in &self.painted {
-                    let start = self.selection.start.max(row.range.start);
-                    let end = self.selection.end.min(row.range.end);
-                    if start < end {
-                        let left = row.line.x_for_index(start - row.range.start);
-                        let right = row.line.x_for_index(end - row.range.start);
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                row.origin + point(left, px(0.)),
-                                size(right - left, ROW_HEIGHT.to_pixels(self.rem_size)),
-                            ),
-                            cx.theme().selection,
-                        ));
+                    let mut highlight = |range: Range<usize>, color: Hsla| {
+                        let start = range.start.max(row.range.start);
+                        let end = range.end.min(row.range.end);
+                        if start < end {
+                            let left = row.line.x_for_index(start - row.range.start);
+                            let right = row.line.x_for_index(end - row.range.start);
+                            window.paint_quad(fill(
+                                Bounds::new(
+                                    row.origin + point(left, px(0.)),
+                                    size(right - left, ROW_HEIGHT.to_pixels(self.rem_size)),
+                                ),
+                                color,
+                            ));
+                        }
+                    };
+
+                    // The same colors as search matches in the Pretty editor.
+                    for (range, current) in self.matches.within(row.range.clone()) {
+                        highlight(
+                            range,
+                            cx.theme().yellow.alpha(if current { 0.6 } else { 0.3 }),
+                        );
                     }
+                    highlight(self.selection.clone(), cx.theme().selection);
+
                     let _ = row.line.paint(
                         row.origin,
                         ROW_HEIGHT.to_pixels(self.rem_size),

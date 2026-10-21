@@ -388,10 +388,10 @@ impl ResponseView {
             )
             .when_some(
                 match body {
-                    Body::Raw { search, .. } => search.as_ref(),
+                    Body::Raw { view, search } => search.as_ref().map(|search| (search, view)),
                     _ => None,
                 },
-                |view, search| view.child(Self::body_search_bar(search, cx)),
+                |body, (search, view)| body.child(Self::body_search_bar(search, view, cx)),
             )
             .child(
                 div()
