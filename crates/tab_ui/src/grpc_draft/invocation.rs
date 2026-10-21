@@ -78,6 +78,18 @@ impl GrpcDraft {
             return;
         }
 
+        // A call without a URL is pointed out at the URL, before the methods
+        // that reflection would load from it. A Before invoke script may set
+        // the URL itself.
+        if self.request.url.trim().is_empty()
+            && self.request.scripts.before_invoke.trim().is_empty()
+        {
+            self.url_missing = true;
+            self.focus_url(window, cx);
+            self.redraw(cx);
+            return;
+        }
+
         let missing = if self.request.method.trim().is_empty() {
             Some("Select a method to invoke")
         } else if self.current_source().is_none() && self.request.definition.is_reflection() {

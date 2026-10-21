@@ -47,6 +47,8 @@ pub struct GrpcDraft {
     pub(crate) section: GrpcSection,
     pub(super) url: Option<Entity<InputState>>,
     pub(super) url_completion: Option<Entity<VariableInput>>,
+    /// Whether Invoke found no URL to call. The URL says so until it is edited.
+    pub(super) url_missing: bool,
     pub(super) message: Option<Entity<EditorState>>,
     pub(super) message_completion: Option<Entity<VariableInput>>,
     pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
@@ -155,6 +157,7 @@ impl GrpcDraft {
             section: GrpcSection::Message,
             url: None,
             url_completion: None,
+            url_missing: false,
             message: None,
             message_completion: None,
             message_vim: None,
@@ -395,6 +398,7 @@ impl GrpcDraft {
                             let tls = this.request.tls;
                             this.request.url = input.read(cx).value().to_string();
                             this.request.tls = this.request.uses_tls();
+                            this.url_missing = false;
                             this.schedule_reflection(window, cx);
 
                             // A scheme typed in the URL switches the lock.
