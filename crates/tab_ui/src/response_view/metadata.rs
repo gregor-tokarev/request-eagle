@@ -12,7 +12,14 @@ use super::{
 };
 
 impl ResponseView {
-    pub(super) fn metadata(&self, content: &ResponseContent, cx: &Context<Self>) -> Div {
+    /// The status, time, size and HTTP version. A status wider than
+    /// `max_width` is shortened.
+    pub(super) fn metadata(
+        &self,
+        content: &ResponseContent,
+        max_width: Option<Pixels>,
+        cx: &Context<Self>,
+    ) -> Div {
         let response = content.http();
         let status = response.status;
         let metrics = response.metrics;
@@ -64,7 +71,8 @@ impl ResponseView {
                         .debug_selector(|| "response-status".into())
                         .px_2().py_1().rounded(cx.theme().radius_tokens().md)
                         .bg(color.opacity(0.15)).text_color(color)
-                        .font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().cursor_text()
+                        .font_weight(FontWeight::SEMIBOLD).truncate().cursor_text()
+                        .when_some(max_width, |pill, width| pill.max_w(width))
                         .child(SelectableText::new("response-status-text", status.to_string())))
                     .content(move |_, _, cx| {
                         panel("response-status-overlay", focus.clone(), owner, cx)
@@ -126,42 +134,56 @@ impl ResponseView {
 
 impl ResponseView {
     /// The status of an event stream that is open, whose time and size are
-    /// still growing, or that broke before they were measured.
+    /// still growing, or that broke before they were measured. A status wider
+    /// than `max_width` is shortened.
     pub(super) fn stream_status(
         &self,
         content: &ResponseContent,
         streaming: bool,
+        max_width: Option<Pixels>,
         cx: &Context<Self>,
     ) -> Div {
         let status = content.http().status;
         let color = status_color(status, cx);
 
+        // Like the metadata, the badge hides when it does not fit, and the
+        // status stays.
         h_flex()
             .debug_selector(|| "response-stream-status".into())
-            .gap_2()
+            .h_8()
+            .flex_wrap()
+            .justify_end()
+            .gap_x_2()
+            .overflow_hidden()
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .whitespace_nowrap()
             .child(
-                div()
-                    .debug_selector(|| "response-status".into())
-                    .px_2()
-                    .py_1()
-                    .rounded(cx.theme().radius_tokens().md)
-                    .bg(color.opacity(0.15))
-                    .text_color(color)
-                    .child(status.to_string()),
-            )
-            .when(streaming, |row| {
-                row.child(
+                h_flex().h_8().child(
                     div()
-                        .debug_selector(|| "response-streaming".into())
+                        .debug_selector(|| "response-status".into())
+                        .when_some(max_width, |pill, width| pill.max_w(width))
+                        .truncate()
                         .px_2()
                         .py_1()
                         .rounded(cx.theme().radius_tokens().md)
-                        .bg(cx.theme().info.opacity(0.15))
-                        .text_color(cx.theme().info)
-                        .child("STREAMING"),
+                        .bg(color.opacity(0.15))
+                        .text_color(color)
+                        .child(status.to_string()),
+                ),
+            )
+            .when(streaming, |row| {
+                row.child(
+                    h_flex().h_8().child(
+                        div()
+                            .debug_selector(|| "response-streaming".into())
+                            .px_2()
+                            .py_1()
+                            .rounded(cx.theme().radius_tokens().md)
+                            .bg(cx.theme().info.opacity(0.15))
+                            .text_color(cx.theme().info)
+                            .child("STREAMING"),
+                    ),
                 )
             })
     }

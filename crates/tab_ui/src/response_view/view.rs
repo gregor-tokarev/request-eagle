@@ -26,6 +26,9 @@ pub(super) enum Section {
     Console,
 }
 
+/// The width the section tabs keep beside a long status, about two tabs.
+const TABS_MIN_WIDTH: Rems = rems(8.);
+
 const SECTIONS: [Section; 6] = [
     Section::Body,
     Section::Cookies,
@@ -60,8 +63,11 @@ pub struct ResponseView {
     pub(super) section: Section,
     /// Scrolls the section tabs when they do not fit beside the metadata.
     tabs_scroll: ScrollHandle,
-    /// Whether to scroll the selected tab into view after the next layout.
-    reveal_tab: bool,
+    /// The section and the width of the tabs when its tab was last scrolled
+    /// into view.
+    revealed: Option<(Section, Pixels)>,
+    /// The toolbar's width in the last frame.
+    toolbar_width: Option<Pixels>,
     pub(super) wrap: bool,
     pub(super) headers_list: ListState,
     pub(super) cookies_list: ListState,
@@ -88,7 +94,8 @@ impl ResponseView {
             scripts: Vec::new(),
             section: Section::Body,
             tabs_scroll: ScrollHandle::new(),
-            reveal_tab: false,
+            revealed: None,
+            toolbar_width: None,
             wrap: true,
             headers_list: ListState::new(0, ListAlignment::Top, px(0.)),
             cookies_list: ListState::new(0, ListAlignment::Top, px(0.)),
@@ -281,22 +288,31 @@ impl ResponseView {
     /// Show `section`, scrolling its tab into view.
     fn select(&mut self, section: Section) {
         self.section = section;
-        self.reveal_tab = true;
+        self.revealed = None;
     }
 
-    fn toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        // GPUI scrolls a tab into view within the width the tabs had in the
-        // previous frame, and a new status can change that width in this one.
-        // Scroll once this frame has laid them out.
-        if std::mem::take(&mut self.reveal_tab)
-            && let Some(index) = self.sections().position(|section| section == self.section)
-        {
-            cx.on_next_frame(window, move |this, _, cx| {
-                this.tabs_scroll.scroll_to_item(index);
-                cx.notify();
-            });
+    /// Keep the selected tab in view when it changes or the tabs' width does,
+    /// as when a panel opens or a new status is wider, and remeasure the
+    /// toolbar when its width changes.
+    fn toolbar_laid_out(&mut self, width: Pixels, cx: &mut Context<Self>) {
+        if self.toolbar_width != Some(width) {
+            self.toolbar_width = Some(width);
+            cx.notify();
         }
 
+        let tabs_width = self.tabs_scroll.bounds().size.width;
+        if self.revealed != Some((self.section, tabs_width)) {
+            self.revealed = Some((self.section, tabs_width));
+
+            if let Some(index) = self.sections().position(|section| section == self.section) {
+                // Applied in the next frame, against the width the tabs have now.
+                self.tabs_scroll.scroll_to_item(index);
+                cx.notify();
+            }
+        }
+    }
+
+    fn toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let (headers, cookies) = match &self.state {
             ResponseState::Received { content, .. } => {
                 (content.headers.len(), content.cookies.len())
@@ -374,16 +390,34 @@ impl ResponseView {
                     return row;
                 };
 
+                // The metadata leaves the tabs room for a couple of tabs. A
+                // status too long for the rest of the row is shortened.
+                let max_width = self.toolbar_width.map(|width| {
+                    let rem = window.rem_size();
+                    (width - (TABS_MIN_WIDTH + rems(0.75)).to_pixels(rem))
+                        .max(rems(3.).to_pixels(rem))
+                });
                 let metadata = match events.as_ref().map(|events| events.read(cx)) {
-                    Some(events) if events.is_open() => self.stream_status(content, true, cx),
+                    Some(events) if events.is_open() => {
+                        self.stream_status(content, true, max_width, cx)
+                    }
                     // A broken stream has its head, but no complete measurements.
-                    Some(events) if events.failed() => self.stream_status(content, false, cx),
-                    _ => self.metadata(content, cx),
+                    Some(events) if events.failed() => {
+                        self.stream_status(content, false, max_width, cx)
+                    }
+                    _ => self.metadata(content, max_width, cx),
                 };
 
                 // The metadata takes the width the tabs leave, but no less
                 // than its own minimum, so the status always shows.
                 row.child(h_flex().flex_1().justify_end().child(metadata))
+            })
+            .on_prepaint({
+                let view = cx.entity().downgrade();
+                move |bounds, _, cx| {
+                    let _ =
+                        view.update(cx, |this, cx| this.toolbar_laid_out(bounds.size.width, cx));
+                }
             })
     }
 
