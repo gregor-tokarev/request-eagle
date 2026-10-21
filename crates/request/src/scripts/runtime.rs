@@ -106,6 +106,7 @@ pub(crate) async fn pre_request(
                 tests: Vec::new(),
                 logs: Vec::new(),
                 error: Some(message.clone()),
+                error_line: None,
                 next_request: None,
             };
             return Err(ExecutionFailure {

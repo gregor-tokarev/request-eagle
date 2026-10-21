@@ -1,7 +1,12 @@
+use std::rc::Rc;
+
 use gpui_kit::base::SelectableText;
-use gpui_kit::component::{scroll::ScrollableElement as _, *};
+use gpui_kit::component::{button::*, scroll::ScrollableElement as _, *};
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::ScriptReport;
+use request::{ScriptPhase, ScriptReport};
+
+/// Shows a line of one of the tab's scripts, counting from 1, in its editor.
+pub(crate) type ShowScriptLine = Rc<dyn Fn(ScriptPhase, usize, &mut Window, &mut App)>;
 
 /// A short label in the color of what it reports, such as PASS or FAIL.
 pub(crate) fn badge(text: impl Into<SharedString>, color: Hsla, cx: &App) -> Div {
@@ -87,11 +92,13 @@ fn test_row(id: usize, name: &str, error: Option<&str>, phase: String, cx: &App)
 }
 
 /// The tests, or with `console` the logs, of a run's scripts. `action` is
-/// what runs the request again, such as "send the request".
+/// what runs the request again, such as "send the request". With
+/// `show_line`, a script error links to its line in the tab's editor.
 pub(crate) fn script_results(
     scripts: &[ScriptReport],
     console: bool,
     action: &str,
+    show_line: Option<&ShowScriptLine>,
     cx: &App,
 ) -> AnyElement {
     let tests = scripts
@@ -123,6 +130,10 @@ pub(crate) fn script_results(
 
     for (phase_index, report) in scripts.iter().enumerate() {
         if let Some(error) = &report.error {
+            // The tab edits its own scripts, not its collection's.
+            let show_line = show_line.filter(|_| !report.collection).cloned();
+            let phase = report.phase;
+
             rows.push(
                 v_flex()
                     .gap_1()
@@ -130,9 +141,40 @@ pub(crate) fn script_results(
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        div()
-                            .text_color(cx.theme().danger)
-                            .child(format!("{} script error", report.label())),
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_color(cx.theme().danger)
+                                    .child(format!("{} script error", report.label())),
+                            )
+                            .when_some(report.error_line, |header, line| {
+                                let label = format!("Line {line}");
+
+                                header.child(match show_line {
+                                    Some(show_line) => {
+                                        Button::new(("script-error-line", phase_index))
+                                            .debug_selector(move || {
+                                                format!("script-error-line-{phase_index}")
+                                            })
+                                            .link()
+                                            .xsmall()
+                                            .label(label)
+                                            .on_click(move |_, window, cx| {
+                                                show_line(phase, line, window, cx)
+                                            })
+                                            .into_any_element()
+                                    }
+                                    None => div()
+                                        .flex_none()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(label)
+                                        .into_any_element(),
+                                })
+                            }),
                     )
                     .child(SelectableText::new(
                         ("script-error", phase_index),

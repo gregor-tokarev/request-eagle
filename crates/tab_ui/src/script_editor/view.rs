@@ -1,7 +1,7 @@
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::{Editor, EditorState, Enter, Escape, InputEvent, MoveDown, MoveUp},
+    input::{Editor, EditorState, Enter, Escape, InputEvent, MoveDown, MoveUp, Position},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -332,6 +332,23 @@ impl<S: Scripts> ScriptEditor<S> {
         self.phase = phase;
         self.editor(window, cx);
         cx.notify();
+    }
+
+    /// Put the cursor at the start of a line of `phase`'s script, counting
+    /// from 1.
+    pub(crate) fn show_line(
+        &mut self,
+        phase: ScriptPhase,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_phase(phase, window, cx);
+        let line = line.saturating_sub(1) as u32;
+
+        self.editor(window, cx).update(cx, |editor, cx| {
+            editor.set_cursor_position(Position::new(line, 0), window, cx)
+        });
     }
 
     /// The selection in the script with focus, or the whole script.
