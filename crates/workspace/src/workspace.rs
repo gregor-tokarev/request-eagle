@@ -33,7 +33,7 @@ use gpui_kit::component::{
     animation::ease_in_out_cubic,
     button::{Button, ButtonVariants},
     notification::Notification,
-    resizable::{ResizableState, h_resizable, resizable_panel},
+    resizable::{ResizablePanelEvent, ResizableState, h_resizable, resizable_panel},
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -77,6 +77,9 @@ pub(crate) struct Workspace {
     agent_panel_visible: Entity<bool>,
 
     pub(crate) main_split: Entity<ResizableState>,
+    /// Whether a divider of the main split has been dragged, which gives
+    /// every panel in it a size of its own.
+    split_resized: bool,
     pub(crate) sidebar_visible: Entity<bool>,
 
     /// Built when first opened.
@@ -104,6 +107,7 @@ pub(crate) struct Workspace {
     _tabs_subscriptions: [Subscription; 2],
     _git_subscriptions: [Subscription; 3],
     _agent_panel_subscription: Subscription,
+    _main_split_subscription: Subscription,
     _settings_subscription: Option<Subscription>,
 }
 
@@ -305,6 +309,12 @@ impl Workspace {
             }),
         ];
 
+        let main_split = cx.new(|_| ResizableState::default());
+        let main_split_subscription =
+            cx.subscribe(&main_split, |this, _, _: &ResizablePanelEvent, _| {
+                this.split_resized = true;
+            });
+
         // Start in the collections tree, or in the tabs while it is hidden,
         // folded or in place of the Git panel.
         if sidebar_state.visible && sidebar_state.collections && !sidebar_state.git {
@@ -335,7 +345,8 @@ impl Workspace {
             collections,
             agent_panel,
             agent_panel_visible,
-            main_split: cx.new(|_| ResizableState::default()),
+            main_split,
+            split_resized: false,
             sidebar_visible,
             settings: None,
             settings_visible: false,
@@ -353,6 +364,7 @@ impl Workspace {
             _tabs_subscriptions: tabs_subscriptions,
             _git_subscriptions: git_subscriptions,
             _agent_panel_subscription: agent_panel_subscription,
+            _main_split_subscription: main_split_subscription,
             _settings_subscription: None,
         };
 
@@ -911,16 +923,16 @@ impl Workspace {
         range: Range<Pixels>,
         cx: &App,
     ) -> Pixels {
-        self.main_split
-            .read(cx)
-            .sizes()
-            .get(ix)
-            .copied()
-            // A panel that has not been drawn yet holds a placeholder size,
-            // but is drawn at its initial size.
-            .filter(|size| *size != PANEL_MIN_SIZE)
-            .unwrap_or(initial)
-            .clamp(range.start, range.end)
+        let size = self.main_split.read(cx).sizes().get(ix).copied();
+
+        // Until a divider is dragged, a panel that has not been drawn yet
+        // holds a placeholder size, but is drawn at its initial size.
+        let size = match size {
+            Some(size) if self.split_resized || size != PANEL_MIN_SIZE => size,
+            _ => initial,
+        };
+
+        size.clamp(range.start, range.end)
     }
 
     fn section_header(
