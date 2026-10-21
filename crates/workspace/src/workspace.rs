@@ -77,8 +77,8 @@ pub(crate) struct Workspace {
     agent_panel_visible: Entity<bool>,
 
     pub(crate) main_split: Entity<ResizableState>,
-    /// Whether a divider of the main split has been dragged, which gives
-    /// every panel in it a size of its own.
+    /// Whether a divider of the main split has been dragged. Until then, a
+    /// panel that has not been drawn holds a placeholder size.
     split_resized: bool,
     pub(crate) sidebar_visible: Entity<bool>,
 
@@ -914,22 +914,19 @@ impl Workspace {
         )
     }
 
-    /// How wide the panel at `ix` of the main split is drawn, so that it can
-    /// slide out by exactly its width.
+    /// How far the panel at `ix` of the main split slides out. It is also
+    /// the panel's initial size, which a panel without a size of its own is
+    /// drawn at, so the panel always slides by the width it is drawn at.
     fn side_panel_width(
         &self,
         ix: usize,
-        initial: Pixels,
+        default: Pixels,
         range: Range<Pixels>,
         cx: &App,
     ) -> Pixels {
-        let size = self.main_split.read(cx).sizes().get(ix).copied();
-
-        // Until a divider is dragged, a panel that has not been drawn yet
-        // holds a placeholder size, but is drawn at its initial size.
-        let size = match size {
+        let size = match self.main_split.read(cx).sizes().get(ix).copied() {
             Some(size) if self.split_resized || size != PANEL_MIN_SIZE => size,
-            _ => initial,
+            _ => default,
         };
 
         size.clamp(range.start, range.end)
@@ -1406,13 +1403,13 @@ impl Render for Workspace {
         );
 
         let rem_size = window.rem_size();
-        let sidebar_size = rems(19.).to_pixels(rem_size);
         let sidebar_range = rems(14.).to_pixels(rem_size)..rems(30.).to_pixels(rem_size);
-        let sidebar_width = self.side_panel_width(0, sidebar_size, sidebar_range.clone(), cx);
+        let sidebar_width =
+            self.side_panel_width(0, rems(19.).to_pixels(rem_size), sidebar_range.clone(), cx);
 
-        let agent_size = rems(24.).to_pixels(rem_size);
         let agent_range = rems(18.).to_pixels(rem_size)..rems(48.).to_pixels(rem_size);
-        let agent_width = self.side_panel_width(2, agent_size, agent_range.clone(), cx);
+        let agent_width =
+            self.side_panel_width(2, rems(24.).to_pixels(rem_size), agent_range.clone(), cx);
 
         // Commands that only apply to some tabs stay out of the palette for
         // the others. They are handled here, so they also work while the
@@ -1550,7 +1547,7 @@ impl Render for Workspace {
                                 .visible(sidebar_progress > 0.0)
                                 .flex_none()
                                 .ml(sidebar_width * (sidebar_progress - 1.0))
-                                .size(sidebar_size)
+                                .size(sidebar_width)
                                 .size_range(sidebar_range)
                                 .child(self.sidebar(window, cx)),
                         )
@@ -1562,7 +1559,7 @@ impl Render for Workspace {
                                 .visible(agent_visible || agent_progress > 0.0)
                                 .flex_none()
                                 .mr(agent_width * (agent_progress - 1.0))
-                                .size(agent_size)
+                                .size(agent_width)
                                 .size_range(agent_range)
                                 .child(self.agent_panel.clone()),
                         ),
