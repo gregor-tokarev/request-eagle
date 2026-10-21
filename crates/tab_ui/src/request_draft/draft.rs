@@ -282,6 +282,12 @@ impl RequestDraft {
         self.address.update(cx, |_, cx| cx.notify());
     }
 
+    /// Redraw the cached request sections for a change that did not come from
+    /// their inputs.
+    pub(super) fn notify_configuration(&self, cx: &mut Context<Self>) {
+        self.configuration.update(cx, |_, cx| cx.notify());
+    }
+
     /// Follow the saved request to its current file and name.
     pub fn set_location(&mut self, location: SavedLocation, cx: &mut Context<Self>) {
         let path = Some(location.environment_path());

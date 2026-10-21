@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::de::IgnoredAny;
+
 use crate::variable_input::variable_references;
 
 /// How a JSON body reads, which decides whether it can be formatted and
@@ -22,19 +24,26 @@ impl JsonBody {
         if text.trim().is_empty() {
             return Self::Empty;
         }
-        if serde_json::from_str::<serde_json::Value>(text).is_ok() {
-            return Self::Valid;
-        }
+        let error = match serde_json::from_str::<serde_json::Value>(text) {
+            Ok(_) => return Self::Valid,
+            Err(error) => error,
+        };
 
         // A number as long as the reference stands in for any value and fits
-        // inside a string, so the error keeps its position in the text.
+        // inside a string, so an error keeps its position in the text.
         let mut filled = text.to_owned();
         for range in variable_references(text) {
             filled.replace_range(range.clone(), &"1".repeat(range.len()));
         }
+        if filled == text {
+            return Self::Invalid(JsonError::new(text, &error));
+        }
 
         match serde_json::from_str::<serde_json::Value>(&filled) {
             Ok(_) => Self::Templated,
+            // A stand-in can be a larger number than its value, such as the
+            // exponent in `1e{{power}}`, so only the syntax has to hold.
+            Err(_) if serde_json::from_str::<IgnoredAny>(&filled).is_ok() => Self::Templated,
             Err(error) => Self::Invalid(JsonError::new(text, &error)),
         }
     }
@@ -57,6 +66,20 @@ impl JsonError {
             .strip_suffix(&position)
             .unwrap_or(&message)
             .to_owned();
+
+        // At the end of a body that ends in line breaks, serde_json points at
+        // the start of the line after them, where the editor has nothing to
+        // underline. Point at the body's last character instead.
+        if error.column() == 0 {
+            let content = text.trim_end();
+            let last_line = content.rsplit('\n').next().unwrap_or("");
+
+            return Self {
+                message,
+                line: content.matches('\n').count() + 1,
+                column: last_line.chars().count().max(1),
+            };
+        }
 
         // serde_json counts the column in bytes.
         let line = text

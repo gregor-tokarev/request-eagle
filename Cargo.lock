@@ -8782,6 +8782,7 @@ dependencies = [
  "request",
  "ropey",
  "script_intelligence",
+ "serde",
  "serde_json",
  "smol",
  "theme",

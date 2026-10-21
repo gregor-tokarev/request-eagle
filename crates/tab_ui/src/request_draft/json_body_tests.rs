@@ -25,11 +25,10 @@ fn columns_count_characters_on_the_error_line() {
 }
 
 #[test]
-fn an_unfinished_body_points_at_its_end() {
-    let error = error("{\n  \"name\": \"Gregor\"\n");
+fn an_unfinished_body_points_at_its_last_character() {
+    let error = error("{\n  \"name\": \"Gregor\"\n\n  \n");
 
-    assert_eq!(error.line, 3);
-    assert_eq!(error.column, 1);
+    assert_eq!((error.line, error.column), (2, 18));
     assert!(error.message.starts_with("EOF while parsing"));
 }
 
@@ -47,6 +46,7 @@ fn variables_in_place_of_values_are_not_errors() {
         r#"{"user": {{user}}, "total": -{{amount}}.5}"#,
         "{{body}}",
         r#"{"id": {{$randomInt}}{{suffix}}}"#,
+        r#"{"amount": 1e{{power}}}"#,
     ] {
         assert_eq!(JsonBody::check(text), JsonBody::Templated, "{text}");
     }

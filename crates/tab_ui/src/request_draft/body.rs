@@ -394,6 +394,7 @@ impl RequestDraft {
                 }
                 this.body_json = json;
                 this.body_task = None;
+                this.notify_configuration(cx);
                 cx.notify();
             });
         }));
@@ -473,10 +474,11 @@ impl RequestDraft {
             (JsonBody::Invalid(error), BodyType::Raw(RawLanguage::Json)) => Some(error.to_string()),
             _ => None,
         };
-        let format_hint = match self.body_json {
-            JsonBody::Invalid(_) => Some("Format needs valid JSON"),
-            JsonBody::Templated => Some("Variables outside strings can't be formatted"),
-            JsonBody::Empty | JsonBody::Valid => None,
+        let format_tooltip = match self.body_json {
+            JsonBody::Empty => "Enter JSON to format it",
+            JsonBody::Valid => "Pretty-print the JSON",
+            JsonBody::Templated => "Variables outside strings can't be formatted",
+            JsonBody::Invalid(_) => "Format needs valid JSON",
         };
 
         let content = match body_type {
@@ -555,7 +557,9 @@ impl RequestDraft {
                                 .disabled(
                                     self.body_json != JsonBody::Valid || self.body_task.is_some(),
                                 )
-                                .when_some(format_hint, |button, hint| button.tooltip(hint))
+                                // Every state has a tooltip, so one shown before the
+                                // state changes still hides when the pointer leaves.
+                                .tooltip(format_tooltip)
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.format_body(window, cx)),
                                 ),
