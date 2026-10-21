@@ -33,6 +33,14 @@ fn an_unfinished_body_points_at_its_last_character() {
 }
 
 #[test]
+fn a_line_break_inside_a_string_points_at_the_next_line() {
+    let error = error("{\"s\": \"a\nb\",\n\"x\": 0}");
+
+    assert_eq!((error.line, error.column), (2, 1));
+    assert!(error.message.starts_with("control character"));
+}
+
+#[test]
 fn empty_and_valid_bodies_have_no_error() {
     assert_eq!(JsonBody::check(""), JsonBody::Empty);
     assert_eq!(JsonBody::check(" \n "), JsonBody::Empty);

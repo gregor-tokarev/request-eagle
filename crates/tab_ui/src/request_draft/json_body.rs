@@ -70,7 +70,7 @@ impl JsonError {
         // At the end of a body that ends in line breaks, serde_json points at
         // the start of the line after them, where the editor has nothing to
         // underline. Point at the body's last character instead.
-        if error.column() == 0 {
+        if error.is_eof() && error.column() == 0 {
             let content = text.trim_end();
             let last_line = content.rsplit('\n').next().unwrap_or("");
 
