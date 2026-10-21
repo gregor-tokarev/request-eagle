@@ -307,12 +307,24 @@ impl Page {
         }
 
         /// gRPC calls and WebSocket connections are kept when they start,
-        /// and how they ended when they end.
+        /// and how they ended when they end, which `stopped` tells for one
+        /// whose tab closes first.
         fn end<T: EventEmitter<RequestEnded>>(
             page: &Entity<T>,
             history: Entity<HistoryPanel>,
+            stopped: fn(&T) -> Option<RequestEnded>,
             cx: &mut Context<MainView>,
         ) -> Subscription {
+            // The tab's subscriptions end before its page is released, so
+            // this one lasts until then.
+            let closing = history.downgrade();
+            cx.observe_release(page, move |_, page, cx| {
+                if let Some(ended) = stopped(page) {
+                    let _ = closing.update(cx, |history, cx| history.end(&ended, cx));
+                }
+            })
+            .detach();
+
             cx.subscribe(page, move |_, _, ended: &RequestEnded, cx| {
                 history.update(cx, |history, cx| history.end(ended, cx));
             })
@@ -320,10 +332,14 @@ impl Page {
 
         match self {
             Page::Request(draft) => vec![record(draft, history, cx)],
-            Page::Grpc(draft) => vec![record(draft, history.clone(), cx), end(draft, history, cx)],
-            Page::WebSocket(draft) => {
-                vec![record(draft, history.clone(), cx), end(draft, history, cx)]
-            }
+            Page::Grpc(draft) => vec![
+                record(draft, history.clone(), cx),
+                end(draft, history, GrpcDraft::stopped, cx),
+            ],
+            Page::WebSocket(draft) => vec![
+                record(draft, history.clone(), cx),
+                end(draft, history, WebSocketDraft::stopped, cx),
+            ],
             Page::Flow(_)
             | Page::Collection(_)
             | Page::Runner(_)

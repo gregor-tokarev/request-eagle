@@ -361,20 +361,31 @@ impl GrpcDraft {
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
-        // A started call ends as its response shows it: 1 CANCELLED.
-        self.end(
-            Outcome::Grpc {
-                code: 1,
-                message: String::new(),
-            },
-            cx,
-        );
+        if let Some(stopped) = self.stopped() {
+            cx.emit(stopped);
+        }
+        self.call = Call::Idle;
         self.response.update(cx, |response, cx| response.cancel(cx));
 
         self.redraw(cx);
     }
 
-    /// Stop the call. History keeps how a call that started ended.
+    /// How history keeps the started call if it stops now, as when it is
+    /// cancelled or its tab closes: 1 CANCELLED, as the response shows it.
+    pub fn stopped(&self) -> Option<RequestEnded> {
+        match self.call {
+            Call::Open { history, .. } => Some(RequestEnded {
+                id: history,
+                outcome: Outcome::Grpc {
+                    code: 1,
+                    message: String::new(),
+                },
+            }),
+            _ => None,
+        }
+    }
+
+    /// The call ended. History keeps how, once it had started.
     fn end(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
         if let Call::Open { history, .. } = std::mem::replace(&mut self.call, Call::Idle) {
             cx.emit(RequestEnded {

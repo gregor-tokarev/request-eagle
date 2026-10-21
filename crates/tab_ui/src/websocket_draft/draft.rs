@@ -426,6 +426,24 @@ impl WebSocketDraft {
         }
     }
 
+    /// How history keeps the connection if its tab closes now. Dropping the
+    /// connection closes it normally.
+    pub fn stopped(&self) -> Option<RequestEnded> {
+        match self.connection {
+            Connection::Connected { history, .. } | Connection::Closing { history, .. } => {
+                Some(RequestEnded {
+                    id: history,
+                    outcome: Outcome::Closed {
+                        code: Some(1000),
+                        reason: String::new(),
+                        by_client: true,
+                    },
+                })
+            }
+            Connection::Disconnected | Connection::Connecting { .. } => None,
+        }
+    }
+
     /// The connection ended. History keeps how, once it had connected.
     fn end(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
         if let Connection::Connected { history, .. } | Connection::Closing { history, .. } =
