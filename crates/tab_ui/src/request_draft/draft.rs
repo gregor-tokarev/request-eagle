@@ -42,6 +42,8 @@ pub struct RequestDraft {
     pub request: HttpRequest,
     saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
+    /// Whether Send found no URL to send. The URL says so until it is edited.
+    pub(super) url_missing: bool,
     pub(crate) section: RequestSection,
     /// The URL's query parameters.
     pub(super) params: Option<Entity<RequestFields>>,
@@ -173,6 +175,7 @@ impl RequestDraft {
             saved_request: request.clone(),
             request,
             url: None,
+            url_missing: false,
             section: RequestSection::Headers,
             params: None,
             path_variables: None,
@@ -380,6 +383,7 @@ impl RequestDraft {
             auth,
             ..request
         };
+        self.url_missing = false;
 
         // The URL keeps focus. Path values given before belong to the replaced
         // request. The other editors are created again from the new request
@@ -484,6 +488,7 @@ impl RequestDraft {
                     |this, input, event: &InputEvent, window, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.path = input.read(cx).value().to_string();
+                            this.url_missing = false;
                             this.url_changed(window, cx);
                         }
                     },
@@ -560,6 +565,7 @@ impl RequestDraft {
                 url.update(cx, |url, cx| url.set_value(path.clone(), window, cx));
             }
             self.request.path = path;
+            self.url_missing = false;
 
             self.refresh_generated_headers(cx);
             self.notify_address(cx);

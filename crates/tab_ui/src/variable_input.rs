@@ -29,6 +29,14 @@ impl VariableTarget {
         }
     }
 
+    /// Whether it shows dots in place of a hidden secret.
+    fn masked(&self, cx: &App) -> bool {
+        match self {
+            Self::Input(input) => input.read(cx).presentation().is_masked(),
+            Self::Editor(_) => false,
+        }
+    }
+
     /// Where a range of a single-line input is on screen this frame. Unlike
     /// a chip's, its end cannot wrap onto another row.
     fn range_bounds(&self, range: &Range<usize>, cx: &App) -> Option<Bounds<Pixels>> {
@@ -67,6 +75,11 @@ impl VariableTarget {
     }
 
     fn snapshot(&self, window: &Window, cx: &App) -> Option<(SharedString, usize)> {
+        // Completing a hidden secret would insert a name the user cannot see.
+        if self.masked(cx) {
+            return None;
+        }
+
         match self {
             Self::Input(input) => {
                 let input = input.read(cx);
@@ -242,6 +255,11 @@ impl VariableInput {
     /// Paint each `{{variable}}` as a rounded chip over its text. The text
     /// stays ordinary input text; the input only reports where it is.
     fn paint_chips(&mut self, window: &mut Window, cx: &mut App) {
+        // A hidden secret's dots do not line up with the text's variables.
+        if self.target.masked(cx) {
+            return;
+        }
+
         self.update_chips(cx);
         let outset = point(rems(0.125).to_pixels(window.rem_size()), -px(1.));
         let radius = cx.theme().radius_tokens().sm;

@@ -7,7 +7,8 @@ use collection::{Collection, directory_name};
 use environment::GlobalEnvironments;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
-    input::{Textarea, TextareaState},
+    input::{Enter, InputEvent, Textarea, TextareaState},
+    kbd::Kbd,
     spinner::Spinner,
     *,
 };
@@ -44,10 +45,7 @@ impl CollectionPanel {
                 // Enter imports the typed text. The dialog stays open to show
                 // an error, and closes itself once the import is done.
                 .on_ok(move |_, window, cx| {
-                    let _ = confirmed.update(cx, |dialog, cx| {
-                        let source = dialog.text.read(cx).value().to_string();
-                        dialog.import_text(source, window, cx);
-                    });
+                    let _ = confirmed.update(cx, |dialog, cx| dialog.import_typed_text(window, cx));
                     false
                 })
                 .child(dialog.clone())
@@ -152,6 +150,7 @@ struct ImportDialog {
     error: Option<String>,
     summary: Option<Summary>,
     _task: Option<Task<()>>,
+    _subscription: Subscription,
 }
 
 impl ImportDialog {
@@ -170,6 +169,13 @@ impl ImportDialog {
                 .placeholder("Paste cURL or raw text")
         });
 
+        // The import button is enabled only while there is text to import.
+        let subscription = cx.subscribe(&text, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+
         Self {
             panel,
             environments,
@@ -178,7 +184,14 @@ impl ImportDialog {
             error: None,
             summary: None,
             _task: None,
+            _subscription: subscription,
         }
+    }
+
+    /// Imports the text in the field, as Enter and the import button do.
+    fn import_typed_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let source = self.text.read(cx).value().to_string();
+        self.import_text(source, window, cx);
     }
 
     /// Opens a cURL command as a new request, or imports a collection or
@@ -492,7 +505,7 @@ fn save(
 }
 
 impl Render for ImportDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(summary) = &self.summary {
             return self.render_summary(summary, cx);
         }
@@ -501,25 +514,77 @@ impl Render for ImportDialog {
 
         let paste_target = cx.entity().downgrade();
 
+        // The field's own keys, as the keymap binds them on this platform.
+        let import_key = Kbd::binding_for_action(
+            &Enter {
+                secondary: false,
+                shift: false,
+            },
+            Some("Input"),
+            window,
+        );
+        let new_line_key = Kbd::binding_for_action(
+            &Enter {
+                secondary: false,
+                shift: true,
+            },
+            Some("Input"),
+            window,
+        );
+        let has_text = !self.text.read(cx).value().trim().is_empty();
+
         v_flex()
             .debug_selector(|| "import-dialog".into())
             .gap_3()
             .child(
-                div().debug_selector(|| "import-text".into()).child(
-                    Textarea::new(&self.text)
-                        .aria_label("cURL command or raw text to import")
-                        .disabled(self.importing)
-                        // The pasted text replaces the field and is imported at once.
-                        .on_paste(move |clipboard, window, cx| {
-                            let Some(source) = clipboard.text() else {
-                                return false;
-                            };
+                v_flex()
+                    .gap_2()
+                    .child(
+                        div().debug_selector(|| "import-text".into()).child(
+                            Textarea::new(&self.text)
+                                .aria_label("cURL command or raw text to import")
+                                .disabled(self.importing)
+                                // The pasted text replaces the field and is imported at once.
+                                .on_paste(move |clipboard, window, cx| {
+                                    let Some(source) = clipboard.text() else {
+                                        return false;
+                                    };
 
-                            paste_target
-                                .update(cx, |this, cx| this.import_text(source, window, cx))
-                                .is_ok()
-                        }),
-                ),
+                                    paste_target
+                                        .update(cx, |this, cx| this.import_text(source, window, cx))
+                                        .is_ok()
+                                }),
+                        ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .when_some(import_key.zip(new_line_key), |this, (import, new_line)| {
+                                this.child(
+                                    h_flex()
+                                        .debug_selector(|| "import-text-hint".into())
+                                        .flex_wrap()
+                                        .gap_1()
+                                        .text_sm()
+                                        .text_color(theme.muted_foreground)
+                                        .child(import)
+                                        .child("to import ·")
+                                        .child(new_line)
+                                        .child("for a new line"),
+                                )
+                            })
+                            .child(
+                                Button::new("import-typed-text")
+                                    .debug_selector(|| "import-typed-text".into())
+                                    .ml_auto()
+                                    .primary()
+                                    .label("Import text")
+                                    .disabled(self.importing || !has_text)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.import_typed_text(window, cx)
+                                    })),
+                            ),
+                    ),
             )
             .child(
                 v_flex()

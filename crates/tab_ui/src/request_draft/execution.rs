@@ -227,6 +227,27 @@ impl RequestDraft {
             return;
         }
 
+        // A request without a URL is pointed out at the URL instead of
+        // failing to send. Pre-request scripts may set the URL themselves.
+        if self.request.path.trim().is_empty()
+            && self.request.scripts.pre_request.trim().is_empty()
+            && self
+                .variables
+                .read(cx)
+                .collection_settings()
+                .is_ok_and(|settings| settings.scripts.pre_request.trim().is_empty())
+        {
+            self.url_missing = true;
+            self.focus_url(window, cx);
+            self.notify_address(cx);
+            return;
+        }
+        // A script added since then sets the URL.
+        if self.url_missing {
+            self.url_missing = false;
+            self.notify_address(cx);
+        }
+
         self.prepare(window, cx);
         let response = self.response.clone();
         response.update(cx, |response, cx| response.start(cx));

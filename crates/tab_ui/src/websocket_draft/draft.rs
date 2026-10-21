@@ -6,7 +6,10 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::{Editor, EditorState, Input, InputEvent, InputState},
+    input::{
+        Editor, EditorState, Input, InputEvent, InputGroup, InputGroupAddon,
+        InputGroupAddonAlignment, InputState,
+    },
     resizable::{ResizableState, resizable_panel, v_resizable},
     scroll::ScrollableElement as _,
     *,
@@ -95,6 +98,9 @@ pub struct WebSocketDraft {
     pub(super) connection: Connection,
     pub(crate) url: Option<Entity<InputState>>,
     url_completion: Option<Entity<VariableInput>>,
+    /// Whether Connect found no URL to connect to. The URL says so until it
+    /// is edited.
+    url_missing: bool,
     params: Option<Entity<RequestFields>>,
     headers: Option<Entity<RequestFields>>,
     handshake_headers: Vec<(String, String)>,
@@ -168,6 +174,7 @@ impl WebSocketDraft {
             connection: Connection::Disconnected,
             url: None,
             url_completion: None,
+            url_missing: false,
             params: None,
             headers: None,
             message: None,
@@ -312,6 +319,15 @@ impl WebSocketDraft {
 
     pub fn connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(self.connection, Connection::Disconnected) {
+            return;
+        }
+
+        // A request without a URL is pointed out at the URL instead of
+        // failing to connect.
+        if self.request.url.trim().is_empty() {
+            self.url_missing = true;
+            self.focus_url(window, cx);
+            self.notify_controls(cx);
             return;
         }
 
@@ -462,6 +478,7 @@ impl WebSocketDraft {
                     |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.url = input.read(cx).value().to_string();
+                            this.url_missing = false;
                             this.refresh_handshake_headers(cx);
                             cx.notify();
                         }
@@ -602,6 +619,7 @@ impl WebSocketDraft {
 
     fn url_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let url = self.url_state(window, cx);
+        let url_missing = self.url_missing;
         let state = self.connection.state();
 
         h_flex()
@@ -614,9 +632,32 @@ impl WebSocketDraft {
                     .min_w_0()
                     .child(with_variables(
                         self.url_completion.as_ref().unwrap(),
-                        Input::new(&url)
-                            .aria_label("WebSocket URL")
-                            .context_menu(crate::cite::editable_field_menu),
+                        InputGroup::new("websocket-url-group")
+                            .invalid(url_missing)
+                            .input(
+                                Input::new(&url)
+                                    .aria_label("WebSocket URL")
+                                    .context_menu(crate::cite::editable_field_menu),
+                            )
+                            .when(url_missing, |group| {
+                                group.addon(
+                                    InputGroupAddon::new("websocket-url-missing")
+                                        .align(InputGroupAddonAlignment::InlineEnd)
+                                        // Shares the empty URL's room, so both
+                                        // shrink in narrow windows.
+                                        .flex_1()
+                                        .min_w_0()
+                                        .justify_end()
+                                        .pr_3()
+                                        .text_color(cx.theme().danger)
+                                        .child(
+                                            div()
+                                                .debug_selector(|| "websocket-url-missing".into())
+                                                .truncate()
+                                                .child("Enter a WebSocket URL"),
+                                        ),
+                                )
+                            }),
                     )),
             )
             .child(

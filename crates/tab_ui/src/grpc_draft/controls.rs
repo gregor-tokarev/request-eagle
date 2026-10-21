@@ -22,6 +22,7 @@ impl GrpcDraft {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let url = self.url_state(window, cx);
+        let url_missing = self.url_missing;
         let methods = self.methods_state(window, cx);
         let tls = self.request.uses_tls();
         let running = self.is_running();
@@ -63,6 +64,7 @@ impl GrpcDraft {
                     .child(with_variables(
                         self.url_completion.as_ref().unwrap(),
                         InputGroup::new("grpc-url-group")
+                            .invalid(url_missing)
                             .input(
                                 Input::new(&url)
                                     .aria_label("Server URL")
@@ -99,6 +101,25 @@ impl GrpcDraft {
                                         })),
                                 ),
                             )
+                            .when(url_missing, |group| {
+                                group.addon(
+                                    InputGroupAddon::new("grpc-url-missing")
+                                        .align(InputGroupAddonAlignment::InlineEnd)
+                                        // Shares the empty URL's room, so both
+                                        // shrink in narrow windows.
+                                        .flex_1()
+                                        .min_w_0()
+                                        .justify_end()
+                                        .pr_3()
+                                        .text_color(cx.theme().danger)
+                                        .child(
+                                            div()
+                                                .debug_selector(|| "grpc-url-missing".into())
+                                                .truncate()
+                                                .child("Enter a server URL"),
+                                        ),
+                                )
+                            })
                             .addon(
                                 InputGroupAddon::new("grpc-method-addon")
                                     .align(InputGroupAddonAlignment::InlineEnd)

@@ -51,9 +51,7 @@ pub(crate) struct Inherited {
 
 pub(super) struct FieldInput {
     pub target: VariableTarget,
-    /// None for a hidden secret, whose masked text cannot show variables
-    /// where they are.
-    pub completion: Option<Entity<VariableInput>>,
+    pub completion: Entity<VariableInput>,
 }
 
 /// The Auth tab of a request or collection: a kind of authorization and its
@@ -229,8 +227,7 @@ impl AuthEditor {
                 VariableTarget::Input(input)
             };
             let scope = self.scope.clone();
-            let completion = (!field.secret())
-                .then(|| cx.new(|cx| VariableInput::new(target.clone(), scope, window, cx)));
+            let completion = cx.new(|cx| VariableInput::new(target.clone(), scope, window, cx));
 
             self.inputs.insert(key, FieldInput { target, completion });
         }

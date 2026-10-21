@@ -25,23 +25,21 @@ impl AuthEditor {
 
     fn text_row(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let input = self.input(field, window, cx);
-        let control = match (&input.target, &input.completion) {
-            (VariableTarget::Input(input), Some(completion)) => {
-                with_variables(completion, Input::new(input).aria_label(field.label()))
-            }
-            (VariableTarget::Input(input), None) => {
-                div().child(Input::new(input).aria_label(field.label()).mask_toggle())
-            }
-            (VariableTarget::Editor(editor), completion) => {
-                let editor = Editor::new(editor)
+        let control = match &input.target {
+            // A secret's variables show once it is revealed.
+            VariableTarget::Input(state) => with_variables(
+                &input.completion,
+                Input::new(state)
+                    .aria_label(field.label())
+                    .when(field.secret(), |input| input.mask_toggle()),
+            ),
+            VariableTarget::Editor(editor) => with_variables(
+                &input.completion,
+                Editor::new(editor)
                     .h(rems(8.))
                     .text_sm()
-                    .aria_label(field.label());
-                match completion {
-                    Some(completion) => with_variables(completion, editor),
-                    None => div().child(editor),
-                }
-            }
+                    .aria_label(field.label()),
+            ),
         };
         let label = field.label();
 
