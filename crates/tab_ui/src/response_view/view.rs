@@ -293,12 +293,9 @@ impl ResponseView {
 
     /// Keep the selected tab in view when it changes or the tabs' width does,
     /// as when a panel opens or a new status is wider, and remeasure the
-    /// toolbar when its width changes.
-    fn toolbar_laid_out(&mut self, width: Pixels, cx: &mut Context<Self>) {
-        if self.toolbar_width != Some(width) {
-            self.toolbar_width = Some(width);
-            cx.notify();
-        }
+    /// toolbar when its width changes. Returns whether to draw again.
+    fn toolbar_laid_out(&mut self, width: Pixels) -> bool {
+        let mut changed = self.toolbar_width.replace(width) != Some(width);
 
         let tabs_width = self.tabs_scroll.bounds().size.width;
         if self.revealed != Some((self.section, tabs_width)) {
@@ -307,9 +304,11 @@ impl ResponseView {
             if let Some(index) = self.sections().position(|section| section == self.section) {
                 // Applied in the next frame, against the width the tabs have now.
                 self.tabs_scroll.scroll_to_item(index);
-                cx.notify();
+                changed = true;
             }
         }
+
+        changed
     }
 
     fn toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -414,9 +413,18 @@ impl ResponseView {
             })
             .on_prepaint({
                 let view = cx.entity().downgrade();
-                move |bounds, _, cx| {
-                    let _ =
-                        view.update(cx, |this, cx| this.toolbar_laid_out(bounds.size.width, cx));
+                move |bounds, window, cx| {
+                    let changed = view
+                        .update(cx, |this, _| this.toolbar_laid_out(bounds.size.width))
+                        .unwrap_or(false);
+
+                    // GPUI ignores notifications while it draws, so ask for
+                    // the frame that applies the change.
+                    if changed {
+                        window.on_next_frame(move |_, cx| {
+                            let _ = view.update(cx, |_, cx| cx.notify());
+                        });
+                    }
                 }
             })
     }
