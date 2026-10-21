@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use collection::SavedLocation;
 use environment::EnvironmentSessions;
@@ -6,7 +6,10 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui_kit::base::{Tab, Tabs};
 use gpui_kit::component::{
     button::*,
-    input::{Editor, EditorState, Input, InputEvent, InputState},
+    input::{
+        Editor, EditorState, Input, InputEvent, InputGroup, InputGroupAddon,
+        InputGroupAddonAlignment, InputState,
+    },
     resizable::{ResizableState, resizable_panel, v_resizable},
     scroll::ScrollableElement as _,
     *,
@@ -16,6 +19,8 @@ use preferences::Preferences;
 use request::{
     Auth, Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest,
 };
+use request_history::Outcome;
+use uuid::Uuid;
 
 use super::message_log::MessageLog;
 use crate::actions::SendRequest;
@@ -24,7 +29,7 @@ use crate::request_draft::{FieldsChanged, RequestFields, request_header};
 use crate::storage::Storage;
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
 use crate::variables::VariableScope;
-use crate::{Environments, RequestSent};
+use crate::{Environments, RequestEnded, RequestSent};
 
 /// The most events shown per update. A fast stream is drawn in batches
 /// instead of once for every message.
@@ -50,10 +55,13 @@ pub(super) enum Connection {
     Connected {
         socket: WebSocketConnection,
         task: Task<()>,
+        /// The id history keeps the connection under, which its end refers to.
+        history: Uuid,
     },
     /// Closing was requested; waiting for the server to acknowledge.
     Closing {
         _task: Task<()>,
+        history: Uuid,
     },
 }
 
@@ -95,6 +103,9 @@ pub struct WebSocketDraft {
     pub(super) connection: Connection,
     pub(crate) url: Option<Entity<InputState>>,
     url_completion: Option<Entity<VariableInput>>,
+    /// Whether Connect found no URL to connect to. The URL says so until it
+    /// is edited.
+    url_missing: bool,
     params: Option<Entity<RequestFields>>,
     headers: Option<Entity<RequestFields>>,
     handshake_headers: Vec<(String, String)>,
@@ -118,6 +129,7 @@ pub struct WebSocketDraft {
 }
 
 impl EventEmitter<RequestSent> for WebSocketDraft {}
+impl EventEmitter<RequestEnded> for WebSocketDraft {}
 
 impl WebSocketDraft {
     /// Variables resolve from the request's collection environment, its
@@ -168,6 +180,7 @@ impl WebSocketDraft {
             connection: Connection::Disconnected,
             url: None,
             url_completion: None,
+            url_missing: false,
             params: None,
             headers: None,
             message: None,
@@ -315,6 +328,15 @@ impl WebSocketDraft {
             return;
         }
 
+        // A request without a URL is pointed out at the URL instead of
+        // failing to connect.
+        if self.request.url.trim().is_empty() {
+            self.url_missing = true;
+            self.focus_url(window, cx);
+            self.notify_controls(cx);
+            return;
+        }
+
         self.prepare(window, cx);
 
         let variables = self.variables.read(cx).request_variables(cx);
@@ -330,11 +352,10 @@ impl WebSocketDraft {
         let (socket, mut events) =
             WebSocketConnection::open(self.request.clone(), variables, &preferences);
 
-        let sent = RequestSent {
-            record: request_history::Record::sent(recorded),
-            sent_at: SystemTime::now(),
-            saved: self.storage.location().is_some(),
-        };
+        let sent = RequestSent::new(
+            request_history::Record::sent(recorded),
+            self.storage.location().is_some(),
+        );
 
         let task = cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
@@ -362,7 +383,10 @@ impl WebSocketDraft {
         self.connection = match std::mem::replace(&mut self.connection, Connection::Disconnected) {
             Connection::Connecting { .. } => Connection::Disconnected,
             // Dropping the connection starts a normal closure.
-            Connection::Connected { task, .. } => Connection::Closing { _task: task },
+            Connection::Connected { task, history, .. } => Connection::Closing {
+                _task: task,
+                history,
+            },
             connection @ (Connection::Disconnected | Connection::Closing { .. }) => connection,
         };
         self.notify_controls(cx);
@@ -381,19 +405,31 @@ impl WebSocketDraft {
         let state = self.connection.state();
 
         for event in &events {
-            match event.kind {
+            match &event.kind {
                 WebSocketEventKind::Connected(_)
                     if matches!(self.connection, Connection::Connecting { .. }) =>
                 {
                     if let Connection::Connecting { socket, sent, task } =
                         std::mem::replace(&mut self.connection, Connection::Disconnected)
                     {
-                        self.connection = Connection::Connected { socket, task };
+                        self.connection = Connection::Connected {
+                            socket,
+                            task,
+                            history: sent.id,
+                        };
                         cx.emit(sent);
                     }
                 }
-                WebSocketEventKind::Closed(_) | WebSocketEventKind::Failed(_) => {
-                    self.connection = Connection::Disconnected;
+                WebSocketEventKind::Closed(close) => self.end(
+                    Outcome::Closed {
+                        code: close.code,
+                        reason: close.reason.clone(),
+                        by_client: close.by_client,
+                    },
+                    cx,
+                ),
+                WebSocketEventKind::Failed(error) => {
+                    self.end(Outcome::Failed(error.to_string()), cx)
                 }
                 _ => {}
             }
@@ -403,6 +439,37 @@ impl WebSocketDraft {
 
         if self.connection.state() != state {
             self.notify_controls(cx);
+        }
+    }
+
+    /// How history keeps the connection if its tab closes now: closed by
+    /// Request Eagle. The server's answer is no longer read, so its status
+    /// is unknown.
+    pub fn stopped(&self) -> Option<RequestEnded> {
+        match self.connection {
+            Connection::Connected { history, .. } | Connection::Closing { history, .. } => {
+                Some(RequestEnded {
+                    id: history,
+                    outcome: Outcome::Closed {
+                        code: None,
+                        reason: String::new(),
+                        by_client: true,
+                    },
+                })
+            }
+            Connection::Disconnected | Connection::Connecting { .. } => None,
+        }
+    }
+
+    /// The connection ended. History keeps how, once it had connected.
+    fn end(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
+        if let Connection::Connected { history, .. } | Connection::Closing { history, .. } =
+            std::mem::replace(&mut self.connection, Connection::Disconnected)
+        {
+            cx.emit(RequestEnded {
+                id: history,
+                outcome,
+            });
         }
     }
 
@@ -462,6 +529,7 @@ impl WebSocketDraft {
                     |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.url = input.read(cx).value().to_string();
+                            this.url_missing = false;
                             this.refresh_handshake_headers(cx);
                             cx.notify();
                         }
@@ -602,6 +670,7 @@ impl WebSocketDraft {
 
     fn url_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let url = self.url_state(window, cx);
+        let url_missing = self.url_missing;
         let state = self.connection.state();
 
         h_flex()
@@ -614,9 +683,32 @@ impl WebSocketDraft {
                     .min_w_0()
                     .child(with_variables(
                         self.url_completion.as_ref().unwrap(),
-                        Input::new(&url)
-                            .aria_label("WebSocket URL")
-                            .context_menu(crate::cite::editable_field_menu),
+                        InputGroup::new("websocket-url-group")
+                            .invalid(url_missing)
+                            .input(
+                                Input::new(&url)
+                                    .aria_label("WebSocket URL")
+                                    .context_menu(crate::cite::editable_field_menu),
+                            )
+                            .when(url_missing, |group| {
+                                group.addon(
+                                    InputGroupAddon::new("websocket-url-missing")
+                                        .align(InputGroupAddonAlignment::InlineEnd)
+                                        // Shares the empty URL's room, so both
+                                        // shrink in narrow windows.
+                                        .flex_1()
+                                        .min_w_0()
+                                        .justify_end()
+                                        .pr_3()
+                                        .text_color(cx.theme().danger)
+                                        .child(
+                                            div()
+                                                .debug_selector(|| "websocket-url-missing".into())
+                                                .truncate()
+                                                .child("Enter a WebSocket URL"),
+                                        ),
+                                )
+                            }),
                     )),
             )
             .child(

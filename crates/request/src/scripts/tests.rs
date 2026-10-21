@@ -505,6 +505,81 @@ fn uncaught_errors_are_bounded_without_splitting_unicode() {
 }
 
 #[test]
+fn errors_name_the_lines_the_editor_shows() {
+    smol::block_on(async {
+        for (source, error, line) in [
+            (
+                "const token = null;\nconsole.log(\"Checking token\");\nthrow new Error(\"Missing token\");",
+                "Error: Missing token\n    at line 3",
+                Some(3),
+            ),
+            (
+                "function check(token) {\n    if (!token) throw new TypeError(\"Missing token\");\n}\n\ncheck(null);",
+                "TypeError: Missing token\n    at check (line 2)\n    at line 5",
+                Some(2),
+            ),
+            // Frames in the sandbox and in native functions are left out.
+            (
+                "[1].forEach(() => {\n    pm.expect(1).to.equal(2);\n});",
+                "Error: expected 1 to equal 2\n    at line 2\n    at line 1",
+                Some(2),
+            ),
+            (
+                "const token = null;\ntoken.length;",
+                "TypeError: cannot read property 'length' of null\n    at line 2",
+                Some(2),
+            ),
+            (
+                "const ok = true;\nconst broken = ;",
+                "SyntaxError: unexpected token in expression: ';'\n    at line 2",
+                Some(2),
+            ),
+            // The script's end is found after its last line.
+            (
+                "if (true) {\n    pm.variables.set(\"a\", 1);",
+                "SyntaxError: unexpected token in expression: ')'\n    at line 2",
+                Some(2),
+            ),
+            // An error from outside the script has no line in it.
+            (
+                "await pm.sendRequest(\"\");",
+                "Error: invalid request URL: relative URL without a base",
+                None,
+            ),
+        ] {
+            let failure = pre_request(scripted(source), no_variables())
+                .await
+                .unwrap_err();
+            let report = failure.scripts.last().unwrap();
+
+            assert_eq!(report.error.as_deref(), Some(error), "{source}");
+            assert_eq!(report.error_line, line, "{source}");
+        }
+
+        let mut request = scripted("");
+        request.scripts.post_response = "\npm.response.json();".into();
+        let (request, state, scripts) = pre_request(request, no_variables()).await.unwrap();
+        let execution = Execution {
+            elapsed: Duration::from_millis(42),
+            scripts,
+            sent: None,
+            response: Response::Http(HttpResponse {
+                status: StatusCode::OK,
+                version: Version::HTTP_11,
+                headers: HeaderMap::new(),
+                body: b"not json".to_vec(),
+                metrics: HttpMetrics::default(),
+            }),
+        };
+        let result = post_response(request, None, state, execution).await;
+        let report = &result.scripts[0];
+
+        assert_eq!(report.phase, ScriptPhase::PostResponse);
+        assert_eq!(report.error_line, Some(2), "{:?}", report.error);
+    });
+}
+
+#[test]
 fn runtime_is_isolated_and_has_no_host_io() {
     smol::block_on(async {
         let source = "pm.test('sandbox', () => { for (const name of ['process', 'fetch', 'std', 'os']) pm.expect(typeof globalThis[name]).to.equal('undefined'); for (const name of ['fs', 'child_process']) { try { require(name); throw new Error(`loaded ${name}`); } catch (error) { pm.expect(error.message).to.include('Cannot find module'); } } }); globalThis.leak = 42;";

@@ -27,12 +27,36 @@ pub struct Entry {
     pub label: String,
     /// Where the request went, as written.
     pub address: String,
+    /// How the request ended. Missing while a gRPC call or WebSocket
+    /// connection is open, and for requests that earlier versions kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
 }
 
 impl Entry {
     pub fn sent_at(&self) -> SystemTime {
         UNIX_EPOCH + Duration::from_millis(self.sent_at)
     }
+}
+
+/// How a sent request ended, kept in the list so that it shows without
+/// reading the request's files.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    /// The status code of the HTTP response.
+    Status(u16),
+    /// The status a gRPC call ended with.
+    Grpc { code: i32, message: String },
+    /// The WebSocket connection closed.
+    Closed {
+        code: Option<u16>,
+        reason: String,
+        by_client: bool,
+    },
+    /// Nothing came back: the request failed or was cancelled after it went
+    /// out, the call ended without a status, or the connection broke.
+    Failed(String),
 }
 
 #[derive(Debug, Error)]
@@ -83,10 +107,10 @@ impl History {
         &self.entries
     }
 
-    /// Keep a sent request, deleting the oldest beyond [`LIMIT`].
-    pub fn add(&mut self, record: Record, sent_at: SystemTime) -> Change {
+    /// Keep a sent request under `id`, deleting the oldest beyond [`LIMIT`].
+    pub fn add(&mut self, id: Uuid, record: Record, sent_at: SystemTime) -> Change {
         let entry = Entry {
-            id: Uuid::new_v4().to_string(),
+            id: id.to_string(),
             sent_at: sent_at
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -95,6 +119,7 @@ impl History {
                 .unwrap_or(u64::MAX),
             label: record.label().to_owned(),
             address: record.address(),
+            outcome: record.outcome(),
         };
         let id = entry.id.clone();
 
@@ -116,6 +141,16 @@ impl History {
             removed,
             ..self.change()
         }
+    }
+
+    /// Keep how a gRPC call or WebSocket connection ended. They are added
+    /// when they start, so this comes later; nothing changes once the entry
+    /// is deleted.
+    pub fn end(&mut self, id: &str, outcome: Outcome) -> Option<Change> {
+        let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        entry.outcome = Some(outcome);
+
+        Some(self.change())
     }
 
     pub fn delete(&mut self, id: &str) -> Change {

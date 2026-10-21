@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::execution::Exchange;
 use super::fields::{FieldsChanged, RequestFields, SendCookiesChanged};
+use super::json_body::JsonBody;
 use super::path_variables::{PathVariableChanged, PathVariables};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
@@ -23,7 +24,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{Auth, Field, HttpRequest, Method};
+use request::{Auth, Field, HttpRequest, Method, ScriptPhase};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestSection {
@@ -41,6 +42,8 @@ pub struct RequestDraft {
     pub request: HttpRequest,
     saved_request: HttpRequest,
     pub(crate) url: Option<Entity<InputState>>,
+    /// Whether Send found no URL to send. The URL says so until it is edited.
+    pub(super) url_missing: bool,
     pub(crate) section: RequestSection,
     /// The URL's query parameters.
     pub(super) params: Option<Entity<RequestFields>>,
@@ -63,7 +66,7 @@ pub struct RequestDraft {
     pub(super) parts: Option<Entity<RequestFields>>,
     pub(super) body_file: Option<Entity<InputState>>,
     pub(super) body_vim: Option<Entity<crate::vim::Vim>>,
-    pub(super) body_json_valid: bool,
+    pub(super) body_json: JsonBody,
     pub(super) body_task: Option<Task<()>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
     pub(super) timeout: Option<Entity<InputState>>,
@@ -156,7 +159,16 @@ impl RequestDraft {
         // Unlike the editors, these views do not install window listeners or
         // notify while they are created, so unvisited tabs can own them.
         let owner = cx.weak_entity();
-        let response = cx.new(|cx| ResponseView::new(cx).citable());
+        let script_owner = owner.clone();
+        let response = cx.new(|cx| {
+            ResponseView::new(cx)
+                .citable()
+                .on_show_script_line(move |phase, line, window, cx| {
+                    let _ = script_owner.update(cx, |draft, cx| {
+                        draft.show_script_line(phase, line, window, cx)
+                    });
+                })
+        });
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| RequestAddress(owner.clone()));
         let configuration = cx.new(|_| RequestConfiguration(owner));
@@ -172,6 +184,7 @@ impl RequestDraft {
             saved_request: request.clone(),
             request,
             url: None,
+            url_missing: false,
             section: RequestSection::Headers,
             params: None,
             path_variables: None,
@@ -181,7 +194,7 @@ impl RequestDraft {
             parts: None,
             body_file: None,
             body_vim: None,
-            body_json_valid: false,
+            body_json: JsonBody::Empty,
             body_task: None,
             scripts: None,
             timeout: None,
@@ -281,6 +294,12 @@ impl RequestDraft {
         self.address.update(cx, |_, cx| cx.notify());
     }
 
+    /// Redraw the cached request sections for a change that did not come from
+    /// their inputs.
+    pub(super) fn notify_configuration(&self, cx: &mut Context<Self>) {
+        self.configuration.update(cx, |_, cx| cx.notify());
+    }
+
     /// Follow the saved request to its current file and name.
     pub fn set_location(&mut self, location: SavedLocation, cx: &mut Context<Self>) {
         let path = Some(location.environment_path());
@@ -373,6 +392,7 @@ impl RequestDraft {
             auth,
             ..request
         };
+        self.url_missing = false;
 
         // The URL keeps focus. Path values given before belong to the replaced
         // request. The other editors are created again from the new request
@@ -395,6 +415,7 @@ impl RequestDraft {
         self.body_file = None;
         self.body_vim = None;
         self.body_completion = None;
+        self.body_json = JsonBody::Empty;
         self.body_task = None;
 
         self.set_method(self.request.method, cx);
@@ -476,6 +497,7 @@ impl RequestDraft {
                     |this, input, event: &InputEvent, window, cx| {
                         if matches!(event, InputEvent::Change) {
                             this.request.path = input.read(cx).value().to_string();
+                            this.url_missing = false;
                             this.url_changed(window, cx);
                         }
                     },
@@ -503,6 +525,21 @@ impl RequestDraft {
                 scripts
             })
             .clone()
+    }
+
+    /// Open the Scripts section at a line of a phase's script, counting from 1.
+    fn show_script_line(
+        &mut self,
+        phase: ScriptPhase,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.section = RequestSection::Scripts;
+        self.prepare(window, cx);
+        self.script_editor(cx)
+            .update(cx, |scripts, cx| scripts.show_line(phase, line, window, cx));
+        cx.notify();
     }
 
     /// The editor of the selected script phase.
@@ -552,6 +589,7 @@ impl RequestDraft {
                 url.update(cx, |url, cx| url.set_value(path.clone(), window, cx));
             }
             self.request.path = path;
+            self.url_missing = false;
 
             self.refresh_generated_headers(cx);
             self.notify_address(cx);

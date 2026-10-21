@@ -369,6 +369,7 @@ impl CollectionRunner {
                 &result.scripts,
                 console,
                 "run the requests again",
+                None,
                 cx,
             ))
             .into_any_element()

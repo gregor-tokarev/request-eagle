@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use request::{Execution, HeaderMap, HttpResponse, Response, StatusCode, Version};
 
-use super::{ResponseContent, body::BodyMode};
+use super::{ResponseContent, body::BodyMode, search::Matches};
 
 fn response(body: &[u8], content_type: &str) -> ResponseContent {
     with_headers(body, &[("content-type", content_type)])
@@ -391,4 +391,34 @@ fn previewed_pages_load_no_images() {
         super::html::without_images("<pre>&lt;img src=https://x/&gt;</pre>")
             .contains("<pre>&lt;\u{200b}img src=https://x/&gt;</pre>")
     );
+}
+
+#[test]
+fn search_marks_every_match_a_row_reaches_and_the_current_one() {
+    let mut matches = Matches::default();
+    matches.update("hello Hello\nhello", "hello", false);
+
+    // A row that ends inside a match still marks it.
+    assert_eq!(
+        matches.within(0..8).collect::<Vec<_>>(),
+        [(0..5, true), (6..11, false)]
+    );
+    assert_eq!(
+        matches.within(11..17).collect::<Vec<_>>(),
+        [(12..17, false)]
+    );
+
+    // Moving wraps around both ends.
+    matches.step(true);
+    assert_eq!(matches.current(), Some(12..17));
+    assert_eq!(matches.within(11..17).collect::<Vec<_>>(), [(12..17, true)]);
+    matches.step(false);
+    assert_eq!(matches.current(), Some(0..5));
+
+    matches.update("hello Hello\nhello", "Hello", true);
+    assert_eq!(matches.within(0..17).collect::<Vec<_>>(), [(6..11, true)]);
+
+    matches.update("hello", "", false);
+    assert_eq!(matches.current(), None);
+    assert_eq!(matches.within(0..5).count(), 0);
 }

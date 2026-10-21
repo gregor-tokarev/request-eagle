@@ -11,7 +11,8 @@ use std::{
 use bytes::Bytes;
 use environment::VariableScopes;
 use rquickjs::{
-    Context, Exception, Function, Object, Promise, Runtime, Value,
+    CaughtError, Context, Exception, Function, Object, Promise, Runtime, Value,
+    context::EvalOptions,
     function::{Args, This},
 };
 use serde::{Deserialize, de::DeserializeOwned};
@@ -27,6 +28,9 @@ const TIME_LIMIT: Duration = Duration::from_secs(2);
 const WALL_LIMIT: Duration = Duration::from_secs(30);
 const MEMORY_LIMIT: usize = 32 * 1024 * 1024;
 const OUTPUT_LIMIT: usize = 500;
+/// The file name of the script in stack traces, which tells its frames from
+/// the sandbox's.
+const SCRIPT_FILE: &str = "script";
 
 /// `R` is the protocol's request after the script changed it.
 #[derive(Deserialize)]
@@ -128,6 +132,7 @@ pub(super) fn run<R: DeserializeOwned>(
         tests: Vec::new(),
         logs: Vec::new(),
         error: None,
+        error_line: None,
         next_request: None,
     }));
     let started = Instant::now();
@@ -216,7 +221,12 @@ pub(super) fn run<R: DeserializeOwned>(
                 let state: Object = setup.call_arg(args)?;
                 let export: Function = state.get("export")?;
                 let skipped: Function = state.get("isSkipped")?;
-                let execute: Function = cx.eval(format!("(async function () {{\n{source}\n}})"))?;
+                let mut options = EvalOptions::default();
+                options.filename = Some(SCRIPT_FILE.into());
+                // The script starts on the wrapper's first line, so its errors
+                // name the lines the editor shows.
+                let execute: Function =
+                    cx.eval_with_options(format!("(async function () {{{source}\n}})"), options)?;
                 let main: Promise = execute.call(())?;
                 // Observe the root rejection here; unrelated rejected promises remain errors.
                 main.catch()?
@@ -289,7 +299,9 @@ pub(super) fn run<R: DeserializeOwned>(
                 {
                     "Script exceeded the 2 second time limit".to_owned()
                 } else {
-                    rquickjs::CaughtError::from_error(&cx, error).to_string()
+                    let (message, line) = describe(CaughtError::from_error(&cx, error), source);
+                    report.lock().unwrap().error_line = line;
+                    message
                 }
             })?;
 
@@ -316,4 +328,64 @@ pub(super) fn run<R: DeserializeOwned>(
             (None, report)
         }
     }
+}
+
+/// The error's name and message, then the frames of its stack that are in
+/// the script, with the line it was thrown at, counting from 1. The frames
+/// of the sandbox and of native functions mean nothing to the script's
+/// author, so they are left out.
+fn describe(error: CaughtError<'_>, source: &str) -> (String, Option<usize>) {
+    let CaughtError::Exception(exception) = error else {
+        return (error.to_string(), None);
+    };
+
+    let name = exception
+        .get::<_, String>("name")
+        .unwrap_or_else(|_| "Error".into());
+    let mut text = match exception.message().filter(|message| !message.is_empty()) {
+        Some(message) => format!("{name}: {message}"),
+        None => name,
+    };
+
+    let stack = exception.stack().unwrap_or_default();
+    let frames = script_frames(&stack, source);
+    for (function, line) in &frames {
+        text.push_str(&match function {
+            Some(function) => format!("\n    at {function} (line {line})"),
+            None => format!("\n    at line {line}"),
+        });
+    }
+
+    (text, frames.first().map(|(_, line)| *line))
+}
+
+/// The frames of a QuickJS stack that are in the script: the function's name,
+/// unless it has none, and the line. A syntax error can be found in the code
+/// that closes the script, after its last line, so lines stop at the last.
+fn script_frames<'a>(stack: &'a str, source: &str) -> Vec<(Option<&'a str>, usize)> {
+    let last = source.split('\n').count();
+
+    stack
+        .lines()
+        .filter_map(|frame| {
+            let frame = frame.trim().strip_prefix("at ")?;
+            // `function (file:line:column)`, or `file:line:column` for a syntax error.
+            let (function, location) = match frame
+                .strip_suffix(')')
+                .and_then(|frame| frame.rsplit_once(" ("))
+            {
+                Some((function, location)) => (Some(function), location),
+                None => (None, frame),
+            };
+
+            let mut parts = location.rsplitn(3, ':');
+            let (_column, line, file) = (parts.next()?, parts.next()?, parts.next()?);
+            if file != SCRIPT_FILE {
+                return None;
+            }
+            let line = line.parse::<usize>().ok()?.min(last);
+
+            Some((function.filter(|function| *function != "<anonymous>"), line))
+        })
+        .collect()
 }

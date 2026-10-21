@@ -12,9 +12,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{
-    WebSocketClose, WebSocketEvent, WebSocketEventKind, WebSocketHandshake, WebSocketMessage,
-};
+use request::{WebSocketEvent, WebSocketEventKind, WebSocketHandshake, WebSocketMessage};
 
 use super::draft::{ConnectionState, WebSocketDraft};
 use crate::actions::SendRequest;
@@ -396,7 +394,7 @@ impl MessageLog {
             }
             WebSocketEventKind::Closed(close) => (
                 EntryKind::Disconnected,
-                Content::Text(close_details(&close).into()),
+                Content::Text(close.details().into()),
                 None,
             ),
             WebSocketEventKind::NotSent(error) => (
@@ -855,48 +853,6 @@ fn handshake_details(handshake: &WebSocketHandshake) -> String {
     }
 
     details
-}
-
-fn close_details(close: &WebSocketClose) -> String {
-    let mut details = String::from(if close.by_client {
-        "Closed by Request Eagle\n"
-    } else {
-        "Closed by the server\n"
-    });
-
-    match close.code {
-        Some(code) => {
-            let _ = write!(details, "{code} {}", close_code_name(code));
-        }
-        None => details.push_str("No status code"),
-    }
-
-    if !close.reason.is_empty() {
-        let _ = write!(details, ": {}", close.reason);
-    }
-
-    details
-}
-
-fn close_code_name(code: u16) -> &'static str {
-    match code {
-        1000 => "Normal Closure",
-        1001 => "Going Away",
-        1002 => "Protocol Error",
-        1003 => "Unsupported Data",
-        1005 => "No Status Received",
-        1006 => "Abnormal Closure",
-        1007 => "Invalid Payload Data",
-        1008 => "Policy Violation",
-        1009 => "Message Too Big",
-        1010 => "Mandatory Extension",
-        1011 => "Internal Error",
-        1012 => "Service Restart",
-        1013 => "Try Again Later",
-        1014 => "Bad Gateway",
-        1015 => "TLS Handshake",
-        _ => "",
-    }
 }
 
 fn size_label(bytes: usize) -> String {

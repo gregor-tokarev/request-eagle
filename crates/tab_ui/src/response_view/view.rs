@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use gpui_kit::base::{ElementExt as _, Tab, Tabs, TextSelectionScopeId};
 use gpui_kit::component::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
@@ -7,13 +9,13 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{
     Execution, ExecutionError, ExecutionFailure, HeaderMap, HttpMetrics, HttpResponse, Response,
-    ServerSentEvent, StatusCode, Version,
+    ScriptPhase, ServerSentEvent, StatusCode, Version,
 };
 
 use super::body::{Body, BodyMode};
 use super::content::ResponseContent;
 use super::events::EventLog;
-use super::scripts::script_results;
+use super::scripts::{ShowScriptLine, script_results};
 use crate::actions::SendRequest;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,6 +85,7 @@ pub struct ResponseView {
     request_section: bool,
     /// Whether the tab quotes the response to the agent.
     pub(super) citable: bool,
+    show_script_line: Option<ShowScriptLine>,
 }
 
 impl ResponseView {
@@ -106,6 +109,7 @@ impl ResponseView {
             save_task: None,
             request_section: false,
             citable: false,
+            show_script_line: None,
         }
     }
 
@@ -113,6 +117,15 @@ impl ResponseView {
     /// [`AddToAgent`](crate::AddToAgent), since it knows the request.
     pub(crate) fn citable(mut self) -> Self {
         self.citable = true;
+        self
+    }
+
+    /// Link script errors to their line in the tab's script editor.
+    pub(crate) fn on_show_script_line(
+        mut self,
+        show_line: impl Fn(ScriptPhase, usize, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.show_script_line = Some(Rc::new(show_line));
         self
     }
 
@@ -494,12 +507,20 @@ impl Render for ResponseView {
         };
 
         let content = match (self.section, &self.state) {
-            (Section::Tests, _) if has_results => {
-                script_results(&self.scripts, false, "send the request", cx)
-            }
-            (Section::Console, _) if has_results => {
-                script_results(&self.scripts, true, "send the request", cx)
-            }
+            (Section::Tests, _) if has_results => script_results(
+                &self.scripts,
+                false,
+                "send the request",
+                self.show_script_line.as_ref(),
+                cx,
+            ),
+            (Section::Console, _) if has_results => script_results(
+                &self.scripts,
+                true,
+                "send the request",
+                self.show_script_line.as_ref(),
+                cx,
+            ),
             (
                 Section::Body,
                 ResponseState::Received {

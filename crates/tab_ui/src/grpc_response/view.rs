@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use gpui_kit::base::{SelectableText, Tab, Tabs};
@@ -9,10 +10,12 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use request::{GrpcError, GrpcEvent, GrpcFailure, GrpcStatus, MethodKind, ScriptReport};
+use request::{
+    GrpcError, GrpcEvent, GrpcFailure, GrpcStatus, MethodKind, ScriptPhase, ScriptReport,
+};
 
 use crate::actions::SendRequest;
-use crate::response_view::script_results;
+use crate::response_view::{ShowScriptLine, script_results};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
@@ -92,6 +95,7 @@ pub(crate) struct GrpcResponse {
     /// The lowercase search text.
     pub(super) query: String,
     pub(super) list: ListState,
+    show_script_line: Option<ShowScriptLine>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -114,8 +118,18 @@ impl GrpcResponse {
             search: None,
             query: String::new(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
+            show_script_line: None,
             _subscriptions: Vec::new(),
         }
+    }
+
+    /// Link script errors to their line in the tab's script editor.
+    pub(crate) fn on_show_script_line(
+        mut self,
+        show_line: impl Fn(ScriptPhase, usize, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.show_script_line = Some(Rc::new(show_line));
+        self
     }
 
     fn reset(&mut self) {
@@ -607,6 +621,7 @@ impl Render for GrpcResponse {
                 &self.scripts,
                 self.section == Section::Console,
                 "invoke the method",
+                self.show_script_line.as_ref(),
                 cx,
             ),
             _ if !started => self.empty_state(window, cx),

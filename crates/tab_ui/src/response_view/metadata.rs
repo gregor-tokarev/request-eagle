@@ -189,7 +189,8 @@ impl ResponseView {
     }
 }
 
-pub(crate) fn status_color(status: StatusCode, cx: &App) -> Hsla {
+/// The color of an HTTP status, by its class.
+pub fn status_color(status: StatusCode, cx: &App) -> Hsla {
     if status.is_success() {
         cx.theme().success
     } else if status.is_redirection() {

@@ -10,47 +10,81 @@ use gpui_kit::*;
 
 use super::body::Body;
 use super::view::{ResponseState, ResponseView};
+use super::virtual_body::VirtualBody;
 
 pub(super) struct BodySearch {
     pub(super) input: Entity<InputState>,
-    pub(super) matches: Vec<usize>,
-    current: usize,
-    query_len: usize,
     case_sensitive: bool,
     _subscription: Subscription,
 }
 
-impl BodySearch {
-    fn update_query(&mut self, text: &str, query: &str) {
+/// Where a query occurs in a body, and which occurrence is current.
+#[derive(Default)]
+pub(super) struct Matches {
+    starts: Vec<usize>,
+    len: usize,
+    current: usize,
+}
+
+impl Matches {
+    pub(super) fn update(&mut self, text: &str, query: &str, case_sensitive: bool) {
         // Reuse offsets across keystrokes. Searching a large body must not
         // copy its text or allocate a new list of ranges for every character.
-        self.matches.clear();
+        self.starts.clear();
         self.current = 0;
-        self.query_len = query.len();
+        self.len = query.len();
 
         if query.is_empty() {
             return;
         }
 
         let matcher = AhoCorasickBuilder::new()
-            .ascii_case_insensitive(!self.case_sensitive)
+            .ascii_case_insensitive(!case_sensitive)
             .build([query])
             .expect("response search query");
-        self.matches
+        self.starts
             .extend(matcher.find_iter(text).map(|found| found.start()));
     }
 
-    fn current_range(&self) -> Option<Range<usize>> {
-        self.matches
+    pub(super) fn step(&mut self, previous: bool) {
+        if self.starts.is_empty() {
+            return;
+        }
+
+        self.current = if previous {
+            self.current.checked_sub(1).unwrap_or(self.starts.len() - 1)
+        } else {
+            (self.current + 1) % self.starts.len()
+        };
+    }
+
+    pub(super) fn current(&self) -> Option<Range<usize>> {
+        self.starts
             .get(self.current)
-            .map(|&start| start..start + self.query_len)
+            .map(|&start| start..start + self.len)
+    }
+
+    /// The matches that reach into `range`, and whether each is the current one.
+    pub(super) fn within(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = (Range<usize>, bool)> + '_ {
+        // Matches are sorted and do not overlap.
+        let first = self
+            .starts
+            .partition_point(|&start| start + self.len <= range.start);
+        self.starts[first..]
+            .iter()
+            .take_while(move |&&start| start < range.end)
+            .enumerate()
+            .map(move |(index, &start)| (start..start + self.len, first + index == self.current))
     }
 
     fn label(&self) -> String {
-        if self.matches.is_empty() {
+        if self.starts.is_empty() {
             "0/0".into()
         } else {
-            format!("{}/{}", self.current + 1, self.matches.len())
+            format!("{}/{}", self.current + 1, self.starts.len())
         }
     }
 }
@@ -74,9 +108,6 @@ impl ResponseView {
 
                     BodySearch {
                         input,
-                        matches: Vec::new(),
-                        current: 0,
-                        query_len: 0,
                         case_sensitive: false,
                         _subscription: subscription,
                     }
@@ -111,39 +142,25 @@ impl ResponseView {
             return;
         };
 
-        search.update_query(&view.read(cx).source, &search.input.read(cx).value());
-        let range = search.current_range();
-        view.update(cx, |view, cx| view.select_match(range, cx));
+        let query = search.input.read(cx).value();
+        let case_sensitive = search.case_sensitive;
+        view.update(cx, |view, cx| view.search(&query, case_sensitive, cx));
         cx.notify();
     }
 
     fn move_body_match(&mut self, previous: bool, cx: &mut Context<Self>) {
         let ResponseState::Received {
-            body:
-                Body::Raw {
-                    view,
-                    search: Some(search),
-                },
+            body: Body::Raw {
+                view,
+                search: Some(_),
+            },
             ..
-        } = &mut self.state
+        } = &self.state
         else {
             return;
         };
-        if search.matches.is_empty() {
-            return;
-        }
 
-        if previous {
-            search.current = if search.current == 0 {
-                search.matches.len() - 1
-            } else {
-                search.current - 1
-            };
-        } else {
-            search.current = (search.current + 1) % search.matches.len();
-        }
-        let range = search.current_range();
-        view.update(cx, |view, cx| view.select_match(range, cx));
+        view.update(cx, |view, cx| view.step_match(previous, cx));
         cx.notify();
     }
 
@@ -155,7 +172,7 @@ impl ResponseView {
         {
             *search = None;
             view.update(cx, |view, cx| {
-                view.select_match(None, cx);
+                view.clear_search(cx);
                 window.focus(&view.focus, cx);
             });
         }
@@ -164,8 +181,13 @@ impl ResponseView {
 
     pub(super) fn body_search_bar(
         search: &BodySearch,
+        view: &Entity<VirtualBody>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let matches = &view.read(cx).matches;
+        let label = matches.label();
+        let empty = matches.current().is_none();
+
         h_flex()
             .debug_selector(|| "response-body-search".into())
             .gap_1()
@@ -206,14 +228,14 @@ impl ResponseView {
                         this.update_body_search(cx);
                     })),
             )
-            .child(div().text_xs().child(search.label()))
+            .child(div().text_xs().child(label))
             .child(
                 Button::new("response-search-previous")
                     .ghost()
                     .small()
                     .icon(IconName::ChevronLeft)
                     .accessibility_label("Previous match")
-                    .disabled(search.matches.is_empty())
+                    .disabled(empty)
                     .on_click(cx.listener(|this, _, _, cx| this.move_body_match(true, cx))),
             )
             .child(
@@ -222,7 +244,7 @@ impl ResponseView {
                     .small()
                     .icon(IconName::ChevronRight)
                     .accessibility_label("Next match")
-                    .disabled(search.matches.is_empty())
+                    .disabled(empty)
                     .on_click(cx.listener(|this, _, _, cx| this.move_body_match(false, cx))),
             )
             .child(

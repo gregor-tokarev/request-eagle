@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as _,
     pin::{Pin, pin},
     sync::{
         Arc,
@@ -159,6 +160,52 @@ pub struct WebSocketClose {
     pub reason: String,
     /// Whether this client started closing the connection.
     pub by_client: bool,
+}
+
+impl WebSocketClose {
+    /// Who closed the connection, then its status: `Closed by the server`
+    /// and `1000 Normal Closure: done` on the next line.
+    pub fn details(&self) -> String {
+        let mut details = String::from(if self.by_client {
+            "Closed by Request Eagle\n"
+        } else {
+            "Closed by the server\n"
+        });
+
+        match self.code {
+            Some(code) => {
+                let _ = write!(details, "{code} {}", close_code_name(code));
+            }
+            None => details.push_str("No status code"),
+        }
+
+        if !self.reason.is_empty() {
+            let _ = write!(details, ": {}", self.reason);
+        }
+
+        details
+    }
+}
+
+fn close_code_name(code: u16) -> &'static str {
+    match code {
+        1000 => "Normal Closure",
+        1001 => "Going Away",
+        1002 => "Protocol Error",
+        1003 => "Unsupported Data",
+        1005 => "No Status Received",
+        1006 => "Abnormal Closure",
+        1007 => "Invalid Payload Data",
+        1008 => "Policy Violation",
+        1009 => "Message Too Big",
+        1010 => "Mandatory Extension",
+        1011 => "Internal Error",
+        1012 => "Service Restart",
+        1013 => "Try Again Later",
+        1014 => "Bad Gateway",
+        1015 => "TLS Handshake",
+        _ => "",
+    }
 }
 
 /// An open or opening connection. Dropping it closes the connection.

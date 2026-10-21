@@ -1,15 +1,16 @@
 use std::task::Poll;
-use std::time::SystemTime;
 
 use futures::StreamExt as _;
 use gpui_kit::*;
 use preferences::Preferences;
 use request::{GrpcCall, GrpcClient, GrpcEvent, GrpcEvents, GrpcFailure, RequestVariables};
+use request_history::Outcome;
+use uuid::Uuid;
 
 use super::definition::{DefinitionState, reflected_target};
 use super::draft::GrpcDraft;
-use crate::RequestSent;
 use crate::cookies::Cookies;
+use crate::{RequestEnded, RequestSent};
 
 /// Events handled in one update, so fast streams do not redraw per message.
 const EVENT_BATCH: usize = 256;
@@ -32,6 +33,8 @@ pub(super) enum Call {
         _task: Task<()>,
         /// A message that could not be sent on the open stream.
         send_error: Option<SharedString>,
+        /// The id history keeps the call under, which its end refers to.
+        history: Uuid,
     },
 }
 
@@ -76,6 +79,23 @@ impl GrpcDraft {
     pub fn invoke(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(self.call, Call::Idle) {
             return;
+        }
+
+        // A call without a URL is pointed out at the URL, before the methods
+        // that reflection would load from it. A Before invoke script may set
+        // the URL itself.
+        if self.request.url.trim().is_empty()
+            && self.request.scripts.before_invoke.trim().is_empty()
+        {
+            self.url_missing = true;
+            self.focus_url(window, cx);
+            self.redraw(cx);
+            return;
+        }
+        // A script added since then sets the URL.
+        if self.url_missing {
+            self.url_missing = false;
+            self.redraw(cx);
         }
 
         let missing = if self.request.method.trim().is_empty() {
@@ -232,11 +252,10 @@ impl GrpcDraft {
             request.definition = request.definition.resolved_from(&collection);
         }
 
-        RequestSent {
-            record: request_history::Record::sent(request),
-            sent_at: SystemTime::now(),
-            saved: self.storage.location().is_some(),
-        }
+        RequestSent::new(
+            request_history::Record::sent(request),
+            self.storage.location().is_some(),
+        )
     }
 
     /// Show the call that `result` started, or why it did not, then its
@@ -254,6 +273,7 @@ impl GrpcDraft {
 
             let events = match result {
                 Ok((call, events)) => {
+                    let history = sent.id;
                     cx.emit(sent);
                     let kind = call.kind;
                     this.response
@@ -265,6 +285,7 @@ impl GrpcDraft {
                             call,
                             _task: task,
                             send_error: None,
+                            history,
                         };
                     }
                     Some(events)
@@ -297,9 +318,15 @@ impl GrpcDraft {
                 batch.push(event);
             }
 
-            let finished = batch
-                .iter()
-                .any(|event| matches!(event, GrpcEvent::Finished { .. } | GrpcEvent::Failed(_)));
+            let outcome = batch.iter().find_map(|event| match event {
+                GrpcEvent::Finished { status, .. } => Some(Outcome::Grpc {
+                    code: status.code,
+                    message: status.message.clone(),
+                }),
+                GrpcEvent::Failed(error) => Some(Outcome::Failed(error.to_string())),
+                _ => None,
+            });
+            let finished = outcome.is_some();
             let updated = this.update_in(cx, |this, window, cx| {
                 this.response
                     .update(cx, |response, cx| response.receive(batch, window, cx));
@@ -308,8 +335,8 @@ impl GrpcDraft {
 
                 // Messages redraw only the response; the draft changes
                 // when the call ends.
-                if finished {
-                    this.call = Call::Idle;
+                if let Some(outcome) = outcome {
+                    this.end(outcome, cx);
                     this.redraw(cx);
                 }
             });
@@ -351,10 +378,38 @@ impl GrpcDraft {
     }
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
+        if let Some(stopped) = self.stopped() {
+            cx.emit(stopped);
+        }
         self.call = Call::Idle;
         self.response.update(cx, |response, cx| response.cancel(cx));
 
         self.redraw(cx);
+    }
+
+    /// How history keeps the started call if it stops now, as when it is
+    /// cancelled or its tab closes: 1 CANCELLED, as the response shows it.
+    pub fn stopped(&self) -> Option<RequestEnded> {
+        match self.call {
+            Call::Open { history, .. } => Some(RequestEnded {
+                id: history,
+                outcome: Outcome::Grpc {
+                    code: 1,
+                    message: String::new(),
+                },
+            }),
+            _ => None,
+        }
+    }
+
+    /// The call ended. History keeps how, once it had started.
+    fn end(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
+        if let Call::Open { history, .. } = std::mem::replace(&mut self.call, Call::Idle) {
+            cx.emit(RequestEnded {
+                id: history,
+                outcome,
+            });
+        }
     }
 }
 

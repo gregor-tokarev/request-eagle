@@ -11,7 +11,9 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::*;
-use request::{Auth, Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences};
+use request::{
+    Auth, Field, GrpcClient, GrpcRequest, GrpcScripts, MethodKind, RequestPreferences, ScriptPhase,
+};
 
 use super::definition::DefinitionState;
 use super::invocation::Call;
@@ -23,7 +25,7 @@ use crate::request_draft::{FieldsChanged, RequestFields};
 use crate::script_editor::{ScriptEditor, ScriptTarget, ScriptsChanged};
 use crate::storage::Storage;
 use crate::{
-    Environments, RequestSent,
+    Environments, RequestEnded, RequestSent,
     variable_input::{VariableInput, VariableTarget},
     variables::VariableScope,
 };
@@ -47,6 +49,8 @@ pub struct GrpcDraft {
     pub(crate) section: GrpcSection,
     pub(super) url: Option<Entity<InputState>>,
     pub(super) url_completion: Option<Entity<VariableInput>>,
+    /// Whether Invoke found no URL to call. The URL says so until it is edited.
+    pub(super) url_missing: bool,
     pub(super) message: Option<Entity<EditorState>>,
     pub(super) message_completion: Option<Entity<VariableInput>>,
     pub(super) message_vim: Option<Entity<crate::vim::Vim>>,
@@ -78,6 +82,7 @@ pub struct GrpcDraft {
 }
 
 impl EventEmitter<RequestSent> for GrpcDraft {}
+impl EventEmitter<RequestEnded> for GrpcDraft {}
 
 impl SnippetDraft for GrpcDraft {
     type Request = GrpcRequest;
@@ -143,7 +148,14 @@ impl GrpcDraft {
         // Like the HTTP draft, create views that install window listeners
         // only once the tab is visible.
         let owner = cx.weak_entity();
-        let response = cx.new(GrpcResponse::new);
+        let script_owner = owner.clone();
+        let response = cx.new(|cx| {
+            GrpcResponse::new(cx).on_show_script_line(move |phase, line, window, cx| {
+                let _ = script_owner.update(cx, |draft, cx| {
+                    draft.show_script_line(phase, line, window, cx)
+                });
+            })
+        });
         let split = cx.new(|_| ResizableState::default());
         let address = cx.new(|_| GrpcAddress(owner.clone()));
         let configuration = cx.new(|_| GrpcConfiguration(owner));
@@ -155,6 +167,7 @@ impl GrpcDraft {
             section: GrpcSection::Message,
             url: None,
             url_completion: None,
+            url_missing: false,
             message: None,
             message_completion: None,
             message_vim: None,
@@ -395,6 +408,7 @@ impl GrpcDraft {
                             let tls = this.request.tls;
                             this.request.url = input.read(cx).value().to_string();
                             this.request.tls = this.request.uses_tls();
+                            this.url_missing = false;
                             this.schedule_reflection(window, cx);
 
                             // A scheme typed in the URL switches the lock.
@@ -519,6 +533,21 @@ impl GrpcDraft {
         self.metadata = Some(metadata.clone());
 
         metadata
+    }
+
+    /// Open the Scripts section at a line of a phase's script, counting from 1.
+    fn show_script_line(
+        &mut self,
+        phase: ScriptPhase,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.section = GrpcSection::Scripts;
+        self.prepare(window, cx);
+        self.script_editor(cx)
+            .update(cx, |scripts, cx| scripts.show_line(phase, line, window, cx));
+        self.redraw(cx);
     }
 
     pub(crate) fn script_editor(

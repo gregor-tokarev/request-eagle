@@ -378,6 +378,28 @@ fn on_message_results_are_bounded_per_call() {
 }
 
 #[test]
+fn the_results_limit_replaces_a_script_error_with_its_line() {
+    let events = follow(
+        GrpcScripts {
+            on_message: "for (let i = 0; i < 500; i++) pm.test('check ' + i, () => {});\nthrow new Error('after tests');".into(),
+            ..GrpcScripts::default()
+        },
+        vec![GrpcEvent::Received(message("{}")), finished(0, "", &[])],
+    );
+
+    let reports = reports(&events);
+    assert!(
+        reports[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("500 tests")),
+        "{:?}",
+        reports[0].error
+    );
+    assert_eq!(reports[0].error_line, None);
+}
+
+#[test]
 fn after_response_keeps_the_latest_messages_within_its_limit() {
     let large = |text: &str| {
         message(&format!(
