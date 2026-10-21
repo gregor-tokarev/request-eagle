@@ -4,11 +4,14 @@ mod controls;
 mod draft;
 mod execution;
 mod fields;
+mod json_body;
 mod path_variables;
 mod settings;
 
 #[cfg(test)]
 mod header_tests;
+#[cfg(test)]
+mod json_body_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

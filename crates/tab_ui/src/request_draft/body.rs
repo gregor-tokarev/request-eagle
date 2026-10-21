@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use gpui_kit::base::input::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::{
     button::*,
-    input::{Editor, EditorState, Input, InputEvent, InputState},
+    input::{Editor, EditorState, Input, InputEvent, InputState, Position},
     menu::{DropdownMenu, PopupMenuItem},
     *,
 };
@@ -11,7 +13,12 @@ use request::{Body, Field, Method, RawLanguage};
 
 use super::draft::RequestDraft;
 use super::fields::{ChooseFile, FieldsChanged, RequestFields};
+use super::json_body::{JsonBody, JsonError};
 use crate::variable_input::{VariableInput, VariableTarget, with_variables};
+
+/// How long typing pauses before the body is checked, so its JSON error does
+/// not change with every keystroke.
+const JSON_CHECK_DELAY: Duration = Duration::from_millis(300);
 
 /// No body, or the type of the body the section edits.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -369,25 +376,66 @@ impl RequestDraft {
     }
 
     fn validate_body(&mut self, text: SharedString, cx: &mut Context<Self>) {
-        self.body_json_valid = false;
+        self.underline_json_error(None, cx);
 
         // A new edit drops the previous validation/formatting task, so an old
-        // result cannot enable Format or overwrite a more recent body.
-        let task = cx
-            .background_executor()
-            .spawn(async move { serde_json::from_str::<serde_json::Value>(&text).is_ok() });
+        // result cannot enable Format or overwrite a more recent body. The
+        // previous error stays in the toolbar until the new result.
         self.body_task = Some(cx.spawn(async move |this, cx| {
-            let valid = task.await;
+            cx.background_executor().timer(JSON_CHECK_DELAY).await;
+            let json = cx
+                .background_executor()
+                .spawn(async move { JsonBody::check(&text) })
+                .await;
+
             let _ = this.update(cx, |this, cx| {
-                this.body_json_valid = valid;
+                if let JsonBody::Invalid(error) = &json {
+                    this.underline_json_error(Some(error), cx);
+                }
+                this.body_json = json;
                 this.body_task = None;
                 cx.notify();
             });
         }));
     }
 
+    /// Underline where a JSON body stops being JSON; hovering the underline
+    /// shows the error. Bodies in other languages are not underlined.
+    fn underline_json_error(&self, error: Option<&JsonError>, cx: &mut App) {
+        let Some(body) = &self.body else { return };
+        let json = matches!(
+            self.request.body,
+            Some(Body::Raw {
+                language: RawLanguage::Json,
+                ..
+            })
+        );
+
+        body.update(cx, |body, cx| {
+            // The editor keeps the popover of an underline it no longer has.
+            body.clear_diagnostic_popover(cx);
+            let Some(diagnostics) = body.diagnostics_mut() else {
+                return;
+            };
+            diagnostics.clear();
+
+            if let Some(error) = error.filter(|_| json) {
+                let line = error.line as u32 - 1;
+                let column = error.column as u32;
+                diagnostics.push(
+                    Diagnostic::new(
+                        Position::new(line, column - 1)..Position::new(line, column),
+                        error.to_string(),
+                    )
+                    .with_severity(DiagnosticSeverity::Error),
+                );
+            }
+            cx.notify();
+        });
+    }
+
     pub(super) fn format_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.body_json_valid || self.body_task.is_some() {
+        if self.body_json != JsonBody::Valid || self.body_task.is_some() {
             return;
         }
 
@@ -420,6 +468,16 @@ impl RequestDraft {
         self.body_state(window, cx);
         let body_type = BodyType::of(self.request.body.as_ref());
         let draft = cx.entity().downgrade();
+
+        let json_error = match (&self.body_json, body_type) {
+            (JsonBody::Invalid(error), BodyType::Raw(RawLanguage::Json)) => Some(error.to_string()),
+            _ => None,
+        };
+        let format_hint = match self.body_json {
+            JsonBody::Invalid(_) => Some("Format needs valid JSON"),
+            JsonBody::Templated => Some("Variables outside strings can't be formatted"),
+            JsonBody::Empty | JsonBody::Valid => None,
+        };
 
         let content = match body_type {
             BodyType::None => div()
@@ -472,7 +530,18 @@ impl RequestDraft {
                                 )
                             }),
                     )
-                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .when_some(json_error, |this, error| {
+                                this.debug_selector(|| "request-body-json-error".into())
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().danger)
+                                    .child(error)
+                            }),
+                    )
                     .when(matches!(body_type, BodyType::Raw(_)), |row| {
                         row.children(self.body_vim.clone())
                     })
@@ -483,7 +552,10 @@ impl RequestDraft {
                                 .ghost()
                                 .small()
                                 .label("Format")
-                                .disabled(!self.body_json_valid || self.body_task.is_some())
+                                .disabled(
+                                    self.body_json != JsonBody::Valid || self.body_task.is_some(),
+                                )
+                                .when_some(format_hint, |button, hint| button.tooltip(hint))
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.format_body(window, cx)),
                                 ),
