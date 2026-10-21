@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::execution::Exchange;
 use super::fields::{FieldsChanged, RequestFields, SendCookiesChanged};
+use super::json_body::JsonBody;
 use super::path_variables::{PathVariableChanged, PathVariables};
 use crate::code_snippet::{self, SnippetDraft, SnippetPanel};
 use crate::response_view::{ResponseContent, ResponseView};
@@ -65,7 +66,7 @@ pub struct RequestDraft {
     pub(super) parts: Option<Entity<RequestFields>>,
     pub(super) body_file: Option<Entity<InputState>>,
     pub(super) body_vim: Option<Entity<crate::vim::Vim>>,
-    pub(super) body_json_valid: bool,
+    pub(super) body_json: JsonBody,
     pub(super) body_task: Option<Task<()>>,
     pub(crate) scripts: Option<Entity<ScriptEditor>>,
     pub(super) timeout: Option<Entity<InputState>>,
@@ -193,7 +194,7 @@ impl RequestDraft {
             parts: None,
             body_file: None,
             body_vim: None,
-            body_json_valid: false,
+            body_json: JsonBody::Empty,
             body_task: None,
             scripts: None,
             timeout: None,
@@ -291,6 +292,12 @@ impl RequestDraft {
     /// Redraw the cached URL bar for a change that did not come from its input.
     pub(super) fn notify_address(&self, cx: &mut Context<Self>) {
         self.address.update(cx, |_, cx| cx.notify());
+    }
+
+    /// Redraw the cached request sections for a change that did not come from
+    /// their inputs.
+    pub(super) fn notify_configuration(&self, cx: &mut Context<Self>) {
+        self.configuration.update(cx, |_, cx| cx.notify());
     }
 
     /// Follow the saved request to its current file and name.
@@ -408,6 +415,7 @@ impl RequestDraft {
         self.body_file = None;
         self.body_vim = None;
         self.body_completion = None;
+        self.body_json = JsonBody::Empty;
         self.body_task = None;
 
         self.set_method(self.request.method, cx);
