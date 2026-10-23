@@ -8,7 +8,7 @@ const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest"
 
 <Page
   title="Download — Request Eagle"
-  description="Download the latest stable release of Request Eagle for Apple Silicon Macs, Windows and Debian or Ubuntu."
+  description="Download the latest stable release of Request Eagle for Apple Silicon Macs, Windows and Linux: an AppImage, Debian and RPM packages, and the AUR."
   socialDescription="Request Eagle for macOS, Windows and Linux, ready to download."
   download={false}
 >
@@ -53,10 +53,13 @@ const latest = "https://github.com/gregor-tokarev/request-eagle/releases/latest"
 
           <section class="platform">
             <h2 class="display">Linux</h2>
-            <p>For Debian 12, Ubuntu 22.04 and newer on x64. Open the package to install it.</p>
+            <p>For x64. The AppImage runs on any distribution. The packages are for Debian 12, Ubuntu 22.04, Fedora and newer; Arch Linux installs <code>request-eagle-bin</code> from the AUR.</p>
 
             <div class="platform__actions">
-              <a class="button" href={latest} data-file="_amd64.deb" data-umami-event="Download" data-umami-event-package="Debian package"><span>Debian package</span></a>
+              <a class="button" href={latest} data-file="-x86_64.AppImage" data-umami-event="Download" data-umami-event-package="AppImage"><span>AppImage</span></a>
+              <a class="button button--outline" href={latest} data-file="_amd64.deb" data-umami-event="Download" data-umami-event-package="Debian package"><span>Debian package</span></a>
+              <a class="button button--outline" href={latest} data-file=".x86_64.rpm" data-umami-event="Download" data-umami-event-package="RPM package"><span>RPM package</span></a>
+              <a class="button button--outline" href="https://aur.archlinux.org/packages/request-eagle-bin" data-umami-event="Download" data-umami-event-package="AUR"><span>AUR</span></a>
             </div>
           </section>
         </div>

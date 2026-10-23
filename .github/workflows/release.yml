@@ -272,10 +272,10 @@ jobs:
             dist/RequestEagle-*-x64-setup.exe
             dist/request-eagle-update-windows.json
 
-  debian:
+  linux:
     needs: prepare
     runs-on: ubuntu-latest
-    # The oldest supported release, so the package also installs on newer ones.
+    # The oldest supported release, so the packages also run on newer ones.
     container: debian:bookworm
     timeout-minutes: 120
     defaults:
@@ -286,11 +286,11 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
     steps:
-      - name: Install Debian build dependencies
+      - name: Install Linux build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git \
-            build-essential cmake clang pkg-config dpkg-dev libfontconfig-dev libfreetype-dev \
+            build-essential cmake clang pkg-config dpkg-dev rpm libfontconfig-dev libfreetype-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -317,21 +317,28 @@ jobs:
           restore-keys: |
             debian-dist-
 
-      - name: Build the Debian package
+      - name: Build the Linux packages
         run: |
           export REQUEST_EAGLE_RELEASE_NOTES="$PWD/notes/release-notes.json"
-          ./scripts/package-debian.sh
+          ./scripts/package-linux.sh
+          ./scripts/write-update-manifest.sh "dist/RequestEagle-$VERSION-x86_64.AppImage" dist/request-eagle-update-appimage.json
           ./scripts/write-update-manifest.sh "dist/request-eagle_${VERSION}_amd64.deb" dist/request-eagle-update-debian.json
+          ./scripts/write-update-manifest.sh "dist/request-eagle-$VERSION-1.x86_64.rpm" dist/request-eagle-update-rpm.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: package-debian
+          name: package-linux
           path: |
+            dist/RequestEagle-*-x86_64.AppImage
             dist/request-eagle_*_amd64.deb
+            dist/request-eagle-*-1.x86_64.rpm
+            dist/request-eagle-*-x86_64-linux.tar.gz
+            dist/request-eagle-update-appimage.json
             dist/request-eagle-update-debian.json
+            dist/request-eagle-update-rpm.json
 
   publish:
-    needs: [prepare, linux-cli, macos, windows, debian]
+    needs: [prepare, linux-cli, macos, windows, linux]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:

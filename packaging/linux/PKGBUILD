@@ -1,0 +1,33 @@
+# Maintainer: Gregor Tokarev <gregor-tokarev@users.noreply.github.com>
+#
+# The Promote release workflow fills in the version and checksum of each
+# stable release and publishes this file to the AUR as request-eagle-bin.
+
+pkgname=request-eagle-bin
+pkgver=__VERSION__
+pkgrel=1
+pkgdesc="Fast, native API client: a Postman alternative that keeps requests as TOML files"
+arch=('x86_64')
+url="https://requesteagle.tokarev.work"
+license=('MIT OR Apache-2.0')
+depends=('fontconfig' 'freetype2' 'gcc-libs' 'libxcb' 'libxkbcommon' 'libxkbcommon-x11' 'vulkan-icd-loader' 'wayland')
+optdepends=('vulkan-driver: rendering on the GPU')
+provides=('request-eagle')
+conflicts=('request-eagle')
+source=("https://github.com/gregor-tokarev/request-eagle/releases/download/v${pkgver}/request-eagle-${pkgver}-x86_64-linux.tar.gz")
+sha256sums=('__SHA256__')
+
+package() {
+  cd "request-eagle-${pkgver}"
+
+  install -Dm755 request-eagle "${pkgdir}/usr/bin/request-eagle"
+  install -Dm644 com.egortokarev.requesteagle.desktop "${pkgdir}/usr/share/applications/com.egortokarev.requesteagle.desktop"
+  install -Dm644 com.egortokarev.requesteagle.png "${pkgdir}/usr/share/icons/hicolor/512x512/apps/com.egortokarev.requesteagle.png"
+  install -Dm644 com.egortokarev.requesteagle.metainfo.xml "${pkgdir}/usr/share/metainfo/com.egortokarev.requesteagle.metainfo.xml"
+  install -Dm644 LICENSE-MIT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
+  install -Dm644 LICENSE-APACHE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+
+  # pacman delivers updates, so the app does not look for them itself.
+  install -d "${pkgdir}/usr/share/request-eagle"
+  echo pacman > "${pkgdir}/usr/share/request-eagle/package"
+}
