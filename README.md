@@ -53,9 +53,12 @@ Prices checked in October 2026.
 
 ## Install
 
-Get the macOS disk image, the Windows installer or the Debian package from the
-[downloads page](https://requesteagle.tokarev.work/downloads/). Every build
-checks for new versions; the macOS app installs them in place.
+Get the macOS disk image, the Windows installer or a Linux package from the
+[downloads page](https://requesteagle.tokarev.work/downloads/). Linux has an
+AppImage for any distribution, a Debian package, an RPM package, and
+`request-eagle-bin` in the AUR for Arch Linux. Every build checks for new
+versions, and the macOS app installs them in place; the AUR package is
+updated through pacman.
 
 ## Build from source
 

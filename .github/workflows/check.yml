@@ -159,9 +159,9 @@ jobs:
             target
           key: arch-lint-${{ hashFiles('Cargo.lock') }}
 
-  debian:
+  linux:
     runs-on: ubuntu-latest
-    # The oldest supported release, so the package also installs on newer ones.
+    # The oldest supported release, so the packages also run on newer ones.
     container: debian:bookworm
     timeout-minutes: 60
     defaults:
@@ -172,11 +172,11 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
     steps:
-      - name: Install Debian build and test dependencies
+      - name: Install Linux build and test dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git python3 \
-            build-essential cmake clang pkg-config dpkg-dev libfontconfig-dev libfreetype-dev \
+            build-essential cmake clang pkg-config dpkg-dev rpm file patchelf libfontconfig-dev libfreetype-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev xvfb xauth imagemagick
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -209,10 +209,10 @@ jobs:
       - name: Test preferences, updates, and settings
         run: cargo test --locked -p preferences -p settings_ui -p updater
 
-      - name: Build the Debian package
+      - name: Build the Linux packages
         env:
           PROFILE: dev
-        run: ./scripts/package-debian.sh
+        run: ./scripts/package-linux.sh
 
       - name: Save Cargo cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'
@@ -224,11 +224,25 @@ jobs:
             target
           key: debian-${{ hashFiles('Cargo.lock') }}
 
-      - name: Install the package and open the app on X11
+      # The container has no FUSE, so the AppImage unpacks itself instead of
+      # mounting. The RPM is read without a package database.
+      - name: Check the AppImage, RPM and tarball
+        run: |
+          dist/RequestEagle-*-x86_64.AppImage --appimage-extract > /dev/null
+          test -x squashfs-root/usr/bin/request-eagle
+          test -f squashfs-root/usr/lib/libxkbcommon-x11.so.0
+          test -f squashfs-root/com.egortokarev.requesteagle.desktop
+          rpm --dbpath "$PWD/rpmdb" -qpl dist/request-eagle-*-1.x86_64.rpm | grep -qx /usr/bin/request-eagle
+          rpm --dbpath "$PWD/rpmdb" -qpR dist/request-eagle-*-1.x86_64.rpm | grep -qx 'libvulkan.so.1()(64bit)'
+          tar tzf dist/request-eagle-*-x86_64-linux.tar.gz | grep -qx 'request-eagle-[0-9.]*/request-eagle'
+
+      - name: Install the Debian package and open the app on X11
         run: |
           apt-get install -y ./dist/request-eagle_*.deb
           test -f /usr/share/applications/com.egortokarev.requesteagle.desktop
           test -f /usr/share/icons/hicolor/512x512/apps/com.egortokarev.requesteagle.png
+          test -f /usr/share/metainfo/com.egortokarev.requesteagle.metainfo.xml
+          test "$(cat /usr/share/request-eagle/package)" = debian
 
           export HOME="$RUNNER_TEMP/home"
           mkdir -p "$HOME"

@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 use super::install;
-use super::package::{self, MANIFEST};
+use super::package;
 
 use std::sync::Arc;
 
@@ -36,6 +36,8 @@ pub enum UpdateStatus {
     },
     Verifying(String),
     Ready(String),
+    /// A package manager delivers updates for this copy.
+    Managed,
     Error(String),
 }
 
@@ -76,6 +78,11 @@ impl Updater {
             return;
         }
 
+        let Some(manifest) = package::manifest() else {
+            self.set_status(UpdateStatus::Managed, cx);
+            return;
+        };
+
         self.set_status(UpdateStatus::Checking, cx);
 
         self.checks += 1;
@@ -85,7 +92,8 @@ impl Updater {
         let track = self.track;
 
         cx.spawn(async move |this, cx| {
-            let status = match check_for_update(http_client, current_version, track).await {
+            let status = match check_for_update(http_client, current_version, track, manifest).await
+            {
                 Ok(Some(manifest)) => UpdateStatus::Available(manifest),
                 Ok(None) => UpdateStatus::UpToDate,
                 Err(error) => UpdateStatus::Error(error),
@@ -210,7 +218,8 @@ pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
         }
     });
 
-    // Builds from source cannot be replaced by a release package.
+    // Neither a build from source nor a copy its package manager updates can
+    // be replaced by a release package.
     if package::installed() {
         updater.update(cx, |updater, cx| updater.check(cx));
     }
@@ -231,14 +240,14 @@ struct Asset {
     browser_download_url: String,
 }
 
-/// Find this platform's manifest in the newest release. Nightly builds and
+/// Find this package's manifest in the newest release. Nightly builds and
 /// the stable releases promoted from them share one version sequence.
-fn newest_manifest_url(releases: &[Release]) -> Option<&str> {
+fn newest_manifest_url<'a>(releases: &'a [Release], manifest: &str) -> Option<&'a str> {
     releases
         .iter()
         .filter_map(|release| {
             let version = Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
-            let manifest = release.assets.iter().find(|asset| asset.name == MANIFEST)?;
+            let manifest = release.assets.iter().find(|asset| asset.name == manifest)?;
 
             Some((version, manifest.browser_download_url.as_str()))
         })
@@ -250,11 +259,12 @@ async fn check_for_update(
     http_client: Arc<dyn HttpClient>,
     current_version: &str,
     track: UpdateTrack,
+    manifest: &str,
 ) -> Result<Option<UpdateManifest>, String> {
     let manifest_url = match track {
         // GitHub's latest release is the newest one not marked as a prerelease.
         UpdateTrack::Stable => {
-            format!("https://github.com/{REPOSITORY}/releases/latest/download/{MANIFEST}")
+            format!("https://github.com/{REPOSITORY}/releases/latest/download/{manifest}")
         }
         UpdateTrack::Nightly => {
             let request = Request::get(format!(
@@ -268,7 +278,10 @@ async fn check_for_update(
             let releases: Option<Vec<Release>> =
                 get_json(http_client.send(request), "release list").await?;
 
-            match releases.as_deref().and_then(newest_manifest_url) {
+            match releases
+                .as_deref()
+                .and_then(|releases| newest_manifest_url(releases, manifest))
+            {
                 Some(url) => url.to_owned(),
                 None => return Ok(None),
             }
@@ -340,7 +353,9 @@ mod tests {
     use preferences::UpdateTrack;
     use serde_json::{Value, json};
 
-    use super::{MANIFEST, REPOSITORY, Release, check_for_update, newest_manifest_url};
+    use super::{REPOSITORY, Release, check_for_update, newest_manifest_url};
+
+    const MANIFEST: &str = "request-eagle-update-test.json";
 
     fn release(tag: &str, assets: &[&str]) -> Value {
         let assets: Vec<Value> = assets
@@ -372,7 +387,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            newest_manifest_url(&releases),
+            newest_manifest_url(&releases, MANIFEST),
             Some(format!("https://example.test/v0.1.10/{MANIFEST}").as_str())
         );
     }
@@ -407,14 +422,17 @@ mod tests {
                 }
             });
 
-            let stable = check_for_update(http.clone(), "0.1.19", UpdateTrack::Stable).await;
-            let nightly = check_for_update(http.clone(), "0.1.19", UpdateTrack::Nightly).await;
+            let stable =
+                check_for_update(http.clone(), "0.1.19", UpdateTrack::Stable, MANIFEST).await;
+            let nightly =
+                check_for_update(http.clone(), "0.1.19", UpdateTrack::Nightly, MANIFEST).await;
 
             assert_eq!(stable.unwrap().unwrap().version, "0.1.20");
             assert_eq!(nightly.unwrap().unwrap().version, "0.1.22");
 
             // A nightly build stays ahead of stable until a newer one is promoted.
-            let back_on_stable = check_for_update(http, "0.1.22", UpdateTrack::Stable).await;
+            let back_on_stable =
+                check_for_update(http, "0.1.22", UpdateTrack::Stable, MANIFEST).await;
 
             assert!(back_on_stable.unwrap().is_none());
         });
@@ -445,7 +463,7 @@ mod tests {
             });
 
             for track in [UpdateTrack::Stable, UpdateTrack::Nightly] {
-                let update = check_for_update(http.clone(), "0.1.19", track).await;
+                let update = check_for_update(http.clone(), "0.1.19", track, MANIFEST).await;
 
                 assert!(update.unwrap().is_none());
             }
@@ -462,7 +480,7 @@ mod tests {
                     .unwrap())
             });
 
-            let error = check_for_update(http, "0.1.19", UpdateTrack::Nightly)
+            let error = check_for_update(http, "0.1.19", UpdateTrack::Nightly, MANIFEST)
                 .await
                 .unwrap_err();
 

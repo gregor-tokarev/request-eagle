@@ -38,13 +38,22 @@ nothing when the stable release is already the newest.
 | --- | --- | --- |
 | macOS (Apple Silicon) | `RequestEagle-X.Y.Z-arm64.dmg` and `.zip`, signed and notarized | In the app, from the ZIP |
 | Windows (x64) | `RequestEagle-X.Y.Z-x64-setup.exe`, a per-user installer | The browser downloads the installer |
-| Debian and Ubuntu (x64) | `request-eagle_X.Y.Z_amd64.deb`, built on Debian 12 | The browser downloads the package |
+| Linux (x64), built on Debian 12 | `RequestEagle-X.Y.Z-x86_64.AppImage` for any distribution, `request-eagle_X.Y.Z_amd64.deb` for Debian and Ubuntu, `request-eagle-X.Y.Z-1.x86_64.rpm` for Fedora and other RPM distributions, and `request-eagle-X.Y.Z-x86_64-linux.tar.gz` for the AUR package | The browser downloads the file; pacman updates the AUR package |
 | CLI | `request-eagle-cli-<target>` for macOS and Linux | Downloaded again by hand |
 
-Each platform also gets an update manifest, which the app reads to find its
+Each package also gets an update manifest, which the app reads to find its
 update: `request-eagle-update.json` for macOS (the name older versions read),
-`request-eagle-update-windows.json` and `request-eagle-update-debian.json`.
+`request-eagle-update-windows.json`, `request-eagle-update-appimage.json`,
+`request-eagle-update-debian.json` and `request-eagle-update-rpm.json`.
 `SHA256SUMS` lists every file.
+
+`scripts/package-linux.sh` builds the Linux packages from one build. The
+Debian and RPM packages install the app at `/usr/bin/request-eagle` and name
+themselves in `/usr/share/request-eagle/package`, so the app reads the right
+manifest. The AppImage needs no marker: its runtime names the image in the
+`APPIMAGE` environment variable. The AUR package writes `pacman` as its name,
+and the app leaves updates to it. The AppImage also carries the X11 keyboard
+libraries, which Arch Linux does not install by default.
 
 A stable install reads its manifest from GitHub's latest release. A nightly
 install lists the releases through the GitHub API and takes the newest one
@@ -56,6 +65,20 @@ first run.
 Run the Release workflow by hand with **dry run** to build and check every
 platform from a branch without publishing. **Skip macOS** leaves out signing
 and notarization.
+
+## Arch Linux
+
+The Promote release workflow publishes `request-eagle-bin` to the AUR for
+each promoted release, from `packaging/linux/PKGBUILD` with the version and
+the tarball's checksum filled in. It does so when the `AUR_SSH_PRIVATE_KEY`
+repository secret is set:
+
+1. Create an account on <https://aur.archlinux.org> and add an SSH public key
+   to it under **My Account**.
+2. Store the matching private key as the `AUR_SSH_PRIVATE_KEY` secret.
+
+The first promotion creates the package; pushing to a package that does not
+exist yet creates it on the AUR.
 
 ## Release notes
 

@@ -57,7 +57,8 @@ cf pages projects deployments create requesteagle --branch main
 
 `src/pages/downloads.astro` is the page at `/downloads/`, and the landing's
 download buttons lead there. It offers the macOS disk image and ZIP archive,
-the Windows installer and the Debian package from the latest stable release.
+the Windows installer, and the Linux AppImage, Debian package and RPM package
+from the latest stable release, plus a link to the AUR package.
 Nightly builds are not offered on the site: the app switches to them from its
 [update track](releases.md) setting.
 
@@ -105,8 +106,8 @@ website. The tracker in `src/layouts/Page.astro` counts only visits to
 figures. Umami sets no cookies.
 
 Each download button also records a `Download` event. Its `package` property
-names the file: macOS disk image, macOS ZIP, Windows installer or Debian
-package.
+names the file: macOS disk image, macOS ZIP, Windows installer, AppImage,
+Debian package, RPM package or AUR.
 
 ## Motion
 
@@ -171,4 +172,4 @@ npx lighthouse http://localhost:3000/
   Postman, and "12 times". They come from [the startup benchmark](startup-benchmark.md).
 - Eleven theme families, and the seven themes offered by the picker.
 - Interface sizes from 12 to 24 px.
-- The macOS build targets Apple Silicon; Windows and Debian builds target x64.
+- The macOS build targets Apple Silicon; Windows and Linux builds target x64.

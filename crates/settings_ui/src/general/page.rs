@@ -113,6 +113,9 @@ impl Render for GeneralSettings {
             UpdateStatus::Ready(version) => {
                 format!("Version {version} is ready to install.")
             }
+            UpdateStatus::Managed => {
+                "Your package manager delivers updates for this copy.".to_owned()
+            }
             UpdateStatus::Error(error) => error.clone(),
         };
 

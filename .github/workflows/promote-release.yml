@@ -18,6 +18,8 @@ concurrency:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    outputs:
+      promoted: ${{ steps.promote.outputs.promoted }}
     steps:
       # Tags are needed for the release notes.
       - uses: actions/checkout@v7
@@ -25,6 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Mark the pre-release as the latest stable release
+        id: promote
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -60,8 +63,10 @@ jobs:
 
           stable="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
 
-          # Its notes already list everything since the stable release before it.
+          # Its notes already list everything since the stable release before
+          # it. The AUR job still runs, so a failed publication can be retried.
           if [[ "$stable" == "$TAG" ]]; then
+            echo "promoted=$TAG" >> "$GITHUB_OUTPUT"
             echo "$TAG is already the stable release; nothing to promote"
             exit 0
           fi
@@ -78,4 +83,47 @@ jobs:
           cat "$RUNNER_TEMP/notes.md"
 
           gh release edit "$TAG" --prerelease=false --latest --notes-file "$RUNNER_TEMP/notes.md"
+          echo "promoted=$TAG" >> "$GITHUB_OUTPUT"
           echo "Promoted $TAG"
+
+  # Arch Linux installs request-eagle-bin from the AUR. The package follows
+  # each promoted release once the AUR_SSH_PRIVATE_KEY secret is set; see
+  # docs/releases.md.
+  aur:
+    needs: promote
+    if: needs.promote.outputs.promoted != ''
+    runs-on: ubuntu-latest
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        with:
+          ref: ${{ needs.promote.outputs.promoted }}
+
+      - name: Write the PKGBUILD for the promoted release
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.promote.outputs.promoted }}
+        run: |
+          version="${TAG#v}"
+          sha256="$(gh release download "$TAG" --pattern SHA256SUMS --output - |
+            awk -v file="request-eagle-$version-x86_64-linux.tar.gz" '$2 == file { print $1 }')"
+          test -n "$sha256"
+
+          mkdir aur
+          sed -e "s/__VERSION__/$version/" -e "s/__SHA256__/$sha256/" packaging/linux/PKGBUILD > aur/PKGBUILD
+          cat aur/PKGBUILD
+
+      - name: Publish to the AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
+        with:
+          pkgname: request-eagle-bin
+          pkgbuild: aur/PKGBUILD
+          commit_username: Gregor Tokarev
+          commit_email: gregor-tokarev@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ needs.promote.outputs.promoted }}

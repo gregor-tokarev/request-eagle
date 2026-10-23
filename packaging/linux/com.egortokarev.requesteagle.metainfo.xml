@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.egortokarev.requesteagle</id>
+  <name>Request Eagle</name>
+  <summary>Fast, native API client</summary>
+  <developer id="work.tokarev">
+    <name>Gregor Tokarev</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <description>
+    <p>
+      Request Eagle is a Postman alternative written in Rust and rendered on the
+      GPU. It keeps requests as TOML files on disk, with scripts, Vim mode and a
+      CLI for agents.
+    </p>
+    <p>
+      It sends HTTP, gRPC and WebSocket requests, runs pre-request and
+      post-response scripts, replays a collection for every row of a data
+      file, chains requests on a canvas, commits collections to Git, and imports
+      Postman collections, OpenAPI documents and cURL commands.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.egortokarev.requesteagle.desktop</launchable>
+  <url type="homepage">https://requesteagle.tokarev.work</url>
+  <url type="bugtracker">https://github.com/gregor-tokarev/request-eagle/issues</url>
+  <url type="vcs-browser">https://github.com/gregor-tokarev/request-eagle</url>
+  <categories>
+    <category>Development</category>
+    <category>WebDevelopment</category>
+  </categories>
+  <keywords>
+    <keyword>API</keyword>
+    <keyword>HTTP</keyword>
+    <keyword>REST</keyword>
+    <keyword>gRPC</keyword>
+    <keyword>WebSocket</keyword>
+    <keyword>Postman</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+</component>
