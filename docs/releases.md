@@ -52,7 +52,8 @@ Debian and RPM packages install the app at `/usr/bin/request-eagle` and name
 themselves in `/usr/share/request-eagle/package`, so the app reads the right
 manifest. The AppImage needs no marker: its runtime names the image in the
 `APPIMAGE` environment variable. The AUR package writes `pacman` as its name,
-and the app leaves updates to it.
+and the app leaves updates to it. The AppImage also carries the X11 keyboard
+libraries, which Arch Linux does not install by default.
 
 A stable install reads its manifest from GitHub's latest release. A nightly
 install lists the releases through the GitHub API and takes the newest one

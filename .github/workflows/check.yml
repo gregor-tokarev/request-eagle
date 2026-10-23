@@ -176,7 +176,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git python3 \
-            build-essential cmake clang pkg-config dpkg-dev rpm file libfontconfig-dev libfreetype-dev \
+            build-essential cmake clang pkg-config dpkg-dev rpm file patchelf libfontconfig-dev libfreetype-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev xvfb xauth imagemagick
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -230,6 +230,7 @@ jobs:
         run: |
           dist/RequestEagle-*-x86_64.AppImage --appimage-extract > /dev/null
           test -x squashfs-root/usr/bin/request-eagle
+          test -f squashfs-root/usr/lib/libxkbcommon-x11.so.0
           test -f squashfs-root/com.egortokarev.requesteagle.desktop
           rpm --dbpath "$PWD/rpmdb" -qpl dist/request-eagle-*-1.x86_64.rpm | grep -qx /usr/bin/request-eagle
           rpm --dbpath "$PWD/rpmdb" -qpR dist/request-eagle-*-1.x86_64.rpm | grep -qx 'libvulkan.so.1()(64bit)'

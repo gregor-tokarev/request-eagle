@@ -63,8 +63,10 @@ jobs:
 
           stable="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
 
-          # Its notes already list everything since the stable release before it.
+          # Its notes already list everything since the stable release before
+          # it. The AUR job still runs, so a failed publication can be retried.
           if [[ "$stable" == "$TAG" ]]; then
+            echo "promoted=$TAG" >> "$GITHUB_OUTPUT"
             echo "$TAG is already the stable release; nothing to promote"
             exit 0
           fi

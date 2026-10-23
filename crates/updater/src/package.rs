@@ -9,27 +9,28 @@ pub const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");
 #[cfg(not(target_os = "macos"))]
 pub fn confirm_startup() {}
 
-/// The release file that describes this copy's package. macOS keeps the name
+/// The release file that describes the package this copy updates to, or
+/// `None` when a package manager delivers its updates. macOS keeps the name
 /// that versions before update tracks read.
 #[cfg(target_os = "macos")]
-pub(super) fn manifest() -> &'static str {
-    "request-eagle-update.json"
+pub(super) fn manifest() -> Option<&'static str> {
+    Some("request-eagle-update.json")
 }
 
 #[cfg(windows)]
-pub(super) fn manifest() -> &'static str {
-    "request-eagle-update-windows.json"
+pub(super) fn manifest() -> Option<&'static str> {
+    Some("request-eagle-update-windows.json")
 }
 
-/// Linux has several packages. A copy that no release package replaces,
-/// because it was built from source, is offered the Debian package when
-/// asked, as before the other packages existed.
+/// A copy built from source is offered the Debian package when asked, as
+/// before the other packages existed.
 #[cfg(not(any(target_os = "macos", windows)))]
-pub(super) fn manifest() -> &'static str {
+pub(super) fn manifest() -> Option<&'static str> {
     match linux_package() {
-        Some(LinuxPackage::AppImage) => "request-eagle-update-appimage.json",
-        Some(LinuxPackage::Rpm) => "request-eagle-update-rpm.json",
-        Some(LinuxPackage::Debian) | None => "request-eagle-update-debian.json",
+        Some(LinuxPackage::AppImage) => Some("request-eagle-update-appimage.json"),
+        Some(LinuxPackage::Rpm) => Some("request-eagle-update-rpm.json"),
+        Some(LinuxPackage::Debian) | None => Some("request-eagle-update-debian.json"),
+        Some(LinuxPackage::Managed) => None,
     }
 }
 
@@ -49,7 +50,10 @@ pub(super) fn installed() -> bool {
 
 #[cfg(not(any(target_os = "macos", windows)))]
 pub(super) fn installed() -> bool {
-    linux_package().is_some()
+    matches!(
+        linux_package(),
+        Some(LinuxPackage::AppImage | LinuxPackage::Debian | LinuxPackage::Rpm)
+    )
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -58,23 +62,38 @@ enum LinuxPackage {
     AppImage,
     Debian,
     Rpm,
+    /// Installed by a package manager that delivers updates itself, such as
+    /// pacman for the AUR package.
+    Managed,
 }
 
-/// The AppImage runtime tells the app where its image is. The Debian and RPM
-/// packages install the app at one path and name themselves in a marker
-/// file, which older Debian packages did not leave. A package manager that
-/// delivers updates itself, such as pacman for the AUR package, names itself
-/// there too, and the app leaves updates to it.
+/// The package is recognized once. A package installed over this copy while
+/// it runs renames its executable, which must not change the answer.
 #[cfg(not(any(target_os = "macos", windows)))]
 fn linux_package() -> Option<LinuxPackage> {
-    if std::env::var_os("APPIMAGE").is_some() {
+    static PACKAGE: std::sync::OnceLock<Option<LinuxPackage>> = std::sync::OnceLock::new();
+
+    *PACKAGE.get_or_init(recognize_linux_package)
+}
+
+/// The AppImage runtime tells the app where its image is mounted. An
+/// AppImage terminal passes the same variables to the apps it starts, so the
+/// executable has to run from that mount. The Debian and RPM packages
+/// install the app at one path and name themselves in a marker file, which
+/// older Debian packages did not leave; a package manager names itself there
+/// too.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn recognize_linux_package() -> Option<LinuxPackage> {
+    let executable = std::env::current_exe().ok()?;
+
+    if let Some(mount) = std::env::var_os("APPDIR")
+        && std::env::var_os("APPIMAGE").is_some()
+        && executable.starts_with(&mount)
+    {
         return Some(LinuxPackage::AppImage);
     }
 
-    let packaged = std::env::current_exe()
-        .is_ok_and(|executable| executable == std::path::Path::new("/usr/bin/request-eagle"));
-
-    if !packaged {
+    if executable != std::path::Path::new("/usr/bin/request-eagle") {
         return None;
     }
 
@@ -82,7 +101,7 @@ fn linux_package() -> Option<LinuxPackage> {
         Ok(marker) => match marker.trim() {
             "debian" => Some(LinuxPackage::Debian),
             "rpm" => Some(LinuxPackage::Rpm),
-            _ => None,
+            _ => Some(LinuxPackage::Managed),
         },
         Err(_) => Some(LinuxPackage::Debian),
     }

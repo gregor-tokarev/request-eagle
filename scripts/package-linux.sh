@@ -7,8 +7,8 @@ set -euo pipefail
 #   request-eagle-<version>-1.x86_64.rpm          Fedora, openSUSE and other RPM distributions
 #   request-eagle-<version>-x86_64-linux.tar.gz   the AUR package and other distributions
 #
-# Needs dpkg-dev, rpm, file and curl. The AppImage tools are downloaded on
-# first use.
+# Needs dpkg-dev, rpm, file, patchelf and curl. The AppImage tools are
+# downloaded on first use.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n '/^name = "request-eagle"$/{n;s/version = "\([^"]*\)"/\1/p;q;}' "$ROOT/crates/request-eagle/Cargo.toml")}"
@@ -68,6 +68,16 @@ runtime="$(fetch_tool "$APPIMAGE_RUNTIME_URL" "$APPIMAGE_RUNTIME_SHA256")"
 appdir="$staging/AppDir"
 cp -a "$root" "$appdir"
 ln -s usr/bin/request-eagle "$appdir/AppRun"
+
+# Desktops do not always have X11 keyboard support: Arch Linux makes it an
+# optional package. The AppImage carries those libraries, and the executable
+# looks beside itself first.
+mkdir -p "$appdir/usr/lib"
+for library in libxkbcommon.so.0 libxkbcommon-x11.so.0; do
+  cp -L "$(ldd "$appdir/usr/bin/request-eagle" | awk -v library="$library" '$1 == library { print $3 }')" "$appdir/usr/lib/$library"
+done
+# shellcheck disable=SC2016
+patchelf --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/request-eagle"
 ln -s "usr/share/applications/$APP_ID.desktop" "$appdir/$APP_ID.desktop"
 ln -s "usr/share/icons/hicolor/512x512/apps/$APP_ID.png" "$appdir/$APP_ID.png"
 ln -s "$APP_ID.png" "$appdir/.DirIcon"

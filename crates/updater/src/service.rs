@@ -36,6 +36,8 @@ pub enum UpdateStatus {
     },
     Verifying(String),
     Ready(String),
+    /// A package manager delivers updates for this copy.
+    Managed,
     Error(String),
 }
 
@@ -76,6 +78,11 @@ impl Updater {
             return;
         }
 
+        let Some(manifest) = package::manifest() else {
+            self.set_status(UpdateStatus::Managed, cx);
+            return;
+        };
+
         self.set_status(UpdateStatus::Checking, cx);
 
         self.checks += 1;
@@ -83,7 +90,6 @@ impl Updater {
         let http_client = cx.http_client();
         let current_version = self.current_version;
         let track = self.track;
-        let manifest = package::manifest();
 
         cx.spawn(async move |this, cx| {
             let status = match check_for_update(http_client, current_version, track, manifest).await
@@ -212,7 +218,8 @@ pub fn init(current_version: &'static str, cx: &mut App) -> Entity<Updater> {
         }
     });
 
-    // Builds from source cannot be replaced by a release package.
+    // Neither a build from source nor a copy its package manager updates can
+    // be replaced by a release package.
     if package::installed() {
         updater.update(cx, |updater, cx| updater.check(cx));
     }
