@@ -7,7 +7,8 @@ set -euo pipefail
 #   request-eagle-<version>-1.x86_64.rpm          Fedora, openSUSE and other RPM distributions
 #   request-eagle-<version>-x86_64-linux.tar.gz   the AUR package and other distributions
 #
-# Needs dpkg-dev, rpm and curl. The AppImage tools are downloaded on first use.
+# Needs dpkg-dev, rpm, file and curl. The AppImage tools are downloaded on
+# first use.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n '/^name = "request-eagle"$/{n;s/version = "\([^"]*\)"/\1/p;q;}' "$ROOT/crates/request-eagle/Cargo.toml")}"

@@ -176,7 +176,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git python3 \
-            build-essential cmake clang pkg-config dpkg-dev rpm libfontconfig-dev libfreetype-dev \
+            build-essential cmake clang pkg-config dpkg-dev rpm file libfontconfig-dev libfreetype-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev xvfb xauth imagemagick
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
