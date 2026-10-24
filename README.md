@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="landing/src/assets/shots/hero-dark.webp" alt="Request Eagle showing a request and its response">
+  <img src=".github/demo.gif" width="1000" alt="Request Eagle opening saved requests, sending them and showing the responses">
 </p>
 
 ## Features
