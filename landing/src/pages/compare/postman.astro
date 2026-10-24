@@ -1,6 +1,9 @@
 ---
 import Compare from "../../layouts/Compare.astro";
 
+const benchmark = "https://github.com/gregor-tokarev/request-eagle/blob/main/docs/startup-benchmark.md";
+const scripting = "https://github.com/gregor-tokarev/request-eagle/blob/main/docs/scripting.md";
+
 const rows = [
   {
     label: "Built with",
@@ -14,8 +17,8 @@ const rows = [
   },
   {
     label: "Ready after launch",
-    eagle: '<b class="yes">0.36 s</b> until it answers a keystroke.',
-    other: "4.33 s, signed in, on the same Mac.",
+    eagle: `<b class="yes">0.36 s</b> until it answered a keystroke in <a href="${benchmark}">our benchmark</a>.`,
+    other: "4.33 s in the same benchmark: a warm start, signed in, on the same Mac.",
   },
   {
     label: "Open source",
@@ -39,7 +42,7 @@ const rows = [
   },
   {
     label: "Works offline",
-    eagle: '<b class="yes">Always.</b> There is no server to reach.',
+    eagle: '<b class="yes">Always.</b> The app has no server of its own.',
     other: "With a warning, until the sync comes back.",
   },
   {
@@ -50,16 +53,16 @@ const rows = [
   {
     label: "Protocols",
     eagle: "HTTP, gRPC, WebSocket and server-sent events.",
-    other: "HTTP, GraphQL, gRPC, WebSocket, Socket.IO, MQTT and MCP.",
+    other: "HTTP, GraphQL, gRPC, WebSocket, server-sent events, Socket.IO, MQTT and MCP.",
   },
   {
     label: "Scripts and tests",
-    eagle: "JavaScript with the <code>pm</code> API, pre-request and post-response, without Node.js.",
+    eagle: "JavaScript with the <code>pm</code> API and Postman's bundled libraries, pre-request and post-response, without Node.js.",
     other: "JavaScript with the <code>pm</code> API it introduced, with npm packages.",
   },
   {
     label: "Collection Runner",
-    eagle: '<b class="yes">Unlimited</b>, with CSV and JSON data files.',
+    eagle: '<b class="yes">No run quota.</b> HTTP requests, with CSV and JSON data files.',
     other: "Unlimited runs; data files on paid plans only.",
   },
   {
@@ -70,7 +73,7 @@ const rows = [
   {
     label: "CLI",
     eagle: "A JSON command line for agents and scripts, without the app.",
-    other: "Postman CLI, signed in to the account. Newman is deprecated.",
+    other: "Postman CLI: local runs without signing in, cloud operations with the account. Newman is deprecated.",
   },
   {
     label: "AI",
@@ -79,7 +82,7 @@ const rows = [
   },
   {
     label: "Imports",
-    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    eagle: "Postman collections and environments, OpenAPI 3 and Swagger 2, cURL.",
     other: "Postman, OpenAPI, AsyncAPI, protobuf, GraphQL, cURL, Git repositories, and migrations from Insomnia, Hoppscotch and others.",
   },
   {
@@ -107,7 +110,7 @@ const rows = [
 const eagleWins = [
   {
     heading: "It is ready before Postman has drawn a window",
-    body: "Request Eagle draws its whole window in its first frame and answers a keystroke 0.36 seconds after launch. Postman takes 4.33 seconds on the same MacBook Pro. Every pane after that is native too: no Chromium, no web view, no tab waking up.",
+    body: `In <a href="${benchmark}">our benchmark</a> on a MacBook Pro, Request Eagle drew its whole window in the first frame and answered a keystroke 0.36 seconds after a warm launch. Postman answered after 4.33 seconds. The method and every run are written up. Every pane after that is native too: no Chromium, no web view, no tab waking up.`,
   },
   {
     heading: "Your requests are files in your repository",
@@ -118,8 +121,8 @@ const eagleWins = [
     body: "There is nothing to sign up for and nothing to count. The Collection Runner with data files, flows, scripts and every protocol are free for a person and for a team. Postman's free plan is for one user, and its data files, monitors and AI are paid or metered.",
   },
   {
-    heading: "Your secrets stay on your disk",
-    body: "Nothing syncs to a server, so there is no cloud to trust with your tokens and no outage to wait out. When an AWS outage took Postman's cloud down in October 2025, the desktop app stopped working for many of its users.",
+    heading: "Your collections stay on your disk",
+    body: "Nothing is uploaded unless you push it to a Git remote or cite it to an agent you run. There is no cloud account to secure and no sync outage to wait out. Release builds send anonymous usage counts, never request contents, and a switch in Settings turns them off.",
   },
   {
     heading: "Your coding agent sits beside your requests",
@@ -155,11 +158,11 @@ const otherWins = [
 ];
 
 const switching = {
-  intro: "Request Eagle reads what Postman exports, and its scripts use the same <code>pm</code> API, so most collections run on the first try.",
+  intro: `Request Eagle reads what Postman exports and runs scripts written for the <code>pm</code> API, so a collection usually arrives with its scripts, variables and tests. Run it once after importing to catch anything the <code>pm</code> support does not cover yet; <a href="${scripting}">the scripting guide</a> lists what it does.`,
   steps: [
     "In Postman, export each collection as <b>Collection v2.1</b>, and each environment from the Environments page. If your workspace uses Postman 12's native Git, skip the export: Request Eagle reads the repository folder.",
     "In Request Eagle, run <b>Import collection</b> from the command palette or the sidebar and choose the files or the folder. Each collection becomes a folder of TOML files that you can keep anywhere, including inside your project.",
-    "Select an environment in the tab bar. Pre-request scripts, tests and variables run as they did, and GraphQL requests arrive as JSON bodies. The import names any request it had to leave out.",
+    "Select an environment in the tab bar. Pre-request scripts, tests and variables come along, and GraphQL requests arrive as JSON bodies. The import names any request it had to leave out.",
     "Track the folder with Git from the status bar, or open a folder inside an existing repository as a collection, and push it for your team.",
   ],
 };
@@ -175,17 +178,17 @@ const faq = [
   {
     question: "Is Request Eagle a free Postman alternative?",
     answer:
-      "Yes. Request Eagle is free and open source under the MIT or Apache 2.0 license, with no paid plan, no account and no usage limits. It runs on Apple Silicon Macs, Windows and Linux.",
+      "Yes. Request Eagle is free and open source under the MIT or Apache 2.0 license, with no paid plan, no account and no run quotas. It runs on Apple Silicon Macs, Windows and Linux.",
   },
   {
     question: "Can I import my Postman collections into Request Eagle?",
     answer:
-      "Yes. Request Eagle imports Postman collections and environments, including the YAML folders Postman 12 writes into a Git repository, as well as OpenAPI documents and cURL commands. Scripts keep working because Request Eagle implements the <code>pm</code> API.",
+      "Yes. Request Eagle imports Postman collections and environments, including the YAML folders Postman 12 writes into a Git repository, as well as OpenAPI documents and cURL commands. Scripts come along and run on Request Eagle's <code>pm</code> API, which covers the common calls and Postman's bundled libraries; the scripting guide lists its limits.",
   },
   {
     question: "Why is Request Eagle faster than Postman?",
     answer:
-      "Request Eagle is a native app written in Rust and rendered on the GPU with GPUI, the framework behind the Zed editor. Postman runs inside Electron, which starts a bundled browser first. Measured on a MacBook Pro, Request Eagle answers a keystroke 0.36 seconds after launch and Postman after 4.33 seconds.",
+      "Request Eagle is a native app written in Rust and rendered on the GPU with GPUI, the framework behind the Zed editor. Postman runs inside Electron, which starts a bundled browser first. In our benchmark of warm launches on a MacBook Pro, Request Eagle answered a keystroke 0.36 seconds after launch and Postman after 4.33 seconds.",
   },
   {
     question: "Does Request Eagle need an account or an internet connection?",
@@ -203,9 +206,11 @@ const faq = [
 <Compare
   slug="postman"
   name="Postman"
+  version="12.33"
+  pricing="https://www.postman.com/pricing/"
   title="Request Eagle vs Postman: a native, open-source Postman alternative"
   description="A native Rust API client that starts in 0.36 s, keeps requests as Git-friendly files and needs no account, compared with Postman's Electron app, cloud and plans."
-  lede="Request Eagle is a free, open-source Postman alternative written in Rust. It opens in 0.36 seconds, keeps your requests as files in your repository and never asks you to sign in. Postman is the most used API client, an Electron app built around a cloud workspace and an account. Here is how they compare."
+  lede="Request Eagle is a free, open-source Postman alternative written in Rust. It answers your first keystroke a third of a second after launch, keeps your requests as files in your repository and never asks you to sign in. Postman is the most used API client, an Electron app built around a cloud workspace and an account. Here is how they compare."
   rows={rows}
   eagleWins={eagleWins}
   otherWins={otherWins}

@@ -86,10 +86,11 @@ and questions. They exist to be found: each targets searches such as
 `BreadcrumbList` JSON-LD, and links to the others.
 
 Every claim about another client was checked in the month `src/comparisons.js`
-names. Check the prices, plans and protocols again when that month is more
-than a few months old, and move the month forward. Keep the pages honest:
-each says where the other client is ahead, which is what makes the rest
-believable.
+names, with the Request Eagle version it names, against the release and
+pricing page each page cites. Check the prices, plans and protocols again
+when that month is more than a few months old, and move the month and the
+versions forward. Keep the pages honest: each says where the other client is
+ahead, which is what makes the rest believable.
 
 ## Search engines
 

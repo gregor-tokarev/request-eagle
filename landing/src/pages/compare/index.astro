@@ -1,7 +1,7 @@
 ---
 import Page from "../../layouts/Page.astro";
 
-import { checked, comparisons } from "../../comparisons.js";
+import { checked, comparisons, eagleVersion } from "../../comparisons.js";
 
 import "../../styles/compare.css";
 
@@ -79,7 +79,7 @@ const rows = [
     label: "Protocols",
     cells: [
       "HTTP, gRPC, WebSocket, SSE",
-      "HTTP, GraphQL, gRPC, WebSocket, Socket.IO, MQTT",
+      "HTTP, GraphQL, gRPC, WebSocket, SSE, Socket.IO, MQTT",
       "HTTP, GraphQL, gRPC, WebSocket, SSE, Socket.IO",
       "HTTP, GraphQL, SOAP, gRPC, WebSocket",
       "HTTP, GraphQL, gRPC, WebSocket, SSE",
@@ -103,7 +103,7 @@ const rows = [
       '<b class="yes">Yes, free</b>',
       "Data files on paid plans",
       "Through the Inso CLI",
-      "Data files need Pro",
+      "Data files need Pro in the app; free in the CLI",
       '<span class="no">No runner</span>',
       "Yes",
     ],
@@ -150,7 +150,7 @@ const list = {
 ---
 
 <Page
-  title="Request Eagle vs Postman, Insomnia, Bruno, Yaak and Hoppscotch"
+  title="Postman alternatives compared: six API clients in one table"
   description={summary}
   socialTitle="Request Eagle compared with Postman, Insomnia, Bruno, Yaak and Hoppscotch"
   socialDescription={summary}
@@ -173,15 +173,15 @@ const list = {
         </nav>
 
         <h1 class="display">
-          <span class="line"><span>Compare</span></span>
-          <span class="line"><span class="outline">API clients</span></span>
+          <span class="line"><span>Postman</span></span>
+          <span class="line"><span class="outline">alternatives</span></span>
         </h1>
 
         <div class="hero__row">
           <div>
             <p class="lede">
-              Request Eagle is a native, open-source API client written in Rust. This is how it stands
-              beside the five clients you are most likely using today, and where each of them is ahead.
+              Request Eagle is a native, open-source API client written in Rust. Here it stands beside
+              Postman and the four alternatives you are most likely weighing, with where each of them is ahead.
             </p>
           </div>
 
@@ -220,7 +220,7 @@ const list = {
           </table>
         </div>
 
-        <p class="glance__note">Checked in {checked}. Prices are in US dollars, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
+        <p class="glance__note">Checked in {checked} with Request Eagle {eagleVersion}; each page names the release of the other client it was checked against. Prices are in US dollars, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
 
         <ul class="cards">
           {comparisons.map((comparison) => (

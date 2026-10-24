@@ -15,7 +15,7 @@ const rows = [
   {
     label: "On Linux",
     eagle: "Draws its own window on the GPU.",
-    other: "Renders in WebKitGTK; blank windows on some Wayland and NVIDIA setups have a workaround build.",
+    other: "Renders in WebKitGTK. Yaak documents blank windows on some Wayland and NVIDIA setups, with a workaround build.",
   },
   {
     label: "Open source",
@@ -25,7 +25,7 @@ const rows = [
   {
     label: "Price",
     eagle: '<b class="yes">Free</b>, at home and at work.',
-    other: "Free for personal use. Individual $79 and Business $149 per user per year; $399 for a lifetime.",
+    other: "Free for personal use. Individual $79 and Business $149 per user per year, or $399 for a lifetime; a lapsed license keeps the last version it covered.",
   },
   {
     label: "Account",
@@ -49,12 +49,12 @@ const rows = [
   },
   {
     label: "Scripts and tests",
-    eagle: '<b class="yes">Yes.</b> JavaScript with the <code>pm</code> API, pre-request and post-response, with tests.',
+    eagle: '<b class="yes">Yes.</b> JavaScript with the <code>pm</code> API and Postman\'s bundled libraries, pre-request and post-response, with tests.',
     other: '<span class="no">None.</span> Template functions chain requests; scripting and assertions are under consideration.',
   },
   {
     label: "Collection Runner",
-    eagle: '<b class="yes">Yes</b>, with iterations and CSV and JSON data files.',
+    eagle: '<b class="yes">Yes</b>, for HTTP requests, with iterations and CSV and JSON data files.',
     other: '<span class="no">No runner.</span> A folder\'s Send All runs in parallel; the CLI runs in order, without data files.',
   },
   {
@@ -74,7 +74,7 @@ const rows = [
   },
   {
     label: "Imports",
-    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    eagle: "Postman collections and environments, OpenAPI 3 and Swagger 2, cURL.",
     other: "Postman, Insomnia, Bruno, OpenAPI, Swagger, cURL.",
   },
   {
@@ -106,11 +106,11 @@ const eagleWins = [
   },
   {
     heading: "Free at work",
-    body: "Yaak's source is MIT, but using the prebuilt app for work costs $79 per user per year. Request Eagle's builds are free for any use, with no trial and no license key.",
+    body: "Yaak's source is MIT, but using the prebuilt app for work costs $79 per user per year, and a lapsed license keeps only the last version it covered. Request Eagle's builds are free for any use, with no trial and no license key.",
   },
   {
     heading: "No web view at all",
-    body: "Yaak keeps its logic in Rust but draws its interface in the system web view. On Linux that is WebKitGTK, which has shown blank windows on Wayland with NVIDIA. Request Eagle draws every pixel itself on the GPU, on all three platforms.",
+    body: "Yaak keeps its logic in Rust but draws its interface in the system web view. On Linux that is WebKitGTK, where Yaak documents blank windows on some Wayland and NVIDIA setups. Request Eagle draws every pixel itself on the GPU, on all three platforms.",
   },
   {
     heading: "Postman collections keep their scripts",
@@ -141,7 +141,7 @@ const otherWins = [
   },
   {
     heading: "More imports and more platforms",
-    body: "Yaak imports Insomnia, Bruno and Swagger files, runs on Intel Macs and ARM Windows, and installs from Homebrew, winget and the Arch repositories. Request Eagle imports Postman, OpenAPI and cURL, and needs an Apple Silicon Mac or an x64 PC.",
+    body: "Yaak imports Insomnia and Bruno files, runs on Intel Macs and ARM Windows, and installs from Homebrew, winget and the Arch repositories. Request Eagle imports Postman, OpenAPI and cURL, and needs an Apple Silicon Mac or an x64 PC.",
   },
   {
     heading: "A longer track record",
@@ -171,7 +171,7 @@ const faq = [
   {
     question: "Is Request Eagle free for commercial use?",
     answer:
-      "Yes. Request Eagle is MIT or Apache 2.0, binaries included, with no license key and no trial. Yaak's source is MIT, but its prebuilt app needs an Individual license at $79 per user per year or a Business license at $149 for work.",
+      "Yes. Request Eagle is MIT or Apache 2.0, binaries included, with no license key and no trial. Yaak's source is MIT, but its prebuilt app needs an Individual license at $79 per user per year or a Business license at $149 for work; a lapsed license keeps the last version it covered.",
   },
   {
     question: "Does Yaak support scripting and tests?",
@@ -189,9 +189,9 @@ const faq = [
       "Both have a Rust core. Yaak draws its interface in the system web view through Tauri. Request Eagle has no web view: it draws its window on the GPU with GPUI, the framework behind the Zed editor.",
   },
   {
-    question: "Do both have Vim mode?",
+    question: "Where does Request Eagle keep secrets?",
     answer:
-      "Yes. Yaak offers Vim, VS Code and Emacs key maps in its editors. Request Eagle has Vim mode in the body and script editors, with rebindable shortcuts for everything else.",
+      "In plain TOML. A collection's <code>environment.toml</code> travels with the collection, so put tokens in a global environment, which lives in your home folder and never enters the repository. Yaak can encrypt marked values with a key in the system keychain; Request Eagle does not encrypt them yet.",
   },
 ];
 ---
@@ -199,7 +199,9 @@ const faq = [
 <Compare
   slug="yaak"
   name="Yaak"
-  title="Request Eagle vs Yaak: a native Rust API client against the Tauri client"
+  version="2026.9"
+  pricing="https://yaak.app/pricing"
+  title="Request Eagle vs Yaak: scripting, Git and pricing compared"
   description="Both have a Rust core and no account. Request Eagle adds scripts, tests, a runner and free commercial use; Yaak draws in a web view and needs a license at work."
   lede="Request Eagle and Yaak both have a Rust core and ask for no account. Request Eagle draws its window on the GPU without a web view, runs scripts and tests, replays collections with data files, and is free for any use. Yaak draws in the system web view, chains requests with template functions instead of scripts, and needs a paid license at work. Here is how they compare."
   rows={rows}

@@ -28,5 +28,6 @@ export const comparisons = [
   },
 ];
 
-// The month the facts on the comparison pages were last checked.
+// The month the facts on the comparison pages were last checked, and the Request Eagle they were checked with.
 export const checked = "October 2026";
+export const eagleVersion = "0.1.41";

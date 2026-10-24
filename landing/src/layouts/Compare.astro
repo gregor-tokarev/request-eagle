@@ -3,16 +3,19 @@ import { Picture } from "astro:assets";
 
 import Page from "./Page.astro";
 
-import { checked, comparisons } from "../comparisons.js";
+import { checked, comparisons, eagleVersion } from "../comparisons.js";
 
 import "../styles/compare.css";
 
 import heroDark from "../assets/shots/hero-dark.webp";
 
 // One comparison page: Request Eagle against `name`. Cells and paragraphs may carry inline HTML.
+// `version` is the release of the other client the facts were checked against, `pricing` its price page.
 const {
   slug,
   name,
+  version,
+  pricing,
   title,
   description,
   lede,
@@ -112,7 +115,7 @@ const shotWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 1296px) cal
           </tbody>
         </table>
 
-        <p class="glance__note">Checked in {checked}. Prices are in US dollars, per user, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
+        <p class="glance__note">Checked in {checked} against {name} {version}, its <a href={pricing} rel="noopener">pricing page</a> and documentation, with Request Eagle {eagleVersion}. Prices are in US dollars, per user, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
 
         <figure class="shot">
           <Picture src={heroDark} formats={["avif"]} fallbackFormat="webp" widths={[640, 960, 1280, 1920, 2400]} sizes={shotWide} loading="lazy"
@@ -222,7 +225,7 @@ const shotWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 1296px) cal
       <div class="wrap">
         <h2 class="display">Try it<br>for yourself.</h2>
 
-        <p>Request Eagle is free and open source. It runs on Apple Silicon Macs, Windows and Linux, and it imports your {name} work.</p>
+        <p>Request Eagle is free and open source. It runs on Apple Silicon Macs, Windows and Linux. The steps above bring your {name} requests across.</p>
 
         <div class="actions">
           <a class="button" href="/downloads/"><span>Download</span></a>

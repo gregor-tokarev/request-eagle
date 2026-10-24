@@ -30,7 +30,7 @@ const rows = [
   {
     label: "Requests stored as",
     eagle: "TOML files in a folder you choose, such as your project's repository.",
-    other: "A local database, not encrypted on disk; or end-to-end encrypted cloud sync; or Git Sync.",
+    other: "A local database, not encrypted on disk; or cloud sync with optional end-to-end encryption; or Git Sync.",
   },
   {
     label: "Git",
@@ -44,12 +44,12 @@ const rows = [
   },
   {
     label: "Scripts and tests",
-    eagle: "JavaScript with the <code>pm</code> API, pre-request and post-response, without Node.js.",
-    other: "JavaScript with an <code>insomnia</code> API that mirrors Postman's, since 2024.",
+    eagle: "JavaScript with the <code>pm</code> API and Postman's bundled libraries, without Node.js.",
+    other: "JavaScript with an <code>insomnia</code> API that mirrors Postman's; Postman scripts are converted on import.",
   },
   {
     label: "Collection Runner",
-    eagle: '<b class="yes">Unlimited</b>, with CSV and JSON data files in the app.',
+    eagle: '<b class="yes">No run quota.</b> HTTP requests, with CSV and JSON data files in the app.',
     other: "Unlimited in the app; data files through the Inso CLI.",
   },
   {
@@ -69,7 +69,7 @@ const rows = [
   },
   {
     label: "Imports",
-    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    eagle: "Postman collections and environments, OpenAPI 3 and Swagger 2, cURL.",
     other: "Insomnia, Postman, HAR, OpenAPI, Swagger, WSDL, cURL.",
   },
   {
@@ -80,7 +80,7 @@ const rows = [
   {
     label: "Team collaboration",
     eagle: "Through Git, with the review tools you already use.",
-    other: "End-to-end encrypted cloud sync or Git Sync; roles on the Pro plan.",
+    other: "Cloud sync, with end-to-end encryption as an option, or Git Sync; roles on the Pro plan.",
   },
   {
     label: "Vim mode",
@@ -96,12 +96,12 @@ const rows = [
 
 const eagleWins = [
   {
-    heading: "A native app, not a browser in disguise",
-    body: "Request Eagle draws its window on the GPU and answers the first keystroke a third of a second after launch. Insomnia ships Electron 43 with a bundled browser, and its memory use has been an open complaint on its tracker for years.",
+    heading: "A native app, without Electron",
+    body: "Request Eagle draws its window on the GPU and, in our benchmark against Postman, answered the first keystroke a third of a second after launch. Insomnia ships Electron 43 with a bundled browser, and high memory use has open issues on its tracker.",
   },
   {
     heading: "Nothing to sign in to",
-    body: "Insomnia 8 asked every user to create an account in 2023, and some lost their collections on the way. Today a free Kong account is still needed for anything beyond the Scratch Pad. Request Eagle has no account at all, and no server to be down.",
+    body: "Insomnia 8 asked every user to create an account in 2023, and a free Kong account is still needed for anything beyond the Scratch Pad. Request Eagle has no account at all, and no server to be down.",
   },
   {
     heading: "Files you can read without the app",
@@ -112,8 +112,8 @@ const eagleWins = [
     body: "Insomnia's free plan allows Git Sync for three users per organisation. Request Eagle's Git panel commits, pulls and pushes for every user, and a collection can live inside your project's repository from the start.",
   },
   {
-    heading: "Postman scripts without translation",
-    body: "Request Eagle implements the <code>pm</code> API, so Postman scripts run as they are. Insomnia's <code>insomnia</code> API mirrors it closely, but the calls need renaming.",
+    heading: "Flows, and data files in the app",
+    body: "Flows chain saved requests on a canvas with branches and loops, and the Collection Runner takes a CSV or JSON file in the app. Insomnia has no flows, and feeds data files to its runner through the Inso CLI.",
   },
   {
     heading: "Your coding agent inside the client",
@@ -131,12 +131,12 @@ const otherWins = [
     body: "Insomnia edits OpenAPI documents with Spectral linting, generates collections from them and hosts mock servers. Request Eagle imports OpenAPI and stops there.",
   },
   {
-    heading: "Cloud sync with end-to-end encryption",
-    body: "Teams that do not want Git can sync through Kong's cloud, where workspaces are encrypted on the client. Request Eagle shares a collection through a repository only.",
+    heading: "Cloud sync for teams",
+    body: "Teams that do not want Git can sync through Kong's cloud, with end-to-end encryption as an option. Request Eagle shares a collection through a repository only.",
   },
   {
     heading: "More imports, more platforms, more plugins",
-    body: "Insomnia imports HAR, WSDL, Swagger and its own formats, runs on Intel Macs, and has a plugin hub on npm. Request Eagle imports Postman, OpenAPI and cURL, needs an Apple Silicon Mac or an x64 PC, and has no plugins.",
+    body: "Insomnia imports HAR, WSDL and its own formats, converts Postman scripts on import, runs on Intel Macs, and has a plugin hub on npm. Request Eagle imports Postman, OpenAPI and cURL, needs an Apple Silicon Mac or an x64 PC, and has no plugins.",
   },
   {
     heading: "A decade of releases",
@@ -150,16 +150,16 @@ const switching = {
     "If the collection began as a Postman collection or an OpenAPI document, import that original: Request Eagle reads both, plus cURL commands.",
     "For an Insomnia design document, export its OpenAPI specification with <code>inso export spec</code> and import that. The requests arrive with their paths, parameters and bodies.",
     "For anything else, convert through a client that reads Insomnia and writes Postman v2.1, such as Postman's migration wizard or Bruno's export, then import the Postman file. Or copy single requests from Insomnia as cURL and paste them into Request Eagle's import.",
-    "Scripts move with a rename: <code>insomnia.environment.set</code> becomes <code>pm.environment.set</code>, <code>insomnia.test</code> becomes <code>pm.test</code>, and so on. The shape of the API is the same.",
+    "Adapt scripts by hand: <code>insomnia.environment.set</code> becomes <code>pm.environment.set</code>, <code>insomnia.test</code> becomes <code>pm.test</code>, and so on. Postman's bundled libraries such as lodash and crypto-js are there through <code>require</code>; timers and <code>fetch</code> are not.",
     "Track the folder with Git from the status bar, or open a folder inside an existing repository as a collection, and push it for your team.",
   ],
 };
 
 const verdict = {
   eagle:
-    "you want a native app with no account, requests as files in your repository, a Git panel for everyone on the team, Postman-compatible scripts, and a coding agent inside the client.",
+    "you want a native app with no account, requests as files in your repository, a Git panel for everyone on the team, flows and data-driven runs in the app, and a coding agent inside the client.",
   other:
-    "your team wants end-to-end encrypted cloud sync without Git, designs APIs in OpenAPI with linting, hosts mock servers, or needs GraphQL and Socket.IO.",
+    "your team wants cloud sync without Git, designs APIs in OpenAPI with linting, hosts mock servers, or needs GraphQL and Socket.IO.",
 };
 
 const faq = [
@@ -184,9 +184,9 @@ const faq = [
       "Yes. Request Eagle is MIT or Apache 2.0, with no paid edition. Insomnia's app is Apache 2.0, while its accounts, cloud sync and paid plans are services run by Kong.",
   },
   {
-    question: "Do both have Vim mode?",
+    question: "Does Request Eagle collect usage data?",
     answer:
-      "Yes. Insomnia offers a Vim key map in its editors, and Request Eagle has Vim mode in the body and script editors, with rebindable shortcuts for everything else.",
+      "Release builds send anonymous usage counts to PostHog, such as that a request was sent and which protocol it used, and never URLs, headers, bodies or names. Settings turns it off under General and Privacy, and builds from source send nothing. Insomnia sends usage analytics too, with an opt-out documented for users without an account.",
   },
 ];
 ---
@@ -194,6 +194,8 @@ const faq = [
 <Compare
   slug="insomnia"
   name="Insomnia"
+  version="13.3"
+  pricing="https://insomnia.rest/pricing"
   title="Request Eagle vs Insomnia: a native, open-source Insomnia alternative"
   description="A native Rust API client with no account, requests as files and a free Git panel, compared with Kong's Insomnia, its account, cloud sync and Electron app."
   lede="Request Eagle is a free, open-source Insomnia alternative written in Rust. It needs no account, keeps requests as files in your repository and runs without a web view. Insomnia is Kong's Electron client, with a free Kong account, cloud sync, Git Sync and an OpenAPI design workflow. Here is how they compare."

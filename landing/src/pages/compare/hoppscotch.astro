@@ -39,8 +39,8 @@ const rows = [
   },
   {
     label: "Localhost and CORS",
-    eagle: '<b class="yes">Reaches any host directly.</b>',
-    other: "The browser app needs the extension, the Agent or a proxy for localhost and CORS.",
+    eagle: '<b class="yes">Sends outside the browser</b>, so CORS never applies.',
+    other: "In the browser, needs the extension, the Agent or a proxy when CORS blocks a request, as it does for most localhost servers.",
   },
   {
     label: "Protocols",
@@ -49,12 +49,12 @@ const rows = [
   },
   {
     label: "Scripts and tests",
-    eagle: "JavaScript with the <code>pm</code> API, pre-request and post-response, with tests.",
+    eagle: "JavaScript with the <code>pm</code> API and Postman's bundled libraries, pre-request and post-response, with tests.",
     other: "JavaScript with the <code>pw</code> and <code>hopp</code> APIs, and partial <code>pm</code> compatibility.",
   },
   {
     label: "Collection Runner",
-    eagle: '<b class="yes">Yes</b>, with iterations and CSV and JSON data files.',
+    eagle: '<b class="yes">Yes</b>, for HTTP requests, with iterations and CSV and JSON data files.',
     other: "Yes, with CSV and JSON data files since 2026.8.",
   },
   {
@@ -74,7 +74,7 @@ const rows = [
   },
   {
     label: "Imports",
-    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    eagle: "Postman collections and environments, OpenAPI 3 and Swagger 2, cURL.",
     other: "Hoppscotch, Postman, Insomnia, OpenAPI, HAR, cURL.",
   },
   {
@@ -102,11 +102,11 @@ const rows = [
 const eagleWins = [
   {
     heading: "A desktop app, not a web page",
-    body: "Request Eagle draws its window on the GPU and answers the first keystroke a third of a second after launch. Hoppscotch is a web app; its desktop app wraps the same pages in Tauri and still calls itself alpha.",
+    body: "Request Eagle draws its window on the GPU and, in our benchmark against Postman, answered the first keystroke a third of a second after launch. Hoppscotch is a web app; its desktop app wraps the same pages in Tauri and still calls itself alpha.",
   },
   {
     heading: "Localhost without an extension",
-    body: "A desktop app reaches your local server, your staging host and anything behind CORS directly. In the browser, Hoppscotch needs its extension, its Agent or a proxy for the same request.",
+    body: "A desktop app sends requests outside the browser, so CORS never applies: your local server, your staging host and third-party APIs answer directly. In the browser, Hoppscotch needs its extension, its Agent or a proxy whenever CORS blocks a request, which includes most localhost servers.",
   },
   {
     heading: "Files in your repository, with Git built in",
@@ -186,7 +186,7 @@ const faq = [
   {
     question: "Does Request Eagle need a browser extension for localhost?",
     answer:
-      "No. As a desktop app it sends requests directly, to localhost or anywhere else, with no CORS in the way. Hoppscotch's browser app needs its extension, its Agent or a proxy for those requests.",
+      "No. As a desktop app it sends requests outside the browser, so CORS never applies, to localhost or anywhere else. Hoppscotch's browser app needs its extension, its Agent or a proxy whenever CORS blocks a request.",
   },
   {
     question: "Are both open source?",
@@ -199,6 +199,8 @@ const faq = [
 <Compare
   slug="hoppscotch"
   name="Hoppscotch"
+  version="2026.9"
+  pricing="https://hoppscotch.com/pricing"
   title="Request Eagle vs Hoppscotch: a native desktop Hoppscotch alternative"
   description="A native Rust desktop client with requests as Git-friendly files, gRPC and no extension for localhost, compared with Hoppscotch's browser app and cloud."
   lede="Request Eagle is a free, open-source desktop API client written in Rust. It keeps requests as files in your repository, reaches localhost directly and speaks gRPC. Hoppscotch is a free, open-source client that runs in the browser, with a cloud for teams, a desktop app in alpha and a self-hosted edition. Here is how they compare."
