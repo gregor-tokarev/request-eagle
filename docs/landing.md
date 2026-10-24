@@ -3,10 +3,15 @@
 The site at <https://requesteagle.tokarev.work> is the [Astro](https://astro.build)
 project in `landing/`. It builds to static files in `landing/dist/`:
 
-- `src/pages/` holds the landing, the downloads page and the 404 page.
+- `src/pages/` holds the landing, the downloads page, the comparison pages
+  under `compare/` and the 404 page.
 - `src/layouts/Page.astro` is the shared head, navigation and footer.
+  `Compare.astro` lays out one comparison page from the facts its page
+  passes in.
+- `src/comparisons.js` lists the compared clients, which the hub and the
+  cross-links read, and the month the facts were checked.
 - `src/styles/base.css` styles what the pages share. `landing.css` builds on
-  it for the landing's own sections.
+  it for the landing's own sections, `compare.css` for the comparison pages.
 - `src/scripts/` holds one script per page.
 - `src/assets/` holds the captures, icon and fonts that the build optimises.
 - `public/` is copied as it is.
@@ -70,6 +75,21 @@ executables are not offered, because the CLI is installed from the app.
 Without scripts, or when GitHub cannot be reached, the buttons lead to the
 latest release on GitHub instead. So does a button whose file the latest
 release does not have.
+
+## Comparison pages
+
+`/compare/` puts Request Eagle beside Postman, Insomnia, Bruno, Yaak and
+Hoppscotch in one table, and `/compare/<client>/` compares it with each in
+turn: a glance table, where each client is ahead, how to switch, a verdict
+and questions. They exist to be found: each targets searches such as
+"Postman alternative" and "Request Eagle vs Bruno", carries `FAQPage` and
+`BreadcrumbList` JSON-LD, and links to the others.
+
+Every claim about another client was checked in the month `src/comparisons.js`
+names. Check the prices, plans and protocols again when that month is more
+than a few months old, and move the month forward. Keep the pages honest:
+each says where the other client is ahead, which is what makes the rest
+believable.
 
 ## Search engines
 

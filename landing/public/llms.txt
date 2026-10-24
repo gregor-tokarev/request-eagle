@@ -6,6 +6,12 @@
 
 - [Landing](https://requesteagle.tokarev.work/): What Request Eagle is and what it can do
 - [Download](https://requesteagle.tokarev.work/downloads/): The latest stable release for Apple Silicon Macs, Windows and Linux
+- [Compare](https://requesteagle.tokarev.work/compare/): Request Eagle beside Postman, Insomnia, Bruno, Yaak and Hoppscotch in one table
+- [Request Eagle vs Postman](https://requesteagle.tokarev.work/compare/postman/): A native, open-source Postman alternative compared feature by feature
+- [Request Eagle vs Insomnia](https://requesteagle.tokarev.work/compare/insomnia/): Compared with Kong's Insomnia
+- [Request Eagle vs Bruno](https://requesteagle.tokarev.work/compare/bruno/): Compared with Bruno, the file-based Electron client
+- [Request Eagle vs Yaak](https://requesteagle.tokarev.work/compare/yaak/): Compared with Yaak, the Tauri client
+- [Request Eagle vs Hoppscotch](https://requesteagle.tokarev.work/compare/hoppscotch/): Compared with Hoppscotch, the browser-based client
 
 ## Guides
 

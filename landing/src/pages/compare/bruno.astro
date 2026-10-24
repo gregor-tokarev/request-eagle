@@ -1,0 +1,211 @@
+---
+import Compare from "../../layouts/Compare.astro";
+
+const rows = [
+  {
+    label: "Built with",
+    eagle: "Rust and GPUI, drawn on the GPU. No web view.",
+    other: "Electron: a bundled Chromium and Node.js.",
+  },
+  {
+    label: "Runs on",
+    eagle: "Apple Silicon Macs, Windows and Linux on x64.",
+    other: "Intel and Apple Silicon Macs, Windows and Linux, through Homebrew, winget, Snap, Flatpak and more.",
+  },
+  {
+    label: "Open source",
+    eagle: '<b class="yes">Yes</b>, MIT or Apache 2.0. One edition.',
+    other: "Yes, MIT, with paid Pro and Ultimate editions.",
+  },
+  {
+    label: "Price",
+    eagle: '<b class="yes">Free</b>, for one person or a team.',
+    other: "Free. Pro $6 and Ultimate $11 per user per month, billed yearly.",
+  },
+  {
+    label: "Account",
+    eagle: '<b class="yes">None.</b>',
+    other: "None. Paid editions use a license key.",
+  },
+  {
+    label: "Requests stored as",
+    eagle: "TOML files in a folder you choose, such as your project's repository.",
+    other: "YAML files in the OpenCollection layout, or the older <code>.bru</code> format, in a folder.",
+  },
+  {
+    label: "Git",
+    eagle: '<b class="yes">Built in and free.</b> Commit, pull, push and sync from the Git panel.',
+    other: "Clone, init, diff and pull are free. Commit, push, branches and private Git hosts need Pro.",
+  },
+  {
+    label: "Collections open at once",
+    eagle: '<b class="yes">Any number</b>, from anywhere on disk.',
+    other: "Two workspaces free; unlimited in Pro.",
+  },
+  {
+    label: "Protocols",
+    eagle: "HTTP, gRPC, WebSocket and server-sent events.",
+    other: "HTTP, GraphQL, SOAP, gRPC and WebSocket.",
+  },
+  {
+    label: "Scripts and tests",
+    eagle: "JavaScript with Postman's <code>pm</code> API, without Node.js.",
+    other: "JavaScript with its own <code>bru</code> API and Chai tests; npm packages in Developer Mode.",
+  },
+  {
+    label: "Collection Runner",
+    eagle: '<b class="yes">Unlimited</b>, with CSV and JSON data files.',
+    other: "Unlimited. CSV and JSON data files and parallel runs need Pro.",
+  },
+  {
+    label: "Flows",
+    eagle: "Blocks on a canvas with branches and loops.",
+    other: '<span class="no">No.</span>',
+  },
+  {
+    label: "CLI",
+    eagle: "A JSON command line for agents and scripts, without the app.",
+    other: "<code>bru</code> runs collections in CI with JSON, JUnit and HTML reports.",
+  },
+  {
+    label: "AI",
+    eagle: "Claude Code, Codex or OpenCode in a panel, with your own sign-in and models.",
+    other: "Bruno AI in beta with your own OpenAI, Anthropic or local model; an MCP server around the CLI.",
+  },
+  {
+    label: "Imports",
+    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    other: "Postman, Insomnia, OpenAPI, WSDL, cURL and Bruno. Full Postman data dumps need Ultimate.",
+  },
+  {
+    label: "Exports",
+    eagle: "Copy a request as cURL or grpcurl.",
+    other: "Bruno, Postman and OpenAPI.",
+  },
+  {
+    label: "Secret managers",
+    eagle: '<span class="no">No.</span>',
+    other: "Vault, AWS, Azure and GCP, in Ultimate.",
+  },
+  {
+    label: "Vim mode",
+    eagle: '<b class="yes">Yes</b>, in the body and script editors.',
+    other: '<span class="no">No.</span> Requested since 2024.',
+  },
+  {
+    label: "Interface",
+    eagle: "Eleven theme families in light and dark, sizes from 12 to 24 px.",
+    other: "Light, dark, Dracula, Gruvbox and Cyberdream.",
+  },
+];
+
+const eagleWins = [
+  {
+    heading: "Native, not Electron",
+    body: "Request Eagle draws its window on the GPU and answers the first keystroke a third of a second after launch. Bruno runs inside Electron, and a slow start and a laggy interface with large collections are recurring complaints on its tracker.",
+  },
+  {
+    heading: "Everything is free, including Git",
+    body: "Bruno charges for commit and push from the app, for data files in the runner, for private Git hosts and for a third workspace. Request Eagle has one edition. The Git panel, the runner with data files, flows and every protocol cost nothing for anyone.",
+  },
+  {
+    heading: "Postman scripts run as they are",
+    body: "Request Eagle implements the <code>pm</code> API, so a collection exported from Postman keeps its pre-request scripts and tests. Bruno has its own <code>bru</code> API, so scripts are rewritten on the way in.",
+  },
+  {
+    heading: "One file format since day one",
+    body: "Requests have always been TOML files. Bruno invented the <code>.bru</code> format, then moved to YAML in 2026 and now calls <code>.bru</code> deprecated, with a migration in between.",
+  },
+  {
+    heading: "Your coding agent inside the client",
+    body: "Claude Code, Codex or OpenCode open in a panel next to your requests, read what you cite and fix or create saved requests. Bruno's AI is a chat with a model you bring, and its MCP server wraps the CLI.",
+  },
+  {
+    heading: "Vim mode and flows",
+    body: "Vim motions in the body and script editors, which Bruno has had on its wish list since 2024, and flows that chain saved requests on a canvas with branches and loops.",
+  },
+];
+
+const otherWins = [
+  {
+    heading: "GraphQL and SOAP",
+    body: "Bruno has a GraphQL editor and SOAP support. Request Eagle sends a GraphQL query as a JSON body and has no SOAP helpers.",
+  },
+  {
+    heading: "Imports and exports in every direction",
+    body: "Bruno reads Insomnia and WSDL and writes Postman and OpenAPI. Request Eagle imports Postman, OpenAPI and cURL and exports a request as cURL only.",
+  },
+  {
+    heading: "Enterprise plumbing and a mock server",
+    body: "Secret managers, SSO, SCIM and audit logs are on Bruno's paid tiers, and Bruno 4.1 added a mock server. Request Eagle has none of them.",
+  },
+  {
+    heading: "Package managers, a VS Code extension and CI reports",
+    body: "Bruno installs from Homebrew, winget, Snap, Flatpak and the AUR, runs on Intel Macs, has a VS Code extension, and its CLI writes JUnit and HTML reports. Request Eagle offers a disk image, an installer, an AppImage, Debian and RPM packages and the AUR.",
+  },
+  {
+    heading: "A large community",
+    body: "Bruno has tens of thousands of GitHub stars, a company behind it and years of releases. Request Eagle is in early development.",
+  },
+];
+
+const switching = {
+  intro: "Bruno exports a collection in Postman's format, which Request Eagle reads, so the move is one export and one import.",
+  steps: [
+    "In Bruno, open the collection's menu and export it as a <b>Postman collection</b>. Export any environment the same way, or note its values.",
+    "In Request Eagle, run <b>Import collection</b> from the command palette or the sidebar and choose the file. The collection becomes a folder of TOML files that you can keep anywhere, including the folder where the Bruno collection lives.",
+    "Rewrite scripts from the <code>bru</code> API to the <code>pm</code> API: <code>bru.setVar</code> becomes <code>pm.variables.set</code>, <code>res.getBody()</code> becomes <code>pm.response.json()</code>, and <code>test</code> and <code>expect</code> become <code>pm.test</code> and <code>pm.expect</code>.",
+    "Put shared values in the collection's <code>environment.toml</code>, and secrets in a global environment, which lives in your home folder and stays out of the repository.",
+    "Track the folder with Git from the status bar, or open a folder inside an existing repository as a collection. Commit and push from the Git panel, no license needed.",
+  ],
+};
+
+const verdict = {
+  eagle:
+    "you like Bruno's idea of collections as files but want it without Electron, with Git commit and push, data-driven runs and Postman-compatible scripts all free, plus a coding agent panel and Vim mode.",
+  other:
+    "you need GraphQL or SOAP, a secret manager, SSO, a VS Code extension, exports to Postman and OpenAPI, or the package manager of your choice.",
+};
+
+const faq = [
+  {
+    question: "How is Request Eagle different from Bruno?",
+    answer:
+      "Both keep collections as plain files, work offline and are open source. Request Eagle is a native Rust app with no web view, stores requests as TOML, runs Postman's <code>pm</code> scripts unchanged, and has one free edition with Git, data-driven runs and flows. Bruno is an Electron app that stores YAML or <code>.bru</code> files, uses its own script API, and sells Pro and Ultimate editions.",
+  },
+  {
+    question: "Can I import Bruno collections into Request Eagle?",
+    answer:
+      "Yes, through Bruno's Postman export. Export the collection from Bruno as a Postman collection and import it in Request Eagle. Scripts written against Bruno's <code>bru</code> API are rewritten to the <code>pm</code> API.",
+  },
+  {
+    question: "Is Bruno free?",
+    answer:
+      "Bruno's open-source edition is free. Committing and pushing from its Git panel, data files in its runner, private Git hosts and more than two workspaces need Pro at $6 per user per month; secret managers and SSO need Ultimate at $11. Request Eagle is free in full.",
+  },
+  {
+    question: "Does Request Eagle have a CLI like Bruno's bru?",
+    answer:
+      "Yes, with a different aim. Request Eagle's CLI speaks JSON and is made for coding agents and scripts: it lists, edits and runs saved requests and flows without the app. Bruno's <code>bru</code> is made for CI, with JUnit and HTML reports.",
+  },
+  {
+    question: "Does Request Eagle have Vim mode?",
+    answer:
+      "Yes, in the body and script editors, with motions, operators, counts and Visual mode. Bruno has an open request for Vim mode since 2024.",
+  },
+];
+---
+
+<Compare
+  slug="bruno"
+  name="Bruno"
+  title="Request Eagle vs Bruno: file-based, open-source API clients compared"
+  description="Both keep collections as files and work offline. Request Eagle is native Rust with free Git and Postman-compatible scripts; Bruno is Electron with paid editions."
+  lede="Request Eagle and Bruno agree on the big idea: collections are files on your disk, there is no cloud and no account. They differ in what they are built from and what is free. Request Eagle is a native Rust app with one free edition. Bruno is an Electron app whose Git commits, data-driven runs and private Git hosts need a paid plan. Here is how they compare."
+  rows={rows}
+  eagleWins={eagleWins}
+  otherWins={otherWins}
+  switching={switching}
+  verdict={verdict}
+  faq={faq}
+/>

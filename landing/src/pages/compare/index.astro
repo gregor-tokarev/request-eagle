@@ -1,0 +1,259 @@
+---
+import Page from "../../layouts/Page.astro";
+
+import { checked, comparisons } from "../../comparisons.js";
+
+import "../../styles/compare.css";
+
+// Every client in one table. Each cell is HTML; the first value is Request Eagle's.
+const clients = ["Request Eagle", ...comparisons.map((comparison) => comparison.name)];
+
+const rows = [
+  {
+    label: "Built with",
+    cells: [
+      "Rust and GPUI, no web view",
+      "Electron",
+      "Electron",
+      "Electron",
+      "Tauri: Rust with a web view",
+      "Web app; Tauri desktop app in alpha",
+    ],
+  },
+  {
+    label: "Open source",
+    cells: [
+      '<b class="yes">MIT or Apache 2.0</b>',
+      '<span class="no">No</span>',
+      "Apache 2.0 app; Kong services",
+      "MIT, with paid editions",
+      "MIT source; licensed binaries",
+      "MIT, with an Enterprise edition",
+    ],
+  },
+  {
+    label: "Price",
+    cells: [
+      '<b class="yes">Free</b>',
+      "Free for one user; Team $19 per user per month",
+      "Free; Pro $12 per user per month",
+      "Free; Pro $6 per user per month",
+      "Free at home; $79 per user per year at work",
+      "Free; Business $6 per user per month",
+    ],
+  },
+  {
+    label: "Account",
+    cells: [
+      '<b class="yes">None</b>',
+      "Needed for collections",
+      "A free Kong account, except in the Scratch Pad",
+      "None",
+      "None",
+      "None for local use; sync needs one",
+    ],
+  },
+  {
+    label: "Requests stored as",
+    cells: [
+      "TOML files in your repository",
+      "A cloud workspace; a Git mirror in Postman 12",
+      "A local database, cloud sync or Git Sync",
+      "YAML or <code>.bru</code> files",
+      "SQLite; YAML through Directory Sync",
+      "Browser storage or the cloud",
+    ],
+  },
+  {
+    label: "Git in the app",
+    cells: [
+      '<b class="yes">Yes, free</b>',
+      "A native Git view of the cloud workspace",
+      "Git Sync, three users free",
+      "Commit and push need Pro",
+      "Yes",
+      '<span class="no">No</span>',
+    ],
+  },
+  {
+    label: "Protocols",
+    cells: [
+      "HTTP, gRPC, WebSocket, SSE",
+      "HTTP, GraphQL, gRPC, WebSocket, Socket.IO, MQTT",
+      "HTTP, GraphQL, gRPC, WebSocket, SSE, Socket.IO",
+      "HTTP, GraphQL, SOAP, gRPC, WebSocket",
+      "HTTP, GraphQL, gRPC, WebSocket, SSE",
+      "HTTP, GraphQL, WebSocket, SSE, Socket.IO, MQTT",
+    ],
+  },
+  {
+    label: "Scripts and tests",
+    cells: [
+      "Postman's <code>pm</code> API",
+      "The <code>pm</code> API",
+      "An <code>insomnia</code> API like Postman's",
+      "Its own <code>bru</code> API",
+      '<span class="no">None</span>',
+      "<code>pw</code> and <code>hopp</code> APIs, partial <code>pm</code>",
+    ],
+  },
+  {
+    label: "Runner with data files",
+    cells: [
+      '<b class="yes">Yes, free</b>',
+      "Data files on paid plans",
+      "Through the Inso CLI",
+      "Data files need Pro",
+      '<span class="no">No runner</span>',
+      "Yes",
+    ],
+  },
+  {
+    label: "Coding agents",
+    cells: [
+      "A panel for Claude Code, Codex and OpenCode; a CLI",
+      "Agent Mode on AI credits",
+      "An MCP client; a CLI preview",
+      "Bruno AI; an MCP server",
+      "An agent skill; an MCP server",
+      "Modify with AI; an MCP server",
+    ],
+  },
+  {
+    label: "Vim mode",
+    cells: ['<b class="yes">Yes</b>', '<span class="no">No</span>', "Yes", '<span class="no">No</span>', "Yes", '<span class="no">No</span>'],
+  },
+];
+
+const summary =
+  "Postman alternatives compared: Request Eagle beside Postman, Insomnia, Bruno, Yaak and Hoppscotch on tech stack, storage, price, protocols, scripts and agents.";
+
+const breadcrumbs = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Request Eagle", item: "https://requesteagle.tokarev.work/" },
+    { "@type": "ListItem", position: 2, name: "Compare", item: "https://requesteagle.tokarev.work/compare/" },
+  ],
+};
+
+const list = {
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  itemListElement: comparisons.map((comparison, index) => ({
+    "@type": "ListItem",
+    position: index + 1,
+    name: `Request Eagle vs ${comparison.name}`,
+    url: `https://requesteagle.tokarev.work/compare/${comparison.slug}/`,
+  })),
+};
+---
+
+<Page
+  title="Request Eagle vs Postman, Insomnia, Bruno, Yaak and Hoppscotch"
+  description={summary}
+  socialTitle="Request Eagle compared with Postman, Insomnia, Bruno, Yaak and Hoppscotch"
+  socialDescription={summary}
+>
+  <Fragment slot="head">
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(breadcrumbs)}></script>
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(list)}></script>
+  </Fragment>
+
+  <main>
+
+    <div class="hero hero--short hero--compare">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <nav class="crumbs" aria-label="Breadcrumb">
+          <a href="/">Request Eagle</a>
+          <span aria-hidden="true">/</span>
+          <span>Compare</span>
+        </nav>
+
+        <h1 class="display">
+          <span class="line"><span>Compare</span></span>
+          <span class="line"><span class="outline">API clients</span></span>
+        </h1>
+
+        <div class="hero__row">
+          <div>
+            <p class="lede">
+              Request Eagle is a native, open-source API client written in Rust. This is how it stands
+              beside the five clients you are most likely using today, and where each of them is ahead.
+            </p>
+          </div>
+
+          <div class="actions">
+            <a class="button" href="/downloads/"><span>Download</span></a>
+            <a class="button button--outline" href="#table"><span>See the table</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="glance hub" id="table" aria-labelledby="table-title">
+      <div class="wrap">
+        <h2 class="display" id="table-title">Six clients, one table</h2>
+
+        <div class="hub__scroll">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th scope="col"><span class="visually-hidden">Topic</span></th>
+                {clients.map((client, index) => (
+                  <th scope="col" class:list={{ matrix__eagle: index === 0 }}>{client}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr>
+                  <th scope="row">{row.label}</th>
+                  {row.cells.map((cell, index) => (
+                    <td class:list={{ matrix__eagle: index === 0 }} set:html={cell}></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p class="glance__note">Checked in {checked}. Prices are in US dollars, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
+
+        <ul class="cards">
+          {comparisons.map((comparison) => (
+            <li>
+              <a href={`/compare/${comparison.slug}/`}>
+                <h3 class="display">vs {comparison.name}</h3>
+                <p>{comparison.blurb}</p>
+                <span>Read the comparison</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="streaks streaks--cta" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <h2 class="display">Try it<br>for yourself.</h2>
+
+        <p>Request Eagle is free and open source. It runs on Apple Silicon Macs, Windows and Linux, and it imports Postman collections, OpenAPI documents and cURL commands.</p>
+
+        <div class="actions">
+          <a class="button" href="/downloads/"><span>Download</span></a>
+          <a class="button button--outline" href="https://github.com/gregor-tokarev/request-eagle"><span>GitHub</span></a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</Page>
+
+<script>
+  import "../../scripts/compare.js";
+</script>

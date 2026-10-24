@@ -40,7 +40,7 @@
 | Account | None | Needed for most features | None | None |
 | Price | Free | Free for one user; teams from $19 per user per month | Free; Pro from $6 per user per month | Free for personal use; $79 per year for work |
 
-Prices checked in October 2026.
+Prices checked in October 2026. The [comparison pages](https://requesteagle.tokarev.work/compare/) go through each of these clients, and Insomnia, in detail.
 
 ## Guides
 

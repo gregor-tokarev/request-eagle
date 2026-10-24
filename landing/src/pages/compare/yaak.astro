@@ -1,0 +1,211 @@
+---
+import Compare from "../../layouts/Compare.astro";
+
+const rows = [
+  {
+    label: "Built with",
+    eagle: "Rust and GPUI, drawn on the GPU. No web view.",
+    other: "Tauri: a Rust backend with a React interface in the system web view.",
+  },
+  {
+    label: "Runs on",
+    eagle: "Apple Silicon Macs, Windows and Linux on x64.",
+    other: "Intel and Apple Silicon Macs, Windows on x64 and ARM, Linux, through Homebrew, winget and the Arch repositories.",
+  },
+  {
+    label: "On Linux",
+    eagle: "Draws its own window on the GPU.",
+    other: "Renders in WebKitGTK; blank windows on some Wayland and NVIDIA setups have a workaround build.",
+  },
+  {
+    label: "Open source",
+    eagle: '<b class="yes">Yes</b>, MIT or Apache 2.0, binaries included.',
+    other: "The source is MIT. The prebuilt app needs a license for work.",
+  },
+  {
+    label: "Price",
+    eagle: '<b class="yes">Free</b>, at home and at work.',
+    other: "Free for personal use. Individual $79 and Business $149 per user per year; $399 for a lifetime.",
+  },
+  {
+    label: "Account",
+    eagle: '<b class="yes">None.</b>',
+    other: "None. A 30-day trial starts by itself, and the app stays usable after it.",
+  },
+  {
+    label: "Requests stored as",
+    eagle: "TOML files in a folder you choose, such as your project's repository.",
+    other: "A local SQLite database. Directory Sync mirrors a workspace to YAML files.",
+  },
+  {
+    label: "Git",
+    eagle: '<b class="yes">Built in.</b> Commit, pull, push and sync from the Git panel.',
+    other: "Built in for synced directories: commit, push, pull, branches and a diff viewer.",
+  },
+  {
+    label: "Protocols",
+    eagle: "HTTP, gRPC, WebSocket and server-sent events.",
+    other: "HTTP, GraphQL, gRPC, WebSocket and server-sent events.",
+  },
+  {
+    label: "Scripts and tests",
+    eagle: '<b class="yes">Yes.</b> JavaScript with the <code>pm</code> API, pre-request and post-response, with tests.',
+    other: '<span class="no">None.</span> Template functions chain requests; scripting and assertions are under consideration.',
+  },
+  {
+    label: "Collection Runner",
+    eagle: '<b class="yes">Yes</b>, with iterations and CSV and JSON data files.',
+    other: '<span class="no">No runner.</span> A folder\'s Send All runs in parallel; the CLI runs in order, without data files.',
+  },
+  {
+    label: "Flows",
+    eagle: "Blocks on a canvas with branches and loops.",
+    other: '<span class="no">No.</span>',
+  },
+  {
+    label: "CLI",
+    eagle: "A JSON command line for agents and scripts, without the app.",
+    other: "<code>yaak</code> sends requests, manages workspaces as JSON and installs an agent skill.",
+  },
+  {
+    label: "AI",
+    eagle: "Claude Code, Codex or OpenCode in a panel, citing your requests and responses.",
+    other: "No assistant in the app. A skill for Claude Code, Cursor, Codex and OpenCode, and an MCP server plugin.",
+  },
+  {
+    label: "Imports",
+    eagle: "Postman collections and environments, OpenAPI, cURL.",
+    other: "Postman, Insomnia, Bruno, OpenAPI, Swagger, cURL.",
+  },
+  {
+    label: "Authorization",
+    eagle: "API key, Bearer, Basic, Digest, OAuth 1, OAuth 2, JWT, AWS Signature and client certificates.",
+    other: "The same, plus NTLM.",
+  },
+  {
+    label: "Encrypted secrets",
+    eagle: '<span class="no">No.</span> Keep them in a global environment outside the repository.',
+    other: "Yes, with the key in the system keychain.",
+  },
+  {
+    label: "Vim mode",
+    eagle: '<b class="yes">Yes</b>, in the body and script editors.',
+    other: '<b class="yes">Yes</b>, with VS Code and Emacs key maps too.',
+  },
+  {
+    label: "Interface",
+    eagle: "Eleven theme families in light and dark, sizes from 12 to 24 px.",
+    other: "Built-in themes and theme plugins, including VS Code themes.",
+  },
+];
+
+const eagleWins = [
+  {
+    heading: "Scripts, tests and a runner",
+    body: "Request Eagle runs pre-request and post-response JavaScript with the <code>pm</code> API, reports tests next to the response and replays a collection for every row of a CSV or JSON file. Yaak has no request scripting, no assertions and no runner; its maintainer began exploring a proof of concept in September 2026.",
+  },
+  {
+    heading: "Free at work",
+    body: "Yaak's source is MIT, but using the prebuilt app for work costs $79 per user per year. Request Eagle's builds are free for any use, with no trial and no license key.",
+  },
+  {
+    heading: "No web view at all",
+    body: "Yaak keeps its logic in Rust but draws its interface in the system web view. On Linux that is WebKitGTK, which has shown blank windows on Wayland with NVIDIA. Request Eagle draws every pixel itself on the GPU, on all three platforms.",
+  },
+  {
+    heading: "Postman collections keep their scripts",
+    body: "Both apps import Postman collections. Request Eagle also runs the scripts in them, because it implements the <code>pm</code> API. Yaak has nowhere to run them.",
+  },
+  {
+    heading: "Your coding agent inside the client",
+    body: "Claude Code, Codex or OpenCode open in a panel next to your requests, read what you cite with a shortcut, and fix or create saved requests. Yaak equips agents outside the app with a skill and an MCP server.",
+  },
+  {
+    heading: "Flows",
+    body: "Chain saved requests on a canvas, with branches, loops and FQL expressions to reshape responses, without writing a script.",
+  },
+];
+
+const otherWins = [
+  {
+    heading: "GraphQL",
+    body: "Yaak has a GraphQL editor with a schema. Request Eagle sends a GraphQL query as a JSON body.",
+  },
+  {
+    heading: "Encrypted secrets",
+    body: "Yaak encrypts marked values with a key kept in the system keychain, so a synced workspace can carry them. Request Eagle keeps secrets in a global environment outside the repository, unencrypted.",
+  },
+  {
+    heading: "Plugins",
+    body: "Template functions, authentication schemes, importers and themes are TypeScript plugins, and dozens are published. Request Eagle has no plugin system.",
+  },
+  {
+    heading: "More imports and more platforms",
+    body: "Yaak imports Insomnia, Bruno and Swagger files, runs on Intel Macs and ARM Windows, and installs from Homebrew, winget and the Arch repositories. Request Eagle imports Postman, OpenAPI and cURL, and needs an Apple Silicon Mac or an x64 PC.",
+  },
+  {
+    heading: "A longer track record",
+    body: "Yaak has shipped monthly since January 2024 and is made by the original creator of Insomnia. Request Eagle is in early development.",
+  },
+];
+
+const switching = {
+  intro: "Yaak exports only its own JSON, which Request Eagle does not read, so the route depends on where your requests came from.",
+  steps: [
+    "If the workspace began as a Postman collection or an OpenAPI document, import that original. Request Eagle reads both, plus cURL commands.",
+    "Otherwise copy each request from Yaak as cURL and paste it into Request Eagle's <b>Import collection</b> dialog, which recognises cURL and files the request where you choose.",
+    "Replace Yaak's <code>response()</code> template functions with a line in the source request's post-response script, such as <code>pm.environment.set(\"token\", pm.response.json().token)</code>, and use <code>{{token}}</code> where the value is needed.",
+    "Put shared values in the collection's <code>environment.toml</code>, and secrets in a global environment, which lives in your home folder and stays out of the repository.",
+    "Track the folder with Git from the status bar, or open a folder inside an existing repository as a collection, and push it for your team.",
+  ],
+};
+
+const verdict = {
+  eagle:
+    "you need scripts, tests, a Collection Runner with data files or flows, want a free app at work, want no web view on Linux, or want a coding agent inside the client.",
+  other:
+    "you want GraphQL, encrypted secrets, a plugin system, Insomnia or Bruno imports, an Intel Mac or ARM Windows build, and you do not need scripting.",
+};
+
+const faq = [
+  {
+    question: "Is Request Eagle free for commercial use?",
+    answer:
+      "Yes. Request Eagle is MIT or Apache 2.0, binaries included, with no license key and no trial. Yaak's source is MIT, but its prebuilt app needs an Individual license at $79 per user per year or a Business license at $149 for work.",
+  },
+  {
+    question: "Does Yaak support scripting and tests?",
+    answer:
+      "Not as of October 2026. Yaak chains requests with template functions and plugins, and request scripting is under consideration. Request Eagle runs pre-request and post-response JavaScript with the <code>pm</code> API and shows test results next to the response.",
+  },
+  {
+    question: "Can I import a Yaak workspace into Request Eagle?",
+    answer:
+      "Not directly: Yaak exports only its own format. Import the original Postman collection or OpenAPI document if there was one, or copy requests from Yaak as cURL and paste them into Request Eagle's import.",
+  },
+  {
+    question: "Are Request Eagle and Yaak both native apps?",
+    answer:
+      "Both have a Rust core. Yaak draws its interface in the system web view through Tauri. Request Eagle has no web view: it draws its window on the GPU with GPUI, the framework behind the Zed editor.",
+  },
+  {
+    question: "Do both have Vim mode?",
+    answer:
+      "Yes. Yaak offers Vim, VS Code and Emacs key maps in its editors. Request Eagle has Vim mode in the body and script editors, with rebindable shortcuts for everything else.",
+  },
+];
+---
+
+<Compare
+  slug="yaak"
+  name="Yaak"
+  title="Request Eagle vs Yaak: a native Rust API client against the Tauri client"
+  description="Both have a Rust core and no account. Request Eagle adds scripts, tests, a runner and free commercial use; Yaak draws in a web view and needs a license at work."
+  lede="Request Eagle and Yaak both have a Rust core and ask for no account. Request Eagle draws its window on the GPU without a web view, runs scripts and tests, replays collections with data files, and is free for any use. Yaak draws in the system web view, chains requests with template functions instead of scripts, and needs a paid license at work. Here is how they compare."
+  rows={rows}
+  eagleWins={eagleWins}
+  otherWins={otherWins}
+  switching={switching}
+  verdict={verdict}
+  faq={faq}
+/>
