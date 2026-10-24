@@ -1,0 +1,242 @@
+---
+import { Picture } from "astro:assets";
+
+import Page from "./Page.astro";
+
+import { checked, comparisons, eagleVersion } from "../comparisons.js";
+
+import "../styles/compare.css";
+
+import heroDark from "../assets/shots/hero-dark.webp";
+
+// One comparison page: Request Eagle against `name`. Cells and paragraphs may carry inline HTML.
+// `version` is the release of the other client the facts were checked against, `pricing` its price page.
+const {
+  slug,
+  name,
+  version,
+  pricing,
+  title,
+  description,
+  lede,
+  rows,
+  eagleWins,
+  otherWins,
+  switching,
+  verdict,
+  faq,
+} = Astro.props;
+
+const address = `https://requesteagle.tokarev.work/compare/${slug}/`;
+const others = comparisons.filter((comparison) => comparison.slug !== slug);
+
+// Search engines read the questions from this data, so the answers go in without their markup.
+const plain = (html) => html.replace(/<[^>]+>/g, "");
+
+const questions = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faq.map(({ question, answer }) => ({
+    "@type": "Question",
+    name: question,
+    acceptedAnswer: { "@type": "Answer", text: plain(answer) },
+  })),
+};
+
+const breadcrumbs = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Request Eagle", item: "https://requesteagle.tokarev.work/" },
+    { "@type": "ListItem", position: 2, name: "Compare", item: "https://requesteagle.tokarev.work/compare/" },
+    { "@type": "ListItem", position: 3, name: `Request Eagle vs ${name}`, item: address },
+  ],
+};
+
+const shotWide = "(max-width: 560px) calc(100vw - 36px), (max-width: 1296px) calc(100vw - 56px), 1240px";
+---
+
+<Page title={title} description={description} socialTitle={`Request Eagle vs ${name}`} socialDescription={description}>
+  <Fragment slot="head">
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(questions)}></script>
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(breadcrumbs)}></script>
+  </Fragment>
+
+  <main>
+
+    <div class="hero hero--short hero--compare">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <nav class="crumbs" aria-label="Breadcrumb">
+          <a href="/">Request Eagle</a>
+          <span aria-hidden="true">/</span>
+          <a href="/compare/">Compare</a>
+        </nav>
+
+        <h1 class="display">
+          <span class="line"><span>Request Eagle</span></span>
+          <span class="line"><span class="outline">vs {name}</span></span>
+        </h1>
+
+        <div class="hero__row">
+          <div>
+            <p class="lede" set:html={lede}></p>
+          </div>
+
+          <div class="actions">
+            <a class="button" href="/downloads/"><span>Download</span></a>
+            <a class="button button--outline" href="#switch"><span>Switch from {name}</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="glance" id="glance" aria-labelledby="glance-title">
+      <div class="wrap">
+        <h2 class="display" id="glance-title">At a glance</h2>
+
+        <table class="matrix matrix--stack">
+          <thead>
+            <tr>
+              <th scope="col"><span class="visually-hidden">Topic</span></th>
+              <th scope="col" class="matrix__eagle">Request Eagle</th>
+              <th scope="col">{name}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr>
+                <th scope="row">{row.label}</th>
+                <td class="matrix__eagle" data-col="Request Eagle" set:html={row.eagle}></td>
+                <td data-col={name} set:html={row.other}></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <p class="glance__note">Checked in {checked} against {name} {version}, its <a href={pricing} rel="noopener">pricing page</a> and documentation, with Request Eagle {eagleVersion}. Prices are in US dollars, per user, billed yearly where both options exist. Found something out of date? <a href="https://github.com/gregor-tokarev/request-eagle/issues">Tell us.</a></p>
+
+        <figure class="shot">
+          <Picture src={heroDark} formats={["avif"]} fallbackFormat="webp" widths={[640, 960, 1280, 1920, 2400]} sizes={shotWide} loading="lazy"
+                   alt={`Request Eagle, the native API client compared with ${name} on this page: collections, flows and history in the sidebar, a GET request and a formatted JSON response.`} />
+          <figcaption>Request Eagle on Linux, in the Ayu Dark theme.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="wins" aria-label="Strengths of each client">
+      <div class="wrap wins__grid">
+        <div class="wins__column wins__column--eagle">
+          <h2 class="display">Where Request Eagle is ahead</h2>
+
+          <dl>
+            {eagleWins.map((win) => (
+              <div>
+                <dt>{win.heading}</dt>
+                <dd set:html={win.body}></dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <div class="wins__column">
+          <h2 class="display">Where {name} is ahead</h2>
+
+          <dl>
+            {otherWins.map((win) => (
+              <div>
+                <dt>{win.heading}</dt>
+                <dd set:html={win.body}></dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="switch" id="switch" aria-labelledby="switch-title">
+      <div class="wrap">
+        <h2 class="display" id="switch-title">Switching from {name}</h2>
+
+        <p class="switch__intro" set:html={switching.intro}></p>
+
+        <ol class="steps">
+          {switching.steps.map((step) => (
+            <li set:html={step}></li>
+          ))}
+        </ol>
+      </div>
+    </section>
+
+    <section class="verdict" aria-labelledby="verdict-title">
+      <div class="wrap">
+        <h2 class="display" id="verdict-title">Which one should you use?</h2>
+
+        <div class="verdict__grid">
+          <article class="verdict__card verdict__card--eagle">
+            <h3>Pick Request Eagle if</h3>
+            <p set:html={verdict.eagle}></p>
+          </article>
+
+          <article class="verdict__card">
+            <h3>Pick {name} if</h3>
+            <p set:html={verdict.other}></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <h2 class="display" id="faq-title">Questions</h2>
+
+        <div class="faq__list">
+          {faq.map(({ question, answer }) => (
+            <details>
+              <summary><h3>{question}</h3></summary>
+              <p set:html={answer}></p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="more" aria-labelledby="more-title">
+      <div class="wrap">
+        <h2 id="more-title">Other comparisons</h2>
+
+        <ul class="more__list">
+          {others.map((other) => (
+            <li>
+              <a href={`/compare/${other.slug}/`}>
+                <strong>Request Eagle vs {other.name}</strong>
+                <span>{other.blurb}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="streaks streaks--cta" aria-hidden="true"><i></i><i></i><i></i></div>
+
+      <div class="wrap">
+        <h2 class="display">Try it<br>for yourself.</h2>
+
+        <p>Request Eagle is free and open source. It runs on Apple Silicon Macs, Windows and Linux. The steps above bring your {name} requests across.</p>
+
+        <div class="actions">
+          <a class="button" href="/downloads/"><span>Download</span></a>
+          <a class="button button--outline" href="https://github.com/gregor-tokarev/request-eagle"><span>GitHub</span></a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</Page>
+
+<script>
+  import "../scripts/compare.js";
+</script>

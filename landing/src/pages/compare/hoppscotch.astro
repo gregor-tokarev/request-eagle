@@ -1,0 +1,213 @@
+---
+import Compare from "../../layouts/Compare.astro";
+
+const rows = [
+  {
+    label: "Built with",
+    eagle: "Rust and GPUI, a desktop app drawn on the GPU. No web view.",
+    other: "A Vue web app. The desktop app wraps it in Tauri and is labelled alpha.",
+  },
+  {
+    label: "Runs on",
+    eagle: "Apple Silicon Macs, Windows and Linux on x64.",
+    other: "Any browser; desktop apps for macOS, Windows and Linux; a self-hosted edition in Docker.",
+  },
+  {
+    label: "Open source",
+    eagle: '<b class="yes">Yes</b>, MIT or Apache 2.0.',
+    other: "Yes, MIT, with an Enterprise edition.",
+  },
+  {
+    label: "Price",
+    eagle: '<b class="yes">Free</b>, for one person or a team.',
+    other: "Free. Business $6 and Enterprise $11 per user per month; self-hosted Enterprise $19.",
+  },
+  {
+    label: "Account",
+    eagle: '<b class="yes">None.</b>',
+    other: "None for the browser app with local storage. Sync, teams, documentation and mocks need one.",
+  },
+  {
+    label: "Requests stored as",
+    eagle: "TOML files in a folder you choose, such as your project's repository.",
+    other: "Browser storage, or Hoppscotch's cloud when signed in. Exported as JSON.",
+  },
+  {
+    label: "Git",
+    eagle: '<b class="yes">Built in.</b> Commit, pull, push and sync from the Git panel.',
+    other: '<span class="no">None.</span> Requested since 2020.',
+  },
+  {
+    label: "Localhost and CORS",
+    eagle: '<b class="yes">Sends outside the browser</b>, so CORS never applies.',
+    other: "In the browser, needs the extension, the Agent or a proxy when CORS blocks a request, as it does for most localhost servers.",
+  },
+  {
+    label: "Protocols",
+    eagle: "HTTP, gRPC, WebSocket and server-sent events.",
+    other: "HTTP, GraphQL, WebSocket, server-sent events, Socket.IO and MQTT. No gRPC.",
+  },
+  {
+    label: "Scripts and tests",
+    eagle: "JavaScript with the <code>pm</code> API and Postman's bundled libraries, pre-request and post-response, with tests.",
+    other: "JavaScript with the <code>pw</code> and <code>hopp</code> APIs, and partial <code>pm</code> compatibility.",
+  },
+  {
+    label: "Collection Runner",
+    eagle: '<b class="yes">Yes</b>, for HTTP requests, with iterations and CSV and JSON data files.',
+    other: "Yes, with CSV and JSON data files since 2026.8.",
+  },
+  {
+    label: "Flows",
+    eagle: "Blocks on a canvas with branches and loops.",
+    other: '<span class="no">No.</span>',
+  },
+  {
+    label: "CLI",
+    eagle: "A JSON command line for agents and scripts, without the app.",
+    other: "<code>hopp</code> runs collections in CI with JUnit reports; cloud collections need a token.",
+  },
+  {
+    label: "AI",
+    eagle: "Claude Code, Codex or OpenCode in a panel, with your own sign-in and models.",
+    other: "Modify with AI in the cloud and desktop apps; an MCP server behind a login.",
+  },
+  {
+    label: "Imports",
+    eagle: "Postman collections and environments, OpenAPI 3 and Swagger 2, cURL.",
+    other: "Hoppscotch, Postman, Insomnia, OpenAPI, HAR, cURL.",
+  },
+  {
+    label: "Client certificates",
+    eagle: '<b class="yes">Yes.</b>',
+    other: "In the desktop app or through the Agent only.",
+  },
+  {
+    label: "Mock servers and documentation",
+    eagle: '<span class="no">No.</span>',
+    other: "Yes, on the Business plan.",
+  },
+  {
+    label: "Vim mode",
+    eagle: '<b class="yes">Yes</b>, in the body and script editors.',
+    other: '<span class="no">No.</span>',
+  },
+  {
+    label: "Interface",
+    eagle: "Eleven theme families in light and dark, sizes from 12 to 24 px, rebindable shortcuts.",
+    other: "Light, dark and black with accent colours; fixed shortcuts.",
+  },
+];
+
+const eagleWins = [
+  {
+    heading: "A desktop app, not a web page",
+    body: "Request Eagle draws its window on the GPU and, in our benchmark against Postman, answered the first keystroke a third of a second after launch. Hoppscotch is a web app; its desktop app wraps the same pages in Tauri and still calls itself alpha.",
+  },
+  {
+    heading: "Localhost without an extension",
+    body: "A desktop app sends requests outside the browser, so CORS never applies: your local server, your staging host and third-party APIs answer directly. In the browser, Hoppscotch needs its extension, its Agent or a proxy whenever CORS blocks a request, which includes most localhost servers.",
+  },
+  {
+    heading: "Files in your repository, with Git built in",
+    body: "Each request is a TOML file you can keep in an <code>api</code> folder of your project and review in a pull request; the Git panel commits, pulls and pushes. Hoppscotch keeps collections in the browser or its cloud, and Git integration has been requested since 2020.",
+  },
+  {
+    heading: "gRPC",
+    body: "Request Eagle calls gRPC services with reflection or proto files, including streaming methods. Hoppscotch's gRPC request has been open since 2019.",
+  },
+  {
+    heading: "Your coding agent inside the client",
+    body: "Claude Code, Codex or OpenCode open in a panel next to your requests, read what you cite and fix or create saved requests. A CLI runs saved requests for agents without the app.",
+  },
+  {
+    heading: "Keyboard first",
+    body: "Vim mode in the body and script editors, a shortcut to send from anywhere in the request, and a rebindable shortcut for everything else. Hoppscotch's shortcuts are fixed.",
+  },
+];
+
+const otherWins = [
+  {
+    heading: "Nothing to install",
+    body: "Hoppscotch runs in any browser tab on any operating system, including machines where you cannot install software. Request Eagle is a desktop app for Apple Silicon Macs and x64 PCs.",
+  },
+  {
+    heading: "GraphQL, Socket.IO and MQTT",
+    body: "Hoppscotch has a GraphQL editor with subscriptions, plus Socket.IO and MQTT. Request Eagle sends a GraphQL query as a JSON body and has neither Socket.IO nor MQTT.",
+  },
+  {
+    heading: "Cloud teams, documentation and mock servers",
+    body: "Team workspaces, published documentation and mock servers come with the Business plan, and a self-hosted edition keeps all of it inside a company. Request Eagle shares through Git and hosts nothing.",
+  },
+  {
+    heading: "More imports",
+    body: "Hoppscotch imports Insomnia and HAR files as well as Postman, OpenAPI and cURL. Request Eagle imports Postman, OpenAPI and cURL.",
+  },
+  {
+    heading: "A large community",
+    body: "Hoppscotch has tens of thousands of GitHub stars, a company behind it since 2019 and monthly releases. Request Eagle is in early development.",
+  },
+];
+
+const switching = {
+  intro: "Hoppscotch exports a collection as an OpenAPI document, which Request Eagle reads, so the requests move in one step and the scripts by hand.",
+  steps: [
+    "In Hoppscotch, export the collection as <b>OpenAPI</b>. If the collection began as a Postman collection, import that original instead: it carries the scripts too.",
+    "In Request Eagle, run <b>Import collection</b> from the command palette or the sidebar and choose the file. The collection becomes a folder of TOML files that you can keep anywhere, including inside your project.",
+    "OpenAPI carries requests, not scripts. Paste pre-request scripts and tests again in the <code>pm</code> API, which Hoppscotch partly supports already; <code>pw.env.set</code> becomes <code>pm.environment.set</code> and <code>pw.test</code> becomes <code>pm.test</code>.",
+    "Put shared values in the collection's <code>environment.toml</code>, and secrets in a global environment, which lives in your home folder and stays out of the repository.",
+    "Track the folder with Git from the status bar, or open a folder inside an existing repository as a collection, and push it for your team.",
+  ],
+};
+
+const verdict = {
+  eagle:
+    "you want a desktop app that starts at once, reaches localhost without an extension, keeps collections as files next to your code, speaks gRPC, and has a coding agent inside.",
+  other:
+    "you want to send a request from any browser tab without installing anything, need GraphQL, Socket.IO or MQTT, or want cloud team workspaces, documentation and mock servers.",
+};
+
+const faq = [
+  {
+    question: "Is Request Eagle a desktop alternative to Hoppscotch?",
+    answer:
+      "Yes. Request Eagle is a native desktop app for Apple Silicon Macs, Windows and Linux, written in Rust. It is free and open source like Hoppscotch, but keeps collections as files on your disk instead of in the browser or a cloud, and it reaches localhost without an extension.",
+  },
+  {
+    question: "Can I import Hoppscotch collections into Request Eagle?",
+    answer:
+      "Yes, through Hoppscotch's OpenAPI export, which carries the requests. Scripts are pasted again in the <code>pm</code> API. A collection that began in Postman can be imported from its Postman export, scripts included.",
+  },
+  {
+    question: "Does Request Eagle run in the browser?",
+    answer:
+      "No. Request Eagle is a desktop app only. Hoppscotch runs in the browser, with desktop apps and a self-hosted edition as options.",
+  },
+  {
+    question: "Does Request Eagle need a browser extension for localhost?",
+    answer:
+      "No. As a desktop app it sends requests outside the browser, so CORS never applies, to localhost or anywhere else. Hoppscotch's browser app needs its extension, its Agent or a proxy whenever CORS blocks a request.",
+  },
+  {
+    question: "Are both open source?",
+    answer:
+      "Yes. Request Eagle is MIT or Apache 2.0, with one edition. Hoppscotch's community edition is MIT, and its Business and Enterprise plans add cloud teams, documentation, mocks and single sign-on.",
+  },
+];
+---
+
+<Compare
+  slug="hoppscotch"
+  name="Hoppscotch"
+  version="2026.9"
+  pricing="https://hoppscotch.com/pricing"
+  title="Request Eagle vs Hoppscotch: a native desktop Hoppscotch alternative"
+  description="A native Rust desktop client with requests as Git-friendly files, gRPC and no extension for localhost, compared with Hoppscotch's browser app and cloud."
+  lede="Request Eagle is a free, open-source desktop API client written in Rust. It keeps requests as files in your repository, reaches localhost directly and speaks gRPC. Hoppscotch is a free, open-source client that runs in the browser, with a cloud for teams, a desktop app in alpha and a self-hosted edition. Here is how they compare."
+  rows={rows}
+  eagleWins={eagleWins}
+  otherWins={otherWins}
+  switching={switching}
+  verdict={verdict}
+  faq={faq}
+/>
