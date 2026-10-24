@@ -148,6 +148,25 @@ fallback, and the page picks one by the `sizes` set in `index.astro`. Keep
 those in step with the layout when a capture's column changes width. The theme
 picker swaps its captures from the script, so they are WebP only.
 
+## README demo and social preview
+
+`.github/demo.gif` opens the README: the Linux build opening saved requests
+from a "Flight API" collection, sending them with Ctrl+Enter, showing a test
+result and finding a request through the command palette, against a local
+mock server. It is a 20-second screen recording scaled to 1000 px wide at
+12 frames per second, so it stays near 1 MB. Record it again when the
+interface changes: the app answers synthetic clicks and keys only in a
+session where its window has keyboard focus, so run it inside a headless
+`sway` with a virtual keyboard attached (`wtype`) and drive it with `xdotool`
+through sway's Xwayland, recording with `wf-recorder -D` and converting with
+ffmpeg's `palettegen` and `paletteuse` filters.
+
+`.github/social-preview.png` is the 1280 × 640 card that GitHub and the site
+show when a link is shared; `public/assets/social-preview.png` is the same
+file for the site's `og:image`. It is rendered from an HTML page in a headless
+browser with the site's fonts, the icon and the hero capture. GitHub takes it
+through the repository's **Settings > Social preview** page, which has no API.
+
 ## Loading speed
 
 The landing loads about 120 KB before it is usable, and both pages score 100
