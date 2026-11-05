@@ -74,6 +74,10 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     written
 }
 
+/// The most pairs of changed rows and parameters `match_originals` compares
+/// to align them by their order; past it they are matched by position.
+const MAX_ALIGNED: usize = 1 << 16;
+
 /// The parameter of the URL each row of `params` came from. The most
 /// unchanged rows are matched in their order, nearest to where they were; an
 /// edited row is matched to a parameter left between the same unchanged
@@ -83,44 +87,64 @@ fn match_originals(
     params: &[(String, String)],
 ) -> Vec<Option<usize>> {
     let unchanged = |i: usize, j: usize| current[i].1 == params[j];
-    // The most matches of the first `i` parameters and `j` rows, then the
-    // least distance they moved.
-    let mut best = vec![vec![(0, 0); params.len() + 1]; current.len() + 1];
-    for i in 1..=current.len() {
-        for j in 1..=params.len() {
-            let mut score = best[i - 1][j].max(best[i][j - 1]);
-            if unchanged(i - 1, j - 1) {
-                let (matches, moved) = best[i - 1][j - 1];
-                score = score.max((matches + 1, moved - i.abs_diff(j) as isize));
+    let (n, m) = (current.len(), params.len());
+    // An edit changes a few rows, so those before and after it are matched
+    // as they are and only the rest are aligned.
+    let prefix = (0..n.min(m)).take_while(|&k| unchanged(k, k)).count();
+    let suffix = (0..n.min(m) - prefix)
+        .take_while(|&k| unchanged(n - 1 - k, m - 1 - k))
+        .count();
+    let (rows, cols) = (n - prefix - suffix, m - prefix - suffix);
+
+    // Unchanged rows matched in the middle, by their offset into it, then the
+    // end of the middle.
+    let mut anchors = Vec::new();
+    if rows * cols <= MAX_ALIGNED {
+        let pair = |i: usize, j: usize| unchanged(prefix + i, prefix + j);
+        // The most matches of the first `i` parameters and `j` rows, then the
+        // least distance they moved.
+        let mut best = vec![vec![(0, 0); cols + 1]; rows + 1];
+        let step = |i: usize, j: usize, best: &[Vec<(usize, isize)>]| {
+            let (matches, moved) = best[i - 1][j - 1];
+            (matches + 1, moved - i.abs_diff(j) as isize)
+        };
+        for i in 1..=rows {
+            for j in 1..=cols {
+                let mut score = best[i - 1][j].max(best[i][j - 1]);
+                if pair(i - 1, j - 1) {
+                    score = score.max(step(i, j, &best));
+                }
+                best[i][j] = score;
             }
-            best[i][j] = score;
         }
-    }
 
-    let mut anchors = vec![(current.len(), params.len())];
-    let (mut i, mut j) = (current.len(), params.len());
-    while i > 0 && j > 0 {
-        let (matches, moved) = best[i - 1][j - 1];
-        if unchanged(i - 1, j - 1) && best[i][j] == (matches + 1, moved - i.abs_diff(j) as isize) {
-            i -= 1;
-            j -= 1;
-            anchors.push((i, j));
-        } else if best[i][j] == best[i - 1][j] {
-            i -= 1;
-        } else {
-            j -= 1;
+        let (mut i, mut j) = (rows, cols);
+        while i > 0 && j > 0 {
+            if pair(i - 1, j - 1) && best[i][j] == step(i, j, &best) {
+                i -= 1;
+                j -= 1;
+                anchors.push((i, j));
+            } else if best[i][j] == best[i - 1][j] {
+                i -= 1;
+            } else {
+                j -= 1;
+            }
         }
+        anchors.reverse();
     }
-    anchors.reverse();
+    anchors.push((rows, cols));
 
-    let mut originals = vec![None; params.len()];
+    let mut originals: Vec<_> = (0..m).map(|j| (j < prefix).then_some(j)).collect();
+    for k in 0..suffix {
+        originals[m - 1 - k] = Some(n - 1 - k);
+    }
     let (mut i, mut j) = (0, 0);
     for (anchor_i, anchor_j) in anchors {
         for (original, row) in (i..anchor_i).zip(j..anchor_j) {
-            originals[row] = Some(original);
+            originals[prefix + row] = Some(prefix + original);
         }
-        if anchor_j < params.len() {
-            originals[anchor_j] = Some(anchor_i);
+        if anchor_j < cols {
+            originals[prefix + anchor_j] = Some(prefix + anchor_i);
         }
         (i, j) = (anchor_i + 1, anchor_j + 1);
     }
