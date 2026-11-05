@@ -50,10 +50,14 @@ pub(super) enum Connection {
         /// The request as it was when it started connecting. History keeps
         /// it once it connects.
         sent: RequestSent,
+        /// The settings the connection was opened with, which later edits
+        /// do not change.
+        opened: WebSocketRequest,
         task: Task<()>,
     },
     Connected {
         socket: WebSocketConnection,
+        opened: WebSocketRequest,
         task: Task<()>,
         /// The id history keeps the connection under, which its end refers to.
         history: Uuid,
@@ -314,6 +318,22 @@ impl WebSocketDraft {
         self.log.update(cx, |log, cx| log.prepare(window, cx));
     }
 
+    /// Whether the URL, params, authorization, headers or settings were
+    /// edited since the open connection was made. Messages still go to the
+    /// connection, so it has to reconnect to use them.
+    pub(super) fn needs_reconnect(&self) -> bool {
+        let Connection::Connected { opened, .. } = &self.connection else {
+            return false;
+        };
+        let request = &self.request;
+
+        opened.url != request.url
+            || !Field::enabled(&opened.query).eq(Field::enabled(&request.query))
+            || !Field::enabled(&opened.headers).eq(Field::enabled(&request.headers))
+            || opened.auth != request.auth
+            || opened.settings != request.settings
+    }
+
     /// Connect, or send the composed message once connected.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.connection {
@@ -374,7 +394,12 @@ impl WebSocketDraft {
             }
         });
 
-        self.connection = Connection::Connecting { socket, sent, task };
+        self.connection = Connection::Connecting {
+            socket,
+            sent,
+            opened: self.request.clone(),
+            task,
+        };
         self.notify_controls(cx);
     }
 
@@ -409,11 +434,16 @@ impl WebSocketDraft {
                 WebSocketEventKind::Connected(_)
                     if matches!(self.connection, Connection::Connecting { .. }) =>
                 {
-                    if let Connection::Connecting { socket, sent, task } =
-                        std::mem::replace(&mut self.connection, Connection::Disconnected)
+                    if let Connection::Connecting {
+                        socket,
+                        sent,
+                        opened,
+                        task,
+                    } = std::mem::replace(&mut self.connection, Connection::Disconnected)
                     {
                         self.connection = Connection::Connected {
                             socket,
+                            opened,
                             task,
                             history: sent.id,
                         };

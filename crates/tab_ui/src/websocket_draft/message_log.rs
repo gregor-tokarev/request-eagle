@@ -9,6 +9,7 @@ use gpui_kit::component::{
     menu::{DropdownMenu, PopupMenuItem},
     resizable::{ResizableState, resizable_panel, v_resizable},
     scroll::Scrollbar,
+    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -157,6 +158,13 @@ impl MessageLog {
             .map_or(ConnectionState::Disconnected, |draft| {
                 draft.read(cx).connection.state()
             })
+    }
+
+    /// Whether the draft's connection settings were edited since it connected.
+    fn needs_reconnect(&self, cx: &App) -> bool {
+        self.draft
+            .upgrade()
+            .is_some_and(|draft| draft.read(cx).needs_reconnect())
     }
 
     /// The entry shown below the list.
@@ -429,12 +437,20 @@ impl MessageLog {
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let (label, color) = match self.connection(cx) {
+        let connection = self.connection(cx);
+        let (label, color) = match connection {
             ConnectionState::Disconnected => ("Disconnected", cx.theme().muted_foreground),
             ConnectionState::Connecting => ("Connecting…", cx.theme().info),
             ConnectionState::Connected => ("Connected", cx.theme().success),
             ConnectionState::Closing => ("Disconnecting…", cx.theme().warning),
         };
+        // Messages go to this endpoint, whatever the URL field says now.
+        let endpoint = matches!(
+            connection,
+            ConnectionState::Connected | ConnectionState::Closing
+        )
+        .then(|| self.url.clone());
+        let needs_reconnect = self.needs_reconnect(cx);
         let filter = self.filter;
         let view = cx.entity().downgrade();
 
@@ -457,6 +473,50 @@ impl MessageLog {
                     .child(div().size_2().rounded(cx.theme().radius_full()).bg(color))
                     .child(label),
             )
+            .when_some(endpoint, |row, endpoint| {
+                let tooltip = endpoint.clone();
+
+                row.child(
+                    div()
+                        .id("websocket-endpoint")
+                        .debug_selector(|| "websocket-endpoint".into())
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(cx.theme().muted_foreground)
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(format!("Messages are sent to {tooltip}"))
+                                .build(window, cx)
+                        })
+                        .child(endpoint),
+                )
+            })
+            .when(needs_reconnect, |row| {
+                row.child(
+                    h_flex()
+                        .id("websocket-reconnect-needed")
+                        .debug_selector(|| "websocket-reconnect-needed".into())
+                        .flex_none()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .tooltip(|window, cx| {
+                            Tooltip::new(
+                                "The connection still uses the settings it was opened with. \
+                                 Disconnect and connect again to use the edited ones.",
+                            )
+                            .build(window, cx)
+                        })
+                        .child(
+                            div()
+                                .size(rems(0.375))
+                                .rounded_full()
+                                .bg(cx.theme().warning),
+                        )
+                        .child("Reconnect to apply changes"),
+                )
+            })
             .when(self.dropped > 0, |row| {
                 row.child(
                     div()
