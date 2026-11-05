@@ -480,7 +480,9 @@ impl MessageLog {
                     div()
                         .id("websocket-endpoint")
                         .debug_selector(|| "websocket-endpoint".into())
-                        .min_w_0()
+                        // Narrow windows shorten the endpoint but keep it
+                        // readable; the reconnect hint gives way first.
+                        .min_w(rems(8.))
                         .truncate()
                         .text_xs()
                         .font_family(cx.theme().mono_font_family.clone())
@@ -497,7 +499,7 @@ impl MessageLog {
                     h_flex()
                         .id("websocket-reconnect-needed")
                         .debug_selector(|| "websocket-reconnect-needed".into())
-                        .flex_none()
+                        .min_w_0()
                         .gap_1()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
@@ -510,11 +512,17 @@ impl MessageLog {
                         })
                         .child(
                             div()
+                                .flex_none()
                                 .size(rems(0.375))
                                 .rounded_full()
                                 .bg(cx.theme().warning),
                         )
-                        .child("Reconnect to apply changes"),
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .child("Reconnect to apply changes"),
+                        ),
                 )
             })
             .when(self.dropped > 0, |row| {

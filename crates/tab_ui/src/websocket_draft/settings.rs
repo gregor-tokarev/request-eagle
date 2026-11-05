@@ -24,6 +24,7 @@ impl WebSocketDraft {
             cx.subscribe(&timeout, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.request.settings.timeout_ms = timeout_value(input.read(cx));
+                    this.refresh_reconnect(cx);
                     cx.notify();
                 }
             }),
@@ -66,6 +67,7 @@ impl WebSocketDraft {
                     preferences(cx).ssl_certificate_verification,
                     cx.listener(|this, value: &Option<bool>, _, cx| {
                         this.request.settings.verify_certificates = *value;
+                        this.refresh_reconnect(cx);
                         cx.notify();
                     }),
                 ),

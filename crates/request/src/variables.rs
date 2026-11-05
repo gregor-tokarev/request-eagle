@@ -164,6 +164,27 @@ impl RequestVariables {
         let texts = std::iter::once(request.url.as_str())
             .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]))
             .chain(auth.iter().map(String::as_str));
+
+        self.target_key(texts)
+    }
+
+    /// The URL, parameters, headers and authorization a WebSocket connects
+    /// with, as a key that changes when an edit or a variable changes where
+    /// or how it connects. Generated variables such as `{{$guid}}` stay as
+    /// written, since they differ on every use.
+    pub fn websocket_target_key(&self, request: &WebSocketRequest) -> Option<Vec<String>> {
+        let auth = self.effective_auth(&request.auth).texts();
+        let texts = std::iter::once(request.url.as_str())
+            .chain(Field::enabled(&request.query).flat_map(|(key, value)| [key, value]))
+            .chain(Field::enabled(&request.headers).flat_map(|(key, value)| [key, value]))
+            .chain(auth.iter().map(String::as_str));
+
+        self.target_key(texts)
+    }
+
+    /// `texts` with their variables filled in, keeping generated ones that
+    /// no script set as written. None when one cannot be resolved.
+    fn target_key<'a>(&self, texts: impl Iterator<Item = &'a str> + Clone) -> Option<Vec<String>> {
         let mut resolver = self.resolver();
 
         for text in texts.clone() {
