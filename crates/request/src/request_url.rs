@@ -74,37 +74,55 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     written
 }
 
-/// The parameter of the URL each row of `params` came from. Unchanged rows
-/// are matched first where they were, then wherever they moved; an edited
-/// row is matched to the one left at its position, so an edit of its key or
-/// value keeps the other.
+/// The parameter of the URL each row of `params` came from. The most
+/// unchanged rows are matched in their order, nearest to where they were; an
+/// edited row is matched to a parameter left between the same unchanged
+/// ones, so an edit of its key or value keeps the other.
 fn match_originals(
     current: &[(&str, (String, String))],
     params: &[(String, String)],
 ) -> Vec<Option<usize>> {
-    let mut used = vec![false; current.len()];
-    let mut originals = vec![None; params.len()];
-    let unchanged = |index: usize, param: &(String, String)| current[index].1 == *param;
+    let unchanged = |i: usize, j: usize| current[i].1 == params[j];
+    // The most matches of the first `i` parameters and `j` rows, then the
+    // least distance they moved.
+    let mut best = vec![vec![(0, 0); params.len() + 1]; current.len() + 1];
+    for i in 1..=current.len() {
+        for j in 1..=params.len() {
+            let mut score = best[i - 1][j].max(best[i][j - 1]);
+            if unchanged(i - 1, j - 1) {
+                let (matches, moved) = best[i - 1][j - 1];
+                score = score.max((matches + 1, moved - i.abs_diff(j) as isize));
+            }
+            best[i][j] = score;
+        }
+    }
 
-    for (index, param) in params.iter().enumerate() {
-        if index < current.len() && unchanged(index, param) {
-            used[index] = true;
-            originals[index] = Some(index);
+    let mut anchors = vec![(current.len(), params.len())];
+    let (mut i, mut j) = (current.len(), params.len());
+    while i > 0 && j > 0 {
+        let (matches, moved) = best[i - 1][j - 1];
+        if unchanged(i - 1, j - 1) && best[i][j] == (matches + 1, moved - i.abs_diff(j) as isize) {
+            i -= 1;
+            j -= 1;
+            anchors.push((i, j));
+        } else if best[i][j] == best[i - 1][j] {
+            i -= 1;
+        } else {
+            j -= 1;
         }
     }
-    for (index, param) in params.iter().enumerate() {
-        if originals[index].is_none()
-            && let Some(original) = (0..current.len()).find(|&i| !used[i] && unchanged(i, param))
-        {
-            used[original] = true;
-            originals[index] = Some(original);
+    anchors.reverse();
+
+    let mut originals = vec![None; params.len()];
+    let (mut i, mut j) = (0, 0);
+    for (anchor_i, anchor_j) in anchors {
+        for (original, row) in (i..anchor_i).zip(j..anchor_j) {
+            originals[row] = Some(original);
         }
-    }
-    for (index, original) in originals.iter_mut().enumerate() {
-        if original.is_none() && index < current.len() && !used[index] {
-            used[index] = true;
-            *original = Some(index);
+        if anchor_j < params.len() {
+            originals[anchor_j] = Some(anchor_i);
         }
+        (i, j) = (anchor_i + 1, anchor_j + 1);
     }
 
     originals
