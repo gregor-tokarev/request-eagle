@@ -31,7 +31,7 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
         .filter(|pair| !pair.is_empty())
         .map(|pair| (pair, decode_pair(pair)))
         .collect();
-    let mut used = vec![false; current.len()];
+    let originals = match_originals(&current, params);
     let start = url[..query.start]
         .strip_suffix('?')
         .map_or(query.start, str::len);
@@ -40,12 +40,7 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     for (index, (key, value)) in params.iter().enumerate() {
         written.push(if index == 0 { '?' } else { '&' });
 
-        // The same parameter wherever it moved, or else the one this row
-        // held, so that an edit of its key or value keeps the other.
-        let original = (0..current.len())
-            .find(|&i| !used[i] && current[i].1.0 == *key && current[i].1.1 == *value)
-            .or_else(|| (index < current.len() && !used[index]).then_some(index));
-        let Some(original) = original else {
+        let Some(original) = originals[index] else {
             written.push_str(&encode(key));
             if !value.is_empty() {
                 written.push('=');
@@ -53,7 +48,6 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
             }
             continue;
         };
-        used[original] = true;
 
         let (pair, (old_key, old_value)) = &current[original];
         if old_key == key && old_value == value {
@@ -78,6 +72,42 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
 
     written.push_str(&url[query.end..]);
     written
+}
+
+/// The parameter of the URL each row of `params` came from. Unchanged rows
+/// are matched first where they were, then wherever they moved; an edited
+/// row is matched to the one left at its position, so an edit of its key or
+/// value keeps the other.
+fn match_originals(
+    current: &[(&str, (String, String))],
+    params: &[(String, String)],
+) -> Vec<Option<usize>> {
+    let mut used = vec![false; current.len()];
+    let mut originals = vec![None; params.len()];
+    let unchanged = |index: usize, param: &(String, String)| current[index].1 == *param;
+
+    for (index, param) in params.iter().enumerate() {
+        if index < current.len() && unchanged(index, param) {
+            used[index] = true;
+            originals[index] = Some(index);
+        }
+    }
+    for (index, param) in params.iter().enumerate() {
+        if originals[index].is_none()
+            && let Some(original) = (0..current.len()).find(|&i| !used[i] && unchanged(i, param))
+        {
+            used[original] = true;
+            originals[index] = Some(original);
+        }
+    }
+    for (index, original) in originals.iter_mut().enumerate() {
+        if original.is_none() && index < current.len() && !used[index] {
+            used[index] = true;
+            *original = Some(index);
+        }
+    }
+
+    originals
 }
 
 /// A `key=value` pair of the query, decoded. Without `=` the value is empty.
