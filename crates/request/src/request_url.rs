@@ -20,14 +20,18 @@ pub fn query_params(url: &str) -> Vec<(String, String)> {
 /// The URL with its query replaced by `params`, as `query_params` reads them.
 /// The characters that would change their meaning are percent-encoded, so the
 /// server reads what was entered; `{{variables}}` stay as written until they
-/// resolve. A parameter the URL already holds at the same position keeps its
-/// spelling. A new parameter with an empty value is written without `=`.
+/// resolve. A key or value that reads the same as in the parameter the URL
+/// held for it keeps its spelling, so escapes the table cannot show, such as
+/// encoded braces or bytes that are not UTF-8, are sent unchanged. A new
+/// parameter with an empty value is written without `=`.
 pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     let query = query_range(url);
     let current: Vec<_> = url[query.clone()]
         .split('&')
         .filter(|pair| !pair.is_empty())
+        .map(|pair| (pair, decode_pair(pair)))
         .collect();
+    let mut used = vec![false; current.len()];
     let start = url[..query.start]
         .strip_suffix('?')
         .map_or(query.start, str::len);
@@ -36,15 +40,37 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     for (index, (key, value)) in params.iter().enumerate() {
         written.push(if index == 0 { '?' } else { '&' });
 
-        if let Some(pair) = current.get(index)
-            && decode_pair(pair) == (key.clone(), value.clone())
-        {
+        // The same parameter wherever it moved, or else the one this row
+        // held, so that an edit of its key or value keeps the other.
+        let original = (0..current.len())
+            .find(|&i| !used[i] && current[i].1.0 == *key && current[i].1.1 == *value)
+            .or_else(|| (index < current.len() && !used[index]).then_some(index));
+        let Some(original) = original else {
+            written.push_str(&encode(key));
+            if !value.is_empty() {
+                written.push('=');
+                written.push_str(&encode(value));
+            }
+            continue;
+        };
+        used[original] = true;
+
+        let (pair, (old_key, old_value)) = &current[original];
+        if old_key == key && old_value == value {
             written.push_str(pair);
             continue;
         }
 
-        written.push_str(&encode(key));
-        if !value.is_empty() {
+        let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        if old_key == key {
+            written.push_str(raw_key);
+        } else {
+            written.push_str(&encode(key));
+        }
+        if old_value == value && !value.is_empty() {
+            written.push('=');
+            written.push_str(raw_value);
+        } else if !value.is_empty() {
             written.push('=');
             written.push_str(&encode(value));
         }
@@ -171,11 +197,19 @@ fn escape(text: &str, reserved: &[char]) -> String {
 /// for a space.
 const QUERY_RESERVED: &AsciiSet = &CONTROLS.add(b'%').add(b'&').add(b'=').add(b'#').add(b'+');
 
-/// Percent-encode a query key or value around its `{{variables}}`.
+/// Percent-encode a query key or value around its `{{variables}}`. Spaces at
+/// its ends are encoded too, since sending trims the URL.
 fn encode(text: &str) -> String {
-    around_variables(text, |part| {
+    let inner = text.trim_matches(' ');
+    let leading = text.len() - text.trim_start_matches(' ').len();
+    let trailing = text.len() - leading - inner.len();
+
+    let mut encoded = "%20".repeat(leading);
+    encoded.push_str(&around_variables(inner, |part| {
         utf8_percent_encode(part, QUERY_RESERVED).to_string()
-    })
+    }));
+    encoded.push_str(&"%20".repeat(trailing));
+    encoded
 }
 
 /// Decode a query key or value as a server reads it, around its
