@@ -18,7 +18,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use preferences::Preferences;
 use request::{
     Auth, Field, RequestVariables, WebSocketConnection, WebSocketEvent, WebSocketEventKind,
-    WebSocketRequest, WebSocketSettings,
+    WebSocketRequest,
 };
 use request_history::Outcome;
 use uuid::Uuid;
@@ -81,23 +81,38 @@ impl Connection {
     }
 }
 
-/// Where and how a connection is made, with variables filled in as
-/// connecting fills them. A connection keeps the one it was opened with.
-#[derive(Clone, PartialEq)]
+/// Where and how a connection is made. A connection keeps the one it was
+/// opened with.
 pub(super) struct ConnectionTarget {
-    /// The URL, parameters, headers and authorization with their values.
-    key: Option<Vec<String>>,
-    /// The authorization's kind and fields as written.
-    auth: Auth,
-    settings: WebSocketSettings,
+    /// The request as connecting resolves it, or None when a variable it
+    /// uses cannot be resolved.
+    resolved: Option<WebSocketRequest>,
+    /// The enabled fields and the authorization sent, as written.
+    written: WebSocketRequest,
 }
 
 impl ConnectionTarget {
     fn new(request: &WebSocketRequest, variables: &RequestVariables) -> Self {
-        Self {
-            key: variables.websocket_target_key(request),
+        let mut written = WebSocketRequest {
+            message: String::new(),
             auth: variables.effective_auth(&request.auth),
-            settings: request.settings.clone(),
+            ..request.clone()
+        };
+        written.query.retain(|field| field.enabled);
+        written.headers.retain(|field| field.enabled);
+
+        Self {
+            resolved: variables.websocket_target(request),
+            written,
+        }
+    }
+
+    /// Whether connecting to `other` would differ. A target that cannot be
+    /// resolved is compared as written.
+    fn differs(&self, other: &Self) -> bool {
+        match (&self.resolved, &other.resolved) {
+            (Some(resolved), Some(other)) => resolved != other,
+            _ => self.written != other.written,
         }
     }
 }
@@ -131,6 +146,9 @@ pub struct WebSocketDraft {
     /// Whether the open connection was made with other settings or
     /// variable values than connecting now would use.
     reconnect_needed: bool,
+    /// The variables that comparison resolves with and the session revision
+    /// they were read at, so edits do not read the environment files again.
+    reconnect_variables: Option<(u64, RequestVariables)>,
     url_completion: Option<Entity<VariableInput>>,
     /// Whether Connect found no URL to connect to. The URL says so until it
     /// is edited.
@@ -189,6 +207,7 @@ impl WebSocketDraft {
         // Variables and the collection's authorization decide what
         // connecting would use, as edits to the request do.
         subscriptions.push(cx.observe(&variables, |this: &mut Self, _, cx| {
+            this.reconnect_variables = None;
             this.refresh_reconnect(cx)
         }));
 
@@ -214,6 +233,7 @@ impl WebSocketDraft {
             connection: Connection::Disconnected,
             url: None,
             reconnect_needed: false,
+            reconnect_variables: None,
             url_completion: None,
             url_missing: false,
             params: None,
@@ -361,13 +381,20 @@ impl WebSocketDraft {
     /// Compare what connecting now would use with what the open connection
     /// was made with.
     pub(super) fn refresh_reconnect(&mut self, cx: &mut Context<Self>) {
-        let needed = match &self.connection {
-            Connection::Connected { opened, .. } => {
-                let variables = self.variables.read(cx).request_variables(cx);
-                *opened != ConnectionTarget::new(&self.request, &variables)
-            }
-            _ => false,
+        let Connection::Connected { opened, .. } = &self.connection else {
+            self.reconnect_variables = None;
+            self.reconnect_needed = false;
+            return;
         };
+
+        let scope = self.variables.read(cx);
+        let revision = scope.session.revision();
+        let variables = match self.reconnect_variables.take() {
+            Some((read_at, variables)) if read_at == revision => variables,
+            _ => scope.request_variables(cx),
+        };
+        let needed = opened.differs(&ConnectionTarget::new(&self.request, &variables));
+        self.reconnect_variables = Some((revision, variables));
 
         if needed != self.reconnect_needed {
             self.reconnect_needed = needed;
@@ -407,6 +434,7 @@ impl WebSocketDraft {
             .unwrap_or_default();
         // History keeps the authorization that was sent, as for HTTP.
         let opened = ConnectionTarget::new(&self.request, &variables);
+        self.reconnect_variables = None;
         let recorded = WebSocketRequest {
             auth: variables.effective_auth(&self.request.auth),
             ..self.request.clone()

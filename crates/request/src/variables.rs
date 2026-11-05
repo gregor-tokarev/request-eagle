@@ -164,30 +164,38 @@ impl RequestVariables {
         let texts = std::iter::once(request.url.as_str())
             .chain(Field::enabled(&request.metadata).flat_map(|(key, value)| [key, value]))
             .chain(auth.iter().map(String::as_str));
+        let mut resolver = self.target_resolver(texts.clone());
 
-        self.target_key(texts)
+        texts.map(|text| resolver.resolve(text).ok()).collect()
     }
 
-    /// The URL, parameters, headers and authorization a WebSocket connects
-    /// with, as a key that changes when an edit or a variable changes where
-    /// or how it connects. Generated variables such as `{{$guid}}` stay as
-    /// written, since they differ on every use.
-    pub fn websocket_target_key(&self, request: &WebSocketRequest) -> Option<Vec<String>> {
+    /// The URL, parameters, headers, authorization and settings a WebSocket
+    /// connects with, resolved as connecting resolves them, so it changes
+    /// when an edit or a variable changes where or how it connects. The
+    /// message is left out. Generated variables such as `{{$guid}}` stay as
+    /// written, since they differ on every use. None when a variable that
+    /// connecting uses cannot be resolved.
+    pub fn websocket_target(&self, request: &WebSocketRequest) -> Option<WebSocketRequest> {
         let auth = self.effective_auth(&request.auth).texts();
         let texts = std::iter::once(request.url.as_str())
             .chain(Field::enabled(&request.query).flat_map(|(key, value)| [key, value]))
             .chain(Field::enabled(&request.headers).flat_map(|(key, value)| [key, value]))
             .chain(auth.iter().map(String::as_str));
+        let mut resolver = self.target_resolver(texts);
+        let request = WebSocketRequest {
+            message: String::new(),
+            ..request.clone()
+        };
 
-        self.target_key(texts)
+        self.resolve_websocket_with(&request, &mut resolver).ok()
     }
 
-    /// `texts` with their variables filled in, keeping generated ones that
-    /// no script set as written. None when one cannot be resolved.
-    fn target_key<'a>(&self, texts: impl Iterator<Item = &'a str> + Clone) -> Option<Vec<String>> {
+    /// A resolver that keeps the generated variables of `texts` that no
+    /// script set as written.
+    fn target_resolver<'a>(&self, texts: impl Iterator<Item = &'a str>) -> VariableResolver<'_> {
         let mut resolver = self.resolver();
 
-        for text in texts.clone() {
+        for text in texts {
             for reference in text.split("{{").skip(1) {
                 if let Some((name, _)) = reference.split_once("}}")
                     && name.trim().starts_with('$')
@@ -199,7 +207,7 @@ impl RequestVariables {
             }
         }
 
-        texts.map(|text| resolver.resolve(text).ok()).collect()
+        resolver
     }
 
     /// Resolve the URL, metadata and, with `message`, the message of a call
@@ -279,30 +287,36 @@ impl RequestVariables {
         request: &WebSocketRequest,
     ) -> Result<WebSocketRequest, String> {
         let mut resolver = VariableResolver::new(&self.values);
+
+        self.resolve_websocket_with(request, &mut resolver)
+            .map_err(|error| describe_error(error, self.environment_error.as_deref()))
+    }
+
+    fn resolve_websocket_with(
+        &self,
+        request: &WebSocketRequest,
+        resolver: &mut VariableResolver<'_>,
+    ) -> Result<WebSocketRequest, VariableError> {
         let mut request = request.clone();
         request.headers.retain(|field| field.enabled);
         request.query.retain(|field| field.enabled);
         request.auth = self.effective_auth(&request.auth);
-        let mut resolve = || {
-            request.url = resolve_url(&request.url, &mut resolver)?;
+        request.url = resolve_url(&request.url, resolver)?;
 
-            for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
-                field.key = resolver.resolve(&field.key)?;
-                field.value = resolver.resolve(&field.value)?;
-            }
+        for field in request.headers.iter_mut().chain(request.query.iter_mut()) {
+            field.key = resolver.resolve(&field.key)?;
+            field.value = resolver.resolve(&field.value)?;
+        }
 
-            if request
-                .auth
-                .overridden_by(&request.url, &request.query, &request.headers)
-            {
-                request.auth = Auth::None;
-            }
-            request.auth.resolve_with(|text| resolver.resolve(text))
-        };
+        if request
+            .auth
+            .overridden_by(&request.url, &request.query, &request.headers)
+        {
+            request.auth = Auth::None;
+        }
+        request.auth.resolve_with(|text| resolver.resolve(text))?;
 
-        resolve()
-            .map(|()| request)
-            .map_err(|error| describe_error(error, self.environment_error.as_deref()))
+        Ok(request)
     }
 
     /// Resolve one outgoing WebSocket or gRPC stream message. Other generated
