@@ -1,30 +1,41 @@
 //! The parts of an HTTP request URL as written, before its `{{variables}}`
 //! resolve: its query parameters and `:name` path variables.
 
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use url::form_urlencoded;
 
-/// The URL's query parameters as written, without decoding them. A parameter
+/// The URL's query parameters as the server reads them: `+` is a space and
+/// percent escapes are decoded. `{{variables}}` stay as written. A parameter
 /// without `=` has an empty value.
 pub fn query_params(url: &str) -> Vec<(String, String)> {
-    let query = &url[query_range(url)];
-
-    query
+    url[query_range(url)]
         .split('&')
         .filter(|pair| !pair.is_empty())
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (key.to_owned(), value.to_owned())
-        })
+        .map(decode_pair)
         .collect()
 }
 
-/// The URL with its query replaced by `params`. Keys and values are written as
-/// they are, except for the characters that would end them. A parameter with
-/// an empty value is written without `=`.
+/// The URL with its query replaced by `params`, as `query_params` reads them.
+/// The characters that would change their meaning are percent-encoded, so the
+/// server reads what was entered; `{{variables}}` stay as written until they
+/// resolve. A key or value that reads the same as in the parameter the URL
+/// held for it keeps its spelling, so escapes the table cannot show, such as
+/// encoded braces or bytes that are not UTF-8, are sent unchanged. A new
+/// parameter with an empty value is written without `=`.
 pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     let query = query_range(url);
+    let current: Vec<_> = url[query.clone()]
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| (pair, decode_pair(pair)))
+        // The Params table leaves out a parameter without a key or value, so
+        // no row comes from one.
+        .filter(|(_, (key, value))| !key.is_empty() || !value.is_empty())
+        .collect();
+    let originals = match_originals(&current, params);
     let start = url[..query.start]
         .strip_suffix('?')
         .map_or(query.start, str::len);
@@ -32,16 +43,142 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
 
     for (index, (key, value)) in params.iter().enumerate() {
         written.push(if index == 0 { '?' } else { '&' });
-        written.push_str(&escape(key, &['&', '=', '#']));
 
-        if !value.is_empty() {
+        let Some(original) = originals[index] else {
+            written.push_str(&encode(key));
+            if !value.is_empty() {
+                written.push('=');
+                written.push_str(&encode(value));
+            }
+            continue;
+        };
+
+        let (pair, (old_key, old_value)) = &current[original];
+        if old_key == key && old_value == value {
+            written.push_str(pair);
+            continue;
+        }
+
+        let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        if old_key == key {
+            written.push_str(raw_key);
+        } else {
+            written.push_str(&encode(key));
+        }
+        if old_value == value && !value.is_empty() {
             written.push('=');
-            written.push_str(&escape(value, &['&', '#']));
+            written.push_str(raw_value);
+        } else if !value.is_empty() {
+            written.push('=');
+            written.push_str(&encode(value));
         }
     }
 
     written.push_str(&url[query.end..]);
     written
+}
+
+/// The most pairs of changed rows and parameters `match_originals` compares
+/// to align them by their order; past it each unchanged row is matched to the
+/// next parameter that reads the same.
+const MAX_ALIGNED: usize = 1 << 16;
+
+/// The parameter of the URL each row of `params` came from. The most
+/// unchanged rows are matched in their order, nearest to where they were; an
+/// edited row is matched to a parameter left between the same unchanged
+/// ones, so an edit of its key or value keeps the other.
+fn match_originals(
+    current: &[(&str, (String, String))],
+    params: &[(String, String)],
+) -> Vec<Option<usize>> {
+    let unchanged = |i: usize, j: usize| current[i].1 == params[j];
+    let (n, m) = (current.len(), params.len());
+    // An edit changes a few rows, so those before and after it are matched
+    // as they are and only the rest are aligned.
+    let prefix = (0..n.min(m)).take_while(|&k| unchanged(k, k)).count();
+    let suffix = (0..n.min(m) - prefix)
+        .take_while(|&k| unchanged(n - 1 - k, m - 1 - k))
+        .count();
+    let (rows, cols) = (n - prefix - suffix, m - prefix - suffix);
+
+    // Unchanged rows matched in the middle, by their offset into it, then the
+    // end of the middle.
+    let mut anchors = Vec::new();
+    if rows * cols <= MAX_ALIGNED {
+        let pair = |i: usize, j: usize| unchanged(prefix + i, prefix + j);
+        // The most matches of the first `i` parameters and `j` rows, then the
+        // least distance they moved.
+        let mut best = vec![vec![(0, 0); cols + 1]; rows + 1];
+        let step = |i: usize, j: usize, best: &[Vec<(usize, isize)>]| {
+            let (matches, moved) = best[i - 1][j - 1];
+            (matches + 1, moved - i.abs_diff(j) as isize)
+        };
+        for i in 1..=rows {
+            for j in 1..=cols {
+                let mut score = best[i - 1][j].max(best[i][j - 1]);
+                if pair(i - 1, j - 1) {
+                    score = score.max(step(i, j, &best));
+                }
+                best[i][j] = score;
+            }
+        }
+
+        let (mut i, mut j) = (rows, cols);
+        while i > 0 && j > 0 {
+            if pair(i - 1, j - 1) && best[i][j] == step(i, j, &best) {
+                i -= 1;
+                j -= 1;
+                anchors.push((i, j));
+            } else if best[i][j] == best[i - 1][j] {
+                i -= 1;
+            } else {
+                j -= 1;
+            }
+        }
+        anchors.reverse();
+    } else {
+        let mut same: HashMap<&(String, String), VecDeque<usize>> = HashMap::new();
+        for i in 0..rows {
+            same.entry(&current[prefix + i].1).or_default().push_back(i);
+        }
+        let mut next = 0;
+        for j in 0..cols {
+            let Some(originals) = same.get_mut(&params[prefix + j]) else {
+                continue;
+            };
+            while originals.front().is_some_and(|&i| i < next) {
+                originals.pop_front();
+            }
+            if let Some(i) = originals.pop_front() {
+                anchors.push((i, j));
+                next = i + 1;
+            }
+        }
+    }
+    anchors.push((rows, cols));
+
+    let mut originals: Vec<_> = (0..m).map(|j| (j < prefix).then_some(j)).collect();
+    for k in 0..suffix {
+        originals[m - 1 - k] = Some(n - 1 - k);
+    }
+    let (mut i, mut j) = (0, 0);
+    for (anchor_i, anchor_j) in anchors {
+        for (original, row) in (i..anchor_i).zip(j..anchor_j) {
+            originals[prefix + row] = Some(prefix + original);
+        }
+        if anchor_j < cols {
+            originals[prefix + anchor_j] = Some(prefix + anchor_i);
+        }
+        (i, j) = (anchor_i + 1, anchor_j + 1);
+    }
+
+    originals
+}
+
+/// A `key=value` pair of the query, decoded. Without `=` the value is empty.
+fn decode_pair(pair: &str) -> (String, String) {
+    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+    (decode(key), decode(value))
 }
 
 /// The `:name` segments of the URL's path, where each starts and its name.
@@ -150,22 +287,57 @@ fn escape(text: &str, reserved: &[char]) -> String {
         .collect()
 }
 
+/// The characters of a query key or value that a server would not read as
+/// themselves: those that end or split a parameter, start an escape, or stand
+/// for a space.
+const QUERY_RESERVED: &AsciiSet = &CONTROLS.add(b'%').add(b'&').add(b'=').add(b'#').add(b'+');
+
+/// Percent-encode a query key or value around its `{{variables}}`. Spaces at
+/// its ends are encoded too, since sending trims the URL.
+fn encode(text: &str) -> String {
+    let inner = text.trim_matches(' ');
+    let leading = text.len() - text.trim_start_matches(' ').len();
+    let trailing = text.len() - leading - inner.len();
+
+    let mut encoded = "%20".repeat(leading);
+    encoded.push_str(&around_variables(inner, |part| {
+        utf8_percent_encode(part, QUERY_RESERVED).to_string()
+    }));
+    encoded.push_str(&"%20".repeat(trailing));
+    encoded
+}
+
+/// Decode a query key or value as a server reads it, around its
+/// `{{variables}}`.
+fn decode(text: &str) -> String {
+    around_variables(text, |part| {
+        percent_decode_str(&part.replace('+', " "))
+            .decode_utf8_lossy()
+            .into_owned()
+    })
+}
+
 /// Form-encode the text around `{{variables}}`.
 fn form_encode(text: &str) -> String {
-    let mut encoded = String::new();
+    around_variables(text, |part| {
+        form_urlencoded::byte_serialize(part.as_bytes()).collect()
+    })
+}
+
+/// Apply `map` to the text around `{{variables}}`, which stay as written.
+fn around_variables(text: &str, mut map: impl FnMut(&str) -> String) -> String {
+    let mut mapped = String::new();
     let mut remaining = text;
 
     while let Some(start) = remaining.find("{{")
         && let Some(end) = remaining[start..].find("}}")
     {
         let end = start + end + 2;
-        encoded.extend(form_urlencoded::byte_serialize(
-            &remaining.as_bytes()[..start],
-        ));
-        encoded.push_str(&remaining[start..end]);
+        mapped.push_str(&map(&remaining[..start]));
+        mapped.push_str(&remaining[start..end]);
         remaining = &remaining[end..];
     }
 
-    encoded.extend(form_urlencoded::byte_serialize(remaining.as_bytes()));
-    encoded
+    mapped.push_str(&map(remaining));
+    mapped
 }
