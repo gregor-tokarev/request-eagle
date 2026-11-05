@@ -13,10 +13,10 @@ fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[test]
-fn query_params_are_read_as_written() {
+fn query_params_are_read_as_the_server_decodes_them() {
     assert_eq!(
-        query_params("https://example.com/search?q=owner%20name&flag&&page={{page}}#top"),
-        pairs(&[("q", "owner%20name"), ("flag", ""), ("page", "{{page}}")])
+        query_params("https://example.com/search?q=owner%20name+x&flag&&page={{page}}#top"),
+        pairs(&[("q", "owner name x"), ("flag", ""), ("page", "{{page}}")])
     );
     assert_eq!(query_params("https://example.com/a=b"), []);
     assert_eq!(query_params("https://example.com/#?q=1"), []);
@@ -46,15 +46,15 @@ fn query_params_replace_the_url_query_and_keep_its_fragment() {
 }
 
 #[test]
-fn query_params_escape_only_what_would_end_them() {
-    let params = pairs(&[("a=b&c#d", "e=f&g#h%20")]);
+fn query_params_encode_what_would_change_their_meaning() {
+    let params = pairs(&[("a=b&c#d", "C++ e=f&g#h%20{{x+y}}")]);
     let url = with_query_params("https://example.com/", &params);
 
-    assert_eq!(url, "https://example.com/?a%3Db%26c%23d=e=f%26g%23h%20");
     assert_eq!(
-        query_params(&url),
-        pairs(&[("a%3Db%26c%23d", "e=f%26g%23h%20")])
+        url,
+        "https://example.com/?a%3Db%26c%23d=C%2B%2B e%3Df%26g%23h%2520{{x+y}}"
     );
+    assert_eq!(query_params(&url), params);
 }
 
 #[test]

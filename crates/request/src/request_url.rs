@@ -3,28 +3,31 @@
 
 use std::ops::Range;
 
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use url::form_urlencoded;
 
-/// The URL's query parameters as written, without decoding them. A parameter
+/// The URL's query parameters as the server reads them: `+` is a space and
+/// percent escapes are decoded. `{{variables}}` stay as written. A parameter
 /// without `=` has an empty value.
 pub fn query_params(url: &str) -> Vec<(String, String)> {
-    let query = &url[query_range(url)];
-
-    query
+    url[query_range(url)]
         .split('&')
         .filter(|pair| !pair.is_empty())
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (key.to_owned(), value.to_owned())
-        })
+        .map(decode_pair)
         .collect()
 }
 
-/// The URL with its query replaced by `params`. Keys and values are written as
-/// they are, except for the characters that would end them. A parameter with
-/// an empty value is written without `=`.
+/// The URL with its query replaced by `params`, as `query_params` reads them.
+/// The characters that would change their meaning are percent-encoded, so the
+/// server reads what was entered; `{{variables}}` stay as written until they
+/// resolve. A parameter the URL already holds at the same position keeps its
+/// spelling. A new parameter with an empty value is written without `=`.
 pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
     let query = query_range(url);
+    let current: Vec<_> = url[query.clone()]
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .collect();
     let start = url[..query.start]
         .strip_suffix('?')
         .map_or(query.start, str::len);
@@ -32,16 +35,29 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
 
     for (index, (key, value)) in params.iter().enumerate() {
         written.push(if index == 0 { '?' } else { '&' });
-        written.push_str(&escape(key, &['&', '=', '#']));
 
+        if let Some(pair) = current.get(index)
+            && decode_pair(pair) == (key.clone(), value.clone())
+        {
+            written.push_str(pair);
+            continue;
+        }
+
+        written.push_str(&encode(key));
         if !value.is_empty() {
             written.push('=');
-            written.push_str(&escape(value, &['&', '#']));
+            written.push_str(&encode(value));
         }
     }
 
     written.push_str(&url[query.end..]);
     written
+}
+
+/// A `key=value` pair of the query, decoded. Without `=` the value is empty.
+fn decode_pair(pair: &str) -> (String, String) {
+    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+    (decode(key), decode(value))
 }
 
 /// The `:name` segments of the URL's path, where each starts and its name.
@@ -150,22 +166,49 @@ fn escape(text: &str, reserved: &[char]) -> String {
         .collect()
 }
 
+/// The characters of a query key or value that a server would not read as
+/// themselves: those that end or split a parameter, start an escape, or stand
+/// for a space.
+const QUERY_RESERVED: &AsciiSet = &CONTROLS.add(b'%').add(b'&').add(b'=').add(b'#').add(b'+');
+
+/// Percent-encode a query key or value around its `{{variables}}`.
+fn encode(text: &str) -> String {
+    around_variables(text, |part| {
+        utf8_percent_encode(part, QUERY_RESERVED).to_string()
+    })
+}
+
+/// Decode a query key or value as a server reads it, around its
+/// `{{variables}}`.
+fn decode(text: &str) -> String {
+    around_variables(text, |part| {
+        percent_decode_str(&part.replace('+', " "))
+            .decode_utf8_lossy()
+            .into_owned()
+    })
+}
+
 /// Form-encode the text around `{{variables}}`.
 fn form_encode(text: &str) -> String {
-    let mut encoded = String::new();
+    around_variables(text, |part| {
+        form_urlencoded::byte_serialize(part.as_bytes()).collect()
+    })
+}
+
+/// Apply `map` to the text around `{{variables}}`, which stay as written.
+fn around_variables(text: &str, mut map: impl FnMut(&str) -> String) -> String {
+    let mut mapped = String::new();
     let mut remaining = text;
 
     while let Some(start) = remaining.find("{{")
         && let Some(end) = remaining[start..].find("}}")
     {
         let end = start + end + 2;
-        encoded.extend(form_urlencoded::byte_serialize(
-            &remaining.as_bytes()[..start],
-        ));
-        encoded.push_str(&remaining[start..end]);
+        mapped.push_str(&map(&remaining[..start]));
+        mapped.push_str(&remaining[start..end]);
         remaining = &remaining[end..];
     }
 
-    encoded.extend(form_urlencoded::byte_serialize(remaining.as_bytes()));
-    encoded
+    mapped.push_str(&map(remaining));
+    mapped
 }
