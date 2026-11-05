@@ -17,7 +17,8 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use preferences::Preferences;
 use request::{
-    Auth, Field, WebSocketConnection, WebSocketEvent, WebSocketEventKind, WebSocketRequest,
+    Auth, Field, RequestVariables, WebSocketConnection, WebSocketEvent, WebSocketEventKind,
+    WebSocketRequest,
 };
 use request_history::Outcome;
 use uuid::Uuid;
@@ -50,10 +51,14 @@ pub(super) enum Connection {
         /// The request as it was when it started connecting. History keeps
         /// it once it connects.
         sent: RequestSent,
+        /// What the connection was opened with, which later edits do not
+        /// change.
+        opened: ConnectionTarget,
         task: Task<()>,
     },
     Connected {
         socket: WebSocketConnection,
+        opened: ConnectionTarget,
         task: Task<()>,
         /// The id history keeps the connection under, which its end refers to.
         history: Uuid,
@@ -74,6 +79,55 @@ impl Connection {
             Connection::Closing { .. } => ConnectionState::Closing,
         }
     }
+}
+
+/// Where and how a connection is made. A connection keeps the one it was
+/// opened with.
+pub(super) struct ConnectionTarget {
+    /// The request as connecting resolves it, or None when a variable it
+    /// uses cannot be resolved.
+    resolved: Option<WebSocketRequest>,
+    /// The enabled fields and the authorization sent, as written.
+    written: WebSocketRequest,
+}
+
+impl ConnectionTarget {
+    fn new(request: &WebSocketRequest, variables: &RequestVariables) -> Self {
+        let mut written = WebSocketRequest {
+            message: String::new(),
+            auth: variables.effective_auth(&request.auth),
+            ..request.clone()
+        };
+        written.query.retain(|field| field.enabled);
+        written.headers.retain(|field| field.enabled);
+
+        Self {
+            resolved: variables
+                .websocket_target(request)
+                .map(without_descriptions),
+            written: without_descriptions(written),
+        }
+    }
+
+    /// Whether connecting to `other` would differ. Targets that both cannot
+    /// be resolved are compared as written; one that stopped or started
+    /// resolving has changed.
+    fn differs(&self, other: &Self) -> bool {
+        match (&self.resolved, &other.resolved) {
+            (Some(resolved), Some(other)) => resolved != other,
+            (None, None) => self.written != other.written,
+            _ => true,
+        }
+    }
+}
+
+/// Descriptions document fields and are not sent.
+fn without_descriptions(mut request: WebSocketRequest) -> WebSocketRequest {
+    for field in request.query.iter_mut().chain(request.headers.iter_mut()) {
+        field.description.clear();
+    }
+
+    request
 }
 
 /// What the connection is doing, as the URL bar and message log show it.
@@ -102,6 +156,12 @@ pub struct WebSocketDraft {
     pub(crate) section: WebSocketSection,
     pub(super) connection: Connection,
     pub(crate) url: Option<Entity<InputState>>,
+    /// Whether the open connection was made with other settings or
+    /// variable values than connecting now would use.
+    reconnect_needed: bool,
+    /// The variables that comparison resolves with and the session revision
+    /// they were read at, so edits do not read the environment files again.
+    reconnect_variables: Option<(u64, RequestVariables)>,
     url_completion: Option<Entity<VariableInput>>,
     /// Whether Connect found no URL to connect to. The URL says so until it
     /// is edited.
@@ -143,7 +203,7 @@ impl WebSocketDraft {
     ) -> Self {
         let environment_path = storage.location().map(SavedLocation::environment_path);
         // Switching the active environment changes which references resolve.
-        let subscriptions = environments
+        let mut subscriptions: Vec<Subscription> = environments
             .iter()
             .map(|environments| {
                 cx.observe(environments, |this: &mut Self, _, cx| {
@@ -157,6 +217,12 @@ impl WebSocketDraft {
             environments,
             names: None,
         });
+        // Variables and the collection's authorization decide what
+        // connecting would use, as edits to the request do.
+        subscriptions.push(cx.observe(&variables, |this: &mut Self, _, cx| {
+            this.reconnect_variables = None;
+            this.refresh_reconnect(cx)
+        }));
 
         // Editors install window listeners, so they wait until the tab is shown.
         let owner = cx.weak_entity();
@@ -179,6 +245,8 @@ impl WebSocketDraft {
             section: WebSocketSection::Message,
             connection: Connection::Disconnected,
             url: None,
+            reconnect_needed: false,
+            reconnect_variables: None,
             url_completion: None,
             url_missing: false,
             params: None,
@@ -246,6 +314,7 @@ impl WebSocketDraft {
             .push(cx.subscribe(&auth, |this, _, event: &AuthChanged, cx| {
                 this.request.auth = event.0.clone();
                 this.refresh_handshake_headers(cx);
+                this.refresh_reconnect(cx);
                 // The Headers tab counts the handshake's headers.
                 this.notify_controls(cx);
             }));
@@ -314,6 +383,38 @@ impl WebSocketDraft {
         self.log.update(cx, |log, cx| log.prepare(window, cx));
     }
 
+    /// Whether the URL, params, authorization, headers, settings or the
+    /// variables they use changed since the open connection was made.
+    /// Messages still go to the connection, so it has to reconnect to use
+    /// them.
+    pub(super) fn needs_reconnect(&self) -> bool {
+        self.reconnect_needed && matches!(self.connection, Connection::Connected { .. })
+    }
+
+    /// Compare what connecting now would use with what the open connection
+    /// was made with.
+    pub(super) fn refresh_reconnect(&mut self, cx: &mut Context<Self>) {
+        let Connection::Connected { opened, .. } = &self.connection else {
+            self.reconnect_variables = None;
+            self.reconnect_needed = false;
+            return;
+        };
+
+        let scope = self.variables.read(cx);
+        let revision = scope.session.revision();
+        let variables = match self.reconnect_variables.take() {
+            Some((read_at, variables)) if read_at == revision => variables,
+            _ => scope.request_variables(cx),
+        };
+        let needed = opened.differs(&ConnectionTarget::new(&self.request, &variables));
+        self.reconnect_variables = Some((revision, variables));
+
+        if needed != self.reconnect_needed {
+            self.reconnect_needed = needed;
+            self.log.update(cx, |_, cx| cx.notify());
+        }
+    }
+
     /// Connect, or send the composed message once connected.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.connection {
@@ -345,6 +446,8 @@ impl WebSocketDraft {
             .map(|preferences| preferences.request.clone())
             .unwrap_or_default();
         // History keeps the authorization that was sent, as for HTTP.
+        let opened = ConnectionTarget::new(&self.request, &variables);
+        self.reconnect_variables = None;
         let recorded = WebSocketRequest {
             auth: variables.effective_auth(&self.request.auth),
             ..self.request.clone()
@@ -374,7 +477,12 @@ impl WebSocketDraft {
             }
         });
 
-        self.connection = Connection::Connecting { socket, sent, task };
+        self.connection = Connection::Connecting {
+            socket,
+            sent,
+            opened,
+            task,
+        };
         self.notify_controls(cx);
     }
 
@@ -409,14 +517,21 @@ impl WebSocketDraft {
                 WebSocketEventKind::Connected(_)
                     if matches!(self.connection, Connection::Connecting { .. }) =>
                 {
-                    if let Connection::Connecting { socket, sent, task } =
-                        std::mem::replace(&mut self.connection, Connection::Disconnected)
+                    if let Connection::Connecting {
+                        socket,
+                        sent,
+                        opened,
+                        task,
+                    } = std::mem::replace(&mut self.connection, Connection::Disconnected)
                     {
                         self.connection = Connection::Connected {
                             socket,
+                            opened,
                             task,
                             history: sent.id,
                         };
+                        // The request may have been edited while connecting.
+                        self.refresh_reconnect(cx);
                         cx.emit(sent);
                     }
                 }
@@ -531,6 +646,7 @@ impl WebSocketDraft {
                             this.request.url = input.read(cx).value().to_string();
                             this.url_missing = false;
                             this.refresh_handshake_headers(cx);
+                            this.refresh_reconnect(cx);
                             cx.notify();
                         }
                     },
@@ -572,6 +688,7 @@ impl WebSocketDraft {
                 } else {
                     this.request.query = event.0.clone();
                 }
+                this.refresh_reconnect(cx);
 
                 cx.notify();
             });
