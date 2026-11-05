@@ -102,19 +102,32 @@ impl ConnectionTarget {
         written.headers.retain(|field| field.enabled);
 
         Self {
-            resolved: variables.websocket_target(request),
-            written,
+            resolved: variables
+                .websocket_target(request)
+                .map(without_descriptions),
+            written: without_descriptions(written),
         }
     }
 
-    /// Whether connecting to `other` would differ. A target that cannot be
-    /// resolved is compared as written.
+    /// Whether connecting to `other` would differ. Targets that both cannot
+    /// be resolved are compared as written; one that stopped or started
+    /// resolving has changed.
     fn differs(&self, other: &Self) -> bool {
         match (&self.resolved, &other.resolved) {
             (Some(resolved), Some(other)) => resolved != other,
-            _ => self.written != other.written,
+            (None, None) => self.written != other.written,
+            _ => true,
         }
     }
+}
+
+/// Descriptions document fields and are not sent.
+fn without_descriptions(mut request: WebSocketRequest) -> WebSocketRequest {
+    for field in request.query.iter_mut().chain(request.headers.iter_mut()) {
+        field.description.clear();
+    }
+
+    request
 }
 
 /// What the connection is doing, as the URL bar and message log show it.
