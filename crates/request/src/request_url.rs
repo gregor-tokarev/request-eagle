@@ -1,6 +1,7 @@
 //! The parts of an HTTP request URL as written, before its `{{variables}}`
 //! resolve: its query parameters and `:name` path variables.
 
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
@@ -30,6 +31,9 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
         .split('&')
         .filter(|pair| !pair.is_empty())
         .map(|pair| (pair, decode_pair(pair)))
+        // The Params table leaves out a parameter without a key or value, so
+        // no row comes from one.
+        .filter(|(_, (key, value))| !key.is_empty() || !value.is_empty())
         .collect();
     let originals = match_originals(&current, params);
     let start = url[..query.start]
@@ -75,7 +79,8 @@ pub fn with_query_params(url: &str, params: &[(String, String)]) -> String {
 }
 
 /// The most pairs of changed rows and parameters `match_originals` compares
-/// to align them by their order; past it they are matched by position.
+/// to align them by their order; past it each unchanged row is matched to the
+/// next parameter that reads the same.
 const MAX_ALIGNED: usize = 1 << 16;
 
 /// The parameter of the URL each row of `params` came from. The most
@@ -131,6 +136,24 @@ fn match_originals(
             }
         }
         anchors.reverse();
+    } else {
+        let mut same: HashMap<&(String, String), VecDeque<usize>> = HashMap::new();
+        for i in 0..rows {
+            same.entry(&current[prefix + i].1).or_default().push_back(i);
+        }
+        let mut next = 0;
+        for j in 0..cols {
+            let Some(originals) = same.get_mut(&params[prefix + j]) else {
+                continue;
+            };
+            while originals.front().is_some_and(|&i| i < next) {
+                originals.pop_front();
+            }
+            if let Some(i) = originals.pop_front() {
+                anchors.push((i, j));
+                next = i + 1;
+            }
+        }
     }
     anchors.push((rows, cols));
 
