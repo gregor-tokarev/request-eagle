@@ -146,7 +146,9 @@ impl CollectionPanel {
         cx: &mut Context<Self>,
     ) {
         let revision = self.collections.read(cx).revision();
-        if revision == self.revision {
+        // One update can create several items, such as a collection and the
+        // request saved into it. Each is revealed, so the last one stays selected.
+        if revision == self.revision && !matches!(event, CollectionsEvent::Created(_)) {
             return;
         }
 

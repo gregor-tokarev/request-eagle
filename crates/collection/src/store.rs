@@ -184,6 +184,10 @@ impl Collections {
         Ok(path)
     }
 
+    pub fn free_collection_name(&self) -> String {
+        self.registry.free_collection_name()
+    }
+
     pub fn collection_name_taken(&self, name: &str) -> bool {
         self.registry.collection_name_taken(name)
     }

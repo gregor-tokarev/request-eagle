@@ -111,14 +111,7 @@ impl SaveRequestDialog {
     }
 
     fn begin_new_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let collections = self.collections.read(cx);
-        let default_name = (1..)
-            .map(|number| match number {
-                1 => "New Collection".to_owned(),
-                number => format!("New Collection {number}"),
-            })
-            .find(|name| !collections.collection_name_taken(name))
-            .expect("a free collection name");
+        let default_name = self.collections.read(cx).free_collection_name();
 
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx)

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -55,6 +55,36 @@ impl CollectionRegistry {
                 .file_name()
                 .is_some_and(|existing| existing.to_string_lossy().to_lowercase() == name)
         })
+    }
+
+    /// The first of "New Collection", "New Collection 2" and so on that no
+    /// collection uses and nothing in the collections directory occupies.
+    pub fn free_collection_name(&self) -> String {
+        let mut taken: HashSet<String> = self
+            .collections
+            .iter()
+            .filter_map(|collection| collection.path.file_name())
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .collect();
+        if let Some(entries) = self
+            .directory
+            .as_ref()
+            .and_then(|directory| fs::read_dir(directory).ok())
+        {
+            taken.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().to_lowercase()),
+            );
+        }
+
+        (1..)
+            .map(|number| match number {
+                1 => "New Collection".to_owned(),
+                number => format!("New Collection {number}"),
+            })
+            .find(|name| !taken.contains(&name.to_lowercase()))
+            .expect("a free collection name")
     }
 
     fn collections_directory(&self) -> Result<PathBuf, CollectionEditError> {
