@@ -34,6 +34,9 @@ pub struct CookiePage {
     query: String,
     /// Reloads the cookies when the next one expires.
     expiry: Option<Task<()>>,
+    /// "Delete all" asks for a second click. The task resets the button when
+    /// that click does not come.
+    pending_clear: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -58,6 +61,7 @@ impl CookiePage {
             search: None,
             query: String::new(),
             expiry: None,
+            pending_clear: None,
             _subscriptions: subscriptions,
         };
         page.reload(cx);
@@ -78,6 +82,7 @@ impl CookiePage {
         let subscription = cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 this.query = input.read(cx).value().trim().to_lowercase();
+                this.pending_clear = None;
                 this.filter();
                 cx.notify();
             }
@@ -93,6 +98,8 @@ impl CookiePage {
 
         // Keep the scroll position unless the cookies changed.
         if cookies != self.cookies {
+            // Confirm only the cookies that the button showed.
+            self.pending_clear = None;
             self.cookies = cookies;
             self.filter();
             cx.notify();
@@ -154,7 +161,28 @@ impl CookiePage {
         self.reload(cx);
     }
 
+    /// The first click asks to confirm; the second deletes every cookie.
+    fn request_clear(&mut self, cx: &mut Context<Self>) {
+        if self.pending_clear.is_some() {
+            self.clear(cx);
+            return;
+        }
+
+        self.pending_clear = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let _ = this.update(cx, |this, cx| this.cancel_clear(cx));
+        }));
+        cx.notify();
+    }
+
+    fn cancel_clear(&mut self, cx: &mut Context<Self>) {
+        if self.pending_clear.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn clear(&mut self, cx: &mut Context<Self>) {
+        self.pending_clear = None;
         Cookies::jar(cx).clear();
         Cookies::changed(cx);
         self.reload(cx);
@@ -190,16 +218,37 @@ impl CookiePage {
                     }),
             )
             .child(
-                Button::new("delete-all-cookies")
-                    .debug_selector(|| "delete-all-cookies".into())
-                    .small()
-                    .ghost()
-                    .icon(Icon::default().path("icons/trash.svg"))
-                    .label("Delete all")
-                    .disabled(self.cookies.is_empty())
-                    .tooltip("Delete every cookie in the jar")
-                    .on_click(cx.listener(|this, _, _, cx| this.clear(cx))),
+                div()
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| this.cancel_clear(cx)))
+                    .child(self.delete_all_button(cx)),
             )
+    }
+
+    fn delete_all_button(&self, cx: &mut Context<Self>) -> Button {
+        let button = Button::new("delete-all-cookies")
+            .debug_selector(|| "delete-all-cookies".into())
+            .small()
+            .icon(Icon::default().path("icons/trash.svg"))
+            .disabled(self.cookies.is_empty())
+            .on_click(cx.listener(|this, _, _, cx| this.request_clear(cx)));
+
+        if self.pending_clear.is_none() {
+            return button
+                .ghost()
+                .label("Delete all")
+                .tooltip("Delete every cookie in the jar");
+        }
+
+        // The count includes cookies that the filter hides.
+        let label = match self.cookies.len() {
+            1 => "Delete 1 cookie?".to_owned(),
+            count => format!("Delete all {count} cookies?"),
+        };
+
+        button
+            .danger()
+            .label(label)
+            .tooltip("Click again to delete every cookie in the jar")
     }
 
     fn table(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
