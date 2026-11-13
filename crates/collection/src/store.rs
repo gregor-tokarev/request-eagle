@@ -171,6 +171,23 @@ impl Collections {
         Ok(path)
     }
 
+    /// Create a collection with exactly this name, such as one named while
+    /// saving a request.
+    pub fn create_named_collection(
+        &mut self,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<PathBuf, CollectionEditError> {
+        let path = self.registry.create_named_collection(name)?;
+        self.created(&path, cx);
+
+        Ok(path)
+    }
+
+    pub fn collection_name_taken(&self, name: &str) -> bool {
+        self.registry.collection_name_taken(name)
+    }
+
     pub fn create_folder(
         &mut self,
         parent: &Path,

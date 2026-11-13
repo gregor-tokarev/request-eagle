@@ -58,6 +58,7 @@ pub(crate) fn open(
             filter,
             destinations,
             selected,
+            new_collection: None,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -82,8 +83,16 @@ struct SaveRequestDialog {
     filter: Entity<InputState>,
     destinations: Vec<SaveDestination>,
     selected: Option<usize>,
+    /// The name of a collection to create when the request is saved. The
+    /// collection is not created before that, so cancelling leaves nothing.
+    new_collection: Option<Entity<InputState>>,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
+}
+
+enum Target {
+    Existing(SaveDestination),
+    NewCollection(String),
 }
 
 impl SaveRequestDialog {
@@ -94,22 +103,98 @@ impl SaveRequestDialog {
         cx: &mut Context<Self>,
     ) {
         self.selected = destination;
+        self.new_collection = None;
         self.filter
             .update(cx, |filter, cx| filter.set_value("", window, cx));
         self.error = None;
         cx.notify();
     }
 
+    fn begin_new_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let collections = self.collections.read(cx);
+        let default_name = (1..)
+            .map(|number| match number {
+                1 => "New Collection".to_owned(),
+                number => format!("New Collection {number}"),
+            })
+            .find(|name| !collections.collection_name_taken(name))
+            .expect("a free collection name");
+
+        let input = cx.new(|cx| {
+            let mut input = InputState::new(window, cx)
+                .placeholder("New Collection")
+                .default_value(default_name);
+            input.select_all(window, cx);
+            input.focus(window, cx);
+            input
+        });
+        self._subscriptions
+            .push(cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }));
+
+        self.selected = None;
+        self.new_collection = Some(input);
+        self.error = None;
+        cx.notify();
+    }
+
+    /// Why the new collection cannot have the name typed for it.
+    fn new_collection_problem(&self, cx: &App) -> Option<&'static str> {
+        let name = self.new_collection.as_ref()?.read(cx).value();
+        if name.trim().is_empty() {
+            Some("Enter a collection name.")
+        } else if self.collections.read(cx).collection_name_taken(&name) {
+            Some("A collection with this name already exists.")
+        } else {
+            None
+        }
+    }
+
+    fn target(&self, cx: &App) -> Option<Target> {
+        if let Some(input) = &self.new_collection {
+            return Some(Target::NewCollection(input.read(cx).value().to_string()));
+        }
+
+        self.selected
+            .map(|index| Target::Existing(self.destinations[index].clone()))
+    }
+
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(destination) = self.selected.map(|index| self.destinations[index].clone()) else {
+        if self.new_collection_problem(cx).is_some() {
+            return;
+        }
+        let Some(target) = self.target(cx) else {
             return;
         };
         let name = self.name.read(cx).value().to_string();
-        // Files picked before the collection was known are stored relative to it.
-        let request = self.request.relative_to(&destination.collection);
 
         let result = self.collections.update(cx, |collections, cx| {
-            collections.create_request_with(&destination.path, &name, request, cx)
+            let (destination, collection, created) = match target {
+                Target::Existing(destination) => (destination.path, destination.collection, false),
+                Target::NewCollection(collection_name) => {
+                    match collections.create_named_collection(&collection_name, cx) {
+                        Ok(path) => (path.clone(), path, true),
+                        Err(error) => {
+                            return Err(format!("Could not create collection: {error}"));
+                        }
+                    }
+                }
+            };
+            // Files picked before the collection was known are stored relative to it.
+            let request = self.request.relative_to(&collection);
+
+            collections
+                .create_request_with(&destination, &name, request, cx)
+                .map_err(|error| {
+                    // Leave no empty collection behind when the request was not saved.
+                    if created {
+                        let _ = collections.delete(&destination, cx);
+                    }
+                    format!("Could not save request: {error}")
+                })
         });
         let saved = result.map(|path| {
             let (location, file) = self
@@ -127,7 +212,7 @@ impl SaveRequestDialog {
                 window.close_dialog(cx);
             }
             Err(error) => {
-                self.error = Some(format!("Could not save request: {error}"));
+                self.error = Some(error);
                 cx.notify();
             }
         }
@@ -139,6 +224,8 @@ impl Render for SaveRequestDialog {
         let query = self.filter.read(cx).value().to_lowercase();
         let valid_name = !self.name.read(cx).value().trim().is_empty();
         let current = self.selected.map(|index| &self.destinations[index]);
+        let new_collection_problem = self.new_collection_problem(cx);
+        let has_target = self.selected.is_some() || self.new_collection.is_some();
         let visible: Vec<_> = self
             .destinations
             .iter()
@@ -160,7 +247,15 @@ impl Render for SaveRequestDialog {
                 .label("Collections")
                 .on_click(cx.listener(|this, _, window, cx| this.navigate(None, window, cx))),
         );
-        if let Some(current) = current {
+        if self.new_collection.is_some() {
+            breadcrumbs = breadcrumbs
+                .child(
+                    Icon::new(IconName::ChevronRight)
+                        .size_3()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(div().px_1().text_xs().child("New collection"));
+        } else if let Some(current) = current {
             for (index, ancestor) in self
                 .destinations
                 .iter()
@@ -227,26 +322,45 @@ impl Render for SaveRequestDialog {
                             )
                             .child(breadcrumbs),
                     )
-                    .child(
-                        v_flex()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .rounded(cx.theme().radius_tokens().md)
-                            .child(
-                                div()
-                                    .debug_selector(|| "save-location-filter".into())
-                                    .child(
-                                        Input::new(&self.filter)
-                                            .aria_label("Search collections and folders"),
-                                    ),
-                            )
-                            .child(
-                                v_flex()
-                                    .id("save-destinations")
-                                    .h(rems(15.))
-                                    .overflow_y_scroll()
-                                    .when(visible.is_empty(), |list| {
-                                        list.child(
+                    .map(|section| match &self.new_collection {
+                        Some(input) => section.child(
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .debug_selector(|| "save-new-collection-name".into())
+                                        .child(Input::new(input).aria_label("Collection name")),
+                                )
+                                .when_some(new_collection_problem, |field, problem| {
+                                    field.child(
+                                        div()
+                                            .debug_selector(|| "save-new-collection-problem".into())
+                                            .text_xs()
+                                            .text_color(cx.theme().danger)
+                                            .child(problem),
+                                    )
+                                }),
+                        ),
+                        None => section.child(
+                            v_flex()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .rounded(cx.theme().radius_tokens().md)
+                                .child(
+                                    div()
+                                        .debug_selector(|| "save-location-filter".into())
+                                        .child(
+                                            Input::new(&self.filter)
+                                                .aria_label("Search collections and folders"),
+                                        ),
+                                )
+                                .child(
+                                    v_flex()
+                                        .id("save-destinations")
+                                        .h(rems(15.))
+                                        .overflow_y_scroll()
+                                        .when(visible.is_empty(), |list| {
+                                            list.child(
                                             div()
                                                 .p_3()
                                                 .text_sm()
@@ -259,37 +373,45 @@ impl Render for SaveRequestDialog {
                                                     "Create a collection to save this request."
                                                 }),
                                         )
-                                    })
-                                    .children(visible.into_iter().map(|(index, destination)| {
-                                        let label = SharedString::from(destination.name());
-                                        Button::new(("save-destination", index))
-                                            .debug_selector(move || {
-                                                format!("save-destination-{index}")
-                                            })
-                                            .ghost()
-                                            .w_full()
-                                            .accessibility_label(label.clone())
-                                            .child(
-                                                h_flex()
+                                        })
+                                        .children(visible.into_iter().map(
+                                            |(index, destination)| {
+                                                let label = SharedString::from(destination.name());
+                                                Button::new(("save-destination", index))
+                                                    .debug_selector(move || {
+                                                        format!("save-destination-{index}")
+                                                    })
+                                                    .ghost()
                                                     .w_full()
-                                                    .gap_2()
-                                                    .child(Icon::new(IconName::Folder).size_4())
-                                                    .child(label)
-                                                    .child(div().flex_1())
+                                                    .accessibility_label(label.clone())
                                                     .child(
-                                                        Icon::new(IconName::ChevronRight)
-                                                            .size_3()
-                                                            .text_color(
-                                                                cx.theme().muted_foreground,
+                                                        h_flex()
+                                                            .w_full()
+                                                            .gap_2()
+                                                            .child(
+                                                                Icon::new(IconName::Folder)
+                                                                    .size_4(),
+                                                            )
+                                                            .child(label)
+                                                            .child(div().flex_1())
+                                                            .child(
+                                                                Icon::new(IconName::ChevronRight)
+                                                                    .size_3()
+                                                                    .text_color(
+                                                                        cx.theme().muted_foreground,
+                                                                    ),
                                                             ),
-                                                    ),
-                                            )
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.navigate(Some(index), window, cx)
-                                            }))
-                                    })),
-                            ),
-                    ),
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        move |this, _, window, cx| {
+                                                            this.navigate(Some(index), window, cx)
+                                                        },
+                                                    ))
+                                            },
+                                        )),
+                                ),
+                        ),
+                    }),
             )
             .when_some(self.error.clone(), |view, error| {
                 view.child(
@@ -302,45 +424,28 @@ impl Render for SaveRequestDialog {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(
-                        Button::new("save-new-collection")
-                            .debug_selector(|| "save-new-collection".into())
-                            .ghost()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(div().underline().child("New collection"))
-                            .accessibility_label("New collection")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                match this
-                                    .collections
-                                    .update(cx, |collections, cx| collections.create_collection(cx))
-                                {
-                                    Ok(path) => {
-                                        this.destinations =
-                                            this.collections.read(cx).save_destinations();
-                                        this.selected = this
-                                            .destinations
-                                            .iter()
-                                            .position(|destination| destination.path == path);
-                                        this.filter.update(cx, |filter, cx| {
-                                            filter.set_value("", window, cx)
-                                        });
-                                        this.error = None;
-                                    }
-                                    Err(error) => {
-                                        this.error =
-                                            Some(format!("Could not create collection: {error}"))
-                                    }
-                                }
-                                cx.notify();
-                            })),
-                    )
+                    .when(self.new_collection.is_none(), |footer| {
+                        footer.child(
+                            Button::new("save-new-collection")
+                                .debug_selector(|| "save-new-collection".into())
+                                .ghost()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(div().underline().child("New collection"))
+                                .accessibility_label("New collection")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_new_collection(window, cx)
+                                })),
+                        )
+                    })
                     .child(div().flex_1())
                     .child(
                         Button::new("confirm-save-request")
                             .debug_selector(|| "confirm-save-request".into())
                             .primary()
                             .label("Save")
-                            .disabled(!valid_name || self.selected.is_none())
+                            .disabled(
+                                !valid_name || !has_target || new_collection_problem.is_some(),
+                            )
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     )
                     .child(
