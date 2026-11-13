@@ -206,6 +206,7 @@ impl Render for VariableTable {
 
                 h_flex()
                     .id(("variable", row.name.entity_id()))
+                    .group("variable-row")
                     .h_8()
                     .border_t_1()
                     .border_color(cx.theme().border)
@@ -255,6 +256,10 @@ impl Render for VariableTable {
                                             .right_1()
                                             .top_0()
                                             .h_full()
+                                            .invisible()
+                                            .group_hover("variable-row", |toggle| toggle.visible())
+                                            .opacity(0.5)
+                                            .hover(|toggle| toggle.opacity(1.))
                                             .child(
                                                 Toggle::new("secret-variable")
                                                     .small()
