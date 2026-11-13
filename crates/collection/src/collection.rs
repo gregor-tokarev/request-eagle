@@ -124,6 +124,15 @@ impl Collection {
         if variables_changed {
             let environment = Environment {
                 path: self.local_env.path.clone(),
+                // The collection page has no secret toggle; keep the flags
+                // of variables that are still there.
+                secrets: self
+                    .local_env
+                    .secrets
+                    .iter()
+                    .filter(|key| variables.contains_key(*key))
+                    .cloned()
+                    .collect(),
                 entries: variables,
             };
 

@@ -495,7 +495,11 @@ fn save(
         }
         Import::Environment(environment) => {
             let name = environments
-                .import(&environment.name, environment.variables)
+                .import(
+                    &environment.name,
+                    environment.variables,
+                    environment.secrets,
+                )
                 .map_err(|error| format!("Could not import the environment: {error}"))?;
             outcome.environments.push(name);
         }

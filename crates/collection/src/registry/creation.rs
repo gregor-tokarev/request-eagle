@@ -29,6 +29,7 @@ impl CollectionRegistry {
             local_env: Environment {
                 path: path.join(ENVIRONMENT_FILE_NAME),
                 entries: HashMap::new(),
+                secrets: Default::default(),
             },
             scripts: Default::default(),
             auth: Default::default(),

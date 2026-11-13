@@ -46,6 +46,7 @@ fn renames_without_replacing_another_environment() {
     Environment {
         path: environments.path("Staging"),
         entries: HashMap::from([("host".into(), "staging.example.com".into())]),
+        secrets: Default::default(),
     }
     .save_file()
     .unwrap();
@@ -80,28 +81,36 @@ fn imports_environments_under_names_that_fit() {
     let entries = HashMap::from([("tm_url".into(), "tm.prod.test:443".into())]);
 
     assert_eq!(
-        environments.import("tm:prod", entries.clone()).unwrap(),
+        environments
+            .import("tm:prod", entries.clone(), Default::default())
+            .unwrap(),
         "tm-prod"
     );
     assert_eq!(
-        environments.import("tm:prod", HashMap::new()).unwrap(),
+        environments
+            .import("tm:prod", HashMap::new(), Default::default())
+            .unwrap(),
         "tm-prod 2"
     );
     assert_eq!(
-        environments.import(" ../a\\b ", HashMap::new()).unwrap(),
+        environments
+            .import(" ../a\\b ", HashMap::new(), Default::default())
+            .unwrap(),
         "-a-b"
     );
     assert_eq!(
-        environments.import(".", HashMap::new()).unwrap(),
+        environments
+            .import(".", HashMap::new(), Default::default())
+            .unwrap(),
         "Imported"
     );
     let long = environments
-        .import(&"é".repeat(200), HashMap::new())
+        .import(&"é".repeat(200), HashMap::new(), Default::default())
         .unwrap();
     assert_eq!(long, "é".repeat(60));
     assert_eq!(
         environments
-            .import(&"é".repeat(200), HashMap::new())
+            .import(&"é".repeat(200), HashMap::new(), Default::default())
             .unwrap(),
         format!("{long} 2")
     );

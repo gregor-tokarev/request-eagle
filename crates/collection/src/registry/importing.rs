@@ -83,6 +83,7 @@ fn write_collection(
         local_env: Environment {
             path: path.join(ENVIRONMENT_FILE_NAME),
             entries: HashMap::new(),
+            secrets: Default::default(),
         },
         scripts: RequestScripts::default(),
         auth: Auth::Inherit,
