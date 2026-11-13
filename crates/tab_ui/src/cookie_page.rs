@@ -163,6 +163,10 @@ impl CookiePage {
 
     /// The first click asks to confirm; the second deletes every cookie.
     fn request_clear(&mut self, cx: &mut Context<Self>) {
+        // A response can add cookies without redrawing the page. Reloading
+        // cancels the confirmation when the jar differs from the label.
+        self.reload(cx);
+
         if self.pending_clear.is_some() {
             self.clear(cx);
             return;
