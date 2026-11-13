@@ -257,7 +257,7 @@ impl Render for VariableTable {
                                             .h_full()
                                             .child(
                                                 Toggle::new("secret-variable")
-                                                    .xsmall()
+                                                    .small()
                                                     .gap_1()
                                                     .px_1()
                                                     .checked(secret)
