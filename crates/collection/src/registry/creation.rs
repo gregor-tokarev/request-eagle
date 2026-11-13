@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -9,22 +9,97 @@ use environment::Environment;
 use uuid::Uuid;
 
 use super::catalog::ENVIRONMENT_FILE_NAME;
-use super::mutations::find_entry;
+use super::mutations::{check_directory_name, find_entry};
 use crate::collection::{is_reserved, render};
 use crate::{Collection, CollectionEditError, CollectionRegistry, DirEntry, Entry, FileEntry};
 use request::{HttpRequest, Method, Request};
 
 impl CollectionRegistry {
     pub fn create_collection(&mut self) -> Result<PathBuf, CollectionEditError> {
-        let directory = self
+        let directory = self.collections_directory()?;
+        let path = create_directory(&directory, "New Collection")?;
+        self.add_empty_collection(&path);
+
+        Ok(path)
+    }
+
+    /// Creates a collection with exactly this name. Fails when another
+    /// collection already uses the name.
+    pub fn create_named_collection(&mut self, name: &str) -> Result<PathBuf, CollectionEditError> {
+        let name = name.trim();
+        check_directory_name(name)?;
+        if self.collection_name_taken(name) {
+            return Err(CollectionEditError::AlreadyExists);
+        }
+
+        let path = self.collections_directory()?.join(name);
+        match fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(CollectionEditError::AlreadyExists);
+            }
+            Err(error) => return Err(error.into()),
+        }
+        self.add_empty_collection(&path);
+
+        Ok(path)
+    }
+
+    /// Whether a collection already has this name. Names that differ only
+    /// in case count as the same, as they do on some file systems.
+    pub fn collection_name_taken(&self, name: &str) -> bool {
+        let name = name.trim().to_lowercase();
+        self.collections.iter().any(|collection| {
+            collection
+                .path
+                .file_name()
+                .is_some_and(|existing| existing.to_string_lossy().to_lowercase() == name)
+        })
+    }
+
+    /// The first of "New Collection", "New Collection 2" and so on that no
+    /// collection uses and nothing in the collections directory occupies.
+    pub fn free_collection_name(&self) -> String {
+        let mut taken: HashSet<String> = self
+            .collections
+            .iter()
+            .filter_map(|collection| collection.path.file_name())
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .collect();
+        if let Some(entries) = self
             .directory
             .as_ref()
-            .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
-        fs::create_dir_all(directory)?;
-        let path = create_directory(directory, "New Collection")?;
+            .and_then(|directory| fs::read_dir(directory).ok())
+        {
+            taken.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().to_lowercase()),
+            );
+        }
 
+        (1..)
+            .map(|number| match number {
+                1 => "New Collection".to_owned(),
+                number => format!("New Collection {number}"),
+            })
+            .find(|name| !taken.contains(&name.to_lowercase()))
+            .expect("a free collection name")
+    }
+
+    fn collections_directory(&self) -> Result<PathBuf, CollectionEditError> {
+        let directory = self
+            .directory
+            .clone()
+            .ok_or_else(|| io::Error::other("No collections directory is configured."))?;
+        fs::create_dir_all(&directory)?;
+
+        Ok(directory)
+    }
+
+    fn add_empty_collection(&mut self, path: &Path) {
         self.collections.push(Collection {
-            path: path.clone(),
+            path: path.to_path_buf(),
             entries: Vec::new(),
             local_env: Environment {
                 path: path.join(ENVIRONMENT_FILE_NAME),
@@ -35,8 +110,6 @@ impl CollectionRegistry {
             auth: Default::default(),
             outside_changes: 0,
         });
-
-        Ok(path)
     }
 
     pub fn create_folder(&mut self, parent: &Path) -> Result<PathBuf, CollectionEditError> {

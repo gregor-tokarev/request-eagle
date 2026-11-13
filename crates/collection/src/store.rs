@@ -171,6 +171,39 @@ impl Collections {
         Ok(path)
     }
 
+    /// Create a collection with exactly this name and save a request in it,
+    /// such as when a request is saved into a collection named while saving.
+    /// When the request cannot be saved, the collection is removed again.
+    pub fn create_collection_with_request(
+        &mut self,
+        collection_name: &str,
+        request_name: &str,
+        request: &Request,
+        cx: &mut Context<Self>,
+    ) -> Result<PathBuf, CollectionEditError> {
+        let collection = self.registry.create_named_collection(collection_name)?;
+        // Files picked before the collection was known are stored relative to it.
+        let request = request.relative_to(&collection);
+        let path = self
+            .registry
+            .create_request_with(&collection, request_name, request)
+            .inspect_err(|_| {
+                let _ = self.registry.delete(&collection);
+            })?;
+        // One event for both, so the sidebar selects the saved request.
+        self.created(&path, cx);
+
+        Ok(path)
+    }
+
+    pub fn free_collection_name(&self) -> String {
+        self.registry.free_collection_name()
+    }
+
+    pub fn collection_name_taken(&self, name: &str) -> bool {
+        self.registry.collection_name_taken(name)
+    }
+
     pub fn create_folder(
         &mut self,
         parent: &Path,

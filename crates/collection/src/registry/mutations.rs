@@ -312,13 +312,7 @@ pub(super) fn request_changed(known: &FileEntry, latest: &FileEntry) -> bool {
 }
 
 fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditError> {
-    if name == "." || name == ".." || name.contains(['/', '\\', ':']) {
-        return Err(CollectionEditError::InvalidName);
-    }
-    // Loading leaves hidden folders out.
-    if name.starts_with('.') {
-        return Err(CollectionEditError::HiddenName);
-    }
+    check_directory_name(name)?;
 
     let destination = path.with_file_name(name);
     if destination == path {
@@ -357,6 +351,24 @@ fn rename_directory(path: &Path, name: &str) -> Result<PathBuf, CollectionEditEr
 
     crate::order::rename_directory(path, &destination)?;
     Ok(destination)
+}
+
+/// Checks a trimmed collection or folder name before it becomes a directory.
+pub(super) fn check_directory_name(name: &str) -> Result<(), CollectionEditError> {
+    if name.is_empty()
+        || name.chars().any(char::is_control)
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', ':'])
+    {
+        return Err(CollectionEditError::InvalidName);
+    }
+    // Loading leaves hidden folders out.
+    if name.starts_with('.') {
+        return Err(CollectionEditError::HiddenName);
+    }
+
+    Ok(())
 }
 
 pub(super) fn find_entry<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {
