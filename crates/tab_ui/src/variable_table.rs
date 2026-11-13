@@ -12,6 +12,9 @@ struct VariableRow {
     value: Entity<InputState>,
     /// The value stays masked until revealed. Requests send it as it is.
     secret: bool,
+    /// Contains the focus while the Secure toggle has it, so that keyboard
+    /// focus can reveal the toggle that otherwise shows only on hover.
+    secret_focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,6 +120,7 @@ impl VariableTable {
             name,
             value,
             secret,
+            secret_focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         });
     }
@@ -168,7 +172,7 @@ impl VariableRow {
 }
 
 impl Render for VariableTable {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (prefix, name_column) = (self.prefix, self.name_column);
         let secret_toggle = self.secret_toggle;
 
@@ -203,9 +207,12 @@ impl Render for VariableTable {
                 let populated = !row.is_empty(cx);
                 let secret = row.secret;
                 let show_secret_toggle = secret_toggle && (populated || secret);
+                let secret_keyboard_focus = window.last_input_was_keyboard()
+                    && row.secret_focus.contains_focused(window, cx);
 
                 h_flex()
                     .id(("variable", row.name.entity_id()))
+                    .group("variable-row")
                     .h_8()
                     .border_t_1()
                     .border_color(cx.theme().border)
@@ -255,6 +262,21 @@ impl Render for VariableTable {
                                             .right_1()
                                             .top_0()
                                             .h_full()
+                                            .track_focus(&row.secret_focus)
+                                            .map(|toggle| {
+                                                // Transparent rather than invisible, so that
+                                                // the toggle stays a Tab stop.
+                                                if secret_keyboard_focus {
+                                                    toggle.opacity(1.)
+                                                } else {
+                                                    toggle
+                                                        .opacity(0.)
+                                                        .group_hover("variable-row", |toggle| {
+                                                            toggle.opacity(0.5)
+                                                        })
+                                                        .hover(|toggle| toggle.opacity(1.))
+                                                }
+                                            })
                                             .child(
                                                 Toggle::new("secret-variable")
                                                     .small()
