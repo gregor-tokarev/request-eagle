@@ -124,6 +124,15 @@ impl Collection {
         if variables_changed {
             let environment = Environment {
                 path: self.local_env.path.clone(),
+                // The collection page has no secret toggle; keep the flags
+                // of variables that are still there.
+                secrets: self
+                    .local_env
+                    .secrets
+                    .iter()
+                    .filter(|key| variables.contains_key(*key))
+                    .cloned()
+                    .collect(),
                 entries: variables,
             };
 
@@ -177,6 +186,7 @@ impl Collection {
         let SharedSettings { scripts, auth } = Self::load_settings(&self.path)?;
         let local_env = Environment::from_file(&self.local_env.path)?;
         let changed = self.local_env.entries != local_env.entries
+            || self.local_env.secrets != local_env.secrets
             || self.scripts != scripts
             || self.auth != auth;
 
@@ -207,8 +217,9 @@ impl Collection {
     /// Whether `environment.toml` holds other variables than those last
     /// read from it or saved to it.
     fn variables_changed_outside(&self) -> bool {
-        Environment::from_file(&self.local_env.path)
-            .map_or(true, |latest| latest.entries != self.local_env.entries)
+        Environment::from_file(&self.local_env.path).map_or(true, |latest| {
+            latest.entries != self.local_env.entries || latest.secrets != self.local_env.secrets
+        })
     }
 
     /// The collection's own files, which requests and folders cannot replace.
@@ -233,6 +244,7 @@ impl Collection {
     /// variables, scripts or authorization.
     pub(crate) fn settings_differ(&self, other: &Collection) -> bool {
         self.local_env.entries != other.local_env.entries
+            || self.local_env.secrets != other.local_env.secrets
             || self.scripts != other.scripts
             || self.auth != other.auth
     }

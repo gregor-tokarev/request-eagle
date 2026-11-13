@@ -1,3 +1,5 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
+
 use environment::{Environment, valid_variable_name};
 use gpui_kit::component::{
     button::*,
@@ -20,7 +22,10 @@ pub struct EnvironmentEditor {
     pub name: SharedString,
     environments: Entity<Environments>,
     saved: Vec<(String, String)>,
+    saved_secrets: BTreeSet<String>,
     variables: Vec<(String, String)>,
+    /// Names of the variables whose values are hidden until revealed.
+    secrets: HashSet<String>,
     load_error: Option<String>,
     error: Option<String>,
     name_input: Option<Entity<InputState>>,
@@ -32,15 +37,18 @@ impl EventEmitter<SaveEnvironment> for EnvironmentEditor {}
 
 impl EnvironmentEditor {
     pub fn new(name: SharedString, environments: Entity<Environments>, cx: &App) -> Self {
-        let (saved, load_error) = match Environment::from_file(environments.read(cx).path(&name)) {
-            Ok(environment) => (sorted(environment.entries), None),
-            Err(error) => (Vec::new(), Some(error.to_string())),
-        };
+        let (saved, secrets, load_error) =
+            match Environment::from_file(environments.read(cx).path(&name)) {
+                Ok(environment) => (sorted(environment.entries), environment.secrets, None),
+                Err(error) => (Vec::new(), HashSet::new(), Some(error.to_string())),
+            };
 
         Self {
             name,
             environments,
             variables: saved.clone(),
+            saved_secrets: secrets.iter().cloned().collect(),
+            secrets,
             saved,
             load_error,
             error: None,
@@ -52,6 +60,7 @@ impl EnvironmentEditor {
 
     pub fn is_dirty(&self) -> bool {
         sorted(self.variables.iter().cloned()) != self.saved
+            || self.secrets.iter().cloned().collect::<BTreeSet<_>>() != self.saved_secrets
     }
 
     /// Whether the environment's file holds other variables than when it
@@ -66,6 +75,7 @@ impl EnvironmentEditor {
         let path = self.environments.read(cx).path(&self.name);
         Environment::from_file(path).map_or(true, |environment| {
             sorted(environment.entries) != self.saved
+                || environment.secrets.into_iter().collect::<BTreeSet<_>>() != self.saved_secrets
         })
     }
 
@@ -98,7 +108,7 @@ impl EnvironmentEditor {
             ));
         }
 
-        let mut entries = std::collections::HashMap::new();
+        let mut entries = HashMap::new();
         for (key, value) in &self.variables {
             if !valid_variable_name(key) {
                 return Err(format!(
@@ -114,11 +124,17 @@ impl EnvironmentEditor {
         }
 
         let path = self.environments.read(cx).path(&self.name);
-        Environment { path, entries }
-            .save_file()
-            .map_err(|error| format!("Could not save environment: {error}"))?;
+        let secrets = self.secrets.clone();
+        Environment {
+            path,
+            entries,
+            secrets,
+        }
+        .save_file()
+        .map_err(|error| format!("Could not save environment: {error}"))?;
 
         self.saved = sorted(self.variables.iter().cloned());
+        self.saved_secrets = self.secrets.iter().cloned().collect();
         Ok(())
     }
 
@@ -188,10 +204,19 @@ impl EnvironmentEditor {
 
         let active_subscription = cx.observe(&self.environments, |_, _, cx| cx.notify());
 
-        let table =
-            cx.new(|cx| VariableTable::new("environment", "key", &self.variables, window, cx));
+        let table = cx.new(|cx| {
+            VariableTable::with_secrets(
+                "environment",
+                "key",
+                &self.variables,
+                &self.secrets,
+                window,
+                cx,
+            )
+        });
         let table_subscription = cx.subscribe(&table, |this, _, event: &VariablesChanged, cx| {
             this.variables = event.0.clone();
+            this.secrets = event.1.clone();
             this.error = None;
             cx.notify();
         });

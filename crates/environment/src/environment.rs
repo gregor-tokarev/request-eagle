@@ -1,16 +1,40 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     io::{self, Write as _},
     path::{Path, PathBuf},
 };
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 pub struct Environment {
     pub path: PathBuf,
     pub entries: HashMap<String, String>,
+    /// Variables whose values editors hide until revealed. Requests use
+    /// their values like any other.
+    pub secrets: HashSet<String>,
+}
+
+/// A variable in the file. A plain string is the original format and is
+/// not secret; a secret variable is a table with its value and the flag.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum StoredVariable<'a> {
+    Plain(&'a str),
+    Flagged { value: &'a str, secret: bool },
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LoadedVariable {
+    Plain(String),
+    Flagged {
+        value: String,
+        #[serde(default)]
+        secret: bool,
+    },
 }
 
 impl Environment {
@@ -33,10 +57,21 @@ impl Environment {
 
     pub fn save_file(&self) -> Result<(), EnvironmentSaveError> {
         let path = &self.path;
-        let entries: BTreeMap<&str, &str> = self
+        let entries: BTreeMap<&str, StoredVariable> = self
             .entries
             .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .map(|(key, value)| {
+                let variable = if self.secrets.contains(key) {
+                    StoredVariable::Flagged {
+                        value,
+                        secret: true,
+                    }
+                } else {
+                    StoredVariable::Plain(value)
+                };
+
+                (key.as_str(), variable)
+            })
             .collect();
 
         let source =
@@ -58,15 +93,33 @@ impl Environment {
     }
 
     pub(super) fn from_toml(path: &Path, source: &str) -> Result<Self, EnvironmentLoadError> {
-        let entries: HashMap<String, String> =
+        let variables: HashMap<String, LoadedVariable> =
             toml::from_str(source).map_err(|source| EnvironmentLoadError::Parse {
                 path: path.to_path_buf(),
                 source,
             })?;
 
+        let mut entries = HashMap::new();
+        let mut secrets = HashSet::new();
+        for (key, variable) in variables {
+            let value = match variable {
+                LoadedVariable::Plain(value) => value,
+                LoadedVariable::Flagged { value, secret } => {
+                    if secret {
+                        secrets.insert(key.clone());
+                    }
+
+                    value
+                }
+            };
+
+            entries.insert(key, value);
+        }
+
         Ok(Self {
             path: path.to_path_buf(),
             entries,
+            secrets,
         })
     }
 }

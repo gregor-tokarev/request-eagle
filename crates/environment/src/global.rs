@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -97,6 +97,7 @@ impl GlobalEnvironments {
         &self,
         base: &str,
         entries: HashMap<String, String>,
+        secrets: HashSet<String>,
     ) -> Result<String, GlobalEnvironmentError> {
         let mut name = String::new();
         for character in base.chars() {
@@ -116,6 +117,7 @@ impl GlobalEnvironments {
         let environment = Environment {
             path: self.path(&name),
             entries,
+            secrets,
         };
         if let Err(error) = environment.save_file() {
             let _ = fs::remove_file(&environment.path);
