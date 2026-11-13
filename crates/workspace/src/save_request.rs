@@ -164,31 +164,16 @@ impl SaveRequestDialog {
         };
         let name = self.name.read(cx).value().to_string();
 
-        let result = self.collections.update(cx, |collections, cx| {
-            let (destination, collection, created) = match target {
-                Target::Existing(destination) => (destination.path, destination.collection, false),
-                Target::NewCollection(collection_name) => {
-                    match collections.create_named_collection(&collection_name, cx) {
-                        Ok(path) => (path.clone(), path, true),
-                        Err(error) => {
-                            return Err(format!("Could not create collection: {error}"));
-                        }
-                    }
+        let result =
+            self.collections.update(cx, |collections, cx| match target {
+                Target::Existing(destination) => {
+                    // Files picked before the collection was known are stored relative to it.
+                    let request = self.request.relative_to(&destination.collection);
+                    collections.create_request_with(&destination.path, &name, request, cx)
                 }
-            };
-            // Files picked before the collection was known are stored relative to it.
-            let request = self.request.relative_to(&collection);
-
-            collections
-                .create_request_with(&destination, &name, request, cx)
-                .map_err(|error| {
-                    // Leave no empty collection behind when the request was not saved.
-                    if created {
-                        let _ = collections.delete(&destination, cx);
-                    }
-                    format!("Could not save request: {error}")
-                })
-        });
+                Target::NewCollection(collection_name) => collections
+                    .create_collection_with_request(&collection_name, &name, &self.request, cx),
+            });
         let saved = result.map(|path| {
             let (location, file) = self
                 .collections
@@ -205,7 +190,7 @@ impl SaveRequestDialog {
                 window.close_dialog(cx);
             }
             Err(error) => {
-                self.error = Some(error);
+                self.error = Some(format!("Could not save request: {error}"));
                 cx.notify();
             }
         }
