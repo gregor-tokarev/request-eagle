@@ -8,8 +8,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request::{
-    Execution, ExecutionError, ExecutionFailure, HeaderMap, HttpMetrics, HttpResponse, Response,
-    ScriptPhase, ServerSentEvent, StatusCode, Version,
+    ErrorSummary, Execution, ExecutionError, ExecutionFailure, HeaderMap, HttpMetrics,
+    HttpResponse, Response, ScriptPhase, ServerSentEvent, StatusCode, Version,
 };
 
 use super::body::{Body, BodyMode};
@@ -54,7 +54,11 @@ pub(super) enum ResponseState {
         /// The events of an event-stream response, while it is open and after it ends.
         events: Option<Entity<EventLog>>,
     },
-    Failed(SharedString),
+    Failed {
+        summary: ErrorSummary,
+        details_open: bool,
+        details_copied: bool,
+    },
 }
 
 pub struct ResponseView {
@@ -81,6 +85,7 @@ pub struct ResponseView {
     /// the response it saved.
     pub(super) responses: u64,
     pub(super) save_task: Option<Task<()>>,
+    pub(super) copy_reset_task: Option<Task<()>>,
     /// Whether a section shows the request as it went out.
     request_section: bool,
     /// Whether the tab quotes the response to the agent.
@@ -107,6 +112,7 @@ impl ResponseView {
             saved: None,
             responses: 0,
             save_task: None,
+            copy_reset_task: None,
             request_section: false,
             citable: false,
             show_script_line: None,
@@ -139,6 +145,7 @@ impl ResponseView {
     pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
         self.state = ResponseState::Waiting;
         self.saved = None;
+        self.copy_reset_task = None;
         self.responses += 1;
         self.scripts.clear();
         cx.notify();
@@ -194,6 +201,7 @@ impl ResponseView {
 
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         let message: SharedString = "Request cancelled".into();
+        self.copy_reset_task = None;
 
         match &self.state {
             // An open stream keeps its head and events, ending with the cancellation.
@@ -210,7 +218,15 @@ impl ResponseView {
 
     /// Show why a request from history failed after it was sent.
     pub(crate) fn fail(&mut self, message: SharedString, cx: &mut Context<Self>) {
-        self.state = ResponseState::Failed(message);
+        self.state = ResponseState::Failed {
+            summary: ErrorSummary::from_message(&message),
+            details_open: false,
+            details_copied: false,
+        };
+        self.saved = None;
+        self.copy_reset_task = None;
+        self.responses += 1;
+        self.select(Section::Body);
         self.scripts.clear();
         cx.notify();
     }
@@ -222,6 +238,7 @@ impl ResponseView {
         cx: &mut Context<Self>,
     ) {
         self.scripts.clear();
+        self.copy_reset_task = None;
 
         match result {
             Ok(mut content) => {
@@ -248,12 +265,15 @@ impl ResponseView {
             Err(failure) => {
                 let message: SharedString = failure.error.to_string().into();
                 let skipped = matches!(failure.error, ExecutionError::Skipped { .. });
+                let summary = (!skipped).then(|| failure.error.summary());
                 match failure.error {
                     ExecutionError::Skipped { .. } => self.select(Section::Body),
                     ExecutionError::Script { .. } => self.select(Section::Tests),
                     _ => {}
                 }
                 self.scripts = failure.scripts;
+                self.saved = None;
+                self.responses += 1;
 
                 match &self.state {
                     // A broken stream keeps its head and events, ending with the error.
@@ -261,7 +281,13 @@ impl ResponseView {
                         events: Some(log), ..
                     } => log.update(cx, |log, cx| log.finish(Some(message), cx)),
                     _ if skipped => self.state = ResponseState::Empty(message),
-                    _ => self.state = ResponseState::Failed(message),
+                    _ => {
+                        self.state = ResponseState::Failed {
+                            summary: summary.expect("non-skipped failure has a summary"),
+                            details_open: false,
+                            details_copied: false,
+                        };
+                    }
                 }
             }
         }
@@ -442,7 +468,16 @@ impl ResponseView {
             })
     }
 
-    fn empty_state(&self, window: &Window, cx: &App) -> AnyElement {
+    fn empty_state(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        if let ResponseState::Failed {
+            summary,
+            details_open,
+            details_copied,
+        } = &self.state
+        {
+            return self.failure_state(summary, *details_open, *details_copied, cx);
+        }
+
         let media = EmptyMedia::new().with_variant(EmptyMediaVariant::Icon);
         let header = match &self.state {
             ResponseState::Waiting => EmptyHeader::new()
@@ -452,12 +487,6 @@ impl ResponseView {
                     |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
                 )))
                 .title(EmptyTitle::new().child("Sending request…")),
-            ResponseState::Failed(message) => EmptyHeader::new()
-                .media(
-                    media.child(Icon::new(IconName::TriangleAlert).text_color(cx.theme().danger)),
-                )
-                .title(EmptyTitle::new().child("Request failed"))
-                .description(EmptyDescription::new().child(message.clone())),
             ResponseState::Empty(title) => EmptyHeader::new()
                 .media(media.child(Icon::default().path("icons/send-horizontal.svg")))
                 .title(EmptyTitle::new().child(title.clone()))
@@ -476,8 +505,8 @@ impl ResponseView {
                         )
                     },
                 ),
-            // Its sections show a response, so it has no empty state.
-            ResponseState::Received { .. } => EmptyHeader::new(),
+            // Its sections show a response, and failures use `failure_state`.
+            ResponseState::Received { .. } | ResponseState::Failed { .. } => EmptyHeader::new(),
         };
 
         div()
@@ -497,11 +526,12 @@ impl Render for ResponseView {
         let has_results =
             matches!(self.state, ResponseState::Received { .. }) || !self.scripts.is_empty();
         let failure = match &self.state {
-            ResponseState::Failed(message)
-                if !self.scripts.is_empty()
+            ResponseState::Failed { summary, .. }
+                if has_results
+                    && matches!(self.section, Section::Tests | Section::Console)
                     && self.scripts.iter().all(|report| report.error.is_none()) =>
             {
-                Some(message.clone())
+                Some(summary.clone())
             }
             _ => None,
         };
@@ -571,8 +601,8 @@ impl Render for ResponseView {
             .border_t_1()
             .border_color(cx.theme().border)
             .when(has_results, |view| view.child(self.toolbar(window, cx)))
-            .when_some(failure, |view, message| {
-                view.child(div().px_2().text_color(cx.theme().danger).child(message))
+            .when_some(failure, |view, summary| {
+                view.child(self.failure_banner(&summary, cx))
             })
             .child(content)
             // Root owns the active scope. While a hover card is open, exclude
