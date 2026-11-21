@@ -26,6 +26,14 @@ const INSET: f32 = 0.25;
 /// so a request's method starts where a folder's icon does, in rems.
 const CHEVRON: f32 = 1.;
 
+const OPEN_IN_FILE_MANAGER_LABEL: &str = if cfg!(target_os = "macos") {
+    "Open in Finder"
+} else if cfg!(windows) {
+    "Open in Explorer"
+} else {
+    "Open in File Manager"
+};
+
 type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
 impl CollectionPanel {
@@ -601,7 +609,7 @@ impl CollectionPanel {
                     }),
             )
             .item(
-                PopupMenuItem::new("Open in Finder")
+                PopupMenuItem::new(OPEN_IN_FILE_MANAGER_LABEL)
                     .on_click(move |_, _, cx| cx.reveal_path(&path)),
             )
             .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
