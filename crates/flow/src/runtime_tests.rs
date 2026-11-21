@@ -966,3 +966,188 @@ fn authorization_variables_are_inputs_too() {
         ["base", "shared_token"]
     );
 }
+
+#[test]
+fn runs_on_start_matches_which_http_blocks_execute_without_upstream_data() {
+    smol::block_on(async {
+        let url = serve().await;
+        let requests = HashMap::from([(
+            "ping".to_owned(),
+            saved(
+                "Ping",
+                HttpRequest {
+                    path: format!("{url}/ping?token={{{{token}}}}"),
+                    ..Default::default()
+                },
+            ),
+        )]);
+        // `gate` is not a source (Delay with no incoming connection), so it
+        // never sends anything; any HTTP block wired to it must wait and not run.
+        let flow = Flow {
+            blocks: vec![
+                block("gate", BlockType::Delay.block_kind()),
+                block(
+                    "unconnected",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block(
+                    "outgoing_only",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block("sink", BlockType::Display.block_kind()),
+                block(
+                    "waits_on_send",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block(
+                    "waits_on_var",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block(
+                    "waits_on_stale_var",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block(
+                    "dangling_input",
+                    BlockKind::HttpRequest {
+                        request: "ping".to_owned(),
+                    },
+                ),
+                block(
+                    "empty_request",
+                    BlockKind::HttpRequest {
+                        request: String::new(),
+                    },
+                ),
+            ],
+            connections: vec![
+                wire("outgoing_only", "success", "sink", "data"),
+                wire("gate", "data", "waits_on_send", "send"),
+                wire("gate", "data", "waits_on_var", "token"),
+                wire("gate", "data", "waits_on_stale_var", "removed_var"),
+                wire("missing", "data", "dangling_input", "send"),
+            ],
+        };
+
+        let mut events = Vec::new();
+        run(
+            flow.clone(),
+            RunOptions {
+                requests,
+                ..options()
+            },
+            |event| events.push(event),
+        )
+        .await;
+
+        for (index, block) in flow.blocks.iter().enumerate() {
+            if !matches!(block.kind, BlockKind::HttpRequest { .. }) {
+                continue;
+            }
+            let executed = !finished(&events, &block.id).is_empty();
+            assert_eq!(
+                flow.runs_on_start_at(index),
+                executed,
+                "runs_on_start_at disagreed with runtime for block {}",
+                block.id
+            );
+            assert_eq!(
+                flow.runs_on_start(&block.id),
+                executed,
+                "runs_on_start disagreed with runtime for block {}",
+                block.id
+            );
+        }
+    });
+}
+
+#[test]
+fn runs_on_start_matches_runtime_when_http_block_ids_repeat() {
+    smol::block_on(async {
+        let url = serve().await;
+        let requests = HashMap::from([
+            (
+                "first".to_owned(),
+                saved(
+                    "First",
+                    HttpRequest {
+                        path: format!("{url}/first"),
+                        ..Default::default()
+                    },
+                ),
+            ),
+            (
+                "second".to_owned(),
+                saved(
+                    "Second",
+                    HttpRequest {
+                        path: format!("{url}/second"),
+                        ..Default::default()
+                    },
+                ),
+            ),
+        ]);
+        let mut flow = Flow {
+            blocks: vec![
+                block("gate", BlockType::Delay.block_kind()),
+                block(
+                    "dup",
+                    BlockKind::HttpRequest {
+                        request: "first".to_owned(),
+                    },
+                ),
+                block(
+                    "dup",
+                    BlockKind::HttpRequest {
+                        request: "second".to_owned(),
+                    },
+                ),
+            ],
+            connections: vec![wire("gate", "data", "dup", "send")],
+        };
+
+        // With an incoming wire to "dup", neither duplicate runs at flow start.
+        let mut events = Vec::new();
+        run(
+            flow.clone(),
+            RunOptions {
+                requests: requests.clone(),
+                ..options()
+            },
+            |event| events.push(event),
+        )
+        .await;
+        assert!(finished(&events, "dup").is_empty());
+        assert!(!flow.runs_on_start_at(1));
+        assert!(!flow.runs_on_start_at(2));
+        assert!(!flow.runs_on_start("dup"));
+
+        // Without an incoming wire, both duplicates run at flow start.
+        flow.connections.clear();
+        let mut events = Vec::new();
+        run(
+            flow.clone(),
+            RunOptions {
+                requests,
+                ..options()
+            },
+            |event| events.push(event),
+        )
+        .await;
+        let runs = finished(&events, "dup");
+        assert_eq!(runs.len(), 2);
+        assert!(flow.runs_on_start_at(1));
+        assert!(flow.runs_on_start_at(2));
+        assert!(flow.runs_on_start("dup"));
+    });
+}

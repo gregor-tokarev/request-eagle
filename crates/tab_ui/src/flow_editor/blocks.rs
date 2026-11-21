@@ -1,6 +1,7 @@
-use flow::{Block, BlockKind, BlockType, StartInput};
+use flow::{Block, BlockKind, BlockType, Flow, StartInput};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, spinner::Spinner, v_flex,
+    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, spinner::Spinner, tooltip::Tooltip,
+    v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::{method_color, method_label};
@@ -13,6 +14,24 @@ use super::{
     preview,
     run::BlockStatus,
 };
+
+/// Label shown on unconnected HTTP Request blocks that start with the flow.
+pub(super) const AUTO_START_LABEL: &str = "Runs on flow start";
+
+/// Explains why an unconnected HTTP Request block starts automatically and how
+/// to make it wait for another block.
+pub(super) const AUTO_START_EXPLANATION: &str = "No inputs are connected, so this block runs \
+    automatically when the flow starts. Connect an earlier block's output to Send or a request \
+    variable input to make it wait.";
+
+/// Whether `flow.blocks[index]` is an HTTP Request block that runs
+/// automatically when the flow starts.
+pub(super) fn http_runs_on_start_at(flow: &Flow, index: usize) -> bool {
+    flow.blocks
+        .get(index)
+        .is_some_and(|block| matches!(block.kind, BlockKind::HttpRequest { .. }))
+        && flow.runs_on_start_at(index)
+}
 
 /// How far above itself a zoomed-out Note shows its heading, in interface
 /// pixels.
@@ -89,6 +108,7 @@ pub(super) fn color(block_type: BlockType, cx: &App) -> Hsla {
 impl FlowEditor {
     pub(super) fn block_element(
         &self,
+        index: usize,
         block: &Block,
         layout: &Layout,
         cx: &Context<Self>,
@@ -105,7 +125,12 @@ impl FlowEditor {
         let status = self.run.blocks.get(&block.id);
         let origin = self.viewport.to_view(layout.bounds.origin, self.rem);
         let id = block.id.clone();
-        let rows = layout.inputs.len().max(layout.outputs.len());
+        let auto_start = http_runs_on_start_at(&self.flow, index);
+        let rows = layout
+            .inputs
+            .len()
+            .max(layout.outputs.len())
+            .max(usize::from(auto_start));
         let connecting = self.connecting_port();
 
         div()
@@ -136,6 +161,10 @@ impl FlowEditor {
             )
             .child(self.block_header(block, layout, status, cx))
             .children((0..rows).map(|row| {
+                // Show the auto-start badge beside the Send port so block height
+                // and body space (for URLs, notices, and errors) stay untouched.
+                let row_auto_start = auto_start && row == 0;
+
                 h_flex()
                     .flex_none()
                     .h(units(ROW))
@@ -143,20 +172,41 @@ impl FlowEditor {
                     .gap(units(8.))
                     .text_xs()
                     // A row without an input leaves its output the whole width.
-                    .when_some(layout.inputs.get(row), |this, name| {
+                    .when(row_auto_start, |this| {
                         this.child(
-                            div()
+                            h_flex()
                                 .flex_1()
                                 .min_w_0()
                                 .overflow_hidden()
+                                .gap(units(4.))
+                                .items_center()
                                 .text_color(theme.muted_foreground)
-                                .child(self.input_label(block, layout, name, cx)),
+                                .when_some(layout.inputs.get(row), |this, name| {
+                                    this.child(
+                                        div()
+                                            .flex_none()
+                                            .child(self.input_label(block, layout, name, cx)),
+                                    )
+                                })
+                                .child(auto_start_badge(index, &block.id, cx)),
                         )
+                    })
+                    .when(!row_auto_start, |this| {
+                        this.when_some(layout.inputs.get(row), |this, name| {
+                            this.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_color(theme.muted_foreground)
+                                    .child(self.input_label(block, layout, name, cx)),
+                            )
+                        })
                     })
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .when(row_auto_start, |this| this.flex_none())
+                            .when(!row_auto_start, |this| this.flex_1().min_w_0())
                             .text_ellipsis()
                             .text_right()
                             .children(layout.outputs.get(row).map(|name| {
@@ -641,6 +691,38 @@ impl FlowEditor {
                 .into_any_element(),
         )
     }
+}
+
+/// Marks an unconnected HTTP Request block that starts automatically when the
+/// flow runs.
+fn auto_start_badge(index: usize, id: &str, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let selector = format!("flow-block-auto-start-{id}");
+
+    h_flex()
+        .id(("flow-block-auto-start", index))
+        .debug_selector(move || selector.clone())
+        .min_w_0()
+        .gap(units(3.))
+        .px(units(5.))
+        .py(units(1.))
+        .rounded_full()
+        .bg(theme.warning.opacity(0.14))
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.warning)
+        .tooltip(|window, cx| {
+            Tooltip::element(|_, _| div().max_w(rems(20.)).child(AUTO_START_EXPLANATION))
+                .build(window, cx)
+        })
+        .child(
+            Icon::default()
+                .path("icons/play.svg")
+                .size(units(10.))
+                .flex_none()
+                .text_color(theme.warning),
+        )
+        .child(div().min_w_0().text_ellipsis().child(AUTO_START_LABEL))
 }
 
 /// How the last run went, in the header: the HTTP status a request

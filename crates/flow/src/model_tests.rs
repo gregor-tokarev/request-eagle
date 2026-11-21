@@ -251,3 +251,114 @@ fn edits_keep_connections_consistent() {
     assert_eq!(flow.blocks.len(), 2);
     assert!(flow.connections.is_empty());
 }
+
+#[test]
+fn runs_on_start_matches_source_and_incoming_connection_rules() {
+    let mut flow = Flow {
+        blocks: vec![
+            block("start", BlockType::Start.block_kind()),
+            block(
+                "http_free",
+                BlockKind::HttpRequest {
+                    request: "req-1".to_owned(),
+                },
+            ),
+            block(
+                "http_outgoing",
+                BlockKind::HttpRequest {
+                    request: "req-2".to_owned(),
+                },
+            ),
+            block(
+                "http_send",
+                BlockKind::HttpRequest {
+                    request: "req-3".to_owned(),
+                },
+            ),
+            block(
+                "http_var",
+                BlockKind::HttpRequest {
+                    request: "req-4".to_owned(),
+                },
+            ),
+            block(
+                "http_stale_var",
+                BlockKind::HttpRequest {
+                    request: "req-5".to_owned(),
+                },
+            ),
+            block(
+                "http_dangling",
+                BlockKind::HttpRequest {
+                    request: "req-6".to_owned(),
+                },
+            ),
+            block(
+                "http_self",
+                BlockKind::HttpRequest {
+                    request: "req-7".to_owned(),
+                },
+            ),
+            block("display", BlockType::Display.block_kind()),
+        ],
+        connections: vec![
+            connection("http_outgoing", "success", "display", "data"),
+            connection("start", "data", "http_send", "send"),
+            connection("start", "data", "http_var", "token"),
+            connection("start", "data", "http_stale_var", "removed_var"),
+            connection("missing", "data", "http_dangling", "send"),
+            connection("http_self", "success", "http_self", "send"),
+        ],
+    };
+
+    assert!(flow.runs_on_start("start"));
+    assert!(flow.runs_on_start("http_free"));
+    assert!(flow.runs_on_start("http_outgoing"));
+    assert!(!flow.runs_on_start("http_send"));
+    assert!(!flow.runs_on_start("http_var"));
+    assert!(!flow.runs_on_start("http_stale_var"));
+    // A dangling connection from a missing block is ignored by Graph::new.
+    assert!(flow.runs_on_start("http_dangling"));
+    assert!(!flow.runs_on_start("http_self"));
+    assert!(!flow.runs_on_start("display"));
+    assert!(!flow.runs_on_start("missing"));
+
+    // Removing the upstream block disconnects its targets so they auto-start.
+    flow.remove_blocks(&["start".to_owned()]);
+    assert!(flow.runs_on_start("http_send"));
+    assert!(flow.runs_on_start("http_var"));
+    assert!(flow.runs_on_start("http_stale_var"));
+}
+
+#[test]
+fn runs_on_start_matches_runtime_graph_when_block_ids_repeat() {
+    let mut flow = Flow {
+        blocks: vec![
+            block("start", BlockType::Start.block_kind()),
+            block(
+                "dup",
+                BlockKind::HttpRequest {
+                    request: "req-1".to_owned(),
+                },
+            ),
+            block(
+                "dup",
+                BlockKind::HttpRequest {
+                    request: "req-2".to_owned(),
+                },
+            ),
+        ],
+        connections: vec![connection("start", "data", "dup", "send")],
+    };
+
+    // An incoming wire to "dup" prevents every duplicate from auto-starting.
+    assert!(!flow.runs_on_start_at(1));
+    assert!(!flow.runs_on_start_at(2));
+    assert!(!flow.runs_on_start("dup"));
+
+    // Without an incoming wire, both duplicates auto-start.
+    flow.connections.clear();
+    assert!(flow.runs_on_start_at(1));
+    assert!(flow.runs_on_start_at(2));
+    assert!(flow.runs_on_start("dup"));
+}

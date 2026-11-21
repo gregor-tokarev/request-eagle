@@ -777,7 +777,12 @@ impl FlowEditor {
         }
 
         let inspector = self.inspector.as_ref()?;
-        let block = self.flow.block(&inspector.block)?;
+        let (index, block) = self
+            .flow
+            .blocks
+            .iter()
+            .enumerate()
+            .find(|(_, block)| block.id == inspector.block)?;
         let block_type = block.kind.block_type();
         let id = block.id.clone();
 
@@ -904,7 +909,11 @@ impl FlowEditor {
                             .child("JSON the Start block sends when you run the flow here. Input that is not valid JSON is sent as text. The CLI can send other input."),
                     ),
             ),
-            BlockKind::HttpRequest { request } => panel.child(self.request_chooser(&id, request, inspector, cx)),
+            BlockKind::HttpRequest { request } => panel
+                .when(blocks::http_runs_on_start_at(&self.flow, index), |this| {
+                    this.child(auto_start_hint(cx))
+                })
+                .child(self.request_chooser(&id, request, inspector, cx)),
             BlockKind::Evaluate { .. } => panel
                 .child(labeled_note("Expression", field(Setting::Expression), "FQL, the JSONata-based language of Postman Flows.", cx))
                 .child(self.preview_element(inspector, cx)),
@@ -1835,6 +1844,48 @@ fn underline_start_input(editor: &Entity<EditorState>, input: &StartInput, cx: &
         }
         cx.notify();
     });
+}
+
+/// Explains that an unconnected HTTP Request block starts automatically when
+/// the flow runs and how to make it wait for another block.
+fn auto_start_hint(cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+
+    v_flex()
+        .debug_selector(|| "flow-inspector-auto-start".into())
+        .flex_none()
+        .min_w_0()
+        .gap_1()
+        .p_2()
+        .rounded(theme.radius_tokens().md)
+        .border_1()
+        .border_color(theme.warning.opacity(0.35))
+        .bg(theme.warning.opacity(0.08))
+        .child(
+            h_flex()
+                .gap_1p5()
+                .items_center()
+                .child(
+                    Icon::default()
+                        .path("icons/play.svg")
+                        .size_3p5()
+                        .flex_none()
+                        .text_color(theme.warning),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.warning)
+                        .child(blocks::AUTO_START_LABEL),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(blocks::AUTO_START_EXPLANATION),
+        )
 }
 
 fn section_title(title: &str) -> impl IntoElement {
