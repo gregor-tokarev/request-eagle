@@ -8,6 +8,7 @@ use gpui_kit::component::{
     button::*,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
+    tooltip::Tooltip,
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -15,7 +16,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab, SaveRequest};
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::flow_panel::FlowPanel;
-use crate::history_panel::{HistoryPanel, short_address};
+use crate::history_panel::HistoryPanel;
 use crate::placeholder::placeholder;
 use crate::save_request;
 use crate::session::{SavedFile, SavedTab};
@@ -138,15 +139,30 @@ impl Page {
     /// The tab as the next launch reopens it. `dirty` is the tab's marker of
     /// unsaved changes. The session is saved while tabs are edited, so a
     /// request is copied only when the session keeps it.
-    fn saved(&self, title: &SharedString, dirty: bool, cx: &App) -> SavedTab {
+    fn saved(
+        &self,
+        title: &SharedString,
+        fallback_title: &SharedString,
+        dirty: bool,
+        cx: &App,
+    ) -> SavedTab {
         fn request<R: Clone + Into<request::Request>>(
             title: &SharedString,
+            fallback_title: &SharedString,
             storage: &Storage,
             request: &R,
             dirty: bool,
         ) -> SavedTab {
+            // Unnamed unsaved requests derive their tab label from their URL,
+            // so persist the fallback title (such as Untitled 2) for when the
+            // URL is cleared after reopening.
+            let saved_title = match storage {
+                Storage::Unsaved { name: None } => fallback_title,
+                Storage::Unsaved { name: Some(_) } | Storage::Saved(_) => title,
+            };
+
             SavedTab::Request {
-                title: title.to_string(),
+                title: saved_title.to_string(),
                 file: storage.location().map(|location| SavedFile {
                     path: location.path.clone(),
                     id: location.id.clone(),
@@ -163,15 +179,15 @@ impl Page {
         match self {
             Page::Request(draft) => {
                 let draft = draft.read(cx);
-                request(title, &draft.storage, &draft.request, dirty)
+                request(title, fallback_title, &draft.storage, &draft.request, dirty)
             }
             Page::Grpc(draft) => {
                 let draft = draft.read(cx);
-                request(title, &draft.storage, &draft.request, dirty)
+                request(title, fallback_title, &draft.storage, &draft.request, dirty)
             }
             Page::WebSocket(draft) => {
                 let draft = draft.read(cx);
-                request(title, &draft.storage, &draft.request, dirty)
+                request(title, fallback_title, &draft.storage, &draft.request, dirty)
             }
             Page::Flow(editor) => {
                 let editor = editor.read(cx);
@@ -198,14 +214,28 @@ impl Page {
     /// tab opened with, such as Untitled 2.
     fn title(&self, cx: &App) -> Option<SharedString> {
         match self {
-            Page::Request(draft) => draft.read(cx).storage.name(),
-            Page::Grpc(draft) => draft.read(cx).storage.name(),
-            Page::WebSocket(draft) => draft.read(cx).storage.name(),
+            Page::Request(draft) => draft.read(cx).title(),
+            Page::Grpc(draft) => draft.read(cx).title(),
+            Page::WebSocket(draft) => draft.read(cx).title(),
             Page::Flow(editor) => Some(editor.read(cx).name.clone()),
             Page::Collection(page) => Some(page.read(cx).name().to_owned().into()),
             Page::Runner(runner) => Some(runner.read(cx).name().clone()),
             Page::Environment(editor) => Some(editor.read(cx).name.clone()),
             Page::Cookies(_) => None,
+        }
+    }
+
+    /// The full request endpoint shown when hovering a request tab.
+    fn tooltip(&self, cx: &App) -> Option<SharedString> {
+        match self {
+            Page::Request(draft) => draft.read(cx).endpoint_tooltip(),
+            Page::Grpc(draft) => draft.read(cx).endpoint_tooltip(),
+            Page::WebSocket(draft) => draft.read(cx).endpoint_tooltip(),
+            Page::Flow(_)
+            | Page::Collection(_)
+            | Page::Runner(_)
+            | Page::Environment(_)
+            | Page::Cookies(_) => None,
         }
     }
 
@@ -245,8 +275,8 @@ impl Page {
         }
     }
 
-    /// Redraw the tab strip only when the tab's title, label or dirty marker
-    /// changes. Every change is reported, so the session can be saved.
+    /// Redraw the tab strip only when the tab's title, tooltip, label or dirty
+    /// marker changes. Every change is reported, so the session can be saved.
     fn observe(&self, id: u64, cx: &mut Context<MainView>) -> Subscription {
         let on_change = move |this: &mut MainView, cx: &mut Context<MainView>| {
             let Some(tab) = this.tabs.iter_mut().find(|tab| tab.id == id) else {
@@ -254,12 +284,21 @@ impl Page {
             };
             cx.emit(TabEdited);
 
-            let title = tab.page.title(cx).unwrap_or_else(|| tab.title.clone());
+            let title = tab
+                .page
+                .title(cx)
+                .unwrap_or_else(|| tab.fallback_title.clone());
+            let tooltip = tab.page.tooltip(cx);
             let label = tab.page.label(cx);
             let dirty = tab.page.is_dirty(cx);
 
-            if tab.title != title || tab.label != label || tab.dirty != dirty {
+            if tab.title != title
+                || tab.tooltip != tooltip
+                || tab.label != label
+                || tab.dirty != dirty
+            {
                 tab.title = title;
+                tab.tooltip = tooltip;
                 tab.label = label;
                 tab.dirty = dirty;
                 cx.notify();
@@ -394,6 +433,9 @@ impl Page {
 pub(crate) struct PageTab {
     pub(crate) id: u64,
     pub(crate) title: SharedString,
+    /// Shown while the page has no name or endpoint of its own, such as Untitled 2.
+    fallback_title: SharedString,
+    pub(crate) tooltip: Option<SharedString>,
     pub(crate) label: Option<&'static str>,
     dirty: bool,
     /// How many changes from outside the app the tab's saved request or flow
@@ -566,8 +608,20 @@ impl MainView {
                             Some(file) => draft.resolved_from(&file.collection),
                             None => draft,
                         };
-                        let name = unsaved_name.or_else(|| file.is_some().then(|| title.clone()));
-                        self.open_unsaved_copy(title.into(), draft, name.map(Into::into), cx);
+                        let name =
+                            unsaved_name
+                                .filter(|name| !name.trim().is_empty())
+                                .or_else(|| {
+                                    file.is_some()
+                                        .then(|| title.clone())
+                                        .filter(|name| !name.trim().is_empty())
+                                });
+                        let fallback = if name.is_none() && !title.starts_with("Untitled ") {
+                            format!("Untitled {}", self.next_id)
+                        } else {
+                            title
+                        };
+                        self.open_unsaved_copy(fallback.into(), draft, name.map(Into::into), cx);
                     }
                     (None, None) => return false,
                 }
@@ -665,7 +719,10 @@ impl MainView {
     pub(crate) fn saved_tabs(&self, cx: &App) -> Vec<SavedTab> {
         self.tabs
             .iter()
-            .map(|tab| tab.page.saved(&tab.title, tab.dirty, cx))
+            .map(|tab| {
+                tab.page
+                    .saved(&tab.title, &tab.fallback_title, tab.dirty, cx)
+            })
             .collect()
     }
 
@@ -676,12 +733,15 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> usize {
         let id = self.next_id;
+        let fallback_title = title.into();
         let mut subscriptions = vec![page.observe(id, cx)];
         subscriptions.extend(page.record_history(self.history.clone(), cx));
 
         self.tabs.push(PageTab {
             id,
-            title: page.title(cx).unwrap_or_else(|| title.into()),
+            title: page.title(cx).unwrap_or_else(|| fallback_title.clone()),
+            fallback_title,
+            tooltip: page.tooltip(cx),
             label: page.label(cx),
             dirty: page.is_dirty(cx),
             outside_changes: self.outside_changes(&page, cx),
@@ -1283,10 +1343,7 @@ impl MainView {
             return;
         }
 
-        let title: SharedString = match short_address(&entry.address) {
-            "" => format!("Untitled {}", self.next_id).into(),
-            address => address.to_owned().into(),
-        };
+        let title: SharedString = format!("Untitled {}", self.next_id).into();
         let storage = Storage::Unsaved { name: None };
         let index = match record.request {
             request::Request::Http(request) => self.open_draft(title, request, storage, cx),
@@ -2359,6 +2416,8 @@ impl MainView {
     fn tab(&self, index: usize, tab: &PageTab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let selected = self.selected == Some(index);
         let id = tab.id;
+        let rename = self.rename.as_ref().filter(|rename| rename.tab == id);
+        let tooltip = tab.tooltip.clone().filter(|_| rename.is_none());
 
         Tab::new(("page-tab", id))
             .debug_selector(move || format!("page-tab-{id}"))
@@ -2373,7 +2432,7 @@ impl MainView {
             .flex_none()
             .w(TAB_WIDTH)
             .h(TAB_HEIGHT)
-            .px_2()
+            .pr_2()
             .gap_2()
             .rounded(cx.theme().radius_tokens().md)
             .text_sm()
@@ -2389,43 +2448,87 @@ impl MainView {
                     this.bg(cx.theme().muted)
                 }
             })
-            .when_some(tab.page.icon(), |this, icon| {
-                this.child(
-                    Icon::default()
-                        .path(icon)
-                        .size(rems(0.875))
-                        .flex_none()
-                        .text_color(cx.theme().muted_foreground),
-                )
-            })
-            .when_some(tab.label, |this, label| {
-                this.child(
-                    div()
-                        .debug_selector(move || format!("tab-method-{id}"))
-                        .flex_none()
-                        .child(method_label(label, cx)),
-                )
-            })
             .child(
-                if let Some(rename) = self.rename.as_ref().filter(|rename| rename.tab == id) {
-                    div()
-                        .id("tab-rename-editor")
-                        .debug_selector(|| "tab-rename-editor".into())
-                        .flex_1()
-                        .min_w_0()
-                        .capture_key_down(cx.listener(Self::on_rename_key_down))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(|_, _, cx| cx.stop_propagation())
-                        .child(Input::new(&rename.input).small().aria_label("Request name"))
-                        .into_any_element()
-                } else {
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_ellipsis()
-                        .child(tab.title.clone())
-                        .into_any_element()
-                },
+                h_flex()
+                    .id(("page-tab-label", id))
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .pl_2()
+                    .gap_2()
+                    .when_some(tooltip, |this, tooltip| {
+                        this.hoverable_tooltip(move |window, cx| {
+                            let tooltip = tooltip.clone();
+                            let scroll = ScrollHandle::new();
+
+                            Tooltip::element(move |window, _| {
+                                let viewport = window.viewport_size();
+                                let rem = window.rem_size();
+                                let max_width = rems(32.)
+                                    .to_pixels(rem)
+                                    .min((viewport.width - rems(4.).to_pixels(rem)).max(px(0.)));
+                                let max_height = rems(18.)
+                                    .to_pixels(rem)
+                                    .min((viewport.height - rems(4.).to_pixels(rem)).max(px(0.)));
+
+                                div()
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .id(("page-tab-tooltip", id))
+                                            .max_w(max_width)
+                                            .max_h(max_height)
+                                            .overflow_y_scroll()
+                                            .lock_scroll_axis()
+                                            .track_scroll(&scroll)
+                                            .child(tooltip.clone()),
+                                    )
+                                    .child(
+                                        div().absolute().inset_0().child(
+                                            scroll::Scrollbar::vertical(&scroll)
+                                                .id(("page-tab-tooltip-scrollbar", id)),
+                                        ),
+                                    )
+                            })
+                            .build(window, cx)
+                        })
+                    })
+                    .when_some(tab.page.icon(), |this, icon| {
+                        this.child(
+                            Icon::default()
+                                .path(icon)
+                                .size(rems(0.875))
+                                .flex_none()
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                    })
+                    .when_some(tab.label, |this, label| {
+                        this.child(
+                            div()
+                                .debug_selector(move || format!("tab-method-{id}"))
+                                .flex_none()
+                                .child(method_label(label, cx)),
+                        )
+                    })
+                    .child(if let Some(rename) = rename {
+                        div()
+                            .id("tab-rename-editor")
+                            .debug_selector(|| "tab-rename-editor".into())
+                            .flex_1()
+                            .min_w_0()
+                            .capture_key_down(cx.listener(Self::on_rename_key_down))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(|_, _, cx| cx.stop_propagation())
+                            .child(Input::new(&rename.input).small().aria_label("Request name"))
+                            .into_any_element()
+                    } else {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .child(tab.title.clone())
+                            .into_any_element()
+                    }),
             )
             .child(
                 div()

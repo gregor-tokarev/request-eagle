@@ -18,14 +18,16 @@ use crate::variable_input::with_variables;
 use collection::SavedLocation;
 
 /// The request's protocol, `HTTP`, `gRPC` or `WS`, and where it is saved. An
-/// unsaved request shows the name given in its tab.
+/// unsaved request shows the name given in its tab, or its endpoint when it
+/// has one.
 pub(crate) fn request_header(
     protocol: &'static str,
     storage: &Storage,
+    title: Option<SharedString>,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let location = storage.location();
-    let name = storage.name().unwrap_or_else(|| "Untitled Request".into());
+    let name = title.unwrap_or_else(|| "Untitled Request".into());
 
     h_flex()
         .flex_none()

@@ -79,7 +79,10 @@ pub use model::{
 };
 pub use preferences::{HttpVersion, RequestPreferences};
 pub use proxy::{ProxyMode, ProxyPreferences, ProxyProtocol};
-pub use request_url::{fill_path_variables, path_variables, query_params, with_query_params};
+pub use request_url::{
+    endpoint_label, endpoint_tooltip, fill_path_variables, path_variables, query_params,
+    with_query_params,
+};
 pub use response::{Execution, HttpMetrics, HttpResponse, Response};
 pub use variables::RequestVariables;
 pub use websocket::{

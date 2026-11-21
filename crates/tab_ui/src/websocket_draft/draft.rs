@@ -323,6 +323,19 @@ impl WebSocketDraft {
         auth
     }
 
+    /// The saved name, the name given in the tab, or the endpoint of an
+    /// unsaved request with a URL.
+    pub fn title(&self) -> Option<SharedString> {
+        self.storage
+            .name()
+            .or_else(|| self.request.endpoint_label().map(Into::into))
+    }
+
+    /// The full WebSocket URL for a tab tooltip, without credentials.
+    pub fn endpoint_tooltip(&self) -> Option<SharedString> {
+        self.request.endpoint_tooltip().map(Into::into)
+    }
+
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request || self.storage.is_dirty()
@@ -643,10 +656,24 @@ impl WebSocketDraft {
                     &url,
                     |this, input, event: &InputEvent, cx| {
                         if matches!(event, InputEvent::Change) {
+                            let previous_title = this
+                                .storage
+                                .name()
+                                .is_none()
+                                .then(|| this.request.endpoint_label());
+                            let cleared_missing = std::mem::take(&mut this.url_missing);
+
                             this.request.url = input.read(cx).value().to_string();
-                            this.url_missing = false;
                             this.refresh_handshake_headers(cx);
                             this.refresh_reconnect(cx);
+
+                            if cleared_missing
+                                || previous_title.is_some_and(|previous| {
+                                    previous != this.request.endpoint_label()
+                                })
+                            {
+                                this.address.update(cx, |_, cx| cx.notify());
+                            }
                             cx.notify();
                         }
                     },
@@ -1034,7 +1061,7 @@ impl Render for WebSocketAddress {
                 v_flex()
                     .size_full()
                     .gap_2()
-                    .child(request_header("WS", &draft.storage, cx))
+                    .child(request_header("WS", &draft.storage, draft.title(), cx))
                     .child(draft.url_bar(window, cx))
             })
             .unwrap_or_else(|_| div())

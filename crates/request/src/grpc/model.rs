@@ -124,6 +124,42 @@ impl GrpcDefinition {
 }
 
 impl GrpcRequest {
+    /// A short label for an unsaved gRPC call: its server address, method, or both.
+    pub fn endpoint_label(&self) -> Option<String> {
+        let method = self.method.trim().trim_matches('/');
+
+        match (
+            crate::request_url::grpc_endpoint_label(&self.url),
+            method.is_empty(),
+        ) {
+            (Some(base), false) => Some(format!("{base}/{method}")),
+            (Some(base), true) => Some(base),
+            (None, false) => Some(method.to_owned()),
+            (None, true) => None,
+        }
+    }
+
+    /// The full gRPC endpoint for display, with any credentials in its
+    /// authority removed.
+    pub fn endpoint_tooltip(&self) -> Option<String> {
+        let method = self.method.trim().trim_matches('/');
+
+        match (
+            crate::request_url::grpc_endpoint_tooltip(&self.url),
+            method.is_empty(),
+        ) {
+            (Some(base), false) => {
+                let split = crate::request_url::find_query_or_fragment(&base);
+                let (head, tail) = base.split_at(split);
+
+                Some(format!("{}/{method}{tail}", head.trim_end_matches('/')))
+            }
+            (Some(base), true) => Some(base),
+            (None, false) => Some(method.to_owned()),
+            (None, true) => None,
+        }
+    }
+
     /// The TLS setting after applying a scheme in the URL.
     pub fn uses_tls(&self) -> bool {
         match scheme(&self.url) {

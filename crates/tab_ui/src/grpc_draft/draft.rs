@@ -280,6 +280,19 @@ impl GrpcDraft {
         auth
     }
 
+    /// The saved name, the name given in the tab, or the endpoint of an
+    /// unsaved call with a server URL or method.
+    pub fn title(&self) -> Option<SharedString> {
+        self.storage
+            .name()
+            .or_else(|| self.request.endpoint_label().map(Into::into))
+    }
+
+    /// The full gRPC endpoint for a tab tooltip, without credentials.
+    pub fn endpoint_tooltip(&self) -> Option<SharedString> {
+        self.request.endpoint_tooltip().map(Into::into)
+    }
+
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request || self.storage.is_dirty()
@@ -406,15 +419,28 @@ impl GrpcDraft {
                     |this, input, event: &InputEvent, window, cx| {
                         if matches!(event, InputEvent::Change) {
                             let tls = this.request.tls;
+                            let previous_title = this
+                                .storage
+                                .name()
+                                .is_none()
+                                .then(|| this.request.endpoint_label());
+                            let cleared_missing = std::mem::take(&mut this.url_missing);
+
                             this.request.url = input.read(cx).value().to_string();
                             this.request.tls = this.request.uses_tls();
-                            this.url_missing = false;
                             this.schedule_reflection(window, cx);
 
                             // A scheme typed in the URL switches the lock.
                             if this.request.tls != tls {
                                 this.redraw(cx);
                             } else {
+                                if cleared_missing
+                                    || previous_title.is_some_and(|previous| {
+                                        previous != this.request.endpoint_label()
+                                    })
+                                {
+                                    this.address.update(cx, |_, cx| cx.notify());
+                                }
                                 cx.notify();
                             }
                         }
@@ -654,7 +680,12 @@ impl Render for GrpcAddress {
                         h_flex()
                             .gap_2()
                             .child(div().flex_1().min_w_0().child(
-                                crate::request_draft::request_header("gRPC", &draft.storage, cx),
+                                crate::request_draft::request_header(
+                                    "gRPC",
+                                    &draft.storage,
+                                    draft.title(),
+                                    cx,
+                                ),
                             ))
                             .child(code_snippet::toggle_button(
                                 draft.code_snippet.snippet.is_some(),

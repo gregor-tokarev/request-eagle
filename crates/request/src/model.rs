@@ -31,6 +31,26 @@ impl Request {
         }
     }
 
+    /// A short host and path label for an unsaved request, without its scheme,
+    /// credentials, query parameters or fragment.
+    pub fn endpoint_label(&self) -> Option<String> {
+        match self {
+            Self::Http(request) => request.endpoint_label(),
+            Self::Grpc(request) => request.endpoint_label(),
+            Self::WebSocket(request) => request.endpoint_label(),
+        }
+    }
+
+    /// The full request endpoint for display, with any credentials in its
+    /// authority removed.
+    pub fn endpoint_tooltip(&self) -> Option<String> {
+        match self {
+            Self::Http(request) => request.endpoint_tooltip(),
+            Self::Grpc(request) => request.endpoint_tooltip(),
+            Self::WebSocket(request) => request.endpoint_tooltip(),
+        }
+    }
+
     /// Resolve file paths relative to `collection`, so a copy of the
     /// request kept outside it still finds its files.
     pub fn resolved_from(&self, collection: &Path) -> Self {
@@ -148,6 +168,18 @@ impl HttpSettings {
 }
 
 impl HttpRequest {
+    /// A short host and path label for an unsaved HTTP request, without its
+    /// scheme, credentials, query parameters or fragment.
+    pub fn endpoint_label(&self) -> Option<String> {
+        crate::request_url::endpoint_label_with_default_scheme(&self.path, "https")
+    }
+
+    /// The full HTTP URL for display, with any credentials in its authority
+    /// removed.
+    pub fn endpoint_tooltip(&self) -> Option<String> {
+        crate::request_url::endpoint_tooltip_with_default_scheme(&self.path, "https")
+    }
+
     /// Move the switched-on rows of `query` into the URL, where the Params
     /// table edits them. Sending the request is unchanged.
     pub fn inline_query(&mut self) {
@@ -258,6 +290,20 @@ impl WebSocketSettings {
     /// How many options differ from the request preferences.
     pub fn overrides(&self) -> usize {
         usize::from(self.timeout_ms.is_some()) + usize::from(self.verify_certificates.is_some())
+    }
+}
+
+impl WebSocketRequest {
+    /// A short host and path label for an unsaved WebSocket request, without
+    /// its scheme, credentials, query parameters or fragment.
+    pub fn endpoint_label(&self) -> Option<String> {
+        crate::request_url::endpoint_label_with_default_scheme(&self.url, "wss")
+    }
+
+    /// The full WebSocket URL for display, with any credentials in its
+    /// authority removed.
+    pub fn endpoint_tooltip(&self) -> Option<String> {
+        crate::request_url::endpoint_tooltip_with_default_scheme(&self.url, "wss")
     }
 }
 

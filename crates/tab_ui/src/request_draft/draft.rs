@@ -278,6 +278,19 @@ impl RequestDraft {
         auth
     }
 
+    /// The saved name, the name given in the tab, or the endpoint of an
+    /// unsaved request with a URL.
+    pub fn title(&self) -> Option<SharedString> {
+        self.storage
+            .name()
+            .or_else(|| self.request.endpoint_label().map(Into::into))
+    }
+
+    /// The full request URL for a tab tooltip, without credentials.
+    pub fn endpoint_tooltip(&self) -> Option<SharedString> {
+        self.request.endpoint_tooltip().map(Into::into)
+    }
+
     /// A name given before the request is saved is an unsaved change too.
     pub fn is_dirty(&self) -> bool {
         self.request != self.saved_request || self.storage.is_dirty()
@@ -496,8 +509,22 @@ impl RequestDraft {
                     window,
                     |this, input, event: &InputEvent, window, cx| {
                         if matches!(event, InputEvent::Change) {
+                            let previous_title = this
+                                .storage
+                                .name()
+                                .is_none()
+                                .then(|| this.request.endpoint_label());
+                            let cleared_missing = std::mem::take(&mut this.url_missing);
+
                             this.request.path = input.read(cx).value().to_string();
-                            this.url_missing = false;
+                            if cleared_missing
+                                || previous_title.is_some_and(|previous| {
+                                    previous != this.request.endpoint_label()
+                                })
+                            {
+                                this.notify_address(cx);
+                            }
+
                             this.url_changed(window, cx);
                         }
                     },
@@ -841,6 +868,7 @@ impl Render for RequestAddress {
                                     .child(super::controls::request_header(
                                         "HTTP",
                                         &draft.storage,
+                                        draft.title(),
                                         cx,
                                     )),
                             )
