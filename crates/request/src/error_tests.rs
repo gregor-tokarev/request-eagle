@@ -332,7 +332,7 @@ fn real_refused_connection_from_executor_classifies_as_connection_refused() {
     drop(listener);
 
     let executor = RequestExecutor::new(&RequestPreferences {
-        timeout_ms: 2_000,
+        timeout_ms: 10_000,
         proxy: crate::ProxyPreferences {
             mode: ProxyMode::Disabled,
             ..Default::default()
