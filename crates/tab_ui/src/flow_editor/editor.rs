@@ -7,7 +7,7 @@ use std::{
 
 use collection::{Collections, FileEntry, SavedLocation};
 use environment::EnvironmentSessions;
-use flow::{Block, BlockKind, BlockType, Connection, Flow, SavedFlow};
+use flow::{Block, BlockKind, BlockType, Connection, Flow, SavedFlow, StartInput};
 use gpui_kit::component::{
     resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
     v_flex,
@@ -124,6 +124,9 @@ pub(super) struct Layout {
     /// The variables of that request its collection, the active environment
     /// or the session fill, which an unconnected input sends.
     pub filled: Option<Rc<HashSet<String>>>,
+    /// A short warning for a Start block whose inline input is sent as text,
+    /// cached so drawing does not re-parse JSON on every frame.
+    pub start_caption: Option<&'static str>,
 }
 
 impl Layout {
@@ -208,6 +211,8 @@ pub struct FlowEditor {
     pub(super) request_info: HashMap<String, Option<RequestInfo>>,
     /// The variables each collection's requests find a value for.
     filled_names: HashMap<PathBuf, FilledNames>,
+    /// Cached canvas captions for Start block inputs, keyed by block ID and text.
+    start_inputs: HashMap<String, (String, Option<&'static str>)>,
     pub(super) history: History,
     pub(super) picker: Option<Picker>,
     pub(super) inspector: Option<Inspector>,
@@ -270,6 +275,7 @@ impl FlowEditor {
             layouts: HashMap::new(),
             request_info: HashMap::new(),
             filled_names: HashMap::new(),
+            start_inputs: HashMap::new(),
             history: History::default(),
             picker: None,
             inspector: None,
@@ -392,6 +398,8 @@ impl FlowEditor {
                 .push(&connection.input);
         }
 
+        let mut start_count = 0usize;
+
         for block in &self.flow.blocks {
             let mut inputs: Vec<SharedString> = block
                 .kind
@@ -423,6 +431,21 @@ impl FlowEditor {
                 }
             }
 
+            let start_caption = if let BlockKind::Start { input } = &block.kind {
+                start_count += 1;
+                match self.start_inputs.get(&block.id) {
+                    Some((cached, caption)) if cached == input => *caption,
+                    _ => {
+                        let caption = blocks::start_input_caption(&StartInput::check(input));
+                        self.start_inputs
+                            .insert(block.id.clone(), (input.clone(), caption));
+                        caption
+                    }
+                }
+            } else {
+                None
+            };
+
             let outputs: Vec<SharedString> = block
                 .kind
                 .outputs()
@@ -448,8 +471,21 @@ impl FlowEditor {
                     outputs,
                     request,
                     filled: names,
+                    start_caption,
                 },
             );
+        }
+
+        if self.start_inputs.len() > start_count {
+            let active: HashSet<&str> = self
+                .flow
+                .blocks
+                .iter()
+                .filter(|block| matches!(block.kind, BlockKind::Start { .. }))
+                .map(|block| block.id.as_str())
+                .collect();
+            self.start_inputs
+                .retain(|id, _| active.contains(id.as_str()));
         }
 
         self.layouts = layouts;

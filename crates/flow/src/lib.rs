@@ -8,6 +8,7 @@ mod http;
 mod library;
 mod model;
 mod runtime;
+mod start_input;
 mod template;
 
 #[cfg(test)]
@@ -16,6 +17,8 @@ mod library_tests;
 mod model_tests;
 #[cfg(test)]
 mod runtime_tests;
+#[cfg(test)]
+mod start_input_tests;
 #[cfg(test)]
 mod template_tests;
 
@@ -28,3 +31,4 @@ pub use model::{
     is_identifier,
 };
 pub use runtime::{BlockRun, MAX_BLOCK_RUNS, RunEvent, RunOptions, RunSummary, run, select};
+pub use start_input::{JsonError, StartInput, parse_start_input};

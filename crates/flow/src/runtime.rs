@@ -22,7 +22,7 @@ use request::RequestExecutor;
 use serde_json::{Map, Value, json};
 
 use crate::graph::{CYCLE, Graph, Target};
-use crate::{BlockKind, Flow, SavedRequest, TemplateFormat, http, template};
+use crate::{BlockKind, Flow, SavedRequest, TemplateFormat, http, parse_start_input, template};
 
 /// The most blocks one run executes, which stops a loop that never ends.
 pub const MAX_BLOCK_RUNS: usize = 100_000;
@@ -356,7 +356,11 @@ impl<E: FnMut(RunEvent)> Run<'_, E> {
         let sent: Sent = match kind {
             BlockKind::Start { input } => match &self.options.input {
                 Some(value) => Ok(vec![("data".into(), value.clone())]),
-                None => inline_value(input).map(|value| vec![("data".into(), value)]),
+                None => {
+                    let (value, kind) = parse_start_input(input);
+                    notice = kind.run_notice();
+                    Ok(vec![("data".into(), value)])
+                }
             },
             BlockKind::HttpRequest { request } => {
                 self.send_request(block, request, &inputs, &mut notice)

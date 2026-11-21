@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
-use flow::{Block, BlockKind, BlockType, Connection, Flow};
+use flow::{Block, BlockKind, BlockType, Connection, Flow, StartInput};
 use request::{Auth, HttpRequest};
 
 use super::{
     editor::FlowRequest,
-    inspector::{List, RequestList, Setting, apply, change_list, invalid, request_list},
+    inspector::{
+        List, RequestList, Setting, apply, change_list, invalid, request_list, start_input_notice,
+    },
 };
 
 fn block(id: &str, kind: BlockKind) -> Block {
@@ -275,4 +277,38 @@ fn request_list_caps_matches_at_thirty() {
     assert_eq!(matches.len(), 30);
     assert_eq!(matches[0].id, "r0");
     assert_eq!(matches[29].id, "r29");
+}
+
+#[test]
+fn start_input_notice_matches_valid_malformed_and_plain_text_inputs() {
+    for clean in [
+        "",
+        "   \n ",
+        r#"{"name":"Gregor"}"#,
+        "[1, 2]",
+        "\"hello\"",
+        "42",
+        "true",
+        "false",
+        "null",
+    ] {
+        assert_eq!(
+            start_input_notice(&StartInput::check(clean)),
+            None,
+            "{clean:?}"
+        );
+    }
+
+    assert_eq!(
+        start_input_notice(&StartInput::check(r#"{"name":"Gregor",}"#)).as_deref(),
+        Some("Invalid JSON at line 1, column 18: trailing comma. Will be sent as text.")
+    );
+    assert_eq!(
+        start_input_notice(&StartInput::check("[1, 2,]")).as_deref(),
+        Some("Invalid JSON at line 1, column 7: trailing comma. Will be sent as text.")
+    );
+    assert_eq!(
+        start_input_notice(&StartInput::check("hello")).as_deref(),
+        Some("Not JSON. Will be sent as text.")
+    );
 }
