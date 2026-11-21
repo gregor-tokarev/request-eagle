@@ -25,9 +25,9 @@ use collection::{
 use flow::FlowLibraryError;
 use request_eagle_theme::{method_label, protocol_icon};
 use tab_ui::{
-    CiteOrigin, CollectionPage, CollectionRunner, CookiePage, EnvironmentEditor, Environments,
-    EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestEnded, RequestSent,
-    RunCollection, SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
+    CiteOrigin, CollectionPage, CollectionRunner, CookiePage, CreateHttpRequest, EnvironmentEditor,
+    Environments, EnvironmentsEvent, FlowEditor, GrpcDraft, RequestDraft, RequestEnded,
+    RequestSent, RunCollection, SaveCollection, SaveEnvironment, Storage, WebSocketDraft,
 };
 
 // Rendering and virtualization share the same relative geometry at every zoom.
@@ -598,7 +598,7 @@ impl MainView {
                     return false;
                 };
 
-                let index = self.open_flow(saved, cx);
+                let index = self.open_flow(saved, window, cx);
                 if let (Some(draft), Page::Flow(editor)) = (draft, &self.tabs[index].page) {
                     editor.update(cx, |editor, cx| editor.restore_draft(*draft, cx));
                 }
@@ -850,7 +850,12 @@ impl MainView {
     }
 
     /// Show a saved flow, reusing its tab when it is open. Returns the tab's index.
-    pub(crate) fn open_flow(&mut self, saved: flow::SavedFlow, cx: &mut Context<Self>) -> usize {
+    pub(crate) fn open_flow(
+        &mut self,
+        saved: flow::SavedFlow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
         if let Some(index) = self.flow_tab(&saved.path, &saved.id, cx) {
             self.select_tab(index, cx);
             return index;
@@ -862,8 +867,19 @@ impl MainView {
         let title = saved.name.clone();
         let editor =
             cx.new(|cx| FlowEditor::new(saved, collections, sessions, Some(environments), cx));
+        let index = self.open_tab(title, Page::Flow(editor.clone()), cx);
+        let subscription = cx.subscribe_in(
+            &editor,
+            window,
+            |this, _, _: &CreateHttpRequest, window, cx| {
+                this.new_tab(cx);
+                this.focus(window, cx);
+                this.focus_url(window, cx);
+            },
+        );
+        self.tabs[index]._subscriptions.push(subscription);
 
-        self.open_tab(title, Page::Flow(editor), cx)
+        index
     }
 
     fn flow_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
@@ -1805,7 +1821,7 @@ impl MainView {
             Page::Flow(editor) => {
                 let path = editor.read(cx).path.clone();
                 if let Some(saved) = self.flows.read(cx).get(&path).cloned() {
-                    self.open_flow(saved, cx);
+                    self.open_flow(saved, window, cx);
                 }
             }
             Page::Environment(editor) => {

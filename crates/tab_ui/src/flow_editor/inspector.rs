@@ -13,7 +13,9 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use request_eagle_theme::method_label;
 use serde_json::Value;
 
-use super::{FlowEditor, blocks, editor::FlowRequest, preview, run::format_duration};
+use super::{
+    CreateHttpRequest, FlowEditor, blocks, editor::FlowRequest, preview, run::format_duration,
+};
 
 /// How long the FQL preview waits for typing to pause before evaluating.
 const PREVIEW_DELAY: Duration = Duration::from_millis(150);
@@ -1109,24 +1111,20 @@ impl FlowEditor {
         let chosen = (!current.is_empty())
             .then(|| FlowRequest::find(self.collections.read(cx), current))
             .flatten();
-        let query = inspector
-            .request_search
-            .as_ref()
-            .map(|search| search.read(cx).value().trim().to_lowercase())
-            .unwrap_or_default();
-        let matches: Vec<_> = FlowRequest::all(self.collections.read(cx))
-            .into_iter()
-            .filter(|request| {
-                query.is_empty()
-                    || request.name.to_lowercase().contains(&query)
-                    || request.request.path.to_lowercase().contains(&query)
-                    || request.location.to_lowercase().contains(&query)
-            })
-            .take(30)
-            .collect();
 
         // Once a request is chosen, the others are listed only to change it.
         let listing = chosen.is_none() || inspector.choosing_request;
+        let list = listing.then(|| {
+            let query = inspector
+                .request_search
+                .as_ref()
+                .map(|search| search.read(cx).value().to_string())
+                .unwrap_or_default();
+
+            request_list(FlowRequest::all(self.collections.read(cx)), &query)
+        });
+        let no_saved_requests = matches!(list, Some(RequestList::NoSavedRequests));
+
         let toggle = chosen.is_some().then(|| {
             Button::new("flow-change-request")
                 .debug_selector(|| "flow-change-request".into())
@@ -1158,43 +1156,64 @@ impl FlowEditor {
                     .child(div().flex_1().child(section_title("Request")))
                     .children(toggle),
             )
-            .child(match &chosen {
-                Some(request) => v_flex()
-                    .gap_1()
-                    .p_2()
-                    .rounded(theme.radius_tokens().md)
-                    .bg(theme.muted)
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(method_label(request.request.method.as_str(), cx))
-                            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(request.name.clone())),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .text_ellipsis()
-                            .child(SharedString::from(request.request.path.clone())),
-                    )
-                    .child(
-                        div().text_xs().text_color(theme.muted_foreground).child(
-                            match flow::request_variables(&request.request, &request.collection_auth) {
-                                variables if variables.is_empty() => "No variables to fill".to_owned(),
-                                variables => format!("Inputs: {}", variables.join(", ")),
-                            },
-                        ),
-                    )
-                    .into_any_element(),
-                None => div()
-                    .text_sm()
-                    .text_color(if current.is_empty() { theme.muted_foreground } else { theme.danger })
-                    .child(if current.is_empty() {
-                        "Choose the saved request this block sends."
-                    } else {
-                        "The chosen request is no longer saved."
-                    })
-                    .into_any_element(),
+            .children(match &chosen {
+                Some(request) => Some(
+                    v_flex()
+                        .gap_1()
+                        .p_2()
+                        .rounded(theme.radius_tokens().md)
+                        .bg(theme.muted)
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(method_label(request.request.method.as_str(), cx))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(request.name.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .text_ellipsis()
+                                .child(SharedString::from(request.request.path.clone())),
+                        )
+                        .child(
+                            div().text_xs().text_color(theme.muted_foreground).child(
+                                match flow::request_variables(
+                                    &request.request,
+                                    &request.collection_auth,
+                                ) {
+                                    variables if variables.is_empty() => {
+                                        "No variables to fill".to_owned()
+                                    }
+                                    variables => format!("Inputs: {}", variables.join(", ")),
+                                },
+                            ),
+                        )
+                        .into_any_element(),
+                ),
+                None if !current.is_empty() => Some(
+                    div()
+                        .text_sm()
+                        .text_color(theme.danger)
+                        .child("The chosen request is no longer saved.")
+                        .into_any_element(),
+                ),
+                None if !no_saved_requests => Some(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child("Choose the saved request this block sends.")
+                        .into_any_element(),
+                ),
+                None => None,
+            })
+            .when(no_saved_requests, |this| {
+                this.child(self.empty_requests_guidance(cx))
             })
             .child(
                 div()
@@ -1202,53 +1221,157 @@ impl FlowEditor {
                     .text_color(theme.muted_foreground)
                     .child("Success sends 2xx responses, Fail the others. Every variable of the request is an input; a connected value replaces its own."),
             )
-            .when(listing, |this| this.children(inspector.request_search.as_ref().map(|search| {
-                Input::new(search).prefix(IconName::Search)
-            }))
+            .when_some(list, |this, list| match list {
+                RequestList::NoSavedRequests => this,
+                RequestList::NoMatches => this
+                    .children(
+                        inspector
+                            .request_search
+                            .as_ref()
+                            .map(|search| Input::new(search).prefix(IconName::Search)),
+                    )
+                    .child(
+                        v_flex()
+                            .debug_selector(|| "flow-no-matching-requests".into())
+                            .gap_1()
+                            .py_1()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("No saved HTTP requests match.")
+                            .child("Try a different name, URL, or collection."),
+                    ),
+                RequestList::Matches(matches) => this
+                    .children(
+                        inspector
+                            .request_search
+                            .as_ref()
+                            .map(|search| Input::new(search).prefix(IconName::Search)),
+                    )
+                    .child(v_flex().gap_px().children(matches.into_iter().enumerate().map(
+                        |(index, request)| {
+                            let block = id.to_owned();
+                            let request_id = request.id.clone();
+                            let selected = request.id == current;
+                            h_flex()
+                                .id(("flow-request-option", index))
+                                .debug_selector(move || format!("flow-request-option-{index}"))
+                                .h_8()
+                                .px_2()
+                                .gap_2()
+                                .rounded(theme.radius_tokens().md)
+                                .text_sm()
+                                .when(selected, |this| this.bg(theme.accent))
+                                .hover(|this| this.bg(theme.accent.opacity(0.7)))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .child(method_label(request.request.method.as_str(), cx)),
+                                )
+                                .child(div().flex_none().child(request.name.clone()))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .text_xs()
+                                        .text_ellipsis()
+                                        .text_color(theme.muted_foreground)
+                                        .child(request.location.clone()),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let request_id = request_id.clone();
+                                    this.set_kind(
+                                        &block,
+                                        |kind| {
+                                            if let BlockKind::HttpRequest { request } = kind {
+                                                *request = request_id;
+                                            }
+                                        },
+                                        cx,
+                                    );
+                                    if let Some(inspector) = &mut this.inspector {
+                                        inspector.choosing_request = false;
+                                    }
+                                }))
+                        },
+                    ))),
+            })
+            .into_any_element()
+    }
+
+    fn empty_requests_guidance(&self, cx: &Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+
+        v_flex()
+            .debug_selector(|| "flow-no-saved-requests".into())
+            .gap_2()
+            .p_3()
+            .rounded(theme.radius_tokens().sm)
+            .bg(theme.muted)
             .child(
                 v_flex()
-                    .gap_px()
-                    .when(matches.is_empty(), |this| {
-                        this.child(div().text_xs().text_color(theme.muted_foreground).child("No saved HTTP requests match"))
-                    })
-                    .children(matches.into_iter().enumerate().map(|(index, request)| {
-                        let block = id.to_owned();
-                        let request_id = request.id.clone();
-                        let selected = request.id == current;
-                        h_flex()
-                            .id(("flow-request-option", index))
-                            .debug_selector(move || format!("flow-request-option-{index}"))
-                            .h_8()
-                            .px_2()
-                            .gap_2()
-                            .rounded(theme.radius_tokens().md)
+                    .gap_1()
+                    .child(
+                        div()
                             .text_sm()
-                            .when(selected, |this| this.bg(theme.accent))
-                            .hover(|this| this.bg(theme.accent.opacity(0.7)))
-                            .child(div().flex_none().child(method_label(request.request.method.as_str(), cx)))
-                            .child(div().flex_none().child(request.name.clone()))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .text_xs()
-                                    .text_ellipsis()
-                                    .text_color(theme.muted_foreground)
-                                    .child(request.location.clone()),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let request_id = request_id.clone();
-                                this.set_kind(&block, |kind| {
-                                    if let BlockKind::HttpRequest { request } = kind {
-                                        *request = request_id;
-                                    }
-                                }, cx);
-                                if let Some(inspector) = &mut this.inspector {
-                                    inspector.choosing_request = false;
-                                }
-                            }))
-                    })),
-            ))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("No saved HTTP requests yet"),
+                    )
+                    .child(div().text_xs().text_color(theme.muted_foreground).child(
+                        "Create an HTTP request and save it to a collection, then return \
+                                 here to choose it.",
+                    )),
+            )
+            .child(
+                h_flex().child(
+                    Button::new("flow-create-request")
+                        .debug_selector(|| "flow-create-request".into())
+                        .small()
+                        .outline()
+                        .rounded(theme.radius_tokens().sm)
+                        .icon(IconName::Plus)
+                        .label("Create request")
+                        .tooltip("Open a new HTTP request tab")
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(CreateHttpRequest);
+                        })),
+                ),
+            )
             .into_any_element()
+    }
+}
+
+/// What the HTTP Request block's chooser lists under its search field.
+pub(super) enum RequestList {
+    /// No HTTP requests are saved in any collection yet.
+    NoSavedRequests,
+    /// Saved HTTP requests exist, but none match the search text.
+    NoMatches,
+    /// Saved HTTP requests that match the search text, up to the list limit.
+    Matches(Vec<FlowRequest>),
+}
+
+/// Filter saved HTTP requests for the inspector chooser, keeping "none saved
+/// yet" apart from "none match the search".
+pub(super) fn request_list(requests: Vec<FlowRequest>, query: &str) -> RequestList {
+    if requests.is_empty() {
+        return RequestList::NoSavedRequests;
+    }
+
+    let query = query.trim().to_lowercase();
+    let matches: Vec<_> = requests
+        .into_iter()
+        .filter(|request| {
+            query.is_empty()
+                || request.name.to_lowercase().contains(&query)
+                || request.request.path.to_lowercase().contains(&query)
+                || request.location.to_lowercase().contains(&query)
+        })
+        .take(30)
+        .collect();
+
+    if matches.is_empty() {
+        RequestList::NoMatches
+    } else {
+        RequestList::Matches(matches)
     }
 }
 

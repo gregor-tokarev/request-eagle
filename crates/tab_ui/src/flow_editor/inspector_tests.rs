@@ -1,6 +1,12 @@
-use flow::{Block, BlockKind, BlockType, Connection, Flow};
+use std::path::PathBuf;
 
-use super::inspector::{List, Setting, apply, change_list, invalid};
+use flow::{Block, BlockKind, BlockType, Connection, Flow};
+use request::{Auth, HttpRequest};
+
+use super::{
+    editor::FlowRequest,
+    inspector::{List, RequestList, Setting, apply, change_list, invalid, request_list},
+};
 
 fn block(id: &str, kind: BlockKind) -> Block {
     Block {
@@ -190,4 +196,83 @@ fn adding_entries_picks_unused_names() {
     assert_eq!(flow.blocks[2].kind.inputs(), ["output1"]);
     // Removing an output name drops its connection.
     assert!(flow.connections.is_empty());
+}
+
+fn saved_request(id: &str, name: &str, path: &str, location: &str) -> FlowRequest {
+    FlowRequest {
+        id: id.to_owned(),
+        name: name.to_owned().into(),
+        location: location.to_owned().into(),
+        collection: PathBuf::from("/collections/API"),
+        request: HttpRequest {
+            path: path.to_owned(),
+            ..HttpRequest::default()
+        },
+        collection_auth: Auth::None,
+    }
+}
+
+#[test]
+fn request_list_distinguishes_no_saved_requests_from_no_search_matches() {
+    assert!(matches!(
+        request_list(Vec::new(), ""),
+        RequestList::NoSavedRequests
+    ));
+    assert!(matches!(
+        request_list(Vec::new(), "users"),
+        RequestList::NoSavedRequests
+    ));
+
+    let saved = vec![
+        saved_request("r1", "List Users", "https://api.example.com/users", "API"),
+        saved_request(
+            "r2",
+            "Health",
+            "https://status.example.com/ok",
+            "Ops › Checks",
+        ),
+    ];
+
+    let RequestList::Matches(all) = request_list(saved.clone(), "   ") else {
+        panic!("empty search should list saved requests");
+    };
+    let ids: Vec<&str> = all.iter().map(|request| request.id.as_str()).collect();
+    assert_eq!(ids, ["r1", "r2"]);
+
+    let RequestList::Matches(by_name) = request_list(saved.clone(), "USERS") else {
+        panic!("name search should match case-insensitively");
+    };
+    assert_eq!(by_name.len(), 1);
+    assert_eq!(by_name[0].id, "r1");
+
+    let RequestList::Matches(by_url) = request_list(saved.clone(), "status.example.com") else {
+        panic!("URL search should match");
+    };
+    assert_eq!(by_url.len(), 1);
+    assert_eq!(by_url[0].id, "r2");
+
+    let RequestList::Matches(by_location) = request_list(saved.clone(), "checks") else {
+        panic!("location search should match");
+    };
+    assert_eq!(by_location.len(), 1);
+    assert_eq!(by_location[0].id, "r2");
+
+    assert!(matches!(
+        request_list(saved, "does-not-exist"),
+        RequestList::NoMatches
+    ));
+}
+
+#[test]
+fn request_list_caps_matches_at_thirty() {
+    let saved: Vec<_> = (0..35)
+        .map(|index| saved_request(&format!("r{index}"), &format!("Req {index}"), "/ok", "API"))
+        .collect();
+
+    let RequestList::Matches(matches) = request_list(saved, "") else {
+        panic!("saved requests should match empty search");
+    };
+    assert_eq!(matches.len(), 30);
+    assert_eq!(matches[0].id, "r0");
+    assert_eq!(matches[29].id, "r29");
 }
