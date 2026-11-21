@@ -460,6 +460,9 @@ impl CollectionRunner {
                 )
             })
             .when(!active, |row| {
+                let no_selection = self.selected_count() == 0;
+                let detached = self.detached;
+
                 row.child(
                     Button::new("run-again")
                         .debug_selector(|| "run-again".into())
@@ -469,7 +472,14 @@ impl CollectionRunner {
                         .icon(Icon::default().path("icons/square-play.svg"))
                         .label("Run Again")
                         .loading(self.preparing.is_some())
-                        .disabled(self.preparing.is_some())
+                        .disabled(self.preparing.is_some() || no_selection || detached)
+                        .when(detached || no_selection, |button| {
+                            button.tooltip(if detached {
+                                "The collection or folder was deleted"
+                            } else {
+                                "No selected requests to run"
+                            })
+                        })
                         .on_click(cx.listener(|this, _, window, cx| this.run_again(window, cx))),
                 )
                 .child(
@@ -480,7 +490,12 @@ impl CollectionRunner {
                         .flex_none()
                         .icon(IconName::Plus)
                         .label("New Run")
-                        .tooltip("Change the run configuration")
+                        .disabled(detached)
+                        .tooltip(if detached {
+                            "The collection or folder was deleted"
+                        } else {
+                            "Change the run configuration"
+                        })
                         .on_click(cx.listener(|this, _, _, cx| this.new_run(cx))),
                 )
                 .child(

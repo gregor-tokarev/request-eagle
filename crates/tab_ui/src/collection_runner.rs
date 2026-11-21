@@ -10,5 +10,7 @@ mod setup;
 mod data_file_tests;
 #[cfg(test)]
 mod run_tests;
+#[cfg(test)]
+mod runner_tests;
 
 pub use runner::CollectionRunner;

@@ -175,7 +175,6 @@ impl CollectionRunner {
         let item = &self.sequence[index];
         let request = &item.request;
         let selected = item.selected;
-        let id = request.id.clone();
         let drag = DraggedRequest {
             index,
             method: request.request.method.as_str().into(),
@@ -202,7 +201,7 @@ impl CollectionRunner {
             }))
             .child(
                 h_flex()
-                    .id(ElementId::Name(format!("run-sequence-{id}").into()))
+                    .id(("run-sequence", index))
                     .debug_selector(move || format!("run-sequence-{index}"))
                     .size_full()
                     .px_2()
@@ -218,7 +217,7 @@ impl CollectionRunner {
                             .when_some(number, |lane, number| lane.child(number.to_string())),
                     )
                     .child(
-                        Checkbox::new(ElementId::Name(format!("run-sequence-check-{id}").into()))
+                        Checkbox::new(("run-sequence-check", index))
                             .accessibility_label(format!("Run {}", request.name))
                             .checked(selected)
                             .on_click(cx.listener(move |this, checked: &bool, _, cx| {

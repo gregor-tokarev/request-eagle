@@ -415,6 +415,7 @@ impl Workspace {
     fn capture_session(&mut self, window: &Window, cx: &App) -> (u64, Session) {
         self.sessions_captured += 1;
 
+        let (tabs, selected_tab) = self.main_view.read(cx).saved_tabs(cx);
         let session = Session {
             path: self.session_path.clone(),
             window: SavedWindow::capture(window, cx),
@@ -435,8 +436,8 @@ impl Workspace {
                     .filter(|path| path.to_str().is_some())
                     .collect(),
             },
-            tabs: self.main_view.read(cx).saved_tabs(cx),
-            selected_tab: self.main_view.read(cx).selected,
+            tabs,
+            selected_tab,
             agent_panel: *self.agent_panel_visible.read(cx),
         };
 

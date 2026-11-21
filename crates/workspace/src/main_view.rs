@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     mem,
     path::{Path, PathBuf},
 };
@@ -399,6 +400,8 @@ pub(crate) struct PageTab {
     /// How many changes from outside the app the tab's saved request or flow
     /// had taken when the tab was opened from it or last saved.
     outside_changes: u64,
+    /// The `Collections` revision this tab's runner last refreshed from.
+    collections_revision: u64,
     pub(crate) page: Page,
     /// The history entry the tab was opened from.
     history: Option<String>,
@@ -661,12 +664,25 @@ impl MainView {
         self.restore_request(title, Some(draft), empty, Storage::Unsaved { name }, cx)
     }
 
-    /// The open tabs, as the next launch reopens them.
-    pub(crate) fn saved_tabs(&self, cx: &App) -> Vec<SavedTab> {
-        self.tabs
-            .iter()
-            .map(|tab| tab.page.saved(&tab.title, tab.dirty, cx))
-            .collect()
+    /// The open tabs, as the next launch reopens them, with the selected tab's
+    /// position among them. Detached runners whose collection or folder was
+    /// deleted are left out.
+    pub(crate) fn saved_tabs(&self, cx: &App) -> (Vec<SavedTab>, Option<usize>) {
+        let mut tabs = Vec::with_capacity(self.tabs.len());
+        let mut selected = None;
+
+        for (index, tab) in self.tabs.iter().enumerate() {
+            if matches!(&tab.page, Page::Runner(runner) if runner.read(cx).is_detached()) {
+                continue;
+            }
+
+            if self.selected == Some(index) {
+                selected = Some(tabs.len());
+            }
+            tabs.push(tab.page.saved(&tab.title, tab.dirty, cx));
+        }
+
+        (tabs, selected)
     }
 
     fn open_tab(
@@ -685,6 +701,7 @@ impl MainView {
             label: page.label(cx),
             dirty: page.is_dirty(cx),
             outside_changes: self.outside_changes(&page, cx),
+            collections_revision: self.collections.read(cx).revision(),
             page,
             history: None,
             _subscriptions: subscriptions,
@@ -766,8 +783,8 @@ impl MainView {
         }
     }
 
-    /// Follow collections, folders and requests renamed, moved or deleted in
-    /// the sidebar or a tab.
+    /// Follow collections, folders and requests created, saved, renamed, moved
+    /// or deleted in the sidebar or a tab.
     fn on_collections_event(
         &mut self,
         _: &Entity<Collections>,
@@ -784,14 +801,33 @@ impl MainView {
                 previous_path,
                 path,
                 collection,
-            } => self.relocate_runners(previous_path, path, collection, cx),
+            } => {
+                self.relocate_runners(previous_path, path, collection, cx);
+                self.relocate_runners_preparing(previous_path, path, cx);
+                self.refresh_runners_overlapping(
+                    &[previous_path, path],
+                    Some((previous_path, path)),
+                    cx,
+                );
+            }
             CollectionsEvent::RequestRelocated {
                 previous_path,
                 location,
             } => self.relocate_request(previous_path, location.clone(), cx),
-            CollectionsEvent::Deleted(path) => self.close_deleted(path, cx),
+            CollectionsEvent::Deleted {
+                path,
+                removed_files,
+                deleted_from_disk,
+            } => {
+                if *deleted_from_disk {
+                    self.note_runners_deleted(path, removed_files, cx);
+                }
+                self.close_deleted(path, cx);
+            }
             CollectionsEvent::Reloaded => self.follow_reload(window, cx),
-            CollectionsEvent::Created(_) | CollectionsEvent::RequestSaved(_) => {}
+            CollectionsEvent::Created(path) | CollectionsEvent::RequestSaved(path) => {
+                self.refresh_runners_overlapping(&[path], None, cx);
+            }
         }
     }
 
@@ -801,19 +837,12 @@ impl MainView {
         location: SavedLocation,
         cx: &mut Context<Self>,
     ) {
-        for tab in &self.tabs {
-            if let Page::Runner(runner) = &tab.page {
-                runner.update(cx, |runner, cx| {
-                    runner.relocate_request(
-                        &location.id,
-                        &location.path,
-                        location.name.clone().into(),
-                        location.folders().into_iter().map(Into::into).collect(),
-                        cx,
-                    )
-                });
-            }
-        }
+        self.relocate_runners_preparing(previous_path, &location.path, cx);
+        self.refresh_runners_overlapping(
+            &[previous_path, &location.path],
+            Some((previous_path, &location.path)),
+            cx,
+        );
 
         if let Some(index) = self.request_tab(previous_path, &location.id, cx) {
             self.set_request_location(index, location, cx);
@@ -1042,38 +1071,33 @@ impl MainView {
     /// reusing its tab when it is open. Tells whether the collection or
     /// folder exists.
     pub(crate) fn open_runner(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
-        let collections = self.collections.read(cx);
-        let (Some(collection), Some(requests)) =
-            (collections.containing(path), collections.requests_in(path))
-        else {
-            return false;
-        };
-        let collection = collection.path.clone();
-        let requests: Vec<_> = requests
-            .into_iter()
-            .map(|(location, file)| {
-                let folders = location.folders().into_iter().map(Into::into).collect();
-                (file.clone(), folders)
-            })
-            .collect();
-
         if let Some(index) = self.runner_tab(path, cx) {
-            if let Page::Runner(runner) = &self.tabs[index].page {
-                runner.update(cx, |runner, cx| runner.refresh(requests, cx));
+            if self.collections.read(cx).requests_in(path).is_none() {
+                return false;
             }
             self.select_tab(index, cx);
             return true;
         }
 
+        let collections = self.collections.read(cx);
+        let (Some(collection), Some(requests)) = (
+            collections.containing(path),
+            runner_requests(collections, path),
+        ) else {
+            return false;
+        };
+        let collection = collection.path.clone();
+
         let name: SharedString = directory_name(path).into();
+        let collections = self.collections.clone();
         let sessions = self.variable_sessions.clone();
         let environments = self.environments.clone();
         let runner = cx.new(|cx| {
             CollectionRunner::new(
                 path.to_path_buf(),
-                name.clone(),
                 collection,
                 requests,
+                collections,
                 sessions,
                 environments,
                 cx,
@@ -1084,9 +1108,108 @@ impl MainView {
         true
     }
 
+    /// Record an explicit in-app disk deletion on running runners so an
+    /// in-flight preparation keeps the captured requests that existed on disk
+    /// right before deletion, plus collection settings when the collection
+    /// itself was deleted.
+    fn note_runners_deleted(
+        &self,
+        path: &Path,
+        removed_files: &HashSet<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        for tab in &self.tabs {
+            if let Page::Runner(runner) = &tab.page
+                && runner.read(cx).is_running()
+            {
+                runner.update(cx, |runner, _| {
+                    runner.note_in_app_delete(path, removed_files)
+                });
+            }
+        }
+    }
+
+    /// Rebase in-flight preparation paths on running runners after an explicit
+    /// in-app move or rename, including moves out of a runner's collection or
+    /// folder.
+    fn relocate_runners_preparing(
+        &self,
+        previous_path: &Path,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) {
+        for tab in &self.tabs {
+            if let Page::Runner(runner) = &tab.page
+                && runner.read(cx).is_running()
+            {
+                runner.update(cx, |runner, _| {
+                    runner.relocate_preparing(previous_path, path)
+                });
+            }
+        }
+    }
+
+    /// Bring an open runner tab in step with `Collections`, unless it already
+    /// shows the latest revision.
+    fn refresh_runner(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.refresh_runner_with_relocation(index, None, cx);
+    }
+
+    fn refresh_runner_with_relocation(
+        &mut self,
+        index: usize,
+        relocated: Option<(&Path, &Path)>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.get(index) else {
+            return;
+        };
+        let Page::Runner(runner) = &tab.page else {
+            return;
+        };
+        if runner.read(cx).is_detached() {
+            return;
+        }
+        let revision = self.collections.read(cx).revision();
+        if tab.collections_revision == revision {
+            return;
+        }
+
+        let path = runner.read(cx).path.clone();
+        let requests = runner_requests(self.collections.read(cx), &path).unwrap_or_default();
+        let runner = runner.clone();
+        self.tabs[index].collections_revision = revision;
+        runner.update(cx, |runner, cx| runner.refresh(requests, relocated, cx));
+    }
+
+    /// Refresh open runner tabs whose collection or folder overlaps any of
+    /// `paths`.
+    fn refresh_runners_overlapping(
+        &mut self,
+        paths: &[&Path],
+        relocated: Option<(&Path, &Path)>,
+        cx: &mut Context<Self>,
+    ) {
+        for index in 0..self.tabs.len() {
+            let Page::Runner(runner) = &self.tabs[index].page else {
+                continue;
+            };
+            if runner.read(cx).is_detached() {
+                continue;
+            }
+            let runner_path = runner.read(cx).path.clone();
+            if paths.iter().any(|path| paths_overlap(&runner_path, path)) {
+                self.refresh_runner_with_relocation(index, relocated, cx);
+            }
+        }
+    }
+
     fn runner_tab(&self, path: &Path, cx: &App) -> Option<usize> {
         self.tabs.iter().position(|tab| match &tab.page {
-            Page::Runner(runner) => runner.read(cx).path == path,
+            Page::Runner(runner) => {
+                let runner = runner.read(cx);
+                !runner.is_detached() && runner.path == path
+            }
             _ => false,
         })
     }
@@ -1099,20 +1222,40 @@ impl MainView {
     }
 
     /// Close the tabs of a deleted collection, folder or request, so a later
-    /// one at the same path cannot reuse their stale settings. Requests with
-    /// unsaved changes stay open as unsaved requests instead.
+    /// one at the same path cannot reuse their stale settings. Active runs
+    /// stay open detached from the deleted path until the user closes them,
+    /// and requests with unsaved changes stay open as unsaved requests
+    /// instead.
     fn close_deleted(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(index) = self.collection_tab(path, cx) {
-            self.remove_tab(index, cx);
-        }
-
-        // Its runners and those of what it holds end with it.
+        // Idle runners of this path and what it holds end with it.
         while let Some(index) = self.tabs.iter().position(|tab| match &tab.page {
-            Page::Runner(runner) => runner.read(cx).path.starts_with(path),
+            Page::Runner(runner) => {
+                let runner = runner.read(cx);
+                !runner.is_detached() && runner.path.starts_with(path) && !runner.is_running()
+            }
             _ => false,
         }) {
             self.remove_tab(index, cx);
         }
+
+        // Active runners of this path or what it holds finish their run
+        // detached, so a replacement collection at the same path opens fresh.
+        for tab in &self.tabs {
+            if let Page::Runner(runner) = &tab.page
+                && !runner.read(cx).is_detached()
+                && runner.read(cx).path.starts_with(path)
+            {
+                runner.update(cx, |runner, cx| runner.detach(cx));
+            }
+        }
+
+        if let Some(index) = self.collection_tab(path, cx) {
+            self.remove_tab(index, cx);
+        }
+
+        // Runners of collections or folders that held the deleted item drop
+        // its requests from their sequence.
+        self.refresh_runners_overlapping(&[path], None, cx);
 
         for index in (0..self.tabs.len()).rev() {
             let page = &self.tabs[index].page;
@@ -1151,6 +1294,8 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         self.relocate_runners(previous_path, path, path, cx);
+        self.relocate_runners_preparing(previous_path, path, cx);
+        self.refresh_runners_overlapping(&[previous_path, path], Some((previous_path, path)), cx);
 
         let Some(index) = self.collection_tab(previous_path, cx) else {
             return;
@@ -1431,6 +1576,7 @@ impl MainView {
 
         self.selected = Some(index);
         self.scroll_to_tab = Some(index);
+        self.refresh_runner(index, cx);
 
         cx.notify();
     }
@@ -1495,6 +1641,9 @@ impl MainView {
         });
 
         self.scroll_to_tab = self.selected;
+        if let Some(selected) = self.selected {
+            self.refresh_runner(selected, cx);
+        }
 
         cx.notify();
     }
@@ -1858,9 +2007,46 @@ impl MainView {
             self.close_deleted(&path, cx);
         }
 
+        // Close idle runners whose collection or folder disappeared on disk,
+        // and detach active ones so they finish without attaching to a
+        // replacement created later at the same path.
+        while let Some(index) = self.tabs.iter().position(|tab| match &tab.page {
+            Page::Runner(runner) => {
+                let runner = runner.read(cx);
+                !runner.is_detached()
+                    && !runner.is_running()
+                    && self
+                        .collections
+                        .read(cx)
+                        .requests_in(&runner.path)
+                        .is_none()
+            }
+            _ => false,
+        }) {
+            self.remove_tab(index, cx);
+        }
+
+        for tab in &self.tabs {
+            if let Page::Runner(runner) = &tab.page {
+                let (detached, path) = {
+                    let runner = runner.read(cx);
+                    (runner.is_detached(), runner.path.clone())
+                };
+                if !detached && self.collections.read(cx).requests_in(&path).is_none() {
+                    runner.update(cx, |runner, cx| runner.detach(cx));
+                }
+            }
+        }
+
         let mut selected = self.selected.map(|index| self.tabs[index].id);
         let mut index = 0;
         while index < self.tabs.len() {
+            if matches!(self.tabs[index].page, Page::Runner(_)) {
+                self.refresh_runner(index, cx);
+                index += 1;
+                continue;
+            }
+
             let tab = &self.tabs[index];
             if tab.page.is_dirty(cx) {
                 index += 1;
@@ -2577,4 +2763,27 @@ impl Render for MainView {
                     }),
             )
     }
+}
+
+/// The saved requests in a collection or folder, with their folder names for
+/// the Collection Runner.
+fn runner_requests(
+    collections: &Collections,
+    path: &Path,
+) -> Option<Vec<(collection::FileEntry, Vec<SharedString>)>> {
+    let requests = collections.requests_in(path)?;
+
+    Some(
+        requests
+            .into_iter()
+            .map(|(location, file)| {
+                let folders = location.folders().into_iter().map(Into::into).collect();
+                (file.clone(), folders)
+            })
+            .collect(),
+    )
+}
+
+fn paths_overlap(a: &Path, b: &Path) -> bool {
+    a.starts_with(b) || b.starts_with(a)
 }

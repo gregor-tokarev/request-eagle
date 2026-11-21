@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use collection::{Collection, FileEntry, SharedSettings};
+use collection::{Collection, Collections, FileEntry, SharedSettings};
 use environment::{EnvironmentSession, EnvironmentSessions};
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
@@ -25,7 +25,7 @@ use crate::response_view::ResponseView;
 use crate::variables::read_entries;
 
 /// A request of the run sequence, which runs while it is selected.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SequenceItem {
     pub request: RunRequest,
     pub selected: bool,
@@ -176,6 +176,157 @@ impl Run {
     }
 }
 
+/// A run whose selected requests and collection files are being read off the
+/// UI thread before execution starts.
+pub(super) struct Preparing {
+    pub selected: Vec<RunRequest>,
+    pub collection: PathBuf,
+    /// Collection variables and shared settings captured when the run started,
+    /// kept if the collection is deleted in the app while preparing.
+    pub collection_values: Values,
+    pub collection_settings: SharedSettings,
+    pub environment: Option<SharedString>,
+    pub environment_path: Option<PathBuf>,
+    /// Whether the collection or a selected request moved while the current
+    /// background read was in flight.
+    pub relocated: bool,
+    /// Whether the collection itself was deleted from disk in the app while
+    /// preparing.
+    pub collection_removed: bool,
+    /// Indices into `selected` for requests whose file existed on disk right
+    /// before an explicit in-app deletion while preparing.
+    pub removed: HashSet<usize>,
+    /// Indices into `selected` whose paths were updated by an explicit in-app
+    /// move or rename while preparing, kept out of ID-only fallback matching.
+    pub explicitly_moved: HashSet<usize>,
+    task: Option<Task<()>>,
+}
+
+impl Preparing {
+    pub(super) fn new(
+        selected: Vec<RunRequest>,
+        collection: PathBuf,
+        collection_values: Values,
+        collection_settings: SharedSettings,
+        environment: Option<SharedString>,
+        environment_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            selected,
+            collection,
+            collection_values,
+            collection_settings,
+            environment,
+            environment_path,
+            relocated: false,
+            collection_removed: false,
+            removed: HashSet::new(),
+            explicitly_moved: HashSet::new(),
+            task: None,
+        }
+    }
+
+    pub(super) fn relocate(
+        &mut self,
+        previous: &Path,
+        path: &Path,
+        collection: &Path,
+        inputs: Option<(Values, SharedSettings)>,
+    ) {
+        if self.collection != collection {
+            self.collection = collection.to_path_buf();
+            self.collection_removed = false;
+            if let Some((values, settings)) = inputs {
+                self.collection_values = values;
+                self.collection_settings = settings;
+            }
+            self.relocated = true;
+        }
+
+        self.relocate_paths(previous, path);
+    }
+
+    pub(super) fn relocate_paths(&mut self, previous: &Path, path: &Path) {
+        for (index, request) in self.selected.iter_mut().enumerate() {
+            if let Some(new_path) = rebase_moved_path(&request.path, previous, path)
+                && new_path != request.path
+            {
+                request.path = new_path;
+                self.explicitly_moved.insert(index);
+                self.relocated = true;
+            }
+        }
+    }
+
+    pub(super) fn note_deleted(
+        &mut self,
+        deleted_path: &Path,
+        removed_files: &HashSet<PathBuf>,
+        detached: bool,
+    ) {
+        if !detached && self.collection.starts_with(deleted_path) {
+            self.collection_removed = true;
+        }
+
+        for (index, request) in self.selected.iter().enumerate() {
+            if removed_files.contains(&request.path) {
+                self.removed.insert(index);
+            }
+        }
+    }
+
+    pub(super) fn follow_refresh(
+        &mut self,
+        previous_sequence: &[SequenceItem],
+        original: &[RunRequest],
+    ) {
+        let by_path_and_id: HashSet<(&Path, &str)> = original
+            .iter()
+            .map(|request| (request.path.as_path(), request.id.as_ref()))
+            .collect();
+        let previous_paths: HashSet<&Path> = previous_sequence
+            .iter()
+            .map(|item| item.request.path.as_path())
+            .collect();
+        let mut previous_id_counts: HashMap<&str, usize> = HashMap::new();
+        for item in previous_sequence {
+            *previous_id_counts
+                .entry(item.request.id.as_ref())
+                .or_default() += 1;
+        }
+        let mut original_id_counts: HashMap<&str, usize> = HashMap::new();
+        for request in original {
+            *original_id_counts.entry(request.id.as_ref()).or_default() += 1;
+        }
+        let unique_by_id: HashMap<&str, &RunRequest> = original
+            .iter()
+            .filter(|request| original_id_counts.get(request.id.as_ref()) == Some(&1))
+            .map(|request| (request.id.as_ref(), request))
+            .collect();
+
+        for (index, request) in self.selected.iter_mut().enumerate() {
+            if self.removed.contains(&index)
+                || self.explicitly_moved.contains(&index)
+                || by_path_and_id.contains(&(request.path.as_path(), request.id.as_ref()))
+            {
+                continue;
+            }
+
+            let id = request.id.as_ref();
+            if previous_id_counts.get(id) == Some(&1)
+                && let Some(latest) = unique_by_id.get(id)
+                && latest.path != request.path
+                && !previous_paths.contains(latest.path.as_path())
+            {
+                request.path = latest.path.clone();
+                request.name = latest.name.clone();
+                request.folders = latest.folders.clone();
+                self.relocated = true;
+            }
+        }
+    }
+}
+
 /// A collection's or folder's requests, run one after another in the order
 /// the run sequence gives them, as Postman's Collection Runner does.
 pub struct CollectionRunner {
@@ -185,6 +336,9 @@ pub struct CollectionRunner {
     /// The directory of the collection, whose variables and scripts apply.
     pub(super) collection: PathBuf,
     pub(super) collection_name: SharedString,
+    /// Set once the collection or folder is deleted while a run is active, so
+    /// a replacement created at the same path opens a fresh runner.
+    pub(super) detached: bool,
     pub(super) sequence: Vec<SequenceItem>,
     pub(super) sequence_scroll: UniformListScrollHandle,
     /// The sequence as the collection orders it, which Reset restores.
@@ -200,7 +354,7 @@ pub struct CollectionRunner {
     pub(super) page: RunnerPage,
     pub(super) run: Option<Run>,
     /// Reads the saved requests before a run starts.
-    pub(super) preparing: Option<Task<()>>,
+    pub(super) preparing: Option<Preparing>,
     /// Why the last run could not start.
     pub(super) start_error: Option<SharedString>,
     /// Where the run's results were exported, or why they could not be.
@@ -211,6 +365,7 @@ pub struct CollectionRunner {
     /// Whether a result without a kept response shows its console rather
     /// than its tests.
     pub(super) detail_console: bool,
+    collections: Entity<Collections>,
     sessions: EnvironmentSessions,
     environments: Entity<Environments>,
     _subscriptions: Vec<Subscription>,
@@ -221,9 +376,9 @@ impl CollectionRunner {
     /// order, each with the folders that contain it.
     pub fn new(
         path: PathBuf,
-        name: SharedString,
         collection: PathBuf,
         requests: impl IntoIterator<Item = (FileEntry, Vec<SharedString>)>,
+        collections: Entity<Collections>,
         sessions: EnvironmentSessions,
         environments: Entity<Environments>,
         cx: &mut Context<Self>,
@@ -244,10 +399,11 @@ impl CollectionRunner {
         ];
 
         Self {
+            name: file_name(&path),
             path,
-            name,
             collection_name: file_name(&collection),
             collection,
+            detached: false,
             sequence: original
                 .iter()
                 .cloned()
@@ -274,6 +430,7 @@ impl CollectionRunner {
             detail: None,
             detail_task: None,
             detail_console: false,
+            collections,
             sessions,
             environments,
             _subscriptions: subscriptions,
@@ -302,77 +459,68 @@ impl CollectionRunner {
             .map_or(0, |folder| folder.components().count())
     }
 
+    /// Whether a run is preparing, running or paused.
+    pub fn is_running(&self) -> bool {
+        self.preparing.is_some() || self.run.as_ref().is_some_and(Run::is_active)
+    }
+
+    /// Whether the collection or folder was deleted while a run was active.
+    pub fn is_detached(&self) -> bool {
+        self.detached
+    }
+
+    /// Detach this runner from its deleted collection or folder while an
+    /// active run finishes. Future runs are disabled here, and a replacement
+    /// collection created at the same path opens a fresh runner.
+    pub fn detach(&mut self, cx: &mut Context<Self>) {
+        if self.detached {
+            return;
+        }
+
+        self.detached = true;
+        self.sequence.clear();
+        self.original.clear();
+        self.other_protocols = 0;
+        self.start_error = None;
+        cx.notify();
+    }
+
     /// Show the collection's or folder's requests as the sidebar has them
-    /// now. Requests keep their place and selection; new ones are added at
+    /// now. While the sequence matches the collection's order with every
+    /// request selected, it follows the sidebar order. Otherwise kept
+    /// requests keep their place and selection, and new ones are added at
     /// the end, selected.
     pub fn refresh(
         &mut self,
         requests: impl IntoIterator<Item = (FileEntry, Vec<SharedString>)>,
+        relocated: Option<(&Path, &Path)>,
         cx: &mut Context<Self>,
     ) {
+        if self.detached {
+            return;
+        }
+
         let (original, other_protocols) = runnable(requests);
-        let saved = original
-            .iter()
-            .map(|request| (request.id.clone(), request))
-            .collect::<HashMap<_, _>>();
-        let mut sequence = self
-            .sequence
-            .iter()
-            .filter_map(|item| {
-                Some(SequenceItem {
-                    request: (*saved.get(&item.request.id)?).clone(),
-                    selected: item.selected,
-                })
-            })
-            .collect::<Vec<_>>();
-        let shown = sequence
-            .iter()
-            .map(|item| item.request.id.clone())
-            .collect::<HashSet<_>>();
-        sequence.extend(
-            original
-                .iter()
-                .filter(|request| !shown.contains(&request.id))
-                .map(|request| SequenceItem {
-                    request: request.clone(),
-                    selected: true,
-                }),
-        );
+        if let Some(preparing) = &mut self.preparing {
+            preparing.follow_refresh(&self.sequence, &original);
+        }
+
+        let sequence = merge_sequence(&self.sequence, &self.original, &original, relocated);
+
+        if self.sequence == sequence
+            && self.original == original
+            && self.other_protocols == other_protocols
+        {
+            return;
+        }
+
+        if self.sequence != sequence {
+            self.start_error = None;
+        }
 
         self.sequence = sequence;
         self.original = original;
         self.other_protocols = other_protocols;
-        cx.notify();
-    }
-
-    /// Follow a request renamed or moved in the sidebar. One moved out of
-    /// the collection or folder no longer runs here.
-    pub fn relocate_request(
-        &mut self,
-        id: &str,
-        path: &Path,
-        name: SharedString,
-        folders: Vec<SharedString>,
-        cx: &mut Context<Self>,
-    ) {
-        if !path.starts_with(&self.path) {
-            self.sequence.retain(|item| item.request.id.as_ref() != id);
-            self.original.retain(|request| request.id.as_ref() != id);
-            cx.notify();
-            return;
-        }
-
-        let requests = self
-            .sequence
-            .iter_mut()
-            .map(|item| &mut item.request)
-            .chain(self.original.iter_mut());
-
-        for request in requests.filter(|request| request.id.as_ref() == id) {
-            request.path = path.to_path_buf();
-            request.name = name.clone();
-            request.folders = folders.clone();
-        }
         cx.notify();
     }
 
@@ -386,16 +534,11 @@ impl CollectionRunner {
         collection: &Path,
         cx: &mut Context<Self>,
     ) {
-        let moved = |old: &Path| {
-            let inner = old.strip_prefix(previous).ok()?;
-            // Joining an empty path would add a trailing separator.
-            Some(if inner.as_os_str().is_empty() {
-                path.to_path_buf()
-            } else {
-                path.join(inner)
-            })
-        };
-        let Some(source) = moved(&self.path) else {
+        if self.detached {
+            return;
+        }
+
+        let Some(source) = rebase_moved_path(&self.path, previous, path) else {
             return;
         };
 
@@ -412,11 +555,47 @@ impl CollectionRunner {
             .map(|item| &mut item.request)
             .chain(self.original.iter_mut());
         for request in requests {
-            if let Some(path) = moved(&request.path) {
+            if let Some(path) = rebase_moved_path(&request.path, previous, path) {
                 request.path = path;
             }
         }
+        if self.preparing.is_some() {
+            let inputs = self.collection_inputs(collection, cx);
+            if let Some(preparing) = &mut self.preparing {
+                preparing.relocate(previous, path, collection, inputs);
+            }
+        }
         cx.notify();
+    }
+
+    /// Rebase in-flight preparation request paths after an in-app move or
+    /// rename, including moves out of this runner's collection or folder.
+    pub fn relocate_preparing(&mut self, previous: &Path, path: &Path) {
+        if let Some(preparing) = &mut self.preparing {
+            preparing.relocate_paths(previous, path);
+        }
+    }
+
+    /// Record an explicit in-app disk deletion so an in-flight preparation
+    /// keeps the captured requests that actually existed on disk right before
+    /// deletion, plus collection settings when the collection itself was
+    /// deleted.
+    pub fn note_in_app_delete(&mut self, deleted_path: &Path, removed_files: &HashSet<PathBuf>) {
+        if let Some(preparing) = &mut self.preparing {
+            preparing.note_deleted(deleted_path, removed_files, self.detached);
+        }
+    }
+
+    fn collection_inputs(&self, collection: &Path, cx: &App) -> Option<(Values, SharedSettings)> {
+        let collection = self.collections.read(cx).collection(collection)?;
+
+        Some((
+            collection.local_env().entries.clone(),
+            SharedSettings {
+                scripts: collection.scripts().clone(),
+                auth: collection.auth().clone(),
+            },
+        ))
     }
 
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -474,12 +653,7 @@ impl CollectionRunner {
     /// Whether the sequence is the collection's order with every request
     /// selected, which Reset restores.
     pub(super) fn is_original(&self) -> bool {
-        self.sequence.len() == self.original.len()
-            && self
-                .sequence
-                .iter()
-                .zip(&self.original)
-                .all(|(item, request)| item.selected && item.request.id == request.id)
+        is_original_sequence(&self.sequence, &self.original)
     }
 
     pub(super) fn select_all(&mut self, selected: bool, cx: &mut Context<Self>) {
@@ -589,7 +763,7 @@ impl CollectionRunner {
     /// Start a run of the selected requests with the run configuration.
     /// Each runs as it is saved now, which is read off the UI thread first.
     pub(super) fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.preparing.is_some() || self.run.as_ref().is_some_and(Run::is_active) {
+        if self.detached || self.is_running() {
             return;
         }
 
@@ -610,57 +784,126 @@ impl CollectionRunner {
         );
 
         // What the run uses is taken now, so changing the environment or
-        // moving the source while it prepares changes nothing about it.
+        // moving or deleting the source while it prepares changes nothing
+        // about it.
         let collection = self.collection.clone();
+        let (collection_values, collection_settings) =
+            self.collection_inputs(&collection, cx).unwrap_or_default();
         let (environment, environment_path) = {
             let environments = self.environments.read(cx);
             (environments.active().cloned(), environments.active_path())
         };
+
+        self.start_error = None;
+        self.preparing = Some(Preparing::new(
+            selected,
+            collection,
+            collection_values,
+            collection_settings,
+            environment,
+            environment_path,
+        ));
+        self.spawn_snapshot(window, cx);
+        cx.notify();
+    }
+
+    fn spawn_snapshot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(preparing) = &mut self.preparing else {
+            return;
+        };
+
+        let selected = preparing.selected.clone();
+        let collection = preparing.collection.clone();
+        let environment = preparing.environment.clone();
+        let environment_path = preparing.environment_path.clone();
+
         let snapshot = cx.background_spawn(async move {
-            let mut requests = Vec::new();
-            let mut missing = Vec::new();
-            for request in &selected {
-                match saved(request, &collection) {
-                    Some(request) => requests.push(request),
-                    None => missing.push(request.name.clone()),
-                }
-            }
+            let loaded = selected
+                .iter()
+                .map(|request| saved(request, &collection))
+                .collect();
 
             Snapshot {
-                requests,
-                missing,
-                files: read_entries(&collection.join("environment.toml")).and_then(|values| {
-                    let environment = environment_path
-                        .as_deref()
-                        .map_or_else(|| Ok(HashMap::new()), read_entries)?;
-                    Ok((values, environment))
-                }),
+                loaded,
+                collection_values: read_entries(&collection.join("environment.toml")),
+                environment_values: environment_path
+                    .as_deref()
+                    .map_or_else(|| Ok(HashMap::new()), read_entries),
                 settings: Collection::load_settings(&collection).map_err(|error| error.to_string()),
                 collection,
                 environment,
             }
         });
 
-        self.start_error = None;
-        self.preparing = Some(cx.spawn_in(window, async move |this, cx| {
+        preparing.task = Some(cx.spawn_in(window, async move |this, cx| {
             let snapshot = snapshot.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.preparing = None;
-                this.begin(snapshot, window, cx);
+                this.finish_preparing(snapshot, window, cx);
             });
         }));
-        cx.notify();
     }
 
-    fn begin(&mut self, snapshot: Snapshot, window: &mut Window, cx: &mut Context<Self>) {
-        let Snapshot {
+    fn finish_preparing(
+        &mut self,
+        snapshot: Snapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(preparing) = self.preparing.as_mut() else {
+            return;
+        };
+        if preparing.relocated {
+            preparing.relocated = false;
+            self.spawn_snapshot(window, cx);
+            return;
+        }
+
+        let Some(preparing) = self.preparing.take() else {
+            return;
+        };
+        let (requests, missing) = resolve_prepared_requests(
+            &preparing.selected,
+            snapshot.loaded,
+            &preparing.removed,
+            &snapshot.collection,
+        );
+        let (collection_values, environment_values, environment_error, settings) =
+            resolve_prepared_inputs(
+                preparing.collection_removed,
+                preparing.collection_values,
+                preparing.collection_settings,
+                snapshot.collection_values,
+                snapshot.environment_values,
+                snapshot.settings,
+            );
+
+        self.begin(
+            PreparedRun {
+                requests,
+                missing,
+                collection_values,
+                environment_values,
+                environment_error,
+                settings,
+                collection: snapshot.collection,
+                environment: snapshot.environment,
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn begin(&mut self, prepared: PreparedRun, window: &mut Window, cx: &mut Context<Self>) {
+        let PreparedRun {
             requests,
             missing,
-            files,
+            collection_values,
+            environment_values,
+            environment_error,
             settings,
             collection,
             environment,
-        } = snapshot;
+        } = prepared;
         if requests.is_empty() {
             self.start_error = Some("The selected requests are no longer saved.".into());
             cx.notify();
@@ -673,10 +916,6 @@ impl CollectionRunner {
             .map(|preferences| preferences.request.clone())
             .unwrap_or_default();
         let collection_environment = collection.join("environment.toml");
-        let ((collection_values, environment_values), environment_error) = match files {
-            Ok(files) => (files, None),
-            Err(error) => (Default::default(), Some(error)),
-        };
 
         // Without Keep variable values, the run changes a copy of the session.
         let session = self.sessions.for_path(Some(&collection_environment));
@@ -761,7 +1000,7 @@ impl CollectionRunner {
 
     /// Show the run configuration to start another run.
     pub(super) fn new_run(&mut self, cx: &mut Context<Self>) {
-        if self.run.as_ref().is_some_and(Run::is_active) {
+        if self.detached || self.run.as_ref().is_some_and(Run::is_active) {
             return;
         }
 
@@ -956,23 +1195,237 @@ type Values = HashMap<String, String>;
 
 /// What a run reads from the collection before it starts.
 struct Snapshot {
-    /// The selected requests as they are saved.
-    requests: Vec<RunRequest>,
-    /// Selected requests that are no longer saved.
-    missing: Vec<SharedString>,
-    /// The collection's variables and the active environment's.
-    files: Result<(Values, Values), String>,
+    /// Each selected request as its file held it, or `None` when it was no
+    /// longer saved at that path as that HTTP request.
+    loaded: Vec<Option<RunRequest>>,
+    /// The collection's variables as `environment.toml` held them.
+    collection_values: Result<Values, String>,
+    /// The active global environment's variables as its file held them.
+    environment_values: Result<Values, String>,
     /// The scripts and authorization the collection shares with requests.
     settings: Result<SharedSettings, String>,
     /// Whose session the run changes.
     collection: PathBuf,
-    /// The name of the environment whose values `files` holds.
+    /// The name of the environment whose values `environment_values` holds.
     environment: Option<SharedString>,
+}
+
+/// The resolved inputs passed into `CollectionRunner::begin`.
+struct PreparedRun {
+    requests: Vec<RunRequest>,
+    missing: Vec<SharedString>,
+    collection_values: Values,
+    environment_values: Values,
+    environment_error: Option<String>,
+    settings: Result<SharedSettings, String>,
+    collection: PathBuf,
+    environment: Option<SharedString>,
+}
+
+fn rebase_moved_path(old: &Path, previous: &Path, path: &Path) -> Option<PathBuf> {
+    let inner = old.strip_prefix(previous).ok()?;
+    // Joining an empty path would add a trailing separator.
+    Some(if inner.as_os_str().is_empty() {
+        path.to_path_buf()
+    } else {
+        path.join(inner)
+    })
+}
+
+/// Combine the requests read from disk with the selection captured when the
+/// run started. Requests whose files existed on disk right before an explicit
+/// in-app deletion while preparing keep their captured copy in place; requests
+/// already missing on disk are reported in `missing`.
+pub(super) fn resolve_prepared_requests(
+    selected: &[RunRequest],
+    loaded: Vec<Option<RunRequest>>,
+    removed: &HashSet<usize>,
+    collection: &Path,
+) -> (Vec<RunRequest>, Vec<SharedString>) {
+    let mut requests = Vec::with_capacity(selected.len());
+    let mut missing = Vec::new();
+
+    for (index, (captured, from_disk)) in selected.iter().zip(loaded).enumerate() {
+        if let Some(request) = from_disk {
+            requests.push(request);
+        } else if removed.contains(&index) {
+            requests.push(RunRequest {
+                request: match Request::Http(captured.request.clone()).resolved_from(collection) {
+                    Request::Http(request) => request,
+                    _ => unreachable!("resolving keeps the protocol"),
+                },
+                ..captured.clone()
+            });
+        } else {
+            missing.push(captured.name.clone());
+        }
+    }
+
+    (requests, missing)
+}
+
+/// Choose the collection variables, global environment variables, variable error
+/// and shared settings once the background read finishes. When the collection
+/// was deleted in the app while preparing, the captured collection variables
+/// and shared settings are kept so the run starts with the settings in effect
+/// when Run was clicked.
+pub(super) fn resolve_prepared_inputs(
+    collection_removed: bool,
+    captured_values: Values,
+    captured_settings: SharedSettings,
+    disk_collection_values: Result<Values, String>,
+    disk_environment_values: Result<Values, String>,
+    disk_settings: Result<SharedSettings, String>,
+) -> (
+    Values,
+    Values,
+    Option<String>,
+    Result<SharedSettings, String>,
+) {
+    let collection_values = if collection_removed {
+        Ok(captured_values)
+    } else {
+        disk_collection_values
+    };
+    let settings = if collection_removed {
+        Ok(captured_settings)
+    } else {
+        disk_settings
+    };
+
+    let (collection_values, environment_values, environment_error) =
+        match (collection_values, disk_environment_values) {
+            (Ok(collection), Ok(environment)) => (collection, environment, None),
+            (Err(error), _) | (_, Err(error)) => {
+                (Default::default(), Default::default(), Some(error))
+            }
+        };
+
+    (
+        collection_values,
+        environment_values,
+        environment_error,
+        settings,
+    )
+}
+
+/// Whether `sequence` is `original` in order with every request selected,
+/// which Reset restores.
+pub(super) fn is_original_sequence(sequence: &[SequenceItem], original: &[RunRequest]) -> bool {
+    sequence.len() == original.len()
+        && sequence.iter().zip(original).all(|(item, request)| {
+            item.selected && item.request.path == request.path && item.request.id == request.id
+        })
+}
+
+/// Merge `original` (the collection's or folder's runnable requests in sidebar
+/// order) into `sequence`.
+///
+/// While the sequence has not been customized, it follows the sidebar order
+/// with every request selected. Otherwise kept requests keep their place and
+/// selection with updated metadata, removed requests drop out, and new ones
+/// are added at the end, selected.
+///
+/// Existing rows match by `(path, id)` first (rebasing `path` with `relocated`
+/// after an explicit in-app move), so two files sharing an ID never replace
+/// each other. An external move falls back to matching by ID only when that ID
+/// is unique on both sides.
+pub(super) fn merge_sequence(
+    sequence: &[SequenceItem],
+    previous_original: &[RunRequest],
+    original: &[RunRequest],
+    relocated: Option<(&Path, &Path)>,
+) -> Vec<SequenceItem> {
+    if is_original_sequence(sequence, previous_original) {
+        return original
+            .iter()
+            .cloned()
+            .map(|request| SequenceItem {
+                request,
+                selected: true,
+            })
+            .collect();
+    }
+
+    let by_path_and_id: HashMap<(&Path, &str), usize> = original
+        .iter()
+        .enumerate()
+        .map(|(index, request)| ((request.path.as_path(), request.id.as_ref()), index))
+        .collect();
+    let mut original_id_counts: HashMap<&str, usize> = HashMap::new();
+    for request in original {
+        *original_id_counts.entry(request.id.as_ref()).or_default() += 1;
+    }
+    let mut sequence_id_counts: HashMap<&str, usize> = HashMap::new();
+    for item in sequence {
+        *sequence_id_counts
+            .entry(item.request.id.as_ref())
+            .or_default() += 1;
+    }
+    let unique_by_id: HashMap<&str, usize> = original
+        .iter()
+        .enumerate()
+        .filter(|(_, request)| original_id_counts.get(request.id.as_ref()) == Some(&1))
+        .map(|(index, request)| (request.id.as_ref(), index))
+        .collect();
+
+    let mut matched = vec![false; original.len()];
+    let mut resolved: Vec<Option<usize>> = vec![None; sequence.len()];
+
+    for (seq_index, item) in sequence.iter().enumerate() {
+        let expected_path = relocated
+            .and_then(|(previous, next)| rebase_moved_path(&item.request.path, previous, next))
+            .unwrap_or_else(|| item.request.path.clone());
+        if let Some(&orig_index) =
+            by_path_and_id.get(&(expected_path.as_path(), item.request.id.as_ref()))
+            && !matched[orig_index]
+        {
+            matched[orig_index] = true;
+            resolved[seq_index] = Some(orig_index);
+        }
+    }
+
+    for (seq_index, item) in sequence.iter().enumerate() {
+        if resolved[seq_index].is_some() {
+            continue;
+        }
+        let id = item.request.id.as_ref();
+        if sequence_id_counts.get(id) == Some(&1)
+            && let Some(&orig_index) = unique_by_id.get(id)
+            && !matched[orig_index]
+        {
+            matched[orig_index] = true;
+            resolved[seq_index] = Some(orig_index);
+        }
+    }
+
+    let mut updated: Vec<SequenceItem> = sequence
+        .iter()
+        .zip(resolved)
+        .filter_map(|(item, orig_index)| {
+            Some(SequenceItem {
+                request: original[orig_index?].clone(),
+                selected: item.selected,
+            })
+        })
+        .collect();
+    updated.extend(
+        original
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !matched[*index])
+            .map(|(_, request)| SequenceItem {
+                request: request.clone(),
+                selected: true,
+            }),
+    );
+
+    updated
 }
 
 /// The HTTP requests that run, and how many requests of other protocols
 /// are left out.
-fn runnable(
+pub(super) fn runnable(
     requests: impl IntoIterator<Item = (FileEntry, Vec<SharedString>)>,
 ) -> (Vec<RunRequest>, usize) {
     let mut other_protocols = 0;

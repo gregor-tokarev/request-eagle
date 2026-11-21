@@ -7,7 +7,7 @@ use request::{
 };
 
 /// A saved HTTP request that a run can send.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RunRequest {
     /// The file the request is saved in.
     pub path: PathBuf,

@@ -174,7 +174,7 @@ impl GitState {
                     }
                     // A request or folder is in its collection, which is committed
                     // already. A collection is not anymore.
-                    CollectionsEvent::Deleted(path)
+                    CollectionsEvent::Deleted { path, .. }
                         if collections.read(cx).containing(path).is_none() =>
                     {
                         this.departed.push(path.clone());

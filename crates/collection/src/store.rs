@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -51,7 +51,15 @@ pub enum CollectionsEvent {
     },
     /// A collection, folder or request was deleted with everything in it,
     /// or a linked collection was removed from the app.
-    Deleted(PathBuf),
+    Deleted {
+        path: PathBuf,
+        /// Request files under `path` that existed on disk right before
+        /// deletion. Empty when unlinking a linked collection without deleting
+        /// its files.
+        removed_files: HashSet<PathBuf>,
+        /// Whether `path` was removed from disk (false when unlinked).
+        deleted_from_disk: bool,
+    },
     /// Every collection was read from disk again, such as after Git changed
     /// their files. Anything can have changed.
     Reloaded,
@@ -276,7 +284,11 @@ impl Collections {
     ) -> Result<(), CollectionEditError> {
         self.registry.unlink(path)?;
         self.changed(cx);
-        cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
+        cx.emit(CollectionsEvent::Deleted {
+            path: path.to_path_buf(),
+            removed_files: HashSet::new(),
+            deleted_from_disk: false,
+        });
 
         Ok(())
     }
@@ -489,9 +501,28 @@ impl Collections {
         path: &Path,
         cx: &mut Context<Self>,
     ) -> Result<(), CollectionEditError> {
+        let removed_files = match self.request(path) {
+            Some((_, file)) => file
+                .path
+                .is_file()
+                .then(|| file.path.clone())
+                .into_iter()
+                .collect(),
+            None => self
+                .requests_in(path)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(_, file)| file.path.is_file())
+                .map(|(_, file)| file.path.clone())
+                .collect(),
+        };
         self.registry.delete(path)?;
         self.changed(cx);
-        cx.emit(CollectionsEvent::Deleted(path.to_path_buf()));
+        cx.emit(CollectionsEvent::Deleted {
+            path: path.to_path_buf(),
+            removed_files,
+            deleted_from_disk: true,
+        });
 
         Ok(())
     }

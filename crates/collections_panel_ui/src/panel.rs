@@ -177,7 +177,7 @@ impl CollectionPanel {
             }
             CollectionsEvent::RequestSaved(_)
             | CollectionsEvent::RequestRelocated { .. }
-            | CollectionsEvent::Deleted(_)
+            | CollectionsEvent::Deleted { .. }
             | CollectionsEvent::Reloaded => {
                 let selected = self
                     .selected
