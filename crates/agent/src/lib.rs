@@ -1,5 +1,5 @@
-//! Coding agents installed on the computer, such as Claude Code, Codex and
-//! OpenCode, run over the Agent Client Protocol.
+//! Coding agents installed on the computer, such as Claude Code, Codex,
+//! OpenCode and Antigravity, run over the Agent Client Protocol.
 
 mod agents;
 mod check;
@@ -19,7 +19,7 @@ mod options_tests;
 mod shell_path_tests;
 
 pub use agent_client_protocol as acp;
-pub use agents::{AGENTS, Agent, find_program};
+pub use agents::{AGENTS, Agent, ConfigDirectory, find_program};
 pub use check::{Check, Status, check};
 pub use connection::{Command, Connection, Event, Failure, Launch};
 pub use options::{

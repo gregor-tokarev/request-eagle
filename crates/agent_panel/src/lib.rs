@@ -1,7 +1,7 @@
 //! The agent panel: a thread with a coding agent installed on the computer,
-//! such as Claude Code, Codex or OpenCode. Messages can cite what is
-//! selected in a request or its response, and mention saved requests, flows
-//! and collections.
+//! such as Claude Code, Codex, OpenCode or Antigravity. Messages can cite
+//! what is selected in a request or its response, and mention saved
+//! requests, flows and collections.
 
 mod actions;
 mod entries;

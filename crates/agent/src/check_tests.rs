@@ -11,5 +11,6 @@ fn reads_the_version_agents_print() {
         Some("0.162.1")
     );
     assert_eq!(parse_version("v1.18.32").as_deref(), Some("1.18.32"));
+    assert_eq!(parse_version("1.5.13\n").as_deref(), Some("1.5.13"));
     assert_eq!(parse_version("unknown"), None);
 }

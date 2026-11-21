@@ -27,8 +27,9 @@ fn an_agent_runs_when_it_and_its_launcher_are_installed() {
     let defaults = ProviderPreferences::default();
     let claude = Agent::find("claude").unwrap();
     let opencode = Agent::find("opencode").unwrap();
+    let antigravity = Agent::find("antigravity").unwrap();
 
-    let (directory, path) = path_with(&["claude", "npx", "opencode"]);
+    let (directory, path) = path_with(&["claude", "npx", "opencode", "agy"]);
     assert_eq!(
         claude.launcher(&defaults, &path),
         Some(directory.path().join("npx"))
@@ -36,6 +37,10 @@ fn an_agent_runs_when_it_and_its_launcher_are_installed() {
     assert_eq!(
         opencode.launcher(&defaults, &path),
         Some(directory.path().join("opencode"))
+    );
+    assert_eq!(
+        antigravity.launcher(&defaults, &path),
+        Some(directory.path().join("agy"))
     );
 
     // Claude Code speaks the protocol through an adapter that npx runs.
@@ -108,6 +113,31 @@ fn the_preferences_set_the_command_and_environment() {
             ("OPENAI_BASE_URL".to_owned(), "https://proxy".to_owned()),
         ])
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_config_flag_is_passed_as_arguments() {
+    let antigravity = Agent::find("antigravity").unwrap();
+    let preferences = ProviderPreferences {
+        config_directory: "/work/.gemini".into(),
+        ..ProviderPreferences::default()
+    };
+    let (directory, path) = path_with(&["agy"]);
+
+    let launch = antigravity
+        .launch(
+            &preferences,
+            path,
+            BTreeMap::new(),
+            PathBuf::from("/work"),
+            Vec::new(),
+        )
+        .unwrap();
+
+    assert_eq!(launch.program, directory.path().join("agy"));
+    assert_eq!(launch.args, ["acp", "--gemini-dir", "/work/.gemini"]);
+    assert!(launch.environment.is_empty());
 }
 
 #[test]

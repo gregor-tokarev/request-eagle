@@ -11,6 +11,25 @@ use preferences::ProviderPreferences;
 
 use crate::connection::Launch;
 
+/// How an agent is told to keep its settings and sign-in in another folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigDirectory {
+    /// An environment variable set to the folder, such as `CLAUDE_CONFIG_DIR`.
+    Environment(&'static str),
+    /// A command-line flag followed by the folder, such as `--gemini-dir`.
+    Flag(&'static str),
+}
+
+impl ConfigDirectory {
+    /// The variable or flag name, as the settings show it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Environment(variable) => variable,
+            Self::Flag(flag) => flag,
+        }
+    }
+}
+
 /// A coding agent the panel runs through the Agent Client Protocol. Agents
 /// keep their own sign-in, models and tools; the panel only talks to them.
 #[derive(Debug, PartialEq, Eq)]
@@ -25,9 +44,8 @@ pub struct Agent {
     /// with its sign-in. They float to their latest release, like the ACP
     /// SDK's own launchers.
     pub command: &'static [&'static str],
-    /// The environment variable that moves the agent's settings and sign-in
-    /// to another folder.
-    pub config_variable: &'static str,
+    /// How the agent moves its settings and sign-in to another folder.
+    pub config_directory: ConfigDirectory,
     /// Where the agent keeps its settings unless told otherwise.
     pub default_config_directory: &'static str,
     /// The name of the agent's mode that runs tools without asking, which
@@ -43,13 +61,13 @@ pub struct Agent {
     pub icon: &'static str,
 }
 
-pub const AGENTS: [Agent; 3] = [
+pub const AGENTS: [Agent; 4] = [
     Agent {
         id: "claude",
         name: "Claude Code",
         program: "claude",
         command: &["npx", "-y", "@agentclientprotocol/claude-agent-acp@latest"],
-        config_variable: "CLAUDE_CONFIG_DIR",
+        config_directory: ConfigDirectory::Environment("CLAUDE_CONFIG_DIR"),
         default_config_directory: "~/.claude",
         bypass_mode: Some("Bypass permissions"),
         provider_in_model_names: false,
@@ -62,7 +80,7 @@ pub const AGENTS: [Agent; 3] = [
         name: "Codex",
         program: "codex",
         command: &["npx", "-y", "@agentclientprotocol/codex-acp@latest"],
-        config_variable: "CODEX_HOME",
+        config_directory: ConfigDirectory::Environment("CODEX_HOME"),
         default_config_directory: "~/.codex",
         bypass_mode: Some("Full access"),
         provider_in_model_names: false,
@@ -75,13 +93,26 @@ pub const AGENTS: [Agent; 3] = [
         name: "OpenCode",
         program: "opencode",
         command: &["opencode", "acp"],
-        config_variable: "OPENCODE_CONFIG_DIR",
+        config_directory: ConfigDirectory::Environment("OPENCODE_CONFIG_DIR"),
         default_config_directory: "~/.config/opencode",
         bypass_mode: None,
         provider_in_model_names: true,
         sign_in: "Run `opencode auth login` in a terminal, then start a new thread.",
         install_url: "https://opencode.ai/docs/",
         icon: "icons/opencode.svg",
+    },
+    Agent {
+        id: "antigravity",
+        name: "Antigravity",
+        program: "agy",
+        command: &["agy", "acp"],
+        config_directory: ConfigDirectory::Flag("--gemini-dir"),
+        default_config_directory: "~/.gemini",
+        bypass_mode: None,
+        provider_in_model_names: false,
+        sign_in: "Run `agy` in a terminal and sign in, then start a new thread.",
+        install_url: "https://antigravity.google/docs/getting-started",
+        icon: "icons/antigravity.svg",
     },
 ];
 
@@ -134,13 +165,19 @@ impl Agent {
         additional_directories: Vec<PathBuf>,
     ) -> Option<Launch> {
         let program = self.launcher(preferences, &path)?;
-        let args = self.command(preferences).split_off(1);
+        let mut args = self.command(preferences).split_off(1);
         let config_directory = preferences.config_directory.trim();
         if !config_directory.is_empty() {
-            environment.insert(
-                self.config_variable.to_owned(),
-                expand_home(config_directory).to_string_lossy().into_owned(),
-            );
+            let expanded = expand_home(config_directory).to_string_lossy().into_owned();
+            match self.config_directory {
+                ConfigDirectory::Environment(variable) => {
+                    environment.insert(variable.to_owned(), expanded);
+                }
+                ConfigDirectory::Flag(flag) => {
+                    args.push(flag.to_owned());
+                    args.push(expanded);
+                }
+            }
         }
 
         Some(Launch {
