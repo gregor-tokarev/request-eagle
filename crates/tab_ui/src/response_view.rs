@@ -2,6 +2,7 @@ mod body;
 mod cite;
 mod content;
 mod events;
+mod failure;
 mod headers;
 mod hex;
 mod html;

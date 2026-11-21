@@ -43,6 +43,8 @@ mod cookies_tests;
 #[cfg(test)]
 mod curl_tests;
 #[cfg(test)]
+mod error_tests;
+#[cfg(test)]
 mod event_stream_tests;
 #[cfg(test)]
 mod grpcurl_tests;
@@ -62,7 +64,7 @@ pub use auth::{
 pub use body::{Body, FormPart, RawLanguage};
 pub use certificates::{CertificateFiles, ClientCertificate};
 pub use cookies::{Cookie, CookieJar};
-pub use error::{ExecutionError, ExecutionFailure};
+pub use error::{ErrorSummary, ExecutionError, ExecutionFailure};
 pub use event_stream::{
     Dispatch, EventStream, EventStreamUpdate, EventStreamUpdates, ServerSentEvent, StopEventStream,
 };
