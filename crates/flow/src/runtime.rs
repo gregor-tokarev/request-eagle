@@ -107,9 +107,7 @@ pub async fn run(
     // Start blocks run first, then the other blocks that need no input, in
     // the order of the flow.
     let mut sources: Vec<usize> = (0..flow.blocks.len())
-        .filter(|&block| {
-            flow.blocks[block].kind.is_source() && run.graph.connected[block].is_empty()
-        })
+        .filter(|&block| run.graph.runs_on_start(&flow, block))
         .collect();
     sources.sort_by_key(|&block| !matches!(flow.blocks[block].kind, BlockKind::Start { .. }));
     for &block in sources.iter().rev() {

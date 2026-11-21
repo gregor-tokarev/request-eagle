@@ -663,6 +663,27 @@ impl Flow {
             .find(|connection| connection.to == block && connection.input == input)
     }
 
+    /// Whether `self.blocks[index]` runs when the flow starts: it needs no
+    /// input to start and has no incoming connection from a block in the flow.
+    pub fn runs_on_start_at(&self, index: usize) -> bool {
+        let Some(found) = self.blocks.get(index) else {
+            return false;
+        };
+
+        found.kind.is_source()
+            && !self.connections.iter().any(|connection| {
+                connection.to == found.id && self.block(&connection.from).is_some()
+            })
+    }
+
+    /// Whether the block returned by [`Self::block`] runs when the flow starts.
+    pub fn runs_on_start(&self, block: &str) -> bool {
+        self.blocks
+            .iter()
+            .position(|candidate| candidate.id == block)
+            .is_some_and(|index| self.runs_on_start_at(index))
+    }
+
     /// Remove blocks and every connection to or from them.
     pub fn remove_blocks(&mut self, ids: &[String]) {
         self.blocks.retain(|block| !ids.contains(&block.id));

@@ -549,18 +549,19 @@ impl FlowEditor {
             .flow
             .blocks
             .iter()
-            .partition(|block| matches!(block.kind, BlockKind::Note { .. }));
+            .enumerate()
+            .partition(|(_, block)| matches!(block.kind, BlockKind::Note { .. }));
         let blocks: Vec<AnyElement> = notes
             .into_iter()
             .chain(others)
-            .filter_map(|block| {
+            .filter_map(|(index, block)| {
                 let layout = self.layouts.get(&block.id)?;
                 if let Some(visible) = &visible
                     && !geometry::intersects(visible, &layout.bounds)
                 {
                     return None;
                 }
-                Some(self.block_element(block, layout, cx))
+                Some(self.block_element(index, block, layout, cx))
             })
             .collect();
 

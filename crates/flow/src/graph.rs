@@ -35,6 +35,7 @@ impl Graph {
             .enumerate()
             .map(|(index, block)| (block.id.as_str(), index))
             .collect();
+        let has_duplicate_ids = index.len() != flow.blocks.len();
         let mut targets: Vec<HashMap<String, Vec<Target>>> =
             (0..count).map(|_| HashMap::new()).collect();
         let mut connected = vec![Vec::new(); count];
@@ -56,7 +57,18 @@ impl Graph {
                     input: connection.input.clone(),
                     back: false,
                 });
-            if !connected[to].contains(&connection.input) {
+            if has_duplicate_ids {
+                // Invalid flows with repeated IDs are rejected by `Flow::check`;
+                // if run directly, every block sharing `connection.to` waits so
+                // an earlier duplicate cannot auto-start behind an incoming wire.
+                for (block_index, block) in flow.blocks.iter().enumerate() {
+                    if block.id == connection.to
+                        && !connected[block_index].contains(&connection.input)
+                    {
+                        connected[block_index].push(connection.input.clone());
+                    }
+                }
+            } else if !connected[to].contains(&connection.input) {
                 connected[to].push(connection.input.clone());
             }
             if !successors[from].contains(&to) {
@@ -86,6 +98,11 @@ impl Graph {
             collects,
             cycle,
         }
+    }
+
+    /// Whether `block` runs when the flow starts. Matches [`Flow::runs_on_start_at`].
+    pub fn runs_on_start(&self, flow: &Flow, block: usize) -> bool {
+        flow.blocks[block].kind.is_source() && self.connected[block].is_empty()
     }
 }
 
