@@ -4,6 +4,14 @@ use crate::logs;
 
 actions!(request_eagle, [CheckForUpdates, Quit, ShowLogs]);
 
+const SHOW_LOGS_DESCRIPTION: &str = if cfg!(target_os = "macos") {
+    "Reveal the log file in Finder."
+} else if cfg!(windows) {
+    "Reveal the log file in Explorer."
+} else {
+    "Reveal the log file in the file manager."
+};
+
 pub fn init(updater: Entity<updater::Updater>, cx: &mut App) {
     keybindings_service::register(
         CheckForUpdates,
@@ -19,7 +27,7 @@ pub fn init(updater: Entity<updater::Updater>, cx: &mut App) {
     keybindings_service::register(
         ShowLogs,
         "Show logs",
-        "Reveal the log file in Finder.",
+        SHOW_LOGS_DESCRIPTION,
         "Application",
         None,
         None,
