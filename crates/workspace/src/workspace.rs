@@ -7,6 +7,7 @@ use std::{
 
 use crate::actions::*;
 use crate::{
+    affected_flows,
     bottom_panel::BottomPanel,
     command_palette::CommandPalette,
     environment_panel::{EnvironmentPanel, EnvironmentPanelEvent},
@@ -21,10 +22,11 @@ use crate::{
 use agent_panel::{
     AgentPanel, AgentPanelEvent, Mention, MentionKind, OpenAgentSettings, ToggleAgentPanel,
 };
-use collection::{CollectionRegistry, Collections};
+use collection::{CollectionRegistry, Collections, CollectionsEvent};
 use collections_panel_ui::{CollectionPanel, CollectionPanelEvent};
 use environment::GlobalEnvironments;
 use flow::{FlowLibrary, SavedFlow};
+use futures::StreamExt as _;
 use gpui_kit::base::{
     PANEL_MIN_SIZE,
     motion::{self, Transition},
@@ -149,37 +151,6 @@ impl Workspace {
             )
         });
 
-        let sidebar = cx.new(|cx| {
-            CollectionPanel::new(collections.clone(), sidebar_state.collapsed, window, cx)
-        });
-        let sidebar_subscription =
-            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
-                CollectionPanelEvent::Open(path) => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_saved(path, window, cx);
-                        view.prepare_active_tab(window, cx);
-                    });
-                }
-                CollectionPanelEvent::Run(path) => {
-                    this.main_view.update(cx, |view, cx| {
-                        view.open_runner(path, cx);
-                        view.prepare_active_tab(window, cx);
-                    });
-                }
-                CollectionPanelEvent::OpenUnsavedRequest(request) => {
-                    this.update_tabs(window, cx, |view, cx| {
-                        view.open_unsaved_request(request.clone(), cx)
-                    });
-                }
-                CollectionPanelEvent::EnvironmentsImported => {
-                    // Show the imported environments in the sidebar.
-                    this.environments_open = true;
-                    let environments = this.main_view.read(cx).environments.clone();
-                    environments.update(cx, |environments, cx| environments.refresh(cx));
-                    cx.notify();
-                }
-            });
-
         let active_environment = cx
             .try_global::<preferences::Preferences>()
             .and_then(|preferences| preferences.active_environment.clone());
@@ -274,6 +245,82 @@ impl Workspace {
                 cx,
             )
         });
+
+        let sidebar = cx.new(|cx| {
+            let collections_for_flows = collections.clone();
+            let flows = flow_panel.downgrade();
+            let tabs = main_view.downgrade();
+            let collections_for_wait = collections.downgrade();
+            let flows_for_wait = flow_panel.downgrade();
+            CollectionPanel::new(
+                collections.clone(),
+                sidebar_state.collapsed,
+                move |path, cx| {
+                    let (Some(flows), Some(tabs)) = (flows.upgrade(), tabs.upgrade()) else {
+                        return Vec::new();
+                    };
+                    let open_flows = tabs.read(cx).open_flows(cx);
+                    affected_flows::find(
+                        collections_for_flows.read(cx).registry(),
+                        path,
+                        flows.read(cx).flows(),
+                        &open_flows,
+                    )
+                },
+                move |cx| {
+                    let (Some(collections), Some(flows)) =
+                        (collections_for_wait.upgrade(), flows_for_wait.upgrade())
+                    else {
+                        return None;
+                    };
+                    wait_for_pending_refreshes(&collections, &flows, cx)
+                },
+                window,
+                cx,
+            )
+        });
+        let sidebar_subscription =
+            cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+                CollectionPanelEvent::Open(path) => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_saved(path, window, cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+                CollectionPanelEvent::OpenFlow { path, id } => {
+                    let focused = this
+                        .main_view
+                        .update(cx, |view, cx| view.focus_flow(path, id, window, cx));
+                    if !focused
+                        && let Some(saved) = this
+                            .flow_panel
+                            .read(cx)
+                            .get(path)
+                            .filter(|saved| saved.id == id.as_ref())
+                            .cloned()
+                    {
+                        this.open_flow(&saved, window, cx);
+                    }
+                }
+                CollectionPanelEvent::Run(path) => {
+                    this.main_view.update(cx, |view, cx| {
+                        view.open_runner(path, cx);
+                        view.prepare_active_tab(window, cx);
+                    });
+                }
+                CollectionPanelEvent::OpenUnsavedRequest(request) => {
+                    this.update_tabs(window, cx, |view, cx| {
+                        view.open_unsaved_request(request.clone(), cx)
+                    });
+                }
+                CollectionPanelEvent::EnvironmentsImported => {
+                    // Show the imported environments in the sidebar.
+                    this.environments_open = true;
+                    let environments = this.main_view.read(cx).environments.clone();
+                    environments.update(cx, |environments, cx| environments.refresh(cx));
+                    cx.notify();
+                }
+            });
 
         // The tab strip redraws as tabs open, close and are selected; edits
         // inside a tab are reported apart, so they do not redraw it.
@@ -449,6 +496,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Entity<Settings> {
         if !self.settings_visible {
+            self.dismiss_collections_delete(cx);
             self.previous_focus = window.focused(cx);
             self.settings_visible = true;
         }
@@ -526,6 +574,7 @@ impl Workspace {
     }
 
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_collections_delete(cx);
         // Focus can stay on a row of the hidden sidebar, where workspace
         // commands do nothing. Run them from the tabs instead.
         if !window.is_action_available(&NewTab, cx) {
@@ -538,11 +587,19 @@ impl Workspace {
         self.command_palette = Some(palette.downgrade());
     }
 
+    fn dismiss_collections_delete(&self, cx: &mut App) {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.dismiss_pending_delete(cx));
+    }
+
     pub(crate) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A hidden sidebar is not drawn, so keys sent to it would miss the
         // workspace's shortcuts.
-        if *self.sidebar_visible.read(cx) && self.sidebar_contains_focus(window, cx) {
-            self.main_view.update(cx, |view, cx| view.focus(window, cx));
+        if *self.sidebar_visible.read(cx) {
+            self.dismiss_collections_delete(cx);
+            if self.sidebar_contains_focus(window, cx) {
+                self.main_view.update(cx, |view, cx| view.focus(window, cx));
+            }
         }
 
         self.sidebar_visible.update(cx, |visible, cx| {
@@ -580,7 +637,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match section {
-            SidebarSection::Collections => self.collections_open = !self.collections_open,
+            SidebarSection::Collections => {
+                self.collections_open = !self.collections_open;
+                if !self.collections_open {
+                    self.dismiss_collections_delete(cx);
+                }
+            }
             SidebarSection::Environments => self.environments_open = !self.environments_open,
             SidebarSection::Flows => self.flows_open = !self.flows_open,
             SidebarSection::History => self.history_open = !self.history_open,
@@ -657,6 +719,7 @@ impl Workspace {
         let focused = self.sidebar_contains_focus(window, cx);
 
         if open {
+            self.dismiss_collections_delete(cx);
             self.sidebar_visible.update(cx, |visible, cx| {
                 *visible = true;
                 cx.notify();
@@ -1178,6 +1241,55 @@ impl Workspace {
             view.focus(window, cx);
         });
     }
+}
+
+/// Waits until any in-progress background reload of collections and flows has
+/// settled, or returns `None` immediately when neither is refreshing.
+fn wait_for_pending_refreshes(
+    collections: &Entity<Collections>,
+    flows: &Entity<FlowPanel>,
+    cx: &mut App,
+) -> Option<Task<()>> {
+    if !collections.read(cx).is_reloading() && !flows.read(cx).is_refreshing() {
+        return None;
+    }
+
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    let tx_collections = tx.clone();
+    let sub_collections = cx.subscribe(collections, move |_, event, _| {
+        if matches!(event, CollectionsEvent::Reloaded) {
+            let _ = tx_collections.unbounded_send(());
+        }
+    });
+    let sub_flows = cx.subscribe(flows, move |_, event, _| {
+        if matches!(event, FlowPanelEvent::Refreshed) {
+            let _ = tx.unbounded_send(());
+        }
+    });
+
+    let collections = collections.downgrade();
+    let flows = flows.downgrade();
+    Some(cx.spawn(async move |cx| {
+        let _subscriptions = (sub_collections, sub_flows);
+
+        loop {
+            let done = cx.update(|cx| {
+                let reloading = collections
+                    .upgrade()
+                    .is_some_and(|collections| collections.read(cx).is_reloading());
+                let refreshing = flows
+                    .upgrade()
+                    .is_some_and(|flows| flows.read(cx).is_refreshing());
+                !reloading && !refreshing
+            });
+            if done {
+                break;
+            }
+            if rx.next().await.is_none() {
+                break;
+            }
+        }
+    }))
 }
 
 /// What a message to the agent can mention: every saved request, in the

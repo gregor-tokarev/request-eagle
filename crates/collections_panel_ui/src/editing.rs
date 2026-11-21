@@ -6,11 +6,15 @@ use std::{
 
 use collection::CollectionEditError;
 use gpui_kit::{
-    component::input::{InputEvent, InputState},
+    component::{
+        WindowExt as _,
+        input::{InputEvent, InputState},
+    },
     *,
 };
 
 use super::{
+    delete_warning::{AffectedFlow, ConfirmationCheck, TargetSnapshot, recheck_confirmation},
     panel::CollectionPanel,
     tree::{CollectionTree, ItemKind},
 };
@@ -96,7 +100,7 @@ impl CollectionPanel {
         match result {
             Ok(path) => {
                 self.rename = None;
-                self.pending_delete = None;
+                self.clear_pending_delete();
                 self.error = None;
                 self.reveal(&path, None, window, cx);
 
@@ -131,7 +135,7 @@ impl CollectionPanel {
         let path = item.path.clone();
         let name = item.label.clone();
         self.rename = None;
-        self.pending_delete = None;
+        self.clear_pending_delete();
         self.error = None;
         self.selected = Some(index);
 
@@ -211,18 +215,98 @@ impl CollectionPanel {
             return;
         };
         let path = item.path.clone();
+        let Some(target) = TargetSnapshot::capture(self.collections.read(cx), &self.tree, &path)
+        else {
+            return;
+        };
+
         self.rename = None;
         self.error = None;
         if let Ok(row) = self.visible.binary_search(&index) {
             self.select_row(row, cx);
         }
-        self.pending_delete = Some(path);
+
+        self.finish_request_delete(target, window, cx);
+    }
+
+    fn finish_request_delete(
+        &mut self,
+        original: TargetSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(wait) = (self.wait_for_refreshes)(cx) {
+            self.clear_pending_delete();
+            self.delete_check = Some(cx.spawn_in(window, async move |this, cx| {
+                wait.await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.delete_check = None;
+                    if window.has_active_dialog(cx) {
+                        cx.notify();
+                        return;
+                    }
+                    this.finish_request_delete(original, window, cx);
+                });
+            }));
+            cx.notify();
+            return;
+        }
+
+        let current =
+            TargetSnapshot::capture(self.collections.read(cx), &self.tree, &original.path);
+        match current {
+            None => {
+                self.clear_pending_delete();
+                self.error = Some("This item is no longer saved.".to_owned());
+                window.focus(&self.focus, cx);
+                cx.notify();
+                return;
+            }
+            Some(current) if current != original => {
+                self.clear_pending_delete();
+                self.error =
+                    Some("This item changed while refreshing. Try deleting it again.".to_owned());
+                window.focus(&self.focus, cx);
+                cx.notify();
+                return;
+            }
+            Some(_) => {}
+        }
+
+        let affected = (self.affected_flows)(&original.path, cx);
+        if !affected.is_empty() {
+            self.clear_pending_delete();
+            self.open_delete_warning(original, affected, window, cx);
+            cx.notify();
+            return;
+        }
+
+        self.delete_check = None;
+        self.pending_delete = Some(original);
         window.focus(&self.delete_focus, cx);
         cx.notify();
     }
 
+    pub(super) fn recheck_delete(
+        &self,
+        previous_target: &TargetSnapshot,
+        previous_affected: &[AffectedFlow],
+        cx: &App,
+    ) -> ConfirmationCheck {
+        let current_target =
+            TargetSnapshot::capture(self.collections.read(cx), &self.tree, &previous_target.path);
+        let current_affected = (self.affected_flows)(&previous_target.path, cx);
+
+        recheck_confirmation(
+            previous_target,
+            previous_affected,
+            current_target,
+            current_affected,
+        )
+    }
+
     pub(super) fn cancel_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.pending_delete = None;
+        self.clear_pending_delete();
         self.error = None;
         window.focus(&self.focus, cx);
         cx.notify();
@@ -258,32 +342,91 @@ impl CollectionPanel {
     }
 
     pub(super) fn confirm_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self.pending_delete.clone() else {
+        if self.delete_check.is_some() {
+            return;
+        }
+
+        let Some(pending) = self.pending_delete.clone() else {
             return;
         };
+
+        if let Some(wait) = (self.wait_for_refreshes)(cx) {
+            self.delete_check = Some(cx.spawn_in(window, async move |this, cx| {
+                wait.await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.delete_check = None;
+                    if window.has_active_dialog(cx) {
+                        this.clear_pending_delete();
+                        cx.notify();
+                        return;
+                    }
+                    this.confirm_delete(window, cx);
+                });
+            }));
+            cx.notify();
+            return;
+        }
+
+        match self.recheck_delete(&pending, &[], cx) {
+            ConfirmationCheck::Proceed => {}
+            ConfirmationCheck::Missing => {
+                self.clear_pending_delete();
+                self.error = Some("This item is no longer saved.".to_owned());
+                window.focus(&self.focus, cx);
+                cx.notify();
+                return;
+            }
+            ConfirmationCheck::Changed {
+                target, affected, ..
+            } => {
+                if !affected.is_empty() {
+                    self.clear_pending_delete();
+                    self.error = None;
+                    self.open_delete_warning(target, affected, window, cx);
+                    cx.notify();
+                    return;
+                }
+
+                self.pending_delete = Some(target);
+                self.error = Some("This item changed before deletion. Confirm again.".to_owned());
+                cx.notify();
+                return;
+            }
+        }
+
+        if let Err(error) = self.delete_path(&pending.path, window, cx) {
+            self.error = Some(format!("Could not delete: {error}"));
+            cx.notify();
+        }
+    }
+
+    pub(super) fn delete_path(
+        &mut self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CollectionEditError> {
         let row = self.selected_row().unwrap_or(0);
 
         // A linked collection's folder stays; only the app forgets it.
-        match self.collections.update(cx, |collections, cx| {
-            if collections.registry().is_linked(&path) {
-                collections.unlink(&path, cx)
+        self.collections.update(cx, |collections, cx| {
+            if collections.registry().is_linked(path) {
+                collections.unlink(path, cx)
             } else {
-                collections.delete(&path, cx)
+                collections.delete(path, cx)
             }
-        }) {
-            Ok(()) => {
-                self.pending_delete = None;
-                self.rename = None;
-                self.error = None;
-                self.rebuild_tree(None, None, cx);
-                if !self.visible.is_empty() {
-                    self.select_row(row.min(self.visible.len() - 1), cx);
-                }
-                window.focus(&self.focus, cx);
-            }
-            Err(error) => self.error = Some(format!("Could not delete: {error}")),
+        })?;
+
+        self.clear_pending_delete();
+        self.rename = None;
+        self.error = None;
+        self.rebuild_tree(None, None, cx);
+        if !self.visible.is_empty() {
+            self.select_row(row.min(self.visible.len() - 1), cx);
         }
+        window.focus(&self.focus, cx);
         cx.notify();
+        Ok(())
     }
 
     /// Clear the filter and expand the ancestors of a created or moved item so

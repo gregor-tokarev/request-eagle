@@ -318,6 +318,11 @@ impl Collections {
         }));
     }
 
+    /// Whether collections are currently being read from disk in the background.
+    pub fn is_reloading(&self) -> bool {
+        self.reloading || self.reload_pending
+    }
+
     /// Whether a linked folder that was gone is back, so that reloading
     /// shows it again.
     pub fn linked_folder_returned(&self) -> bool {

@@ -73,7 +73,11 @@ impl CollectionPanel {
             .filter(|rename| rename.path == item.path);
         let menu_open = self.menu_row.as_ref() == Some(&item.path);
 
-        if self.pending_delete.as_ref() == Some(&item.path) {
+        if self
+            .pending_delete
+            .as_ref()
+            .is_some_and(|pending| pending.path == item.path)
+        {
             return div()
                 .id(ElementId::Path(item.path.clone().into()))
                 .debug_selector(move || format!("collection-row-{index}"))
@@ -107,6 +111,7 @@ impl CollectionPanel {
                                 })
                                 .xsmall()
                                 .danger()
+                                .loading(self.delete_check.is_some())
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.confirm_delete(window, cx)
                                 })),
@@ -323,7 +328,7 @@ impl CollectionPanel {
                 |this| {
                     this.on_drag(drag, move |drag, _, window, cx| {
                         let _ = drag_view.update(cx, |this, cx| {
-                            this.pending_delete = None;
+                            this.clear_pending_delete();
                             this.drop_target = None;
                             this.select_row(row, cx);
                             window.focus(&this.focus, cx);

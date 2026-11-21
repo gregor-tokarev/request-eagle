@@ -86,6 +86,11 @@ impl FlowPanel {
         self.library.get(path)
     }
 
+    /// Whether flows are currently being read from disk in the background.
+    pub(crate) fn is_refreshing(&self) -> bool {
+        self.refreshing.is_some() || self.refresh_pending
+    }
+
     pub(crate) fn contains_focus(&self, window: &Window, cx: &App) -> bool {
         self.focus.contains_focused(window, cx)
             || self

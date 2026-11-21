@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -16,9 +17,13 @@ use request::HttpRequest;
 
 use super::{
     actions::{DeleteItem, RenameItem},
+    delete_warning::{AffectedFlow, TargetSnapshot},
     editing::RenameEditor,
     tree::{CollectionTree, ItemKind},
 };
+
+type AffectedFlowsLookup = Rc<dyn Fn(&Path, &App) -> Vec<AffectedFlow>>;
+pub(super) type RefreshWaiter = Rc<dyn Fn(&mut App) -> Option<Task<()>>>;
 
 /// What the user asked of the sidebar. Changes to collections themselves are
 /// `CollectionsEvent`s.
@@ -27,6 +32,8 @@ use super::{
 pub enum CollectionPanelEvent {
     /// Open the collection or request at the path in a tab.
     Open(PathBuf),
+    /// Open a flow affected by a pending deletion so the user can inspect it.
+    OpenFlow { path: PathBuf, id: SharedString },
     /// Open the Collection Runner for the collection's or folder's requests.
     Run(PathBuf),
     /// A request imported without saving it, such as a pasted cURL command.
@@ -38,10 +45,15 @@ pub enum CollectionPanelEvent {
 /// The collections tree and its search, editing, and drag interactions.
 pub struct CollectionPanel {
     pub(super) collections: Entity<Collections>,
+    pub(super) affected_flows: AffectedFlowsLookup,
+    pub(super) wait_for_refreshes: RefreshWaiter,
     /// The revision of the collections that the tree shows.
     pub(super) revision: u64,
     pub(super) rename: Option<RenameEditor>,
-    pub(super) pending_delete: Option<PathBuf>,
+    pub(super) pending_delete: Option<TargetSnapshot>,
+    /// Waiting for an in-progress collections or flows refresh before prompting
+    /// or confirming an inline deletion.
+    pub(super) delete_check: Option<Task<()>>,
     /// The row whose "…" menu is open, which keeps its button shown.
     pub(super) menu_row: Option<PathBuf>,
     pub(super) drop_target: Option<(usize, MovePlacement)>,
@@ -74,9 +86,14 @@ impl EventEmitter<CollectionPanelEvent> for CollectionPanel {}
 impl CollectionPanel {
     /// `collapsed` holds the paths of the collections and folders that start
     /// collapsed, as `collapsed_paths` gave them in the last session.
+    /// `affected_flows` reports which flows reference saved requests at or
+    /// under a path about to be deleted or removed, and `wait_for_refreshes`
+    /// resolves once any in-progress collections or flows reload finishes.
     pub fn new(
         collections: Entity<Collections>,
         collapsed: Vec<PathBuf>,
+        affected_flows: impl Fn(&Path, &App) -> Vec<AffectedFlow> + 'static,
+        wait_for_refreshes: impl Fn(&mut App) -> Option<Task<()>> + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -92,7 +109,7 @@ impl CollectionPanel {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter collections"));
         let search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Focus | InputEvent::Change) {
-                this.pending_delete = None;
+                this.clear_pending_delete();
                 cx.notify();
             }
 
@@ -111,9 +128,12 @@ impl CollectionPanel {
 
         Self {
             collections,
+            affected_flows: Rc::new(affected_flows),
+            wait_for_refreshes: Rc::new(wait_for_refreshes),
             revision,
             rename: None,
             pending_delete: None,
+            delete_check: None,
             menu_row: None,
             drop_target: None,
             error: None,
@@ -307,10 +327,28 @@ impl CollectionPanel {
         self.refresh_rows(false, cx);
     }
 
+    pub(super) fn refresh_waiter(&self) -> RefreshWaiter {
+        self.wait_for_refreshes.clone()
+    }
+
+    /// Cancel any inline delete prompt or in-flight refresh check when the
+    /// collections sidebar leaves the screen.
+    pub fn dismiss_pending_delete(&mut self, cx: &mut Context<Self>) {
+        if self.pending_delete.is_some() || self.delete_check.is_some() {
+            self.clear_pending_delete();
+            cx.notify();
+        }
+    }
+
+    pub(super) fn clear_pending_delete(&mut self) {
+        self.pending_delete = None;
+        self.delete_check = None;
+    }
+
     pub(super) fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if let Some(&index) = self.visible.get(row) {
             if self.selected != Some(index) {
-                self.pending_delete = None;
+                self.clear_pending_delete();
             }
 
             self.selected = Some(index);
@@ -343,7 +381,7 @@ impl CollectionPanel {
         if self.delete_focus.is_focused(window)
             && matches!(event.keystroke.key.as_str(), "up" | "down" | "home" | "end")
         {
-            self.pending_delete = None;
+            self.clear_pending_delete();
             window.focus(&self.focus, cx);
         }
 
@@ -420,7 +458,7 @@ impl CollectionPanel {
 
     fn delete_selected(&mut self, _: &DeleteItem, window: &mut Window, cx: &mut Context<Self>) {
         // Repeating the shortcut in an open prompt must not confirm it.
-        if self.pending_delete.is_some() {
+        if self.pending_delete.is_some() || self.delete_check.is_some() {
             return;
         }
 

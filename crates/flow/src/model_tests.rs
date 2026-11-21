@@ -251,3 +251,41 @@ fn edits_keep_connections_consistent() {
     assert_eq!(flow.blocks.len(), 2);
     assert!(flow.connections.is_empty());
 }
+
+#[test]
+fn referenced_request_ids_lists_chosen_http_requests_only() {
+    let flow = Flow {
+        blocks: vec![
+            block("b1", BlockType::Start.block_kind()),
+            block(
+                "b2",
+                BlockKind::HttpRequest {
+                    request: "req-1".to_owned(),
+                },
+            ),
+            block(
+                "b3",
+                BlockKind::HttpRequest {
+                    request: String::new(),
+                },
+            ),
+            block(
+                "b4",
+                BlockKind::HttpRequest {
+                    request: "req-2".to_owned(),
+                },
+            ),
+            block(
+                "b5",
+                BlockKind::HttpRequest {
+                    request: "req-1".to_owned(),
+                },
+            ),
+            block("b6", BlockType::Log.block_kind()),
+        ],
+        connections: Vec::new(),
+    };
+
+    let ids: Vec<_> = flow.referenced_request_ids().collect();
+    assert_eq!(ids, vec!["req-1", "req-2", "req-1"]);
+}

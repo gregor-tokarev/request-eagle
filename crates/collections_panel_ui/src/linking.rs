@@ -11,6 +11,7 @@ impl CollectionPanel {
     /// project's Git repository, and adds them. Each folder must be empty or
     /// hold a collection.
     pub fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_pending_delete();
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -87,7 +88,7 @@ impl CollectionPanel {
         }
 
         self.rename = None;
-        self.pending_delete = None;
+        self.clear_pending_delete();
         self.error = None;
         if let Some(path) = linked {
             self.reveal(&path, None, window, cx);

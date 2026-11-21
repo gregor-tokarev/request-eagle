@@ -13,6 +13,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::actions::{CloseTab, NewGrpcTab, NewTab, NewWebSocketTab, RenameTab, SaveRequest};
+use crate::affected_flows::FlowSnapshot;
 use crate::environment_picker::{CreateEnvironmentRequested, EnvironmentPicker};
 use crate::flow_panel::FlowPanel;
 use crate::history_panel::{HistoryPanel, short_address};
@@ -866,6 +867,42 @@ impl MainView {
         self.open_tab(title, Page::Flow(editor), cx)
     }
 
+    /// Select an already-open flow tab and prepare it. Returns whether one was open.
+    pub(crate) fn focus_flow(
+        &mut self,
+        path: &Path,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self.flow_tab(path, id, cx) else {
+            return false;
+        };
+
+        self.select_tab(index, cx);
+        self.prepare_active_tab(window, cx);
+        true
+    }
+
+    /// The flow tabs currently open, with their live (possibly unsaved) graphs.
+    pub(crate) fn open_flows<'a>(&'a self, cx: &'a App) -> Vec<FlowSnapshot<'a>> {
+        self.tabs
+            .iter()
+            .filter_map(|tab| match &tab.page {
+                Page::Flow(editor) => {
+                    let editor = editor.read(cx);
+                    Some(FlowSnapshot {
+                        path: editor.path.as_path(),
+                        id: editor.id.as_ref(),
+                        name: editor.name.as_ref(),
+                        flow: editor.flow(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn flow_tab(&self, path: &Path, id: &str, cx: &App) -> Option<usize> {
         self.tabs.iter().position(|tab| match &tab.page {
             Page::Flow(editor) => {
@@ -1104,6 +1141,14 @@ impl MainView {
     fn close_deleted(&mut self, path: &Path, cx: &mut Context<Self>) {
         if let Some(index) = self.collection_tab(path, cx) {
             self.remove_tab(index, cx);
+        }
+
+        // Open flow editors cache request metadata; clear it so blocks reflect
+        // deleted requests immediately.
+        for tab in &self.tabs {
+            if let Page::Flow(editor) = &tab.page {
+                editor.update(cx, |editor, cx| editor.refresh_requests(cx));
+            }
         }
 
         // Its runners and those of what it holds end with it.

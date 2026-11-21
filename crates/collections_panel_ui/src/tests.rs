@@ -1,8 +1,14 @@
-use std::{collections::HashSet, fs};
+use std::{collections::HashSet, fs, path::PathBuf};
 
 use collection::CollectionRegistry;
 
-use super::tree::{CollectionTree, ItemKind};
+use super::{
+    delete_warning::{
+        AffectedFlow, ConfirmationCheck, FlowImpact, TargetSnapshot, delete_warning_copy,
+        recheck_confirmation,
+    },
+    tree::{CollectionTree, ItemKind},
+};
 
 pub(super) fn collections() -> CollectionRegistry {
     let directory = tempfile::tempdir().unwrap();
@@ -183,4 +189,141 @@ fn collapsed_paths_find_their_collections_and_folders() {
     ]);
     assert_eq!(tree.branches_at(&paths), HashSet::from([0, 1]));
     assert!(tree.branches_at(&HashSet::new()).is_empty());
+}
+
+fn affected_flow(name: &str, impact: FlowImpact) -> AffectedFlow {
+    AffectedFlow {
+        path: PathBuf::from(format!("/flows/{name}.toml")),
+        id: name.to_owned().into(),
+        name: name.to_owned().into(),
+        impact,
+    }
+}
+
+#[test]
+fn delete_warning_copy_matches_item_kind_flow_count_and_impact() {
+    let one_missing = [affected_flow("Sync", FlowImpact::MissingRequest)];
+    let (title, description, heading) =
+        delete_warning_copy(ItemKind::Request("GET"), "Get user", false, &one_missing);
+    assert_eq!(title, "Delete request?");
+    assert!(description.contains("“Get user”"));
+    assert!(description.contains("1 flow"));
+    assert!(description.contains("fail if a run reaches it"));
+    assert_eq!(heading, "Affected flow (1)");
+
+    let three_missing = [
+        affected_flow("A", FlowImpact::MissingRequest),
+        affected_flow("B", FlowImpact::MissingRequest),
+        affected_flow("C", FlowImpact::MissingRequest),
+    ];
+    let (title, description, heading) = delete_warning_copy(
+        ItemKind::Request("POST"),
+        "Create user",
+        false,
+        &three_missing,
+    );
+    assert_eq!(title, "Delete request?");
+    assert!(description.contains("“Create user”"));
+    assert!(description.contains("3 flows"));
+    assert!(description.contains("fail if a run reaches it"));
+    assert_eq!(heading, "Affected flows (3)");
+
+    let one_different = [affected_flow("Sync", FlowImpact::DifferentRequest)];
+    let (_, description, _) =
+        delete_warning_copy(ItemKind::Request("GET"), "Get user", false, &one_different);
+    assert!(
+        description.contains("send another saved request with the same ID if a run reaches it")
+    );
+    assert!(!description.contains("fail"));
+
+    let mixed_folder = [
+        affected_flow("A", FlowImpact::MissingRequest),
+        affected_flow("B", FlowImpact::DifferentRequest),
+    ];
+    let (title, description, heading) =
+        delete_warning_copy(ItemKind::Folder, "Users", false, &mixed_folder);
+    assert_eq!(title, "Delete folder?");
+    assert!(description.contains("“Users”"));
+    assert!(description.contains("2 flows"));
+    assert!(
+        description
+            .contains("fail or send another saved request with the same ID if a run reaches it")
+    );
+    assert_eq!(heading, "Affected flows (2)");
+
+    let (title, description, heading) =
+        delete_warning_copy(ItemKind::Collection, "Billing", false, &one_missing);
+    assert_eq!(title, "Delete collection?");
+    assert!(description.contains("“Billing”"));
+    assert!(description.contains("1 flow"));
+    assert!(description.contains("fail if a run reaches it"));
+    assert_eq!(heading, "Affected flow (1)");
+
+    let two_missing = [
+        affected_flow("A", FlowImpact::MissingRequest),
+        affected_flow("B", FlowImpact::MissingRequest),
+    ];
+    let (title, description, heading) =
+        delete_warning_copy(ItemKind::Collection, "Billing", true, &two_missing);
+    assert_eq!(title, "Remove collection?");
+    assert!(description.contains("folder stays on disk"));
+    assert!(description.contains("2 flows"));
+    assert!(description.contains("fail if a run reaches it"));
+    assert_eq!(heading, "Affected flows (2)");
+
+    let (_, description, _) = delete_warning_copy(ItemKind::Request("GET"), "Get user", false, &[]);
+    assert!(description.contains("No flows currently use"));
+}
+
+#[test]
+fn recheck_confirmation_requires_reconfirmation_when_target_or_flows_change() {
+    let target = TargetSnapshot {
+        path: PathBuf::from("/collections/API/get.toml"),
+        label: "Get user".into(),
+        kind: ItemKind::Request("GET"),
+        linked: false,
+        requests: vec![(
+            PathBuf::from("/collections/API/get.toml"),
+            "req-1".to_owned(),
+            true,
+        )],
+    };
+    let affected = vec![affected_flow("Sync", FlowImpact::MissingRequest)];
+
+    assert_eq!(
+        recheck_confirmation(&target, &affected, Some(target.clone()), affected.clone()),
+        ConfirmationCheck::Proceed
+    );
+
+    assert_eq!(
+        recheck_confirmation(&target, &affected, None, Vec::new()),
+        ConfirmationCheck::Missing
+    );
+
+    let replaced_target = TargetSnapshot {
+        requests: vec![(
+            PathBuf::from("/collections/API/get.toml"),
+            "req-2".to_owned(),
+            true,
+        )],
+        ..target.clone()
+    };
+    assert!(matches!(
+        recheck_confirmation(&target, &affected, Some(replaced_target), affected.clone()),
+        ConfirmationCheck::Changed { .. }
+    ));
+
+    let updated_flows = vec![
+        affected_flow("Sync", FlowImpact::MissingRequest),
+        affected_flow("Audit", FlowImpact::MissingRequest),
+    ];
+    assert!(matches!(
+        recheck_confirmation(&target, &affected, Some(target.clone()), updated_flows),
+        ConfirmationCheck::Changed { .. }
+    ));
+
+    assert!(matches!(
+        recheck_confirmation(&target, &affected, Some(target.clone()), Vec::new()),
+        ConfirmationCheck::Changed { affected, .. } if affected.is_empty()
+    ));
 }

@@ -644,6 +644,15 @@ impl Flow {
         self.blocks.iter_mut().find(|block| block.id == id)
     }
 
+    /// The saved request IDs chosen by this flow's HTTP Request blocks.
+    /// Blocks without a chosen request are left out.
+    pub fn referenced_request_ids(&self) -> impl Iterator<Item = &str> {
+        self.blocks.iter().filter_map(|block| match &block.kind {
+            BlockKind::HttpRequest { request } if !request.is_empty() => Some(request.as_str()),
+            _ => None,
+        })
+    }
+
     /// An ID no block of the flow has, such as `b4`.
     pub fn next_block_id(&self) -> String {
         let highest = self

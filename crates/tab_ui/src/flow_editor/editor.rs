@@ -308,6 +308,13 @@ impl FlowEditor {
         cx.notify();
     }
 
+    /// Clear cached saved-request lookups so blocks immediately reflect
+    /// requests deleted or removed from collections.
+    pub fn refresh_requests(&mut self, cx: &mut Context<Self>) {
+        self.request_info.clear();
+        cx.notify();
+    }
+
     /// Focus the canvas, so its shortcuts apply.
     pub fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.request_info.clear();

@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 mod actions;
+mod affected_flows;
 mod bottom_panel;
 mod command_palette;
 mod environment_panel;
@@ -18,6 +19,8 @@ mod workspace;
 
 #[cfg(test)]
 mod actions_tests;
+#[cfg(test)]
+mod affected_flows_tests;
 #[cfg(test)]
 mod history_panel_tests;
 #[cfg(test)]

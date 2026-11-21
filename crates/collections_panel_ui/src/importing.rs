@@ -28,6 +28,7 @@ impl CollectionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_pending_delete();
         let panel = cx.entity().downgrade();
         let dialog = cx.new(|cx| ImportDialog::new(panel, environments, window, cx));
         let text = dialog.read(cx).text.clone();
@@ -73,7 +74,7 @@ impl CollectionPanel {
         self.collections
             .update(cx, |store, cx| store.add_collections(collections, cx));
         self.rename = None;
-        self.pending_delete = None;
+        self.clear_pending_delete();
         self.error = None;
         self.reveal(first, None, window, cx);
 

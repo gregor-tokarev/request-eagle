@@ -101,7 +101,7 @@ impl CollectionPanel {
         }) {
             Ok(destination) => {
                 self.rename = None;
-                self.pending_delete = None;
+                self.clear_pending_delete();
                 self.error = None;
                 self.reveal(&destination, Some((source, &destination)), window, cx);
                 if let Some(row) = self.selected_row() {

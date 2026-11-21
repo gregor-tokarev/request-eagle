@@ -1,4 +1,5 @@
 mod actions;
+mod delete_warning;
 mod dragging;
 mod editing;
 mod importing;
@@ -15,5 +16,6 @@ mod search_tests;
 mod tests;
 
 pub use actions::init;
+pub use delete_warning::{AffectedFlow, FlowImpact};
 pub use lookup::{CollectionMatch, RequestMatch};
 pub use panel::{CollectionPanel, CollectionPanelEvent};
