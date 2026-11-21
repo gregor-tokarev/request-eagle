@@ -29,4 +29,4 @@ mod preview_tests;
 mod run_tests;
 
 pub use actions::*;
-pub use editor::FlowEditor;
+pub use editor::{CreateHttpRequest, FlowEditor};

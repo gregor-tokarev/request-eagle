@@ -181,6 +181,10 @@ pub(super) enum Hover {
     Connection(Connection),
 }
 
+/// Emitted when an HTTP Request block asks to open a new HTTP request tab.
+/// The workspace owns tab creation.
+pub struct CreateHttpRequest;
+
 /// A flow's canvas, editing its blocks and connections, and its runs.
 pub struct FlowEditor {
     /// Where the flow is saved. Renaming a flow keeps its file.
@@ -199,8 +203,8 @@ pub struct FlowEditor {
     pub(super) rem: Pixels,
     pub(super) layouts: HashMap<String, Layout>,
     /// The requests HTTP Request blocks send, looked up once rather than on
-    /// every frame. Cleared whenever the canvas is focused or clicked, so
-    /// edits made elsewhere show up.
+    /// every frame. Cleared when collections change or the tab is prepared,
+    /// so edits made elsewhere show up.
     pub(super) request_info: HashMap<String, Option<RequestInfo>>,
     /// The variables each collection's requests find a value for.
     filled_names: HashMap<PathBuf, FilledNames>,
@@ -229,10 +233,11 @@ pub struct FlowEditor {
     pub(super) log_filtered: bool,
     pub(super) inspector_split: Entity<ResizableState>,
     pub(super) log_split: Entity<ResizableState>,
-    /// Redraws when another environment is chosen, which fills other
-    /// variables.
-    _environments: Option<Subscription>,
+    /// Redraws when collections change or another environment is chosen.
+    _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<CreateHttpRequest> for FlowEditor {}
 
 impl FlowEditor {
     pub fn new(
@@ -242,9 +247,13 @@ impl FlowEditor {
         environments: Option<Entity<Environments>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let observed = environments
-            .as_ref()
-            .map(|environments| cx.observe(environments, |_, _, cx| cx.notify()));
+        let mut subscriptions = vec![cx.observe(&collections, |this, _, cx| {
+            this.request_info.clear();
+            cx.notify();
+        })];
+        if let Some(environments) = environments.as_ref() {
+            subscriptions.push(cx.observe(environments, |_, _, cx| cx.notify()));
+        }
 
         Self {
             path: saved.path,
@@ -279,7 +288,7 @@ impl FlowEditor {
             log_filtered: false,
             inspector_split: cx.new(|_| ResizableState::default()),
             log_split: cx.new(|_| ResizableState::default()),
-            _environments: observed,
+            _subscriptions: subscriptions,
         }
     }
 

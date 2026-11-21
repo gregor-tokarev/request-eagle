@@ -881,7 +881,7 @@ impl Workspace {
 
     fn open_flow(&mut self, saved: &SavedFlow, window: &mut Window, cx: &mut Context<Self>) {
         self.main_view.update(cx, |view, cx| {
-            view.open_flow(saved.clone(), cx);
+            view.open_flow(saved.clone(), window, cx);
             view.prepare_active_tab(window, cx);
         });
     }

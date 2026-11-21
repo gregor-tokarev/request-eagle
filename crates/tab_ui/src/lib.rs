@@ -48,8 +48,9 @@ pub use cookies::Cookies;
 pub use environment_editor::{EnvironmentEditor, SaveEnvironment};
 pub use environments::{Environments, EnvironmentsEvent};
 pub use flow_editor::{
-    AddBlock, ArrangeBlocks, CopyBlocks, DeleteSelection, DuplicateBlocks, FlowEditor, PasteBlocks,
-    RedoFlowEdit, SelectAllBlocks, StopFlow, UndoFlowEdit, ZoomIn, ZoomOut, ZoomToFit,
+    AddBlock, ArrangeBlocks, CopyBlocks, CreateHttpRequest, DeleteSelection, DuplicateBlocks,
+    FlowEditor, PasteBlocks, RedoFlowEdit, SelectAllBlocks, StopFlow, UndoFlowEdit, ZoomIn,
+    ZoomOut, ZoomToFit,
 };
 pub use grpc_draft::GrpcDraft;
 pub use request_draft::RequestDraft;
