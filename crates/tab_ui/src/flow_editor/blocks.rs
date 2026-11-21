@@ -1,4 +1,4 @@
-use flow::{Block, BlockKind, BlockType};
+use flow::{Block, BlockKind, BlockType, StartInput};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, spinner::Spinner, v_flex,
 };
@@ -513,8 +513,13 @@ impl FlowEditor {
             );
         }
 
+        let start_caption = matches!(block.kind, BlockKind::Start { .. })
+            .then_some(layout.start_caption)
+            .flatten();
+
         // Settings shown on two lines where the block has room for them.
-        let lines = if body_height(&block.kind) >= 56. {
+        // A Start block with a live text-fallback caption leaves one line for it.
+        let lines = if body_height(&block.kind) >= 56. && start_caption.is_none() {
             2
         } else {
             1
@@ -612,7 +617,12 @@ impl FlowEditor {
             | BlockKind::Condition { .. }
             | BlockKind::Note { .. } => None,
         };
-        let notice = last.and_then(|run| run.notice.clone());
+        let notice = match &block.kind {
+            BlockKind::Start { .. } => start_caption.map(SharedString::from),
+            _ => last
+                .and_then(|run| run.notice.as_ref())
+                .map(|notice| SharedString::from(notice.clone())),
+        };
 
         if content.is_none() && notice.is_none() {
             return None;
@@ -625,7 +635,7 @@ impl FlowEditor {
                         div()
                             .text_color(theme.warning)
                             .text_ellipsis()
-                            .child(SharedString::from(notice)),
+                            .child(notice),
                     )
                 })
                 .into_any_element(),
@@ -707,6 +717,16 @@ fn output_label(block: &Block, name: &SharedString) -> (SharedString, bool) {
     }
 
     (port_label(name), false)
+}
+
+/// A short canvas warning when a Start block's inline input will be sent as
+/// text rather than parsed as JSON.
+pub(super) fn start_input_caption(input: &StartInput) -> Option<&'static str> {
+    match input {
+        StartInput::Empty | StartInput::Json => None,
+        StartInput::InvalidJson(_) => Some("Invalid JSON · sends as text"),
+        StartInput::Text => Some("Not JSON · sends as text"),
+    }
 }
 
 /// What a JSON Schema checks, in a few words, such as `object · requires

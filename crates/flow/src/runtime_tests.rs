@@ -151,6 +151,71 @@ fn start_sends_the_run_input_or_its_own() {
 }
 
 #[test]
+fn start_notes_when_inline_input_is_sent_as_text() {
+    let broken = Flow {
+        blocks: vec![
+            block(
+                "b1",
+                BlockKind::Start {
+                    input: r#"{"name":"Gregor",}"#.to_owned(),
+                },
+            ),
+            block("b2", evaluate(&["value1"], "value1.name")),
+            block("b3", output(&["name"])),
+        ],
+        connections: vec![
+            wire("b1", "data", "b2", "value1"),
+            wire("b2", "result", "b3", "name"),
+        ],
+    };
+
+    let (summary, events) = run_flow(broken.clone(), options());
+    let start = finished(&events, "b1")[0];
+    assert_eq!(summary.failures, 0);
+    assert_eq!(start.outputs[0].1.as_ref(), &json!(r#"{"name":"Gregor",}"#));
+    assert_eq!(
+        start.notice.as_deref(),
+        Some("Invalid JSON, sent as text (line 1, column 18: trailing comma)")
+    );
+    assert_eq!(
+        finished(&events, "b2")[0].notice.as_deref(),
+        Some("Result is undefined")
+    );
+    assert!(!summary.outputs.contains_key("name"));
+
+    // Run input overrides the Start block's inline text, so no notice is emitted.
+    let (summary, events) = run_flow(
+        broken,
+        RunOptions {
+            input: Some(json!({"name": "Gregor"})),
+            ..options()
+        },
+    );
+    assert_eq!(finished(&events, "b1")[0].notice, None);
+    assert_eq!(summary.outputs["name"], "Gregor");
+
+    // Plain text is also sent as a string with a notice.
+    let plain = Flow {
+        blocks: vec![
+            block(
+                "b1",
+                BlockKind::Start {
+                    input: "hello".to_owned(),
+                },
+            ),
+            block("b2", output(&["text"])),
+        ],
+        connections: vec![wire("b1", "data", "b2", "text")],
+    };
+    let (summary, events) = run_flow(plain, options());
+    assert_eq!(summary.outputs["text"], "hello");
+    assert_eq!(
+        finished(&events, "b1")[0].notice.as_deref(),
+        Some("Not JSON, sent as text")
+    );
+}
+
+#[test]
 fn if_and_condition_route_their_data() {
     let flow = Flow {
         blocks: vec![

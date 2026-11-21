@@ -1,11 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
-use flow::{Block, BlockKind, BlockRun, BlockType, DisplayFormat, Field, Flow, TemplateFormat};
+use flow::{
+    Block, BlockKind, BlockRun, BlockType, DisplayFormat, Field, Flow, StartInput, TemplateFormat,
+};
+use gpui_kit::base::input::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Editor, EditorState, Input, InputEvent, InputState},
+    input::{Editor, EditorState, Input, InputEvent, InputState, Position},
     switch::Switch,
     v_flex,
 };
@@ -88,6 +91,9 @@ pub(super) struct Inspector {
     /// Settings whose text cannot apply, such as a number that is not one.
     /// The block keeps its previous value until they are fixed.
     pub errors: Vec<(Setting, String)>,
+    /// How a Start block's inline input is read, so malformed JSON or plain
+    /// text is pointed out beside its editor.
+    start_input: Option<StartInput>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -217,6 +223,7 @@ impl FlowEditor {
             chosen_run: None,
             choosing_request: false,
             errors: Vec::new(),
+            start_input: None,
             _subscriptions: Vec::new(),
         };
         let Some(block) = self.flow.block(id).cloned() else {
@@ -389,6 +396,14 @@ impl FlowEditor {
                 code(Setting::Note, text, "text", "Write a note", window, cx)
             }
             _ => {}
+        }
+
+        if let BlockKind::Start { input } = &block.kind {
+            let status = StartInput::check(input);
+            if let Some(Editing::Code(editor)) = inspector.editor(Setting::StartInput) {
+                underline_start_input(editor, &status, cx);
+            }
+            inspector.start_input = Some(status);
         }
 
         if matches!(block.kind, BlockKind::HttpRequest { .. }) {
@@ -570,11 +585,30 @@ impl FlowEditor {
         }
 
         self.edit(key, |flow| apply(flow, &id, setting, value), cx);
-        if matches!(
+        if setting == Setting::StartInput {
+            self.update_start_input(&id, cx);
+        } else if matches!(
             setting,
             Setting::Expression | Setting::Condition(_) | Setting::Variable(_)
         ) {
             self.update_preview(&id, cx);
+        }
+    }
+
+    fn update_start_input(&mut self, id: &str, cx: &mut Context<Self>) {
+        let status = match self.flow.block(id).map(|block| &block.kind) {
+            Some(BlockKind::Start { input }) => StartInput::check(input),
+            _ => return,
+        };
+        if let Some(inspector) = self
+            .inspector
+            .as_mut()
+            .filter(|inspector| inspector.block == id)
+        {
+            if let Some(Editing::Code(editor)) = inspector.editor(Setting::StartInput) {
+                underline_start_input(editor, &status, cx);
+            }
+            inspector.start_input = Some(status);
         }
     }
 
@@ -846,12 +880,30 @@ impl FlowEditor {
         }
 
         panel = match &block.kind {
-            BlockKind::Start { .. } => panel.child(labeled_note(
-                "Input",
-                field(Setting::StartInput),
-                "JSON the Start block sends when you run the flow here. The CLI can send other input.",
-                cx,
-            )),
+            BlockKind::Start { .. } => panel.child(
+                v_flex()
+                    .gap_1()
+                    .child(section_title("Input"))
+                    .children(field(Setting::StartInput))
+                    .when_some(
+                        inspector.start_input.as_ref().and_then(start_input_notice),
+                        |this, notice| {
+                            this.child(
+                                div()
+                                    .debug_selector(|| "flow-start-input-notice".into())
+                                    .text_xs()
+                                    .text_color(theme.warning)
+                                    .child(notice),
+                            )
+                        },
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("JSON the Start block sends when you run the flow here. Input that is not valid JSON is sent as text. The CLI can send other input."),
+                    ),
+            ),
             BlockKind::HttpRequest { request } => panel.child(self.request_chooser(&id, request, inspector, cx)),
             BlockKind::Evaluate { .. } => panel
                 .child(labeled_note("Expression", field(Setting::Expression), "FQL, the JSONata-based language of Postman Flows.", cx))
@@ -1745,6 +1797,44 @@ fn run_summary(run: &BlockRun, cx: &App) -> AnyElement {
         )
     })
     .into_any_element()
+}
+
+/// Explains beside the Start block's Input editor when its text will be sent
+/// as a string rather than parsed as JSON.
+pub(super) fn start_input_notice(input: &StartInput) -> Option<String> {
+    match input {
+        StartInput::Empty | StartInput::Json => None,
+        StartInput::InvalidJson(error) => Some(format!("{error}. Will be sent as text.")),
+        StartInput::Text => Some("Not JSON. Will be sent as text.".to_owned()),
+    }
+}
+
+/// Underline where a malformed JSON Start input stops being JSON; hovering the
+/// underline shows the warning.
+fn underline_start_input(editor: &Entity<EditorState>, input: &StartInput, cx: &mut App) {
+    let message = start_input_notice(input);
+
+    editor.update(cx, |editor, cx| {
+        // The editor keeps the popover of an underline it no longer has.
+        editor.clear_diagnostic_popover(cx);
+        let Some(diagnostics) = editor.diagnostics_mut() else {
+            return;
+        };
+        diagnostics.clear();
+
+        if let (StartInput::InvalidJson(error), Some(message)) = (input, message) {
+            let line = error.line.saturating_sub(1) as u32;
+            let start = error.column.saturating_sub(1) as u32;
+            diagnostics.push(
+                Diagnostic::new(
+                    Position::new(line, start)..Position::new(line, start + 1),
+                    message,
+                )
+                .with_severity(DiagnosticSeverity::Warning),
+            );
+        }
+        cx.notify();
+    });
 }
 
 fn section_title(title: &str) -> impl IntoElement {
