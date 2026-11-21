@@ -1,10 +1,10 @@
 # Agent
 
 The agent panel brings the coding agent you already use into Request Eagle:
-Claude Code, Codex or OpenCode. Point at what you mean in a request or its
-response, or mention a saved request or flow, ask about it, and let the agent
-read your code and run, fix or create saved requests and flows. The agent
-keeps its own sign-in, models and tools.
+Claude Code, Codex, OpenCode or Antigravity. Point at what you mean in a
+request or its response, or mention a saved request or flow, ask about it,
+and let the agent read your code and run, fix or create saved requests and
+flows. The agent keeps its own sign-in, models and tools.
 
 ## Open the panel
 
@@ -20,6 +20,7 @@ the message box starts a new thread. Change any of these in
 | Claude Code | `claude` and Node.js (`npx`) |
 | Codex | `codex` and Node.js (`npx`) |
 | OpenCode | `opencode` |
+| Antigravity | `agy` |
 
 Sign in to the agent in a terminal first, the way you use it there. When an
 agent asks to sign in, the panel says how.

@@ -651,7 +651,8 @@ impl AgentSettings {
                 format!(
                     "Where {} keeps its settings and sign-in, set with {}. Leave it empty for \
                      its own.",
-                    agent.name, agent.config_variable
+                    agent.name,
+                    agent.config_directory.name()
                 ),
                 &self.config_directory,
             ))

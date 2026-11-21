@@ -137,6 +137,15 @@ fn finds_the_mode_that_does_not_ask() {
         SessionConfigOptionCategory::Mode,
         &[("build", "build"), ("plan", "plan")],
     )];
+    let antigravity = vec![menu(
+        "mode",
+        SessionConfigOptionCategory::Mode,
+        &[
+            ("default", "Default"),
+            ("accept-edits", "Accept edits"),
+            ("plan", "Plan"),
+        ],
+    )];
 
     let value = |options: &[SessionConfigOption]| {
         bypass_mode(options).map(|(option, value)| (option.0.to_string(), value.0.to_string()))
@@ -150,6 +159,7 @@ fn finds_the_mode_that_does_not_ask() {
         Some(("mode".into(), "agent-full-access".into()))
     );
     assert_eq!(value(&opencode), None);
+    assert_eq!(value(&antigravity), None);
 }
 
 #[test]
