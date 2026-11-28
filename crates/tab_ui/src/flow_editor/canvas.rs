@@ -69,7 +69,7 @@ impl FlowEditor {
         window.focus(&self.focus, cx);
         self.picker = None;
         let position = self.canvas_position(event.position);
-        let additive = event.modifiers.shift || event.modifiers.secondary();
+        let additive = event.modifiers.shift || event.modifiers.secondary(cx);
 
         if let Some(port) = self
             .port_at(position, true)
@@ -495,7 +495,7 @@ impl FlowEditor {
         })
     }
 
-    fn scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let wheel = geometry::from_wheel(event.delta, cx.compositor_name() == "X11");
         self.viewport.scroll(
             event.delta,
@@ -693,7 +693,7 @@ impl FlowEditor {
                     });
                 }),
             )
-            .on_scroll_wheel(cx.listener(Self::scroll))
+            .on_scroll(cx.listener(Self::scroll))
             .on_mouse_move(
                 cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                     this.hover_at(event.position, cx)

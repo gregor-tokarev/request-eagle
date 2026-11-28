@@ -591,9 +591,6 @@ impl AgentPanel {
                             // short enough to stay clear of the panel's top.
                             .menu_width(rems(if model { 20. } else { 12. }))
                             .menu_max_h(rems(18.))
-                            // It opens above the message box, so its search
-                            // field would move as a search shortens it.
-                            .keep_menu_height(true)
                             .search_placeholder("Search"),
                     )
                     .into_any_element()

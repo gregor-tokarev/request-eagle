@@ -167,7 +167,11 @@ impl VirtualBody {
                 if self.wrap {
                     self.rows.extend(
                         wrapper
-                            .wrap_line(&[LineFragment::text(content)], width)
+                            .wrap_line(
+                                &[LineFragment::text(content)],
+                                width,
+                                IndentAdjustment::NoIndent,
+                            )
                             .map(|boundary| offset + boundary.ix),
                     );
                 }
@@ -447,7 +451,7 @@ impl Render for VirtualBody {
                 .style
                 .editor_background
                 .unwrap_or_else(|| cx.theme().input_background()))
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
                 let delta = event.delta.pixel_delta(ROW_HEIGHT.to_pixels(this.rem_size));
                 this.scroll.y -= delta.y;
                 this.scroll.x -= delta.x;

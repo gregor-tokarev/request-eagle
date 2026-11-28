@@ -138,8 +138,13 @@ fn a_trackpad_pans_and_zooms_with_ctrl_or_cmd() {
     assert_eq!(viewport.zoom, 1.);
     assert!(close(viewport.origin.y, origin.y + 0.4 * 20.));
 
+    let secondary = if cfg!(target_os = "macos") {
+        Modifiers::command()
+    } else {
+        Modifiers::control()
+    };
     for delta in [swipe, lines] {
-        for modifiers in [Modifiers::control(), Modifiers::secondary_key()] {
+        for modifiers in [Modifiers::control(), secondary] {
             let mut viewport = Viewport::default();
             viewport.scroll(delta, false, modifiers, anchor, line, rem);
             assert!(viewport.zoom < 1.);

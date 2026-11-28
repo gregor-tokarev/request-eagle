@@ -46,16 +46,16 @@ debug = "line-tables-only"
 
 [workspace.dependencies]
 anyhow = "1"
-gpui-kit = { version = "=0.7.0", default-features = false }
+gpui-kit = { version = "=0.11.0", default-features = false, features = ["x11"] }
 # Match GPUI Kit's HTTP client version to keep the GPUI HTTP traits compatible.
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.7" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.14" }
 thiserror = "2"
 
 [patch.crates-io]
-# GPUI Kit 0.7.0 with editor fixes, and GPUI's Linux and macOS platforms with
-# idle frame loops; see docs/gpui-kit-fork.md.
-gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
-gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
-gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
-gpui-pre-linux = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
-gpui-pre-macos = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "08313f0bc0a4ca1384b714758c7570e9cf7fdfc3" }
+# GPUI Kit 0.11.0 with editor fixes, and GPUI's Linux and macOS platforms with
+# idle frame loops and instant macOS window open; see docs/gpui-kit-fork.md.
+gpui-base = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "b15e0e0b91a328e68830c90c6ec1b6261637e3d1" }
+gpui-component = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "b15e0e0b91a328e68830c90c6ec1b6261637e3d1" }
+gpui-kit-assets = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "b15e0e0b91a328e68830c90c6ec1b6261637e3d1" }
+gpui-pre-linux = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "b15e0e0b91a328e68830c90c6ec1b6261637e3d1" }
+gpui-pre-macos = { git = "https://github.com/gregor-tokarev/gpui-kit", rev = "b15e0e0b91a328e68830c90c6ec1b6261637e3d1" }

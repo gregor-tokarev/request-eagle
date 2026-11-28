@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gpui_kit::{
     App, AppContext, Context, Entity,
-    http_client::{self, AsyncBody, HttpClient, Request, Response, StatusCode},
+    http_client::{AsyncBody, HttpClient, Request, Response, StatusCode},
 };
 use preferences::{Preferences, UpdateTrack};
 use semver::Version;
@@ -308,7 +308,7 @@ async fn check_for_update(
 
 /// Decode a JSON document, or `None` when GitHub has no such file.
 async fn get_json<T: DeserializeOwned>(
-    response: impl Future<Output = http_client::Result<Response<AsyncBody>>>,
+    response: impl Future<Output = gpui_kit::Result<Response<AsyncBody>>>,
     name: &str,
 ) -> Result<Option<T>, String> {
     let mut response = response

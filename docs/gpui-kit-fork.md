@@ -1,53 +1,42 @@
 # GPUI Kit and GPUI fixes
 
-The workspace builds GPUI Kit **0.7.0** from a fork with fixes that are not
+The workspace builds GPUI Kit **0.11.0** from a fork with fixes that are not
 upstream yet. The same fork carries patched copies of GPUI's Linux and macOS
-platform crates. GPUI Kit's own changes touch twelve files:
+platform crates. GPUI Kit's own changes touch ten files:
 
-- Upstream tag: `v0.7.0`, commit `0c830f4d257e69fdd17200650533ab4ca9a40cc0`.
-- Fork branch: [`request-eagle/patches-0.7.0`](https://github.com/gregor-tokarev/gpui-kit/tree/request-eagle/patches-0.7.0),
-  pinned at [`08313f0b`](https://github.com/gregor-tokarev/gpui-kit/commit/08313f0bc0a4ca1384b714758c7570e9cf7fdfc3).
-- All changes: [`0c830f4d...08313f0b`](https://github.com/gregor-tokarev/gpui-kit/compare/0c830f4d257e69fdd17200650533ab4ca9a40cc0...08313f0bc0a4ca1384b714758c7570e9cf7fdfc3).
-- Completion changes: [`4eb43a09`](https://github.com/gregor-tokarev/gpui-kit/commit/4eb43a09ed12cedb409a826d055678164a28bae8), [`9b588e02`](https://github.com/gregor-tokarev/gpui-kit/commit/9b588e027112fadcc00ccd979e01437402e8a2e0) and [`6aa23423`](https://github.com/gregor-tokarev/gpui-kit/commit/6aa2342323f92d4af2b026b294da7422e8d98389).
-- Query reuse: [`55ed1bb5`](https://github.com/gregor-tokarev/gpui-kit/commit/55ed1bb5b4afa407ca6fb195003820ae0327c309).
-- Vim cursor support: [`cc673b8f`](https://github.com/gregor-tokarev/gpui-kit/commit/cc673b8f9c51aba0cd912078f52699032c44245c) and [`e9affedd`](https://github.com/gregor-tokarev/gpui-kit/commit/e9affedd20e6bc04f7a9412f0e6491fd10672ce3).
-- Idle caret: [`e44d3924`](https://github.com/gregor-tokarev/gpui-kit/commit/e44d39248944fa18ae9636cc8987a8ccfada8c9b).
-- Idle frame loops in `gpui-pre-linux` and `gpui-pre-macos` 0.3.7:
-  [`291bd0c3`](https://github.com/gregor-tokarev/gpui-kit/commit/291bd0c3ca2181ce88baeea2320185568d7a27fe)
-  adds the published crates unchanged under `patches/`, and
-  [`c113cdd1`](https://github.com/gregor-tokarev/gpui-kit/commit/c113cdd18491183a8ad00d869ebf775625667e90)
-  and [`7398d394`](https://github.com/gregor-tokarev/gpui-kit/commit/7398d394d83ea91c75390bc297795d762c377fba)
-  patch them.
-- macOS windows without the opening animation: [`60435d31`](https://github.com/gregor-tokarev/gpui-kit/commit/60435d31ef4be042ca19fb685bfc1a3dbcb1130e).
-- Select menus that keep their height while filtering: [`328e0ed7`](https://github.com/gregor-tokarev/gpui-kit/commit/328e0ed782024133c0e1cb23b00807cd2e0da2df).
-- Visible search matches: [`08313f0b`](https://github.com/gregor-tokarev/gpui-kit/commit/08313f0bc0a4ca1384b714758c7570e9cf7fdfc3).
+- Upstream tag: `v0.11.0`, commit `e97fe438129c5e4ccab504f2e6fafd9a4e396bba`.
+- Fork branch: [`request-eagle/patches-0.11.0`](https://github.com/gregor-tokarev/gpui-kit/tree/request-eagle/patches-0.11.0),
+  pinned at [`b15e0e0b`](https://github.com/gregor-tokarev/gpui-kit/commit/b15e0e0b91a328e68830c90c6ec1b6261637e3d1).
+- All changes: [`e97fe438...b15e0e0b`](https://github.com/gregor-tokarev/gpui-kit/compare/e97fe438129c5e4ccab504f2e6fafd9a4e396bba...b15e0e0b91a328e68830c90c6ec1b6261637e3d1).
+- Stale completion snapshot guard: [`b158403f`](https://github.com/gregor-tokarev/gpui-kit/commit/b158403f29d0a5417c32892e93690442328c6dd9).
+- Query reuse: [`12e3d97d`](https://github.com/gregor-tokarev/gpui-kit/commit/12e3d97dbdaed6a4bde8d2efc0d2f86fd8e8c4bf).
+- Vim cursor support: [`4f9bc119`](https://github.com/gregor-tokarev/gpui-kit/commit/4f9bc1197769d80c533fb6d638b5591d91861eef).
+- Visible search matches: [`e0898d73`](https://github.com/gregor-tokarev/gpui-kit/commit/e0898d73a35f1068815bdd99ed621d0053597727).
+- Platform crates `gpui-pre-linux` and `gpui-pre-macos` 0.3.14:
+  [`7007f323`](https://github.com/gregor-tokarev/gpui-kit/commit/7007f323151fb7e53ca7681ac7793e4844600e89)
+  adds the published crates unchanged under `patches/`.
+- Idle frame loops in `gpui-pre-linux` (X11) and `gpui-pre-macos` (macOS 13
+  `CVDisplayLink` fallback):
+  [`815a6ab8`](https://github.com/gregor-tokarev/gpui-kit/commit/815a6ab8da508a7b7a15f9712f17c12b893b2ff9)
+  and [`b15e0e0b`](https://github.com/gregor-tokarev/gpui-kit/commit/b15e0e0b91a328e68830c90c6ec1b6261637e3d1).
+- macOS windows without the opening animation in `gpui-pre-macos`:
+  [`c0cb046d`](https://github.com/gregor-tokarev/gpui-kit/commit/c0cb046d8a828df270c6ab2d1f884ddb95e1b8f0).
 
 The fork branch must stay on GitHub: Cargo fetches the pinned commit from it.
 
-Inputs previously published their caret geometry during paint, after popups
-had already chosen a position using the previous frame. Typing therefore
-painted the menu at a stale position before a later redraw corrected it.
-
-The fix publishes the existing geometry during input prepaint. The native
-Scripts completion popup builds its element tree during deferred prepaint,
-so layout, pointer hitboxes, and paint use that frame's caret position. The
-app-owned variable popup uses the same timing. Both account for horizontal
-scrolling already present in the caret coordinates.
+Current-frame completion positioning, idle caret timeout (`Theme::cursor_blink`),
+select menus keeping their height when opening above the trigger, and macOS
+`CAMetalDisplayLink` idle frame pausing moved upstream between 0.7.0 and 0.11.0
+and were dropped from the fork.
 
 The Scripts provider keeps its menu visible while TypeScript refreshes the
-items. The fix retains the source/caret snapshot that produced each list:
-Enter rejects stale ranges, and deferred mouse/keyboard insertion checks the
-snapshot again. A pending-provider regression covers visibility, stale Enter,
-stale clicks, and returning focus to the editor.
+items. The stale completion guard retains the source/caret snapshot that
+produced each list: Enter rejects stale ranges, and deferred mouse/keyboard
+insertion checks the snapshot again.
 
 `gpui-kit-assets` comes from the fork too, because the component's
 path dependency otherwise conflicts with its registry package's native `links`
 identity. Assets and macros are unchanged. There is no framework version bump.
-
-The completion fix includes a Base regression test for deferred overlay geometry.
-Request Eagle's `tab_ui` tests check the first painted frame for Scripts, Body,
-and URL completion, including the `pm.request` → `pm.request.` transition,
-light/dark themes, 12/16/24 px interface sizes, and clicking the moved menu.
 
 The query reuse fix shares immutable compiled syntax queries across editors. Each
 editor still owns its parser, source, and syntax tree. Cache keys include the
@@ -67,13 +56,7 @@ The Vim cursor fix supports Vim's block cursor. `set_caret_hidden` hides only th
 painted caret, and `scroll_to_offset` reveals the Vim cursor rather than an edge
 of the Visual selection. `range_to_bounds` now returns `None` for offsets above
 or below the laid-out lines instead of resolving them to the first visible line,
-so the block disappears with its line. Base tests cover all three; Request
-Eagle's Vim tests check the block in Normal, Visual, and Visual Line mode.
-
-The select height option lets a searchable select keep its menu as tall as
-it opened while a search filters it. The agent panel's model, reasoning and
-mode menus open above the message box, so a shorter list moved their search
-field down. Other selects keep shrinking with their results.
+so the block disappears with its line. Base tests cover all three.
 
 The search match fix makes an editor's matches visible. They were painted in
 the selection color, which themes keep faint, and every match except the
@@ -83,20 +66,16 @@ window was inactive. Editors now paint matches in the theme's yellow, every
 match lightly and the current one strongly, whether or not the window is
 active. The Raw response view paints its matches the same way.
 
-The idle caret fix stops the caret from redrawing an idle window. Every blink
-redraws the whole window, so a focused input kept an otherwise idle window
-drawing twice a second for as long as it stayed focused. The caret now stops
-blinking, visible, after ten seconds without input, as GTK does. Input or
-focus starts it again. A Base test covers settling and restarting.
-
-The idle frame loop fix stops an idle window from waking the app. On X11 a
-timer, and on macOS the display link, asked GPUI for a frame on every display
-refresh, so a visible window woke the app 60 to 120 times a second while
-nothing changed. Each window's loop now stops 100 ms after GPUI last asked for
-a frame, and GPUI's frame waker restarts it, as GPUI already does on Wayland
-and the web. On X11 the waker pings the event loop, which restarts the timer;
-on macOS it posts one step through the window's dispatch source, which
-restarts the display link.
+The idle frame loop fix stops idle X11 windows and macOS 13 `CVDisplayLink`
+windows from waking the app. On X11 a timer, and on macOS 13 the fallback
+display link, asked GPUI for a frame on every display refresh, so a visible
+window woke the app 60 to 120 times a second while nothing changed. Each
+window's loop now stops 100 ms after GPUI last asked for a frame, and GPUI's
+frame waker (plus `schedule_frame` on macOS 13) restarts it, as GPUI already
+does on Wayland, macOS 14+ (`CAMetalDisplayLink`), and the web. On X11 the
+waker pings the event loop, which restarts the timer, and a pending request
+stands until the loop restarts; on macOS 13 it posts one step through the
+window's dispatch source, which restarts the display link.
 
 The opening animation fix shows a new macOS window at once. AppKit animated
 every new normal window onto the screen for about 0.3 s, and the app took no

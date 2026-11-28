@@ -17,14 +17,6 @@ impl Zoom {
     }
 }
 
-impl IntoElement for Zoom {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for Zoom {
     type RequestLayoutState = ();
     type PrepaintState = ();

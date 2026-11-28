@@ -88,10 +88,13 @@ impl KeybindingsPage {
         };
 
         recording.keystroke = Some(stroke.clone());
-        recording.error =
-            keybindings::validate_override(recording.command.id, &stroke.unparse(), cx)
-                .err()
-                .map(|e| e.to_string());
+        recording.error = keybindings::validate_override(
+            recording.command.id,
+            &stroke.unparse(cx.platform_info().os),
+            cx,
+        )
+        .err()
+        .map(|e| e.to_string());
 
         cx.notify();
     }
@@ -109,7 +112,8 @@ impl KeybindingsPage {
             return;
         };
 
-        match keybindings::set_override(recording.command.id, Some(&stroke.unparse()), cx) {
+        let os = cx.platform_info().os;
+        match keybindings::set_override(recording.command.id, Some(&stroke.unparse(os)), cx) {
             Ok(()) => {
                 self.error = None;
                 self.cancel_recording(window, cx);
