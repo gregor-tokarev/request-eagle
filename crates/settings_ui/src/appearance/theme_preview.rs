@@ -107,7 +107,7 @@ impl ThemePreview {
 
                 // These marks do not overlap. One paint layer avoids inserting
                 // each mark separately into GPUI's scene ordering bounds tree.
-                window.paint_layer(bounds, |window| {
+                window.paint_layer(|window| {
                     let mut rectangle = |x, y, width, height, radius, color| {
                         let rectangle = Bounds::new(
                             bounds.origin + point(bounds.size.width * x, bounds.size.height * y),

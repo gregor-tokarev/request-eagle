@@ -3,6 +3,7 @@ use gpui_kit::*;
 use request_eagle_theme::shortcut_keycaps;
 
 pub(super) fn shortcut(keys: Option<&str>, cx: &App) -> AnyElement {
+    let os = cx.platform_info().os;
     match keys {
         Some(keys) => h_flex()
             .w_full()
@@ -10,7 +11,7 @@ pub(super) fn shortcut(keys: Option<&str>, cx: &App) -> AnyElement {
             .gap_1()
             .children(
                 keys.split_whitespace()
-                    .filter_map(|key| Keystroke::parse(key).ok())
+                    .filter_map(|key| Keystroke::parse_with_os(key, os).ok())
                     .map(|stroke| shortcut_keycaps(&stroke, cx)),
             )
             .into_any_element(),

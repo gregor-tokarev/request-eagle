@@ -195,7 +195,12 @@ impl Viewport {
         let pixels = delta.pixel_delta(line_height);
         // A wheel that only scrolls sideways, such as a tilt wheel, pans.
         let wheel = wheel && !modifiers.shift && pixels.y != px(0.);
-        if !wheel && !modifiers.secondary() && !modifiers.control {
+        let secondary = if cfg!(target_os = "macos") {
+            modifiers.platform
+        } else {
+            modifiers.control
+        };
+        if !wheel && !secondary && !modifiers.control {
             self.pan(pixels, rem);
             return;
         }

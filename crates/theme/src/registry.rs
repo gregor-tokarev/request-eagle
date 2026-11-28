@@ -1,7 +1,8 @@
 use crate::apply_preferences;
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
+use gpui_kit::base::input::CursorBlink;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeSet};
 use gpui_kit::{App, Global};
 
@@ -28,6 +29,11 @@ pub fn init(cx: &mut App) {
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     cx.set_global(ThemeCatalog(themes));
+
+    // Stop blinking an idle caret after ten seconds so a focused input does not
+    // keep redrawing an otherwise idle window.
+    Theme::global_mut(cx).cursor_blink =
+        CursorBlink::default().with_idle_timeout(Duration::from_secs(10));
 
     cx.observe_global::<preferences::Preferences>(|cx| {
         apply_preferences(cx.window_appearance(), cx);

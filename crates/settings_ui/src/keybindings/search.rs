@@ -25,11 +25,16 @@ impl KeybindingsPage {
         cx.notify();
     }
 
-    pub(super) fn matches_search(&self, command: &Command, query: &str) -> bool {
+    pub(super) fn matches_search(
+        &self,
+        command: &Command,
+        query: &str,
+        os: OperatingSystem,
+    ) -> bool {
         if self.search_by_shortcut {
             self.search_keystroke
                 .as_ref()
-                .is_none_or(|stroke| matches_shortcut(command, stroke))
+                .is_none_or(|stroke| matches_shortcut(command, stroke, os))
         } else {
             matches_search(command, query)
         }
@@ -142,10 +147,10 @@ impl KeybindingsPage {
     }
 }
 
-fn matches_shortcut(command: &Command, stroke: &Keystroke) -> bool {
+fn matches_shortcut(command: &Command, stroke: &Keystroke, os: OperatingSystem) -> bool {
     command.binding.as_ref().is_some_and(|binding| {
         binding.keystrokes.split_whitespace().any(|keys| {
-            Keystroke::parse(keys).is_ok_and(|binding| {
+            Keystroke::parse_with_os(keys, os).is_ok_and(|binding| {
                 binding.key == stroke.key && binding.modifiers == stroke.modifiers
             })
         })

@@ -1,8 +1,13 @@
 use std::{collections::BTreeMap, io::Write, path::Path};
 
+use gpui_kit::OperatingSystem;
+
 use crate::Binding;
 
-pub(super) fn load(path: &Path) -> anyhow::Result<BTreeMap<String, Option<String>>> {
+pub(super) fn load(
+    path: &Path,
+    os: OperatingSystem,
+) -> anyhow::Result<BTreeMap<String, Option<String>>> {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -13,7 +18,7 @@ pub(super) fn load(path: &Path) -> anyhow::Result<BTreeMap<String, Option<String
 
     let mut overrides: BTreeMap<String, Option<String>> = serde_json::from_str(&contents)?;
     for keystrokes in overrides.values_mut().flatten() {
-        *keystrokes = Binding::new(keystrokes, None)?.keystrokes;
+        *keystrokes = Binding::new(keystrokes, None, os)?.keystrokes;
     }
 
     Ok(overrides)

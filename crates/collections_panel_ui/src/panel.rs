@@ -539,7 +539,7 @@ impl Render for CollectionPanel {
                             this.clicked_branch = None;
                         }
                     }))
-                    .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, _| {
+                    .on_scroll(cx.listener(|this, _: &ScrollEvent, _, _| {
                         this.clicked_branch = None;
                     }))
                     .child(if self.visible.is_empty() {

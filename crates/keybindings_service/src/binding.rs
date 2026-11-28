@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    Action, DummyKeyboardMapper, InvalidKeystrokeError, KeyBinding, KeyBindingContextPredicate,
-    Keystroke, SharedString, Unbind,
+    Action, App, InvalidKeystrokeError, KeyBinding, KeyBindingContextPredicate, Keystroke,
+    OperatingSystem, SharedString, Unbind,
 };
 
 use crate::KeybindingError;
@@ -19,7 +19,11 @@ pub(crate) struct RegisteredBinding {
 }
 
 impl Binding {
-    pub(crate) fn new(keystrokes: &str, context: Option<&str>) -> Result<Self, KeybindingError> {
+    pub(crate) fn new(
+        keystrokes: &str,
+        context: Option<&str>,
+        os: OperatingSystem,
+    ) -> Result<Self, KeybindingError> {
         let keystrokes = keystrokes.trim();
         if keystrokes.is_empty() {
             return Err(KeybindingError::EmptyKeystrokes);
@@ -37,8 +41,8 @@ impl Binding {
         Ok(Self {
             keystrokes: keystrokes
                 .split_whitespace()
-                .map(Keystroke::parse)
-                .map(|stroke| stroke.map(|stroke| stroke.unparse()))
+                .map(|stroke| Keystroke::parse_with_os(stroke, os))
+                .map(|stroke| stroke.map(|stroke| stroke.unparse(os)))
                 .collect::<Result<Vec<_>, _>>()?
                 .join(" "),
             context: context.map(str::to_owned),
@@ -48,6 +52,7 @@ impl Binding {
     pub(crate) fn to_gpui(
         &self,
         action: Box<dyn Action>,
+        cx: &App,
     ) -> Result<KeyBinding, InvalidKeystrokeError> {
         let predicate = self
             .context
@@ -57,23 +62,14 @@ impl Binding {
             .expect("binding context was validated when the binding was created")
             .map(Rc::new);
 
-        KeyBinding::load(
-            &self.keystrokes,
-            action,
-            predicate,
-            false,
-            None,
-            &DummyKeyboardMapper,
-        )
+        KeyBinding::load(&self.keystrokes, action, predicate, false, None, cx)
     }
 }
 
 impl RegisteredBinding {
-    pub(crate) fn unbind(self) -> KeyBinding {
-        KeyBinding::new(
-            &self.binding.keystrokes,
-            Unbind(SharedString::from(self.action_name)),
-            self.binding.context.as_deref(),
-        )
+    pub(crate) fn unbind(self, cx: &App) -> KeyBinding {
+        self.binding
+            .to_gpui(Box::new(Unbind(SharedString::from(self.action_name))), cx)
+            .expect("registered binding was already validated")
     }
 }

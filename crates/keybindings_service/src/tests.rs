@@ -44,7 +44,9 @@ fn replaces_a_binding_at_runtime_and_keeps_unmanaged_bindings() {
         assert_eq!(
             binding_for::<FirstAction>(cx),
             Some(&Binding {
-                keystrokes: Keystroke::parse("cmd-w").unwrap().unparse(),
+                keystrokes: Keystroke::parse("cmd-w")
+                    .unwrap()
+                    .unparse(cx.platform_info().os),
                 context: None,
             })
         );
@@ -347,7 +349,13 @@ fn startup_disables_a_conflicting_override_and_can_reset_an_unassigned_command()
         actions_for("cmd-q", &app),
         vec![OtherAction::name_for_type()]
     );
-    assert!(storage::load(&path).unwrap().is_empty());
+    app.read(|cx| {
+        assert!(
+            storage::load(&path, cx.platform_info().os)
+                .unwrap()
+                .is_empty()
+        );
+    });
 }
 
 #[test]
@@ -488,9 +496,10 @@ fn reset_restores_an_unassigned_default() {
 
 fn actions_for(keystrokes: &str, app: &TestApp) -> Vec<&'static str> {
     app.read(|cx| {
+        let os = cx.platform_info().os;
         let keystrokes = keystrokes
             .split_whitespace()
-            .map(Keystroke::parse)
+            .map(|stroke| Keystroke::parse_with_os(stroke, os))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let keymap = cx.key_bindings();

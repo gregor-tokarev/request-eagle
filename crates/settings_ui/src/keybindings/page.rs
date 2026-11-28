@@ -282,10 +282,11 @@ impl Render for KeybindingsPage {
         commands.sort_by_key(|command| command.label);
         let modified = commands.iter().any(Command::is_modified);
 
+        let os = cx.platform_info().os;
         let query = self.search.read(cx).value();
         let visible = commands
             .into_iter()
-            .filter(|command| self.matches_search(command, &query))
+            .filter(|command| self.matches_search(command, &query, os))
             .collect::<Vec<_>>();
         let empty = visible.is_empty();
         let visible_commands = visible.iter().map(|command| command.id).collect::<Vec<_>>();

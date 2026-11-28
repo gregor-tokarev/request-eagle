@@ -62,7 +62,7 @@ fn init(cx: &mut App) {
 pub fn load_overrides(path: PathBuf, cx: &mut App) -> anyhow::Result<()> {
     init(cx);
 
-    let result = storage::load(&path);
+    let result = storage::load(&path, cx.platform_info().os);
 
     let service = cx.global_mut::<KeybindingsService>();
     service.storage_path = Some(path);
@@ -100,8 +100,9 @@ pub fn register<A: Action>(
     context: Option<&'static str>,
     cx: &mut App,
 ) -> Result<(), KeybindingError> {
+    let os = cx.platform_info().os;
     let default_binding = default_keystrokes
-        .map(|keys| Binding::new(keys, context))
+        .map(|keys| Binding::new(keys, context, os))
         .transpose()?;
 
     init(cx);
@@ -116,7 +117,7 @@ pub fn register<A: Action>(
         let mut binding = match service.overrides.get(id) {
             Some(keys) => keys
                 .as_deref()
-                .map(|keys| Binding::new(keys, context))
+                .map(|keys| Binding::new(keys, context, os))
                 .transpose()?,
             None => default_binding.clone(),
         };
@@ -177,7 +178,7 @@ pub fn validate_override(id: &str, keystrokes: &str, cx: &App) -> Result<(), Key
         .commands
         .get(id)
         .ok_or(KeybindingError::UnknownCommand)?;
-    let binding = Binding::new(keystrokes, command.context)?;
+    let binding = Binding::new(keystrokes, command.context, cx.platform_info().os)?;
 
     service.check_conflict(id, &binding)
 }
@@ -196,7 +197,7 @@ pub fn set_override(
             .ok_or(KeybindingError::UnknownCommand)?;
 
         let binding = keystrokes
-            .map(|keys| Binding::new(keys, command.context))
+            .map(|keys| Binding::new(keys, command.context, cx.platform_info().os))
             .transpose()?;
 
         if let Some(binding) = &binding {
@@ -300,12 +301,12 @@ impl KeybindingsService {
 
         let gpui_binding = binding
             .as_ref()
-            .map(|binding| binding.to_gpui(action))
+            .map(|binding| binding.to_gpui(action, cx))
             .transpose()?;
 
         let mut changes = Vec::with_capacity(2);
         if let Some(previous) = self.bindings.remove(&action_type) {
-            changes.push(previous.unbind());
+            changes.push(previous.unbind(cx));
         }
 
         if let (Some(binding), Some(gpui_binding)) = (binding, gpui_binding) {
